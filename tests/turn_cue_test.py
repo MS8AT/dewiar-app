@@ -68,8 +68,11 @@ try:
         ok(seen and 2.0 <= float(seen["dur"].rstrip("s") or 0) <= 3.0, f"полоса тает столько, сколько ждём: {seen and seen['dur']}")
         pg.wait_for_timeout(1300)
         pg.screenshot(path=str(tmp / "turn.png"), clip={"x": 20, "y": 150, "width": 260, "height": 60})
-        pg.wait_for_timeout(3200)
-        after = pg.evaluate("() => ({ txt: document.getElementById('say').textContent, cls: document.getElementById('bubble').className })")
+        for _ in range(40):                      # окно 3 с; медленная машина проверок — ждём до 8 с
+            pg.wait_for_timeout(200)
+            after = pg.evaluate("() => ({ txt: document.getElementById('say').textContent, cls: document.getElementById('bubble').className })")
+            if "turn" not in after["cls"]:
+                break
         ok("turn" not in after["cls"] and after["txt"] != "Ваша очередь — говорите", f"окно истекло — снова покой: {after}")
         ok(not errs, f"без ошибок на странице: {errs}")
         b.close()

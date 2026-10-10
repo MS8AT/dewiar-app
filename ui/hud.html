@@ -505,6 +505,8 @@ core.on("hello", d => {
   turnUntil = Date.now() + (e.seconds || 0) * 1000;
   const bub = $("bubble"); bub.classList.remove("turn"); void bub.offsetWidth;    // новая очередь — полоса заново
   setState("listening");
+  clearTimeout(window._turnT);                    // полоса дотаяла — надпись обычная, даже если ядро ещё не сказало «покой»
+  window._turnT = setTimeout(() => { if (Date.now() >= turnUntil - 50) setState(state); }, (e.seconds || 0) * 1000 + 100);
 })
 .on("persona", e => applyPersona(e.persona))
 .on("personas", e => { personas = e.personas; applyPersona(current ? current.id : personas[0].id); })
