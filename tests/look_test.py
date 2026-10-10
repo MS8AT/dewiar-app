@@ -88,6 +88,8 @@ for (const fx of ["bars", "pulse", "wave"]) for (const tone of ["mono", "color"]
     ph0 = pg.evaluate("() => [document.body.className, orb.tone, orb.fx]")
     ok("skin-calm" in ph0[0] and ph0[1] == "mono" and ph0[2] == "bars", f"телефон по умолчанию: {ph0}")
     pg.evaluate("openSettings('more')"); pg.wait_for_timeout(400)
+    card = pg.evaluate("() => [document.querySelector('#set-body').textContent.includes('№' + devId().slice(-4)), !!document.querySelector('#dev-ping')]")
+    ok(card == [True, True], "«Этот телефон в кабинете»: №… как в списке экзамена и кнопка «Отметиться в кабинете»")
     pg.select_option("#ap-skin", "neon"); pg.select_option("#ap-fx", "pulse"); pg.wait_for_timeout(300)
     ph1 = pg.evaluate("() => [document.body.className, orb.tone, orb.fx, S.skin, S.voice_fx]")
     ok("skin-neon" in ph1[0] and ph1[1:] == ["color", "pulse", "neon", "pulse"], f"телефон: тема и анимация меняются и запоминаются: {ph1}")

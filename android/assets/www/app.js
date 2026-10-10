@@ -2865,6 +2865,9 @@ function renderSettings() {
     h.push(`<h3>Оформление</h3><div class="card"><div class="row2">
       <label class="f" style="flex:1"><span>Тема</span><select id="ap-skin">${opt([["calm", "Сдержанная"], ["graphite", "Графит"], ["neon", "Неон"]], lookSkin())}</select></label>
       <label class="f" style="flex:1"><span>Когда говорит</span><select id="ap-fx">${opt([["bars", "Лучи"], ["pulse", "Пульс"], ["wave", "Волна"]], lookFx())}</select></label></div></div>`);
+    h.push(`<h3>Этот телефон в кабинете</h3><div class="card"><p class="hint" style="margin-top:0">В кабинете облака (экзамен, здоровье) этот телефон —
+      <b>${esc((info.device || "Телефон") + " · " + (info.version || "") + " · №" + devId().slice(-4))}</b>. Нет в списке — нажмите «Отметиться в кабинете»: появится через минуту.</p>
+      <button class="btn w" id="dev-ping">Отметиться в кабинете</button><div class="res" id="dev-res"></div></div>`);
     const perms = [[MIC, "Микрофон"], [NOTIF, "Уведомления (напоминания)"], [CONTACTS, "Контакты (звонки по имени)"], [CALLP, "Звонки без лишнего нажатия"]];
     h.push(`<h3>Сообщить о проблеме</h3><div class="card" id="bug-card"><p class="hint" style="margin-top:0">Напишите пару слов — разработчик увидит их вместе со снимком экрана и журналом работы (без ключей и паролей), ответит сюда, а когда исправит — я скажу. Голосом тоже можно: «сообщи об ошибке: …».</p>
       ${bugSnap && Date.now() - bugSnap.ts < 30 * 6e4 ? `<div class="bugsnap"><img src="data:image/jpeg;base64,${bugSnap.b64}" alt="Снимок экрана" id="bug-img"><label class="chk"><input type="checkbox" id="bug-use" checked><span>Приложить снимок экрана — каким он был до настроек</span></label></div>` : ""}
@@ -2904,6 +2907,9 @@ function renderSettings() {
 
 function wireSettings(info) {
   const g = (id) => $("#" + id);
+  if (g("dev-ping")) g("dev-ping").onclick = async () => { const r = g("dev-res"); r.className = "res"; r.textContent = "отправляю…";
+    const ok = await pulseSend(); r.className = ok ? "res ok" : "res bad";
+    r.textContent = ok ? "Готово — обновите список «Где» в кабинете." : (S.pulse === false ? "«Анонимный пульс» выключен — включите его ниже, и телефон появится." : "Не получилось — проверьте интернет."); };
   if (g("ap-skin")) g("ap-skin").onchange = () => { S.skin = g("ap-skin").value; saveS(); applyLook(); };
   if (g("ap-fx")) g("ap-fx").onchange = () => { S.voice_fx = g("ap-fx").value; saveS(); applyLook(); };
   if (g("br-think")) g("br-think").addEventListener("change", () => { if (g("br-think").checked) delete S.llm.think; else S.llm.think = "off"; saveS(); });
