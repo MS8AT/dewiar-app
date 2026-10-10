@@ -10,7 +10,7 @@
 поручаете большую задачу — и она делается в фоне, пока вы заняты своим. Думает любой моделью: вашей
 (vLLM, Ollama, llama.cpp, LM Studio) или облачной (Dewiar, OpenRouter, OpenAI, Claude).
 
-![версия](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-0.36.9-7c5cff)
+![версия](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-0.36.10-7c5cff)
 ![телефон](https://img.shields.io/badge/Android-0.4.31-3ddc84)
 ![платформы](https://img.shields.io/badge/Ubuntu%20%C2%B7%20Windows%20%C2%B7%20Android-%D0%B3%D0%BE%D1%82%D0%BE%D0%B2%D0%BE-2b2f3a)
 [![Проверки](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml/badge.svg)](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml)
@@ -56,6 +56,9 @@
 </div>
 
 ## Скачать — всегда последняя версия
+
+Проще всего — страница **[dewiar.pro/dwrapp/download.php](https://dewiar.pro/dwrapp/download.php)**: сама узнаёт ваше
+устройство и даёт свежую версию, для телефона на компьютере — QR-код.
 
 Все файлы последнего выпуска — на странице [Releases → latest](https://github.com/dwr-git/dewiar-app/releases/latest). Прямые
 ссылки ниже не меняются и всегда ведут на самое свежее:
