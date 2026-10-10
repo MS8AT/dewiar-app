@@ -1,0 +1,69 @@
+<!doctype html>
+<!-- Каркас единственного экрана телефона (открывает MainActivity в WebView): облик персонажа (#orb), строка состояния,
+     разговор, нижняя панель с микрофоном и листы снизу. Содержимое листов и всю логику рисует app.js, стили — app.css.
+     personas.js и radio.js создаёт сборка (tools/build_apk.sh), entities.js (облики) она копирует из ui/assets —
+     в этой папке их нет. Они должны грузиться раньше app.js: он читает window.DEWIAR_PERSONAS, RADIO_LIST, DewiarEntity.
+     id элементов — договорённость с app.js и app.css. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Dewiar</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="scene"></div>
+
+<header id="top">
+  <button id="who" class="who" title="Персонаж"><img id="who-img" alt=""><span id="who-name">Агент</span><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+  <div class="sp"><div id="rchip" hidden><span class="eq"><i></i><i></i><i></i></span><b>Радио</b>
+    <button id="r-pp" title="Пауза / играть"><svg class="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg><svg class="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg></button>
+    <button id="r-x" title="Выключить радио"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg></button></div></div>
+  <button class="ib" id="b-voice" title="Отвечать текстом, без голоса" aria-pressed="false"><svg class="i-on" viewBox="0 0 24 24"><path d="M2.5 9h4.2L12 4.5v15L6.7 15H2.5z"/><path d="M15.8 8.3a5.2 5.2 0 0 1 0 7.4M18.9 5.2a9.6 9.6 0 0 1 0 13.6"/></svg><svg class="i-off" viewBox="0 0 24 24"><path d="M2.5 9h4.2L12 4.5v15L6.7 15H2.5z"/><path d="m15.5 9 6 6M21.5 9l-6 6"/></svg></button>
+  <button class="ib" id="b-soul" title="Душа: дневник, душа, конституция"><svg viewBox="0 0 24 24"><path d="M10.5 2.8l1.9 5.5 5.6 1.9-5.6 1.9-1.9 5.6-1.9-5.6L3 10.2l5.6-1.9z"/><path d="M18.5 14.5l.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9z"/></svg></button>
+  <button class="ib" id="b-day" title="Напоминания и заметки"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
+  <button class="ib" id="b-set" title="Настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+</header>
+
+<main id="stage">
+  <div id="orbwrap"><canvas id="orb"></canvas></div>
+  <div id="state">Нажмите и говорите</div>
+  <div id="talk">
+    <div id="you"></div>
+    <div id="bot"></div>
+    <div id="card"></div>
+  </div>
+</main>
+
+<footer id="bar">
+  <div id="typebox"><input id="typed" type="text" placeholder="Напишите…" autocomplete="off" enterkeyhint="send"><button id="send" class="ib"><svg viewBox="0 0 24 24"><path d="M4 12 20 4l-6 16-2.5-6.5z"/></svg></button></div>
+  <div id="row">
+    <button class="ib soft" id="b-kb" title="Написать"><svg viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12.5" rx="2.5"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7.5 14.5h9"/></svg></button>
+    <button id="mic" title="Говорить"><span class="ring"></span><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></button>
+    <button class="ib soft" id="b-hist" title="Разговор"><svg viewBox="0 0 24 24"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/></svg></button>
+  </div>
+</footer>
+
+<!-- листы снизу -->
+<section class="sheet" id="sh-persona"><div class="grab"></div><h2>Кто отвечает</h2><div id="plist"></div><div id="pkb"></div></section>
+<section class="sheet tall" id="sh-hist"><div class="grab"></div><h2>Разговор<button class="lnk" id="h-clear">Начать заново</button></h2><div id="hlist"></div></section>
+<section class="sheet tall" id="sh-day"><div class="grab"></div><h2>Мой день</h2>
+  <div class="tabs" id="day-tabs"><button data-t="rem" class="on">Напоминания</button><button data-t="notes">Заметки</button><button data-t="money">Деньги</button><button data-t="made">Сделанное</button></div>
+  <div id="day-body"></div>
+</section>
+<section class="sheet tall" id="sh-soul"><div class="grab"></div><h2>Душа</h2>
+  <div class="tabs" id="soul-tabs"><button data-t="diary" class="on">Дневник</button><button data-t="soul">Душа</button><button data-t="const">Конституция</button></div>
+  <div id="soul-body"></div>
+</section>
+<section class="sheet tall" id="sh-set"><div class="grab"></div><h2>Настройки</h2><div id="set-body"></div></section>
+
+<div id="toast"></div>
+<div id="dim"></div>
+
+<script src="personas.js"></script>
+<script src="entities.js"></script>
+<script src="radio.js"></script>
+<script src="app.js"></script>
+<script src="exam.js"></script>
+</body>
+</html>

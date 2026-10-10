@@ -1,0 +1,3840 @@
+/* Dewiar для Android — интерфейс и «мозг» на телефоне (страница index.html в WebView MainActivity).
+   Нативная часть (Bridge.java и соседи) даёт слух, голос, сеть без CORS, будильники и руки телефона через window.Dewiar (D);
+   ответы долгих дел приходят событиями в N.ev({type, ...}). Думает модель (свой сервер, облако по ключу или Dewiar Облако —
+   server/dwrapp/cloud.php) с инструментами телефона.
+   Разделы «---------- … ----------» по порядку: мост, радио, настройки, отчёты, разговор, персонажи, слух, голос, мозг,
+   время словами, быстрые команды, инструменты, камера, интернет, заметки и деньги, умный дом, листы, синхронизация
+   (общая с core/sync.py и cloud.php ?p=/sync), облако, аккаунт, мессенджеры, запуск.
+   В браузере вместо D — заглушка с теми же методами: на ней страницу проверяют тесты tests/android_*. */
+"use strict";
+const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const MIC = "android.permission.RECORD_AUDIO", CONTACTS = "android.permission.READ_CONTACTS",
+      CALLP = "android.permission.CALL_PHONE", NOTIF = "android.permission.POST_NOTIFICATIONS";
+
+/* ---------- мост к телефону: window.Dewiar — методы Bridge.java (в браузере для проверки — заглушка) ----------
+   Новый метод моста добавляй в обе стороны: в Bridge.java и в заглушку ниже. Ответы — строки (JSON строкой). */
+const D = window.Dewiar || (() => {
+  const store = {}, files = {}, alarms = [];
+  const ev = (o) => setTimeout(() => N.ev(JSON.stringify(o)), 0);
+  return {
+    mock: true, info: () => JSON.stringify({ version: "0.1.0-web", sdk: 0, recognizer: false, tts: false, crash: "" }),
+    clearCrash() {}, takeIntent: () => "", pref: (k) => (k in store ? store[k] : (localStorage.getItem("p_" + k) || "")),
+    setPref: (k, v) => { store[k] = v; try { localStorage.setItem("p_" + k, v); } catch (e) {} },
+    toast: (t) => console.log("toast", t), vibrate() {}, share() {}, keepScreen() {}, has: () => true, perm: (n) => ev({ type: "perm", name: n, granted: true }),
+    openSettings: () => false, notify() {}, setFace(id, name, color, png) { (window._faces = window._faces || {})[id] = { name, color, png: png.length }; },
+    http(id, method, url, headers, body, stream) {
+      fetch(url, { method, headers: JSON.parse(headers || "{}"), body: body || undefined }).then(async r => {
+        if (stream && r.ok && r.body) {
+          const rd = r.body.getReader(), dec = new TextDecoder();
+          for (;;) { const { value, done } = await rd.read(); if (done) break; ev({ type: "http_chunk", id, text: dec.decode(value) }); }
+          ev({ type: "http_done", id, status: r.status, body: "" });
+        } else ev({ type: "http_done", id, status: r.status, body: await r.text() });
+      }).catch(e => ev({ type: "http_error", id, error: String(e) }));
+    },
+    snapshot: () => window._snap || "",
+    abort() {}, setProxy(spec, hosts) { window._proxy = { spec, hosts }; return ""; }, recognizer: () => false, listen(g) { ev({ type: "stt_error", g, code: 9, msg: "нет микрофона в браузере" }); },
+    listenServer(g) { this.listen(g); }, stopListen() {}, cancelListen() {}, pauseExtra(ms) { window._pause = ms; },
+    speak(id) { ev({ type: "tts_start", id }); setTimeout(() => ev({ type: "tts_done", id }), 300); }, speakRemote(id) { this.speak(id); },
+    stopSpeak() {}, voices: () => "[]", ttsReady: () => false,
+    alarmSet(j) { const x = JSON.parse(j); x.id = x.id || "a" + Date.now(); const i = alarms.findIndex(a => a.id === x.id); if (i >= 0) alarms[i] = x; else alarms.push(x); return JSON.stringify(x); },
+    alarmCancel(id) { const i = alarms.findIndex(a => a.id === id); if (i >= 0) alarms.splice(i, 1); return i >= 0; },
+    alarms: () => JSON.stringify(alarms), alarmHistory: () => "[]", exactAlarms: () => true,
+    contact: () => "", call: (n) => { (window._calls = window._calls || []).push(n); return true; }, sms: () => true, openApp: (n) => (/телеграм|telegram/i.test(n) ? "Telegram" : ""), apps: () => "[]",
+    openUrl: () => true, torch: () => true, volume: (op, v) => { (window._vol = window._vol || []).push([op, v]); return 50; }, battery: () => JSON.stringify({ percent: 80, charging: false }),
+    files: (n) => (n in files ? files[n] : (localStorage.getItem("f_" + n) || "")),
+    saveFile: (n, t) => { files[n] = t; try { localStorage.setItem("f_" + n, t); } catch (e) {} return true; },
+    saveDownload: (n, m, t) => { (window._downloads = window._downloads || []).push([n, t]); return "Загрузки/Dewiar/" + n; },
+    saveDownloadB64: (n, m, b) => { (window._downloads = window._downloads || []).push([n, new TextDecoder().decode(Uint8Array.from(atob(b), c => c.charCodeAt(0)))]); return "Загрузки/Dewiar/" + n; },
+    shareTo: (pkg, t) => { window._shared = { pkg, text: t }; return true; },
+    _radio: { state: "stopped", name: "", error: "", log: [] },
+    radioPlay(url, name) { const r = this._radio; r.log.push("play " + name); Object.assign(r, { state: "preparing", name, error: "", url }); ev({ type: "radio", state: "preparing", name, error: "" });
+      setTimeout(() => { if (r.url !== url || /slow/.test(url)) return; const bad = /bad|dead/.test(url); Object.assign(r, { state: bad ? "error" : "playing", error: bad ? "станция не отвечает (сеть)" : "" });
+        ev({ type: "radio", state: r.state, name, error: r.error });
+        if (/silent/.test(url)) setTimeout(() => { if (r.url !== url) return; Object.assign(r, { state: "error", error: "станция молчит — поток не идёт" }); ev({ type: "radio", state: "error", name, error: r.error }); }, 300);
+      }, 60); },
+    radioPause() { const r = this._radio; r.log.push("pause"); if (r.state === "playing") { r.state = "paused"; ev({ type: "radio", state: "paused", name: r.name, error: "", by: "user" }); } },
+    radioResume() { const r = this._radio; r.log.push("resume"); if (r.state === "paused") { r.state = "playing"; ev({ type: "radio", state: "playing", name: r.name, error: "" }); } },
+    _focusLoss() { const r = this._radio; if (r.state === "playing") { r.state = "paused"; ev({ type: "radio", state: "paused", name: r.name, error: "", by: "focus" }); } },
+    radioStop() { const r = this._radio; r.log.push("stop"); r.url = ""; r.state = "stopped"; ev({ type: "radio", state: "stopped", name: r.name, error: "" }); },
+    radioDuck(on) { this._radio.duck = on; }, radioVolume(v) { this._radio.volume = v; },
+    radioState() { const r = this._radio; return JSON.stringify({ state: r.state, name: r.name, error: r.error }); },
+    // руки в других приложениях (Hands.java): в браузере выключены — проверки подменяют эти методы своими
+    handsState: () => "", handsScreen: () => "OFF", handsTap: () => "OFF", handsTapText: () => "OFF", handsType: () => "OFF",
+    handsScroll: () => "OFF", handsNav: () => "OFF", toFront() {},
+  };
+})();
+/* Песочница экзамена (exam.js): пока она включена, настройки и файлы пишутся в память, а не на телефон; после экзамена
+   приложение перезагружается и видит всё как было. Все записи и чтения настроек и файлов — только через эти четыре. */
+let SANDBOX = null;
+function prefSet(k, v) { if (SANDBOX) { SANDBOX.prefs[k] = v; return; } D.setPref(k, v); }
+function prefGet(k) { return SANDBOX && k in SANDBOX.prefs ? SANDBOX.prefs[k] : D.pref(k); }
+function fileSave(n, t) { if (SANDBOX) { SANDBOX.files[n] = t; return true; } return D.saveFile(n, t); }
+function fileGet(n) { return SANDBOX && n in SANDBOX.files ? SANDBOX.files[n] : D.files(n); }
+function devTorch(on) { if (SANDBOX) { SANDBOX.dev.push({ name: "flashlight", on: !!on, t: Date.now() }); return true; } return D.torch(on); }
+function devVolume(op, v) { if (SANDBOX) { SANDBOX.dev.push({ name: "set_volume", op, v, t: Date.now() }); return 40; } return D.volume(op, v); }
+
+if (!window.Dewiar) window.Dewiar = D;          // кнопки в разметке вызывают Dewiar.* и в браузере
+
+const N = window.N = {
+  handlers: {},
+  on(type, fn) { (this.handlers[type] = this.handlers[type] || []).push(fn); },
+  ev(raw) { let e; try { e = typeof raw === "string" ? JSON.parse(raw) : raw; } catch (x) { return; } (this.handlers[e.type] || []).forEach(f => { try { f(e); } catch (x) { console.error(x); } }); },
+  back() { const s = $(".sheet.on"); if (s) { closeSheets(); return true; } if (state !== "idle") { interrupt(); return true; } return false; },
+};
+
+/* ---------- радио: играет внутри приложения (как на компьютере), а не на сайтах и в чужих приложениях ----------
+   Свой список станций — тот же, что у компьютера (data/radio.json; свежий — с dewiar.pro раз в 6 часов);
+   не нашли в нём — открытый каталог radio-browser.info. «Стоп», «пауза», «дальше», «продолжи» — голосом и кнопками. */
+const radio = (() => {
+  const SITE_LIST = "https://dewiar.pro/dwrapp/radio.json";
+  const API = ["https://de1.api.radio-browser.info", "https://de2.api.radio-browser.info", "https://all.api.radio-browser.info"];
+  const SYN = { "спокойн": "релакс спокойно", "расслаб": "релакс", "отдох": "релакс", "чилаут": "релакс", "чил": "релакс", "тих": "релакс спокойно",
+    "сон": "релакс", "медитац": "релакс", "фонов": "релакс джаз", "танц": "танцевальная клубная", "клуб": "клубная", "бодр": "энерджи танцевальная",
+    "энерг": "энерджи", "драйв": "рок энерджи", "весел": "поп хиты", "попс": "поп", "хит": "хиты поп", "русск": "русское русские", "наш": "русское русские",
+    "отечеств": "русское русские", "стар": "ретро", "ретро": "ретро", "80": "ретро 80", "90": "ретро 90", "восьмидесят": "ретро 80", "девяност": "ретро 90",
+    "диско": "ретро", "советск": "ссср ретро", "ссср": "ссср", "хаус": "дип хаус", "электрон": "клубная дип", "дип": "дип", "ремикс": "ремиксы",
+    "новост": "новости", "поговор": "разговорное", "разговор": "разговорное", "джаз": "джаз",
+    "легк": "релакс спокойно поп", "приятн": "релакс спокойно", "вечер": "релакс джаз спокойно", "медлен": "релакс спокойно",
+    "романт": "релакс джаз", "инструмент": "джаз эмбиент классика", "утр": "поп хиты", "бодрящ": "энерджи танцевальная", "блюз": "джаз", "рок": "рок",
+    "альтернатив": "альтернатива", "метал": "рок", "поп": "поп", "класси": "классика", "шансон": "шансон" };
+  const FILLER = new Set(("мне нам пожалуйста немного немножко какую какую-нибудь какую-то что-нибудь что-то нибудь музыку музыка музыки музычку песни песню " +
+    "радио радиостанцию радиостанция станцию станция волну послушать для под в на стиле жанре жанр из типа вроде что бы лучше а и тогда можно давай хочу включи " +
+    "поставь запусти эфир онлайн").split(" "));
+  const GENRE_EN = { "электрон": "electronic", "техно": "techno", "хаус": "house", "транс": "trance", "рок": "rock", "джаз": "jazz", "класси": "classical",
+    "поп": "pop", "хип": "hiphop", "рэп": "rap", "лаунж": "lounge", "чилаут": "chillout", "чил": "chillout", "эмбиент": "ambient", "амбиент": "ambient",
+    "метал": "metal", "блюз": "blues", "кантри": "country", "регги": "reggae", "диско": "disco", "шансон": "chanson", "лофай": "lofi", "лоуфай": "lofi",
+    "фолк": "folk", "соул": "soul", "фанк": "funk", "релакс": "relax", "спокойн": "relax", "медитац": "meditation", "новост": "news", "детск": "children" };
+  const words = (t) => (String(t || "").toLowerCase().replace(/ё/g, "е").match(/[a-zа-я0-9-]+/g) || []);
+  const stem = (w) => w.length > 4 ? w.slice(0, Math.max(3, w.length - 2)) : w;
+  let st = { state: "stopped", name: "", error: "", by: "" }, cur = null, found = [], waiters = [], played = [], starting = false, focusAt = 0, autoTried = {};
+  let opSeq = 0, usedAt = 0;                       // каждая команда (включи, дальше, стоп) — своя; прежняя, ещё перебирающая станции, сдаётся
+  const bad = {};                                  // станция не заиграла — 20 минут пробуем её последней
+  const isBad = (s) => bad[s.url] && Date.now() - bad[s.url] < 20 * 60e3;
+  const goodFirst = (xs) => xs.filter(x => !isBad(x)).concat(xs.filter(isBad));
+  function norm(d) {
+    const raw = Array.isArray(d) ? d : (d && d.stations) || [];
+    return raw.filter(x => x && x.name && x.url).map(x => ({ name: String(x.name).trim(), url: String(x.url).trim(), tags: String(x.tags || "").toLowerCase(),
+      aliases: (Array.isArray(x.aliases) ? x.aliases : x.aliases ? [x.aliases] : []).map(a => String(a).toLowerCase().replace(/ё/g, "е")) }));
+  }
+  function list() {
+    let l = []; try { l = norm(JSON.parse(prefGet("radio_list") || "null")); } catch (e) { l = []; }
+    return l.length ? l : norm(window.RADIO_LIST);
+  }
+  async function refresh() {                    // свежий список с сайта (его правит администратор) — раз в 6 часов
+    if (Date.now() - (+prefGet("radio_at") || 0) < 6 * 3600e3) return;
+    prefSet("radio_at", String(Date.now()));
+    try { const r = await http("GET", SITE_LIST, { timeout: 15000 }); if (r.status === 200 && norm(JSON.parse(r.body)).length) prefSet("radio_list", r.body); } catch (e) { /* играем по встроенному */ }
+  }
+  function match(query) {
+    const all = list();
+    if (query === "*") return all.slice().sort(() => Math.random() - .5);
+    const q = words(query).join(" ");
+    if (!q) return [];
+    for (const s of all) {
+      const names = [s.name.toLowerCase().replace(/ё/g, "е"), ...s.aliases];
+      if (names.includes(q) || names.includes(q.replace(/^радио /, ""))) {
+        const tg = new Set(s.tags.split(" ")); return [s, ...all.filter(x => x !== s && x.tags.split(" ").some(t => t && tg.has(t)))];
+      }
+    }
+    const want = [];
+    words(query).filter(w => !FILLER.has(w)).forEach(w => { want.push(stem(w)); for (const k in SYN) if (w.startsWith(k)) SYN[k].split(" ").forEach(x => want.push(stem(x))); });
+    if (!want.length) return [];
+    return all.map(s => {
+      const nw = [...words(s.name), ...s.aliases.flatMap(words)].map(stem), tw = words(s.tags).map(stem);
+      return { s, sc: want.filter(w => nw.includes(w)).length * 3 + want.filter(w => tw.includes(w)).length * 2, r: Math.random() };
+    }).filter(x => x.sc).sort((a, b) => b.sc - a.sc || a.r - b.r).map(x => x.s);
+  }
+  async function search(query) {                // каталог radio-browser: ~50 000 станций, популярные сверху, нерабочие скрыты
+    const ws = words(query).filter(w => !FILLER.has(w));
+    let tag = ""; for (const w of ws) for (const k in GENRE_EN) if (!tag && w.startsWith(k)) tag = GENRE_EN[k];
+    const p = new URLSearchParams({ limit: "8", hidebroken: "true", order: "clickcount", reverse: "true" });
+    if (tag) p.set("tag", tag); else if (ws.length) p.set("name", ws.join(" ")); else p.set("countrycode", "RU");
+    let last = "";
+    for (const base of API) {
+      try {
+        const r = await http("GET", base + "/json/stations/search?" + p, { headers: { "User-Agent": "Dewiar-Android (voice assistant)" }, timeout: 10000 });
+        if (r.status !== 200) { last = "ответ " + r.status; continue; }
+        return JSON.parse(r.body).filter(x => x.url_resolved || x.url).map(x => ({ name: String(x.name || "").trim(), url: x.url_resolved || x.url, tags: String(x.tags || ""), aliases: [] }));
+      } catch (e) { last = e.message; }
+    }
+    throw new Error("каталог радиостанций недоступен" + (last ? ": " + last : ""));
+  }
+  N.on("radio", e => {
+    st = { state: e.state, name: e.name || "", error: e.error || "", by: e.by || "" };
+    if (st.state === "paused" && st.by === "focus") focusAt = Date.now();
+    waiters.splice(0).forEach(f => f(st));
+    render();
+    // станция заиграла, а через пару секунд замолчала или оборвалась — сами включаем похожую, а не оставляем тишину
+    if (st.state === "error" && !starting && cur && st.name === cur.name && !autoTried[cur.url]) {
+      autoTried[cur.url] = 1; bad[cur.url] = Date.now();
+      toast(`«${cur.name}» не играет (${st.error || "нет звука"}) — включаю другую`, 3500);
+      next().then(r => { if (!r.ok) toast(r.text.replace(/^Ошибка: /, ""), 4000); });
+    }
+  });
+  function resumeAfterTalk() {                    // распознавание речи забрало динамик — после ответа радио продолжает само
+    if (st.state === "paused" && st.by === "focus" && Date.now() - focusAt < 5 * 60e3) D.radioResume();
+  }
+  async function resolve(s) {                     // ссылка на плейлист (.m3u, .pls) — достаём сам поток
+    if (!/\.(m3u|pls)(\?|$)/i.test(s.url)) return s;
+    try {
+      const r = await http("GET", s.url, { timeout: 10000 });
+      const u = (String(r.body || "").match(/^(?:File\d+=)?\s*(https?:\/\/\S+)/im) || [])[1];
+      if (u) return Object.assign({}, s, { url: u.trim() });
+    } catch (e) { }
+    return s;
+  }
+  let startSeq = 0;
+  async function start(s0) {
+    const my = ++startSeq;                         // новая команда отменяет ожидание прежней (иначе «ждём» 15 с и не замечаем молчание)
+    starting = true;
+    const s = await resolve(s0);
+    try { return my === startSeq ? await startRaw(s, my) : { state: "superseded" }; } finally { if (my === startSeq) starting = false; }
+  }
+  function startRaw(s, my) {
+    return new Promise(res => {
+      let done = false; const fin = (x) => { if (!done) { done = true; res(x); } };
+      const w = (x) => {
+        if (my !== startSeq) return fin({ state: "superseded", error: "переключили на другую" });
+        if (x.name !== s.name) return waiters.push(w);
+        if (x.state === "playing" || x.state === "error") fin(x); else waiters.push(w);
+      };
+      waiters.push(w);
+      setTimeout(() => fin(my !== startSeq ? { state: "superseded" } : { state: "error", error: "не ответила за 15 секунд" }), 15000);
+      D.radioPlay(s.url, s.name);
+    });
+  }
+  async function play(query) {
+    const op = ++opSeq; usedAt = Date.now();
+    const q = String(query || "").trim();
+    let fromList = match(q || "*"), cand = fromList;
+    if (!cand.length) {
+      try { cand = await search(q); } catch (e) { return { ok: false, text: `Ошибка: ${e.message}. Скажи пользователю, что сеть сейчас не даёт найти станцию.` }; }
+    }
+    if (!cand.length) return { ok: false, text: `Ошибка: не нашёл радиостанцию «${q}». Предложи жанр или известную станцию (Европа Плюс, Русское Радио, Маяк, джаз, релакс).` };
+    if (fromList.length && cand.length < 3) {     // единственная станция не ответит — есть чем заменить: того же жанра
+      const tg = new Set(cand[0].tags.split(" ").filter(Boolean)), have = new Set(cand.map(x => x.url));
+      cand = cand.concat(list().filter(x => !have.has(x.url) && x.tags.split(" ").some(t => tg.has(t))));
+    }
+    if (q && !fromList.length) {                  // из каталога: точное название — первым
+      const ql = q.toLowerCase(); const ex = cand.find(x => x.name.toLowerCase() === ql) || cand.find(x => x.name.toLowerCase().includes(ql));
+      if (ex) cand = [ex, ...cand.filter(x => x !== ex)];
+    }
+    const errs = [];
+    if (op !== opSeq) return { ok: false, superseded: true, text: "" };
+    cand = [cand[0], ...goodFirst(cand.slice(1))];   // названную станцию — первой, дальше — сначала те, что недавно не отказывали
+    for (const s of cand.slice(0, 4)) {
+      if (op !== opSeq) return { ok: false, superseded: true, text: "" };
+      const r = await start(s);
+      if (r.state === "superseded" || op !== opSeq) return { ok: false, superseded: true, text: "" };
+      if (r.state === "playing") { cur = s; found = cand; remember(s); delete bad[s.url]; return { ok: true, station: s, others: cand.filter(x => x !== s).slice(0, 5).map(x => x.name) }; }
+      bad[s.url] = Date.now();
+      errs.push(`«${s.name}» — ${r.error || "не отвечает"}`);
+    }
+    if (op !== opSeq) return { ok: false, superseded: true, text: "" };
+    D.radioStop();
+    return { ok: false, text: `Ошибка: радио не заиграло: ${errs.join("; ")}. Похоже на сеть телефона — перескажи это простыми словами.` };
+  }
+  function remember(s) { played = [s.url, ...played.filter(u => u !== s.url)].slice(0, 8); }
+  async function next() {
+    if (!cur && st.name) cur = list().find(x => x.name === st.name) || null;      // после перезапуска экрана — знаем, что играет
+    if (!cur) return play("*");
+    const op = ++opSeq; usedAt = Date.now();
+    const fresh = (xs) => xs.filter(x => x.url !== cur.url && !played.includes(x.url));
+    // сначала — ещё не игравшие из прошлого поиска, потом того же жанра, потом любые из списка; по кругу не ходим
+    const uniq = (xs) => xs.filter((x, i) => xs.findIndex(y => y.url === x.url) === i);
+    let alts = uniq([...fresh(found), ...fresh(match(cur.tags.split(" ").filter(Boolean)[0] || "*")), ...fresh(match("*"))]);
+    if (!alts.length) { played = [cur.url]; alts = fresh(match("*")); }
+    alts = goodFirst(alts);
+    const errs = [];
+    for (const s of alts.slice(0, 4)) {
+      if (op !== opSeq) return { ok: false, superseded: true, text: "" };
+      const r = await start(s);
+      if (r.state === "superseded" || op !== opSeq) return { ok: false, superseded: true, text: "" };
+      if (r.state === "playing") { cur = s; remember(s); delete bad[s.url]; found = alts.filter(x => x !== s); return { ok: true, station: s, others: [] }; }
+      bad[s.url] = Date.now(); remember(s); errs.push(`«${s.name}» — ${r.error || "не отвечает"}`);
+    }
+    if (op !== opSeq) return { ok: false, superseded: true, text: "" };
+    D.radioStop();                                 // ни одна не заиграла — тишина честная, а не «подключаюсь» без конца
+    return { ok: false, text: errs.length ? `Не заиграли: ${errs.join("; ")}. Похоже, сеть телефона сейчас не пускает к станциям.` : "Других станций нет." };
+  }
+  function on() { return st.state === "playing" || st.state === "preparing" || st.state === "paused"; }
+  function playing() { return st.state === "playing" || st.state === "preparing"; }
+  function pause() { opSeq++; D.radioPause(); }
+  function resume() { if (!cur && !st.name) return false; D.radioResume(); return true; }
+  function stop() { opSeq++; startSeq++; D.radioStop(); }
+  function recent() { return !!(cur || st.name) && Date.now() - usedAt < 60 * 60e3; }     // радио включали недавно — «другую» понимаем и после ошибки
+  function render() {
+    const el = document.getElementById("rchip"); if (!el) return;
+    el.hidden = !on();
+    document.body.classList.toggle("radio-on", on());           // имя персонажа прячем — название станции видно целиком
+    try { if (orb) orb.vinyl = playing() ? (st.name || "Радио") : null; } catch (e) { }   // как на компьютере: в покое крутится пластинка
+    el.classList.toggle("paused", st.state === "paused"); el.classList.toggle("wait", st.state === "preparing");
+    const n = el.querySelector("b"); if (n) n.textContent = st.name || "Радио";
+  }
+  return { play, next, pause, resume, stop, on, playing, recent, render, refresh, match, list, resumeAfterTalk, state: () => st, current: () => cur };
+})();
+
+/* HTTP через Java (Dewiar.http → Net.java): без ограничений CORS, адреса Dewiar — через прокси (NetProxy.java).
+   Ответ приходит событиями http_chunk / http_done / http_error с тем же id; stream — построчно (SSE / NDJSON) в onChunk.
+   Ответ 4xx/5xx — не ошибка: resolve со status и телом; reject — только сбой связи или отмена (signal). */
+let httpN = 0;
+const pendingHttp = {};
+N.on("http_chunk", e => { const p = pendingHttp[e.id]; if (p && p.onChunk) p.onChunk(e.text); });
+N.on("http_done", e => { const p = pendingHttp[e.id]; if (p) { delete pendingHttp[e.id]; p.resolve({ status: e.status, body: e.body }); } });
+N.on("http_error", e => { const p = pendingHttp[e.id]; if (p) { delete pendingHttp[e.id];
+  const err = new Error(netErr(e.error, p.url)); err.net = true; err.raw = String(e.error || ""); err.url = p.url || ""; p.reject(err); } });
+/* idle — поток ответа молчит дольше idle мс (мобильная связь «зависла», а соединение не рвётся) — обрываем сами
+   и отдаём сетевую ошибку (net, idle): ask() повторит этот круг, не дожидаясь трёхминутного таймаута. */
+function http(method, url, { headers = {}, body = null, stream = false, onChunk = null, timeout = 120000, signal = null, idle = 0 } = {}) {
+  const id = "h" + (++httpN);
+  return new Promise((resolve, reject) => {
+    let tm = 0;
+    const kick = () => {
+      if (!idle) return;
+      clearTimeout(tm);
+      tm = setTimeout(() => { if (!pendingHttp[id]) return; D.abort(id); delete pendingHttp[id];
+        reject(Object.assign(new Error("сервер замолчал посреди ответа — похоже, слабая связь"), { net: true, idle: true, url })); }, idle);
+    };
+    pendingHttp[id] = { resolve: (v) => { clearTimeout(tm); resolve(v); }, reject: (e) => { clearTimeout(tm); reject(e); },
+      onChunk: (onChunk || idle) ? (c) => { kick(); if (onChunk) onChunk(c); } : null, url };
+    kick();
+    if (signal) signal.onabort = () => { D.abort(id); delete pendingHttp[id]; reject(new Error("отменено")); };
+    D.http(id, method, url, JSON.stringify(headers), body == null ? "" : (typeof body === "string" ? body : JSON.stringify(body)), !!stream, timeout);
+  });
+}
+/* Понятная причина сетевой ошибки. «Не дома» — только когда адрес и правда домашний (10.*, 192.168.*, …): на мобильной
+   связи в городе ошибка облака Dewiar — это связь или сервер, а не «домашняя сеть». Таймаут проверяем раньше отказа:
+   у Android таймаут соединения звучит как «failed to connect … after 15000ms». */
+const HOME_URL = /^https?:\/\/(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|127\.|localhost\b|[\w-]+\.local\b)/i;
+function netErr(e, url) {
+  e = String(e || "");
+  const home = HOME_URL.test(url || "");
+  if (/Unable to resolve|UnknownHost|No address/i.test(e)) return home ? "домашний сервер не найден (возможно, вы не дома)" : "нет интернета или слабая связь";
+  if (/timeout|timed out|after \d+\s*ms/i.test(e)) return home ? "домашний сервер долго не отвечает (возможно, вы не дома)" : "сервер долго не отвечает — похоже, слабая связь";
+  if (/ECONNREFUSED|Connection refused|failed to connect|reset|closed|EOF/i.test(e)) return home ? "домашний сервер не отвечает (возможно, вы не в домашней сети)" : "связь с сервером оборвалась";
+  return e;
+}
+
+/* ---------- настройки: одна строка JSON в pref "settings" (SharedPreferences, Bridge.java); чего нет — из DEF ---------- */
+const DEF = {
+  sync: { on: true },
+  persona: "lira", user_name: "", follow: "ask",
+  join: null,                                   // заявка на Dewiar из приложения: {id, secret, base} — ждём ключ (joinPoll)
+  welcome: { on: true, seen: 0, at: 0 },        // «сам замечает»: seen — когда приложение последний раз было на экране, at — когда здоровались
+  llm: { kind: "openai", name: "", base_url: "", api_key: "", model: "", disable_thinking: true, temperature: 0.7, cloud: false, title: "", account: false },
+  stt: { engine: "system", url: "", key: "", model: "" },
+  account: { server: "", login: "", token: "", user: {}, rag_url: "", services: {}, problem: "" },
+  net: { proxy: "", dewiar: false, dewiar_secret: "", dewiar_at: 0 },   // прокси для серверов Dewiar: свой или «прокси Dewiar»
+  kb: {}, accCloud: null, tg: { linked: false },
+  // голос: system — устройства (sys_voice — героинь и по умолчанию, sys_voice_m — героев; пусто — подберём сами), cloud — Dewiar,
+  // server — свой OpenAI-совместимый сервер (voice / voice_m), eleven — ElevenLabs своим ключом (el_*)
+  tts: { engine: "system", url: "", key: "", model: "", voice: "", voice_m: "", rate: 1.0, sys_voice: "", sys_voice_m: "",
+         el_key: "", el_model: "eleven_flash_v2_5", el_voice_f: "", el_voice_m: "" },
+  home: { token: "", client_id: "" },
+  memory: [], onboarded: false, textMode: false,   // textMode — отвечать только текстом (значок динамика вверху)
+  relations: {},                 // кто есть кто в контактах: {жена: {name, number}} — «позвони жене» (doCall, REL)
+  report: { auto: null },        // отчёты разработчику при сбое: null — ещё не спрашивали
+  pulse: true, who: "", dev: "", // анонимный пульс для «Здоровья»; как подписать в «Помощниках проекта»; случайный номер установки
+  complaints: [],                // мои жалобы: {id, s (секрет), base, note, ts, status, reply, fixed, reward, shot}
+};
+let S = (() => { try { return Object.assign({}, DEF, JSON.parse(prefGet("settings") || "{}")); } catch (e) { return Object.assign({}, DEF); } })();
+for (const k of ["llm", "stt", "tts", "home", "account", "net", "tg"]) S[k] = Object.assign({}, DEF[k], S[k] || {});
+applyProxy();                                      // прокси для серверов Dewiar — с первого запроса
+function saveS() { prefSet("settings", JSON.stringify(S)); applyProxy(); }
+
+/* ---------- отчёты разработчику: кнопка «Отправить отчёт» и тихая отправка при сбое (с согласия) — отчёт сразу виден
+   в управлении на сайте. Журнал приложения — в памяти (последние 400 строк, сюда же идёт console.*); ошибки программы
+   (не сеть) — предложение один раз, согласились — уходят сами: одна и та же не чаще раза в 12 ч, не больше 4 в сутки. ---------- */
+/* Журнал переживает перезапуск приложения (файл plog.txt, пишется раз в несколько секунд): раньше отчёт после перезапуска
+   был почти пустым. Отчёт ушёл — журнал начинается заново: в следующем отчёте только новое, а не старые, уже исправленные беды. */
+const PLOG_F = "plog.txt";
+const PLOG = (() => { try { return String(fileGet(PLOG_F) || "").split("\n").filter(Boolean).slice(-400); } catch (e) { return []; } })();
+let plogT = 0;
+function plogSave(now) {
+  clearTimeout(plogT); plogT = 0;
+  const w = () => { try { fileSave(PLOG_F, PLOG.join("\n")); } catch (e) { } };
+  if (now) w(); else plogT = setTimeout(w, 4000);
+}
+function plog(level, ...a) {
+  const one = (x) => x instanceof Error ? (x.stack || x.message) : typeof x === "string" ? x : (() => { try { return JSON.stringify(x); } catch (e) { return String(x); } })();
+  PLOG.push(`${new Date().toTimeString().slice(0, 8)} ${level} ${a.map(one).join(" ")}`.replace(/\n/g, " ⏎ ").slice(0, 2000));
+  if (PLOG.length > 400) PLOG.splice(0, PLOG.length - 400);
+  if (!plogT) plogSave();
+}
+plog("INFO", `— запуск приложения ${new Date().toLocaleDateString("ru-RU")} —`);
+// приложение уходит в фон или закрывается — журнал сразу на диск, не дожидаясь отложенной записи
+addEventListener("pagehide", () => plogSave(true));
+document.addEventListener("visibilitychange", () => { if (document.hidden && plogT) plogSave(true); });
+document.addEventListener("visibilitychange", () => { if (document.hidden) plogSave(true); });
+for (const [lv, fn] of [["INFO", "log"], ["WARNING", "warn"], ["ERROR", "error"]]) {
+  const orig = (console[fn] || console.log).bind(console);
+  console[fn] = (...a) => { try { plog(lv, ...a); } catch (e) { } orig(...a); };
+}
+const NETLIKE = /network|timeout|timed out|сеть|интернет|облако ответило|failed to fetch|отменено|abort|unable to resolve|connect/i;
+window.addEventListener("error", (e) => { if (e.message) problem("js:" + e.message, `${e.message} (${String(e.filename || "").split("/").pop()}:${e.lineno || 0})`, e.error); });
+window.addEventListener("unhandledrejection", (e) => {
+  const m = String((e.reason && e.reason.message) || e.reason || "");
+  if (m && !NETLIKE.test(m)) problem("promise:" + m.slice(0, 80), "Promise: " + m, e.reason);
+});
+/* Сбои связи с мозгом: копятся (pref net_inc) и, как только связь вернулась, уходят разработчику одним отчётом —
+   если отчёты разрешены (S.report.auto), не чаще раза в 6 часов. Так видно, что это было: слабая связь или сервер. */
+function netIncident(e) {
+  let l = []; try { l = JSON.parse(prefGet("net_inc") || "[]") || []; } catch (x) { }
+  const c = navigator.connection || {};
+  l.push({ ts: Date.now(), host: String(e.url || "").replace(/^https?:\/\//, "").split(/[/?]/)[0], err: String(e.raw || e.message || "").slice(0, 200),
+           online: navigator.onLine, type: c.type || c.effectiveType || "" });
+  prefSet("net_inc", JSON.stringify(l.slice(-30)));
+  hCount("net_fail"); hProblem(`связь с мозгом: ${l[l.length - 1].err}`);
+  plog("WARNING", `связь с мозгом: ${l[l.length - 1].host} — ${l[l.length - 1].err} (${l[l.length - 1].type || "сеть ?"})`);
+}
+function netRecovered() {
+  let l = []; try { l = JSON.parse(prefGet("net_inc") || "[]") || []; } catch (x) { }
+  if (!l.length || !(S.report || {}).auto) return;
+  if (Date.now() - (+prefGet("net_rep") || 0) < 6 * 36e5) return;
+  prefSet("net_rep", String(Date.now())); prefSet("net_inc", "[]");
+  const hosts = [...new Set(l.map(x => x.host))].join(", ");
+  reportSend("", true, `Связь с мозгом: ${l.length} сбоев (${hosts}) — ` + l.slice(-3).map(x => `${new Date(x.ts).toTimeString().slice(0, 5)} ${x.err.slice(0, 60)} [${x.type || "?"}${x.online ? "" : ", офлайн"}]`).join("; "))
+    .catch(() => {});
+}
+function problem(sig, summary, err) {
+  plog("ERROR", summary, err && err.stack ? err.stack : "");
+  hProblem(summary);
+  const auto = (S.report || {}).auto;
+  if (auto === false) return;
+  if (auto == null) { if (!problem.offered) { problem.offered = true; setTimeout(() => reportOffer(summary), 300); } return; }
+  sig = String(sig).replace(/\d+/g, "#").slice(0, 160);
+  let sent = {}; try { sent = JSON.parse(prefGet("rep_sent") || "{}") || {}; } catch (e) { }
+  const now = Date.now(); for (const k in sent) if (now - sent[k] > 864e5) delete sent[k];
+  if (now - (sent[sig] || 0) < 12 * 36e5 || Object.keys(sent).length >= 4) return;
+  sent[sig] = now; prefSet("rep_sent", JSON.stringify(sent));
+  problem.pending = (problem.pending || []).concat(summary);
+  if (problem.pending.length > 1) return;                                // уже ждём — уйдёт одним отчётом
+  setTimeout(() => { const sm = problem.pending.join(" | ").slice(0, 500); problem.pending = [];
+    reportSend("", true, sm).catch(e => console.log("отчёт о сбое не ушёл: " + e.message)); }, window.DEWIAR_REPORT_WAIT || 15000);
+}
+function reportOffer(summary) {
+  showCard(`<div class="repask"><b>Что-то пошло не так.</b> Отправлять разработчику отчёт о таких сбоях самому? В нём — журнал работы
+    приложения и настройки без ключей и паролей. Так ошибки исправят быстрее.${summary ? `<small>${esc(String(summary).slice(0, 140))}</small>` : ""}
+    <div class="row2"><button class="btn p" id="rq-yes">Отправлять</button><button class="btn" id="rq-no">Не надо</button></div></div>`);
+  $("#rq-yes").onclick = () => { S.report = { auto: true }; saveS(); showCard(""); toast("Хорошо — при сбое отчёт уйдёт сам"); };
+  $("#rq-no").onclick = () => { S.report = { auto: false }; saveS(); showCard(""); };
+}
+async function reportSend(note, auto, summary, extra) {
+  let info = {}; try { info = JSON.parse(D.info() || "{}"); } catch (e) { }
+  // в отчёт не попадает секретное: ключи, токены, пароли, прокси (в нём бывает логин) — звёздочками; ниже то же для текста журнала
+  const mask = (o) => JSON.parse(JSON.stringify(o, (k, v) => /key|token|pass|secret|auth|cookie|proxy/i.test(k) && v && typeof v !== "object" ? "***" : v));
+  const st = Object.assign({}, S, { memory: `(записей: ${(S.memory || []).length})` });
+  const errs = PLOG.filter(l => /^\S+ (ERROR|WARNING) /.test(l));
+  note = String(note || "").trim().slice(0, 2000);
+  let text = [`Dewiar (телефон) ${info.version || ""} — отчёт ${new Date().toLocaleString("ru-RU")}`,
+    `Android ${info.android || ""}; ${info.device || ""}; распознаватель: ${info.recognizer}; голос: ${info.tts}`, "",
+    ...(note ? ["== Со слов человека", note, ""] : []),
+    "== Состояние", JSON.stringify({ state, online: navigator.onLine, sync: syncStatus, cloud: cloudInfo }, null, 1), "",
+    "== Настройки (без ключей)", JSON.stringify(mask(st), null, 1), "",
+    ...(info.crash ? ["== Последнее падение приложения", info.crash, ""] : []),
+    ...(errs.length ? ["== Ошибки (последние)", ...errs.slice(-40), ""] : []),
+    "== Журнал (последние строки)", ...PLOG.slice(auto ? -200 : -400)].join("\n");
+  text = text.replace(/(Bearer\s+)[\w.-]+/g, "$1***").replace(/\bdw-[a-z0-9]{4,}(?:-[a-z0-9]{2,})+/gi, "dw-***");
+  // принимает облако (cloud.php ?p=/report): с аккаунтом или ключом — от их имени, без них — анонимно на общий адрес
+  const c = syncCred(), base = (c ? c.base : CLOUD_URL).split("?")[0];
+  const headers = { "Content-Type": "application/json" }; if (c) headers.Authorization = "Bearer " + c.token;
+  const errLines = errs.filter(l => / ERROR /.test(l)).map(l => l.replace(/^\S+ ERROR /, ""));
+  const body = { kind: auto ? "auto" : "manual", app: "phone", version: info.version || "", os: "Android " + (info.android || ""), device: info.device || "",
+    summary: String(summary || errLines.slice(-3).join("; ") || "").slice(0, 500), note, text };
+  if (extra && extra.shot) body.shot = extra.shot;                 // жалоба: снимок экрана и подпись автора
+  if (extra && extra.who) body.who = extra.who;
+  let r; try { r = await http("POST", base + "?p=/report", { headers, body, timeout: extra && extra.shot ? 60000 : 40000 }); }
+  catch (e) { throw new Error("не удалось отправить отчёт: " + netErr(e.message || e)); }
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  if (r.status >= 400 || !d.ok) throw new Error("отчёт не принят: " + ((d.error && d.error.message) || ("сервер ответил " + r.status)));
+  PLOG.length = 0;                                   // всё это уже у разработчика — следующий отчёт только о новом
+  console.log(`🧾 Отчёт №${d.id} отправлен разработчику (${auto ? "сам, при сбое" : "кнопкой"}) — журнал начат заново`);
+  plogSave(true);
+  d.base = base;
+  return d;
+}
+// приложение падало (Java записала причину), а отчёты разрешены — одно падение уходит один раз
+setTimeout(() => {
+  try {
+    const i = JSON.parse(D.info() || "{}");
+    if (!i.crash || !(S.report || {}).auto) return;
+    const h = syncHash(i.crash);
+    if (prefGet("rep_crash") === h) return;
+    prefSet("rep_crash", h);
+    reportSend("", true, "Падение приложения: " + String(i.crash).split("\n")[0]).catch(e => console.log("отчёт о падении не ушёл: " + e.message));
+  } catch (e) { }
+}, 20000);
+/* ---------- «Здоровье» и жалобы (сервер — cloud.php, вкладка «Здоровье»; компьютер — core/health.py, формат общий) ----------
+   Пульс (/pulse): через минуту после запуска и раз в 6 часов — случайный номер установки (S.dev), версия, Android, модель
+   телефона, где думает (dewiar | local | server | cloud | none — без адресов), запуски (за сколько секунд готов), ответы,
+   удачные и неудачные запросы к мозгу, сбои по подписям. Без разговоров, файлов и ключей; выключается S.pulse.
+   Счётчики — pref "health" до отправки. Жалоба: слова, снимок экрана приложения (D.snapshot() — снимается, когда открывают
+   настройки: каким был экран до них), подпись S.who; номер и секрет — в S.complaints, раз в 6 часов спрашиваем ответ
+   (/report/status) и, когда ответили или исправили, — уведомление со спасибо. Голосом: «сообщи об ошибке: …» (quick). */
+const H_T0 = Date.now() - (window.performance && performance.now ? performance.now() : 0);
+let bugSnap = null, thanksCache = null, bugWait = 0;
+function hLoad() { try { return JSON.parse(prefGet("health") || "{}") || {}; } catch (e) { return {}; } }
+function hSave(h) { try { prefSet("health", JSON.stringify(h)); } catch (e) { } }
+function hCount(k, n = 1) { const h = hLoad(); h[k] = (h[k] || 0) + n; hSave(h); }
+function hClean(t) {
+  return String(t || "").replace(/(Bearer\s+)[\w.-]+/g, "$1***").replace(/\bdw-[a-z0-9-]{6,}/gi, "dw-***").replace(/(:\/\/[^/\s:@]+:)[^@\s/]+@/g, "$1***@")
+    .replace(/\b[\w.+-]+@[\w-]+\.[\w.]+\b/g, "<почта>").replace(/\b(?!127\.0\.0\.1\b)\d{1,3}(?:\.\d{1,3}){3}\b/g, "<ip>").trim().slice(0, 300);
+}
+function hProblem(text) {
+  text = hClean(text); if (!text) return;
+  const sig = text.replace(/https?:\/\/\S+/g, "URL").replace(/\d+/g, "#").slice(0, 160);
+  const h = hLoad(); h.problems = h.problems || {};
+  if (!h.problems[sig] && Object.keys(h.problems).length >= 30) return;
+  const p = h.problems[sig] = h.problems[sig] || { text, n: 0 }; p.n++; p.text = text; h.errors = (h.errors || 0) + 1; hSave(h);
+}
+function hReady() {                                       // приложение готово слушать — запуск записан (для «Запуск» в «Здоровье»)
+  const h = hLoad(), first = !prefGet("h_seen");
+  h.starts = (h.starts || []).slice(-9).concat([{ ts: Math.round(Date.now() / 1000), ready_s: Math.round((Date.now() - H_T0) / 100) / 10, cpu: 0, first }]);
+  hSave(h); if (first) prefSet("h_seen", "1");
+}
+function devId() { if (!/^ph-[0-9a-f]{16}$/.test(S.dev || "")) { S.dev = "ph-" + Array.from({ length: 16 }, () => "0123456789abcdef"[Math.random() * 16 | 0]).join(""); saveS(); } return S.dev; }
+function brainKind() {
+  if (S.llm.cloud) return "dewiar";
+  if (!S.llm.base_url) return loggedIn() ? "dewiar" : "none";
+  const host = String(S.llm.base_url).replace(/^\w+:\/\//, "").split(/[/:]/)[0].toLowerCase();
+  if (/dewiar/.test(host)) return "dewiar";
+  if (/^(localhost|127\.|0\.0\.0\.0)/.test(host)) return "local";
+  if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) || /\.local$/.test(host) || !host.includes(".")) return "server";
+  return "cloud";
+}
+const healthBase = () => ((syncCred() || {}).base || CLOUD_URL).split("?")[0];
+async function pulseSend() {
+  if (S.pulse === false) return false;
+  let info = {}; try { info = JSON.parse(D.info() || "{}"); } catch (e) { }
+  const h = hLoad();
+  const body = { dev: devId(), app: "phone", version: info.version || "", os: "Android " + (info.android || ""), hw: { device: info.device || "" },
+    brain: brainKind(), uptime_h: Math.round((Date.now() - H_T0) / 36e4) / 10, starts: h.starts || [], turns: h.turns || 0, net_ok: h.net_ok || 0,
+    net_fail: h.net_fail || 0, errors: h.errors || 0, rude: h.rude || 0, refused: h.refused || 0, problems: Object.entries(h.problems || {}).map(([sig, p]) => ({ sig, text: p.text, n: p.n })) };
+  let r; try { r = await http("POST", healthBase() + "?p=/pulse", { headers: { "Content-Type": "application/json" }, body, timeout: 20000 }); }
+  catch (e) { console.log("💓 пульс не ушёл: " + (e.message || e)); return false; }
+  if (r.status >= 400) return false;
+  const now = hLoad();                                        // вычесть отправленное: пока шёл запрос, могло прибавиться
+  for (const k of ["turns", "net_ok", "net_fail", "errors", "rude", "refused"]) now[k] = Math.max(0, (now[k] || 0) - (body[k] || 0));
+  for (const p of body.problems) if (now.problems && now.problems[p.sig]) { now.problems[p.sig].n -= p.n; if (now.problems[p.sig].n <= 0) delete now.problems[p.sig]; }
+  now.starts = (now.starts || []).slice(body.starts.length);
+  hSave(now); prefSet("pulse_at", String(Date.now()));
+  console.log(`💓 Пульс отправлен: запусков ${body.starts.length}, ответов ${body.turns}, сбоев ${body.problems.length}`);
+  try { const d = JSON.parse(r.body || "{}"); if (d.exam && typeof examOffer === "function") examOffer(d.exam); } catch (e) { }   // экзамен из кабинета
+  return true;
+}
+function bugSnapTake() {                                    // открыли настройки — каким был экран до них (для жалобы)
+  try { const b = D.snapshot ? D.snapshot() : ""; bugSnap = b ? { ts: Date.now(), b64: b } : bugSnap; } catch (e) { }
+}
+async function complaintSend(note, who, withShot, via) {
+  note = String(note || "").trim();
+  if (note.length < 3) throw new Error("напишите хотя бы пару слов — что пошло не так");
+  who = String(who || "").replace(/[<>"]/g, "").trim().slice(0, 40); S.who = who;
+  const shot = withShot && bugSnap && Date.now() - bugSnap.ts < 30 * 6e4 ? "data:image/jpeg;base64," + bugSnap.b64 : "";
+  const d = await reportSend(note, false, `жалоба (${via || "кнопкой"})`, { shot, who });
+  S.complaints = (S.complaints || []).filter(c => Date.now() / 1000 - c.ts < 180 * 86400).slice(-49)
+    .concat([{ id: d.id, s: d.secret || "", base: d.base, note: note.slice(0, 200), ts: Math.round(Date.now() / 1000), status: "new", reply: "", fixed: "", shot: !!shot }]);
+  saveS(); if (shot) bugSnap = null;
+  console.log(`🐞 Жалоба №${d.id} отправлена (${via || "кнопкой"})${shot ? " со снимком" : ""}`);
+  return { id: d.id, shot: !!shot };
+}
+function complaintMessage(c) {
+  const what = `«${String(c.note || "").slice(0, 60)}»`, reply = c.reply ? " " + c.reply.trim() : "", reward = c.reward ? ` В благодарность — ${c.reward} тал. на ваш ключ.` : "";
+  if (c.status === "fixed") return [`Ваша жалоба №${c.id} исправлена`, `${what} — исправлено${c.fixed ? " в версии " + c.fixed : ""}.${reply}${reward} Спасибо, что помогаете делать Dewiar лучше!`];
+  if (c.status === "work") return [`Жалоба №${c.id} — в работе`, `${what}: разработчик подтвердил и чинит.${reply}${reward} Спасибо!`];
+  if (c.status === "no") return [`Ответ на жалобу №${c.id}`, `${what}.${reply || " Разработчик не нашёл тут ошибки."} Спасибо, что написали!`];
+  return [`Ответ на жалобу №${c.id}`, `${what}.${reply}`];
+}
+async function complaintsCheck() {
+  const ask = (S.complaints || []).filter(c => c.s && (!["fixed", "no"].includes(c.status) || Date.now() / 1000 - c.ts < 30 * 86400));
+  if (!ask.length) return [];
+  const news = [];
+  for (const base of [...new Set(ask.map(c => c.base || healthBase()))]) {
+    let r; try { r = await http("POST", base + "?p=/report/status", { headers: { "Content-Type": "application/json" },
+      body: { items: ask.filter(c => (c.base || healthBase()) === base).map(c => ({ id: c.id, s: c.s })) }, timeout: 15000 }); } catch (e) { continue; }
+    let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+    for (const x of d.items || []) {
+      const c = S.complaints.find(y => y.id === x.id && (y.base || healthBase()) === base); if (!c) continue;
+      const changed = x.status !== c.status || (x.reply || "") !== (c.reply || "");
+      Object.assign(c, { status: x.status, reply: x.reply || "", fixed: x.fixed || "", reward: x.reward || 0 });
+      if (changed && (["work", "fixed", "no"].includes(x.status) || x.reply)) news.push(c);
+    }
+  }
+  saveS();
+  if (news.length) thanksCache = null;                       // подтвердили — в «Помощниках» мог появиться и он сам
+  for (const c of news) { const [t, x] = complaintMessage(c); D.notify(t, x); toast(t, 4000); }
+  return news;
+}
+async function thanksGet() {
+  if (thanksCache && Date.now() - thanksCache.at < 36e5) return thanksCache.people;
+  const r = await http("GET", healthBase() + "?p=/thanks", { timeout: 10000 });
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  thanksCache = { at: Date.now(), people: d.people || [] };
+  return thanksCache.people;
+}
+const BUG_ST = { new: "отправлена", seen: "прочитана", work: "в работе", fixed: "исправлено", no: "не ошибка" };
+function complaintsHtml() {
+  const mine = (S.complaints || []).slice().reverse().slice(0, 6);
+  return mine.length ? `<div class="bugh">Мои жалобы</div>` + mine.map(c => `<div class="bugc"><div><b>№${c.id}</b> ${esc(c.note || "")}</div>`
+    + `<div class="bst"><span class="chip ${c.status}">${BUG_ST[c.status] || c.status}${c.status === "fixed" && c.fixed ? " в " + esc(c.fixed) : ""}</span>`
+    + `${new Date(c.ts * 1000).toLocaleDateString("ru-RU")}${c.reward ? ` · спасибо ${c.reward} тал.` : ""}</div>${c.reply ? `<div class="brep">${esc(c.reply)}</div>` : ""}</div>`).join("") : "";
+}
+// «сообщи об ошибке: радио молчит», «передай разработчику, что…», «пожалуйся разработчику…»
+const BUG_RX = /^(?:(?:сообщи|передай|напиши|отправь|скажи)\s+(?:разработчик\S*\s+)?(?:об?\s+)?(?:ошибк\S*|проблем\S*|баг\S*|сбо\S*)|отправь\s+жалобу(?:\s+разработчик\S*)?|пожалуйся(?:\s+разработчик\S*)?|(?:передай|скажи|напиши)\s+разработчик\S*)(?:\s*[:,.—-]\s*|\s+)?(?:что\s+)?([\s\S]*)$/i;
+async function bugQuick(text) {
+  const t = text.trim();
+  let note;
+  if (bugWait && Date.now() - bugWait < 40000) {
+    bugWait = 0;
+    if (/^(отмена|отмени|не надо|ничего|передумал\S*|забудь)\W*$/i.test(t)) return { say: "Хорошо, не отправляю." };
+    note = t;
+  } else {
+    const m = t.match(BUG_RX); if (!m) return null;
+    note = m[1].replace(/^[\s.,:]+|[\s.,:]+$/g, "");
+    if (note.length < 4) { bugWait = Date.now(); return { say: "Что случилось? Расскажите одной-двумя фразами — передам разработчику." }; }
+  }
+  try { const r = await complaintSend(note, S.who, false, "голосом"); return { say: gfix(`Передал разработчику — жалоба №${r.id}. Когда ответят или исправят, скажу. Спасибо, что помогаете!`) }; }
+  catch (e) { return { say: `Не получилось отправить: ${e.message}. Можно в настройках: «Ещё» → «Сообщить о проблеме».` }; }
+}
+setTimeout(async function pulseTick() {
+  try { if (Date.now() - (+prefGet("pulse_at") || 0) > 6 * 36e5 - 6e4 || (hLoad().starts || []).length) await pulseSend(); } catch (e) { }
+  try { if (Date.now() - (+prefGet("cmp_at") || 0) > 6 * 36e5 - 6e4) { prefSet("cmp_at", String(Date.now())); await complaintsCheck(); } } catch (e) { }
+  setTimeout(pulseTick, window.DEWIAR_PULSE_EVERY || 6 * 36e5);
+}, window.DEWIAR_PULSE_WAIT || 60000);
+/* Прокси только для серверов Dewiar: dewiar.pro, поддомены, свой сайт аккаунта и облака (Java: NetProxy). */
+function proxyHosts(extra) {
+  return [S.account.server, S.accCloud && S.accCloud.base, S.llm.cloud && S.llm.base_url, S.stt.from_account && S.stt.url].concat(extra || [])
+    .filter(Boolean).join(",");
+}
+function applyProxy(extra) {
+  if (!D.setProxy) return "";
+  const err = D.setProxy(effProxy(), proxyHosts(extra));
+  if (err) console.warn("прокси:", err);
+  return err;
+}
+/* Свой прокси главнее; нет своего, а включено «Использовать прокси Dewiar» — прокси, который выдал dewiar.pro (запомнен,
+   пока сайт открывался). Только для серверов Dewiar: Telegram и остальной интернет — напрямую (трафик прокси платный). */
+function effProxy() { return S.net.proxy || (S.net.dewiar && S.net.dewiar_secret) || ""; }
+function dwProxyCred() {
+  if (loggedIn()) return { token: S.account.token, base: ((S.accCloud && S.accCloud.base) || siteUrl("dwrapp/cloud.php")).split("?")[0] };
+  if (S.llm.cloud && S.llm.api_key) return { token: S.llm.api_key, base: cloudBase() };
+  return null;
+}
+/* «Прокси Dewiar»: адрес выдаёт облако (cloud.php ?p=/netcfg) вошедшим аккаунтом или с ключом Dewiar; обновляем раз в 6 ч.
+   -> "" — получили (или ещё свежий), иначе текст ошибки. */
+async function dwProxyFetch(force) {
+  if (!S.net.dewiar) return "";
+  if (!force && S.net.dewiar_secret && Date.now() - (S.net.dewiar_at || 0) < 6 * 36e5) return "";
+  const c = dwProxyCred();
+  if (!c) return "прокси Dewiar выдаётся тем, кто вошёл аккаунтом dewiar.pro или подключил ключ Dewiar";
+  try {
+    const d = await cloudGet(c.base, c.token, "/netcfg");
+    S.net.dewiar_secret = normProxy(d.proxy || ""); S.net.dewiar_at = Date.now(); saveS();
+    console.log("прокси Dewiar получен: " + hideProxy(S.net.dewiar_secret));
+    return "";
+  } catch (e) { console.log("прокси Dewiar не получен: " + e.message); return e.message; }
+}
+setTimeout(() => dwProxyFetch(false).catch(() => {}), 4000);
+/* socks5://user:pass@host:1080, http://host:3128, host:port, ссылка t.me/socks?… → адрес; MTProto — отказ (как на компьютере). */
+function normProxy(t) {
+  t = String(t || "").trim(); if (!t) return "";
+  const low = t.toLowerCase();
+  if (/^(tg:\/\/socks|https?:\/\/t\.me\/socks|t\.me\/socks)/.test(low)) {
+    const q = new URL(t.replace(/^tg:\/\/socks/i, "https://t.me/socks").replace(/^t\.me/i, "https://t.me")).searchParams;
+    if (!q.get("server")) throw new Error("в ссылке нет адреса прокси (server=…)");
+    const cred = q.get("user") ? encodeURIComponent(q.get("user")) + ":" + encodeURIComponent(q.get("pass") || "") + "@" : "";
+    return `socks5://${cred}${q.get("server")}:${q.get("port") || 1080}`;
+  }
+  if (/^(tg:\/\/proxy|https?:\/\/t\.me\/proxy|t\.me\/proxy)/.test(low) || low.includes("secret="))
+    throw new Error("это MTProto-прокси — он работает только в приложении Telegram. Нужен SOCKS5- или HTTP-прокси (socks5://адрес:порт) или VPN");
+  if (!t.includes("://")) t = "http://" + t;
+  let u; try { u = new URL(t.replace(/^socks5h?:|^socks:/i, "http:")); } catch (e) { throw new Error("прокси — socks5://адрес:порт или http://адрес:порт"); }
+  const sch = t.split("://")[0].toLowerCase();
+  if (!["http", "https", "socks5", "socks5h", "socks"].includes(sch)) throw new Error("прокси — socks5://адрес:порт или http://адрес:порт");
+  if (!u.hostname || !u.port) throw new Error("у прокси нужен адрес и порт, например socks5://192.168.1.10:1080");
+  return sch === "socks" ? "socks5" + t.slice(sch.length) : t;
+}
+const hideProxy = (p) => String(p || "").replace(/\/\/([^:/@]+):[^@]*@/, "//$1:•••@");
+async function saveProxy(text, res, btn) {
+  const old = S.net.proxy || "";
+  let px;
+  try { px = String(text || "").trim() === hideProxy(old) ? old : normProxy(text); }
+  catch (e) { res.className = "res bad"; res.textContent = e.message; return false; }
+  btn && (btn.disabled = true);
+  res.className = "res"; res.textContent = px ? "проверяю, открывается ли dewiar.pro через этот прокси…" : "";
+  S.net.proxy = px;
+  const err = applyProxy();
+  let ok = !err, why = err;
+  if (px && ok) {
+    try { const r = await http("GET", (S.account.server || SITE) + "/dwrapp/latest.json", { timeout: 15000 }); ok = r.status < 500 && r.status !== 407;
+      why = r.status === 407 ? "прокси не принял логин или пароль" : "сайт ответил " + r.status; }
+    catch (e) { ok = false; why = /end of stream|unexpected end/i.test(e.message) ? "прокси оборвал связь — проверьте адрес, порт, логин и пароль" : e.message; }
+  }
+  btn && (btn.disabled = false);
+  if (!ok) { S.net.proxy = old; applyProxy(); res.className = "res bad"; res.textContent = `через этот прокси dewiar.pro не открывается (${why}) — не сохраняю`; return false; }
+  saveS(); res.className = "res ok"; res.textContent = px ? "Готово: запросы к Dewiar идут через прокси." : "Прокси выключен — напрямую.";
+  const inp = $("#px-in"); if (inp) inp.value = hideProxy(px);
+  return true;
+}
+const blockedHint = () => S.net.proxy ? " Сейчас запросы к Dewiar идут через прокси — проверьте его: Настройки → Мозг → «Сеть»."
+  : " Если dewiar.pro у вас заблокирован провайдером — укажите прокси: Настройки → Мозг → «Сеть».";
+// реплики разговора: pref "history", хранятся последние 40 (вместе со свёрнутыми f:1 — см. ниже)
+let history = (() => { try { return JSON.parse(prefGet("history") || "[]"); } catch (e) { return []; } })();
+function saveH() { history = history.slice(-40); prefSet("history", JSON.stringify(history)); }
+
+/* ---------- длинный разговор (как на компьютере, core/conversation.py) ----------
+   Последние 8 пар реплик — модели дословно; когда сверх них накопится ещё 4 пары, модель в фоне сворачивает старое
+   в краткое содержание, и оно идёт в системную подсказку. Свёрнутые реплики помечены f:1 (в «Разговоре» их видно, модели они не уходят).
+   8 часов тишины или «начнём новый разговор» — новый разговор. Перерыв дольше 20 минут модель видит. */
+const CONV_TURNS = 8, CONV_MARGIN = 4, CONV_KEEP = 8 * 3600e3;
+const CONV_SUM = "Ты ведёшь краткое содержание долгого разговора голосового ассистента с пользователем — чтобы ассистент не забыл важное из начала. "
+  + "Обнови содержание по новым репликам: о чём говорили; факты, имена, числа, даты; решения и договорённости; что пользователь просил и что сделано; "
+  + "открытые вопросы; на чём остановились. Пиши по-русски, коротко, пунктами, от третьего лица («Пользователь…», «Ассистент…»). "
+  + "Ничего не выдумывай и не добавляй советов. Не больше 18 пунктов, самое старое и мелкое — сокращай. Верни только содержание, без вступлений.";
+let conv = (() => { try { return Object.assign({ summary: "", turns: 0, started: 0, last: 0 }, JSON.parse(prefGet("conv") || "{}")); } catch (e) { return { summary: "", turns: 0, started: 0, last: 0 }; } })();
+let convBusy = false;
+const saveConv = () => prefSet("conv", JSON.stringify(conv));
+const liveHistory = () => history.filter(m => !m.f);
+function convReset() { history.forEach(m => { m.f = 1; }); saveH(); conv = { summary: "", turns: 0, started: 0, last: 0 }; saveConv(); }
+function convCheck() { if (conv.last && Date.now() - conv.last > CONV_KEEP) convReset(); }
+function convAfter() {
+  const now = Date.now(); if (!conv.started) conv.started = now;
+  conv.last = now; conv.turns++; saveConv();
+  if (liveHistory().length > 2 * (CONV_TURNS + CONV_MARGIN) && !convBusy && S.llm.base_url) convFold();
+}
+async function convFold() {
+  convBusy = true;
+  try {
+    const live = liveHistory(), old = live.slice(0, live.length - 2 * CONV_TURNS);
+    if (old.length < 2) return;
+    const lines = old.map(m => (m.role === "user" ? "Пользователь: " : "Ассистент: ") + String(m.content || "").slice(0, 1500)).join("\n");
+    const msg = (conv.summary ? "Содержание разговора до сих пор:\n" + conv.summary + "\n\n" : "") + "Новые реплики:\n" + lines;
+    const r = await llmStream([{ role: "system", content: CONV_SUM }, { role: "user", content: msg.slice(-24000) }], null, null);
+    const text = String(r.text || "").replace(/^\s*(?:Краткое\s+)?содержание[^\n:]*:\s*/i, "").trim();
+    if (text.length < 20) return;
+    conv.summary = text.slice(0, 3000); saveConv();
+    old.forEach(m => { m.f = 1; }); saveH();
+  } catch (e) { console.log("разговор: свернуть не вышло — " + e.message); }
+  finally { convBusy = false; }
+}
+function convPrompt() {
+  let out = "";
+  if (conv.summary) {
+    const mins = conv.started ? Math.round((Date.now() - conv.started) / 60000) : 0;
+    out += `Это продолжение долгого разговора (идёт ${mins >= 60 ? Math.floor(mins / 60) + " ч " + (mins % 60) + " мин" : mins + " мин"}, ${conv.turns} реплик). Раньше в нём было (кратко):\n`
+      + conv.summary + "\nОпирайся на это, если пользователь возвращается к прежнему, — не переспрашивай то, что уже известно. Последние реплики — ниже, дословно.";
+  }
+  const gap = conv.last ? Date.now() - conv.last : 0;
+  if (gap > 20 * 60000) { const g = Math.round(gap / 60000);
+    out += (out ? "\n\n" : "") + `Перед этим сообщением в разговоре был перерыв ${g >= 60 ? Math.floor(g / 60) + " ч " + (g % 60) + " мин" : g + " мин"}. Если новая просьба не связана с прежней темой — просто выполни её, не возвращаясь к старому.`; }
+  return out;
+}
+const NEW_CONV_RX = /^(?:давай(?:те)?\s+)?(?:начн(?:ем|и)|начать)\s+(?:новый\s+разговор|разговор\s+заново|сначала|заново|с\s+чистого\s+листа)$|^(?:забудь|сотри|очисти)\s+(?:наш\s+|этот\s+|весь\s+)?разговор$|^новый\s+разговор$|^новая\s+тема$/;
+
+/* ---------- персонажи и облик ---------- */
+const PERSONAS = window.DEWIAR_PERSONAS || [{ id: "lira", name: "Лира", style: "strings", color: "#B78CFF", character: "Ты — Лира, голосовой помощник Dewiar.", focus: "", gender: "female", role: "Главная помощница", aliases: ["лира"] }];
+// с 0.4.27 встроенных двое — Лира и Патрик; выбранный прежде Агент, Джарвис, Эва или Кодер — теперь Лира
+if (!PERSONAS.some(p => p.id === S.persona)) { S.persona = PERSONAS[0].id; try { prefSet("settings", JSON.stringify(S)); } catch (e) { } }
+const persona = () => PERSONAS.find(p => p.id === S.persona) || PERSONAS[0];
+const hex2rgb = (h) => { const n = parseInt(h.replace("#", ""), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+let orb = null;
+function applyPersona() {
+  const p = persona(), [r, g, b] = hex2rgb(p.color || "#8A9BFF");
+  document.documentElement.style.setProperty("--pc", p.color);
+  document.documentElement.style.setProperty("--pcg", `rgba(${r},${g},${b},.24)`);
+  $("#who-name").textContent = p.name;
+  $("#who-img").src = p.avatar || miniOrb(p);
+  const style = p.avatar && p.style !== "aura" ? "photo" : p.style;
+  if (!orb) orb = new DewiarEntity($("#orb"), { style, color: p.color, image: p.avatar || null, plate: true, live: p.live || "" });
+  else orb.configure({ style, color: p.color, image: p.avatar || null, live: p.live || "" });
+  orb.set({ state: state === "idle" ? "idle" : state });
+  faceFor(p);
+}
+/* Облик для уведомлений и часов (Faces.java): фото персонажа или его облик в круге, 192×192, и имя с цветом.
+   Рисуется при смене персонажа; уведомления и будильники берут его и без интерфейса (из файла). */
+function faceFor(p) {
+  if (!D.setFace) return;
+  const c = document.createElement("canvas"); c.width = c.height = 192;
+  const x = c.getContext("2d"), done = () => { try { D.setFace(p.id, p.name, p.color || "#8A9BFF", c.toDataURL("image/png").split(",")[1]); } catch (e) {} };
+  x.save(); x.beginPath(); x.arc(96, 96, 96, 0, 7); x.clip();
+  const g = x.createRadialGradient(80, 70, 10, 96, 96, 96);
+  g.addColorStop(0, p.color || "#8A9BFF"); g.addColorStop(.6, "#1d1d38"); g.addColorStop(1, "#0d0d1a");
+  x.fillStyle = g; x.fillRect(0, 0, 192, 192);
+  if (!p.avatar) {                                      // без фото — первая буква имени на облике
+    x.fillStyle = "#fff"; x.font = "600 84px Unbounded, Manrope, sans-serif"; x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillText((p.name || "D")[0].toUpperCase(), 96, 102); x.restore(); return done();
+  }
+  const im = new Image();
+  im.onload = () => { const k = Math.max(192 / im.width, 192 / im.height), w = im.width * k, h = im.height * k;
+    x.drawImage(im, (192 - w) / 2, (192 - h) / 2, w, h); x.restore(); done(); };
+  im.onerror = () => { x.restore(); done(); };
+  im.src = p.avatar;
+}
+function miniOrb(p) {          // значок персонажа без фото — кадр его облика
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const x = c.getContext("2d"), g = x.createRadialGradient(28, 24, 4, 32, 32, 32);
+  g.addColorStop(0, p.color); g.addColorStop(.55, "#1d1d38"); g.addColorStop(1, "#0d0d1a");
+  x.fillStyle = g; x.beginPath(); x.arc(32, 32, 32, 0, 7); x.fill(); return c.toDataURL();
+}
+
+/* ---------- состояние разговора ---------- */
+let state = "idle";
+const STATE_RU = { idle: "Нажмите и говорите", listening: "Слушаю", thinking: "Думаю", speaking: "Говорю" };
+function setState(s) {
+  state = s;
+  if (orb) orb.set({ state: s, level: s === "speaking" ? 0.3 : 0 });
+  $("#state").textContent = STATE_RU[s] || "";
+  const m = $("#mic"); m.classList.toggle("on", s === "listening"); m.classList.toggle("busy", s === "thinking" || s === "speaking");
+  D.keepScreen(s !== "idle");
+  const duck = radio.on() && s !== "idle";        // пока слушаю и отвечаю — радио тише
+  if (duck !== radioDucked) { radioDucked = duck; D.radioDuck(duck); }
+  if (s === "idle") radio.resumeAfterTalk();
+}
+let radioDucked = false;
+function toast(t, ms = 2200) { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("on"), ms); }
+function showYou(t) { $("#you").textContent = t ? "«" + t + "»" : ""; quietCheck(); }
+function showBot(t, cls) { const b = $("#bot"); b.className = cls || ""; b.textContent = t || ""; $("#talk").scrollTop = 1e6; quietCheck(); }
+function showCard(html) { $("#card").innerHTML = html || ""; cardSticky = 0; quietCheck(); }
+/* Снимок с камеры держится на экране 3 минуты: «покажи это фото мне» сразу после снимка не должно его стирать
+   (раньше новая фраза очищала карточку, и человек слышал «вот», а видел пустой экран). Новая карточка — сменяет. */
+let cardSticky = 0;
+function showPhotoCard(url) { showCard(photoCard(url)); cardSticky = Date.now() + 180000; photoTurn = true; }
+function clearCard() { if (Date.now() < cardSticky) return; showCard(""); }
+let photoTurn = false;              // в этом ходе показан снимок — пометим в истории для модели
+// на экране ничего не сказано и не показано — #stage.quiet: лёжа облик встаёт по центру (app.css)
+function quietCheck() { $("#stage").classList.toggle("quiet", !$("#you").textContent && !$("#bot").textContent && !$("#bot").className && !$("#card").innerHTML); }
+
+/* ---------- разрешения ---------- */
+const permWait = {};
+N.on("perm", e => { const w = permWait[e.name]; if (w) { delete permWait[e.name]; w(!!e.granted); } });
+function needPerm(name) {
+  if (D.has(name)) return Promise.resolve(true);
+  return new Promise(res => { permWait[name] = res; D.perm(name); });
+}
+
+/* ---------- слух ----------
+   Распознаёт телефон (SpeechRecognizer) или сервер (свой или Dewiar Облако — GigaAM по ключу или аккаунту, cloudEars).
+   Сторож sttGuard: распознаватель телефона бывает «есть, но молчит» (планшеты без сервисов Google — Huawei и др.):
+   не начал слушать за 4 с — переходим на сервер Dewiar насовсем (S.stt.auto) или честно говорим, что слуха нет;
+   замолчал посреди (нет событий 15 с) или не отпускает после нажатия «стоп» — сами заканчиваем, кнопка не залипает. */
+let sttActive = false, heardPartial = "", sttWatch = null, sttStarted = false, sttVia = "", sttGen = 0, sttOnce = null;
+function sttGuard(ms, why) { clearTimeout(sttWatch); sttWatch = ms ? setTimeout(() => sttStall(why), ms) : null; }
+/* Событие слуха из прежнего сеанса (поле g от Speech.java; после cancel ещё приходит «отменено») — не наше: иначе оно
+   сбило бы новый сеанс, и кнопка осталась бы «слушаю». В браузере-заглушке поля g нет — принимаем всё. */
+let sttT0 = 0;                     // когда начали слушать — в журнал идёт, за сколько пришёл текст
+const clip = (t, n = 120) => { t = String(t || "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n) + "…" : t; };
+const sttMine = (e) => e.g === undefined || e.g === sttGen;
+/* Распознавание Dewiar Облака: вход аккаунтом или ключ dw- и в облаке есть распознавание -> {url, key} или null. */
+function cloudEars() {
+  if (loggedIn() && S.accCloud && S.accCloud.stt) return { url: S.accCloud.base.split("?")[0] + "?p=", key: S.account.token };
+  if (S.llm.cloud && S.llm.stt) return { url: cloudBase() + "?p=", key: S.llm.api_key };
+  return null;
+}
+function sttServerUrl(u) { return u.replace(/\/+$/, "") + (/(transcriptions)$/.test(u) ? "" : "/audio/transcriptions"); }
+async function listen() {
+  stopVoice();
+  if (!(await needPerm(MIC))) { showBot("Без микрофона я вас не услышу. Разрешите микрофон — или напишите текстом.", "err"); return; }
+  heardPartial = ""; showYou(""); showBot(""); clearCard();
+  setState("listening"); sttActive = true; sttStarted = false; D.vibrate(18);
+  let server = S.stt.engine === "server" && S.stt.url ? { url: S.stt.url, key: S.stt.key || "", model: S.stt.model || "" } : null;
+  if (!server && (!D.recognizer() || sttOnce)) { const c = sttOnce || cloudEars(); sttOnce = null; if (c) server = { url: c.url, key: c.key, model: "gigaam" }; }
+  if (!server && !D.recognizer()) {
+    sttActive = false; setState("idle");
+    showBot("В этом устройстве нет распознавания речи. Войдите аккаунтом dewiar.pro (Настройки → Мозг) — слушать будет сервер Dewiar. Или напишите текстом.", "err"); return;
+  }
+  sttVia = server ? "server" : "system"; sttT0 = Date.now();
+  plog("info", "слушаю: " + (server ? "сервер " + server.url.replace(/\?.*$/, "") : "распознавание телефона"));
+  sttGen++;
+  if (server) D.listenServer(sttGen, sttServerUrl(server.url), server.key, server.model);
+  else D.listen(sttGen);
+  sttGuard(server ? 20000 : 4000, "start");
+}
+function sttStall(why) {
+  if (!sttActive) return;
+  sttActive = false; D.cancelListen(); sttGen++;
+  plog("warn", "распознавание: нет ответа (" + why + ", " + sttVia + ")");
+  if (why === "start" && sttVia === "system" && !sttStarted) {
+    const c = cloudEars();
+    if (c) {
+      // Первый раз — только этот вопрос слушает сервер (распознаватель мог просто долго подключаться к сети);
+      // второй раз подряд — насовсем. Заработал сам — счётчик сбрасывается (sttAlive).
+      S.stt.sysFails = (S.stt.sysFails || 0) + 1;
+      if (S.stt.sysFails >= 2) {
+        S.stt = { engine: "server", url: c.url, key: c.key, model: "gigaam", from_account: loggedIn(), auto: true };
+        toast("Распознавание этого устройства не отвечает — слушает сервер Dewiar", 4500);
+      } else sttOnce = c;
+      saveS();
+      return listen();
+    }
+    setState("idle"); showYou("");
+    showBot("Распознавание речи этого устройства не отвечает. Войдите аккаунтом dewiar.pro (Настройки → Мозг) — слушать будет сервер Dewiar. Или напишите текстом.", "err");
+    return;
+  }
+  if (heardPartial) { ask(heardPartial); return; }
+  setState("idle"); showYou("");
+}
+const sttAlive = () => { sttStarted = true; if (sttVia === "system" && S.stt.sysFails) { S.stt.sysFails = 0; saveS(); } if (sttActive) sttGuard(15000, "silent"); };
+N.on("stt_start", e => { if (sttMine(e)) sttAlive(); });
+N.on("stt_end", e => { if (sttMine(e) && sttActive) sttGuard(sttVia === "server" ? 30000 : 8000, "end"); });
+N.on("stt_level", e => { if (!sttMine(e)) return; if (orb && state === "listening") orb.set({ level: e.v }); if (!sttStarted) sttAlive(); });
+N.on("stt_partial", e => { if (!sttMine(e)) return; heardPartial = e.text; showYou(e.text); sttAlive(); });
+N.on("stt_result", e => {
+  if (!sttMine(e)) return;
+  sttGuard(0);
+  if (!sttActive) return; sttActive = false;
+  let t = (e.text || heardPartial || "").trim();
+  plog("info", `📝 ${t ? clip(t) : "(пусто)"} (${sttVia === "server" ? "сервер" : "телефон"}, ${((Date.now() - sttT0) / 1000).toFixed(1)} с)`);
+  if (t && pausePrefix && Date.now() - pausePrefix.at < 30000) t = pausePrefix.text + " " + t;   // договорил после обрыва — один вопрос
+  pausePrefix = null;
+  if (t) { lastStt = { at: Date.now(), text: t, cut: false }; ask(t); } else { setState("idle"); showYou(""); }
+});
+N.on("stt_error", e => {
+  if (!sttMine(e)) return;
+  sttGuard(0);
+  if (!sttActive) return; sttActive = false;
+  plog([6, 7, 5].includes(e.code) ? "info" : "warn", `распознавание (${sttVia}): ${e.code === 6 ? "речи не было" : e.code === 7 ? "не расслышал" : "ошибка " + (e.code ?? "") + " " + (e.msg || "")}`);
+  // распознаватель телефона сломался, не начав слушать (не запустился, нет сервиса, сеть) — слушает сервер Dewiar
+  if (sttVia === "system" && !sttStarted && ![6, 7].includes(e.code) && cloudEars()) { sttActive = true; sttStall("start"); return; }
+  if (heardPartial) { ask(heardPartial); return; }
+  setState("idle"); showYou("");
+  // молча (коды SpeechRecognizer, Speech.java): 6 — речи не было, 7 — не расслышал, 5 — отменено, 11 — распознаватель отключился
+  if (![6, 7, 5, 11].includes(e.code)) showBot("Не получилось услышать: " + (e.msg || e.code), "err");
+});
+function stopListen() { sttGuard(0); sttGen++; if (sttActive) { sttActive = false; D.cancelListen(); } }
+
+/* ---------- голос: фразы по очереди (Tts.java) — голос телефона или сервера (/v1/audio/speech) ----------
+   sayLeft — сколько фраз ещё не отзвучало: tts_done приходит на каждую (и при ошибке), на нуле ход заканчивается. */
+let sayN = 0, sayLeft = 0, voiceWarned = false, afterSpeak = null;
+const EMOJI = (() => { try { return new RegExp("\\p{Extended_Pictographic}", "gu"); } catch (e) { return /[\u2600-\u27BF]|[\uD83C-\uDBFF][\uDC00-\uDFFF]/g; } })();
+/* Текст для голоса — как speakable в core/llm.py: без кода, ссылок, путей к файлам и расширений; сокращения — словами */
+const FILE_EXT = "(?:html?|pdf|pptx?|docx?|xlsx?|csv|json|md|txt|py|js|css|zip|png|jpe?g|svg|mp3|wav|mp4)";
+const SPEAK_RULES = [[/(?:https?:\/\/|www\.)\S+/gi, ""],
+  [new RegExp("(^|[^\\wА-Яа-яЁё.])(?:[~/]?[\\wА-Яа-яЁё.-]+/)+[\\wА-Яа-яЁё-]+\\." + FILE_EXT + "(?![\\w])", "gi"), "$1"],
+  [/(^|[^\w.])(?:\/?[A-Za-z0-9_.~-]+\/){2,}[A-Za-z0-9_.-]*/g, "$1"],
+  [new RegExp("([\\wА-Яа-яЁё-]+)\\." + FILE_EXT + "(?![\\w])", "gi"), "$1"],
+  [/(^|\s)в т\.\s?ч\./gi, "$1в том числе"], [/(^|\s)т\.\s?е\./gi, "$1то есть"], [/(^|\s)и т\.\s?д\./gi, "$1и так далее"],
+  [/(^|\s)и т\.\s?п\./gi, "$1и тому подобное"], [/(^|\s)т\.\s?к\./gi, "$1так как"], [/(^|\s)напр\./gi, "$1например"],
+  [/:\s*[—–-]\s+/g, ": "], [/\s+(?:и|или|в|на|по|из)\s*(?=[.,;:!?]|$)/g, ""], [/\s+([:,;—–-])\s*(?=[:,;.!?—–]|$)/g, ""], [/\(\s*\)/g, ""]];
+function speechText(t) {
+  t = t.replace(/```[\s\S]*?```/g, " ");
+  for (const [rx, to] of SPEAK_RULES) t = t.replace(rx, to);
+  return t.replace(/[*_#>`|~]+/g, " ").replace(EMOJI, "").replace(/\s+/g, " ").trim();
+}
+/* <option> голосов устройства для выбора в настройках; пометка «муж.» / «жен.», если пол известен */
+function voiceOpts(voices, cur) {
+  return voices.map(v => { const m = voiceIsMale(v);
+    return `<option value="${esc(v.name)}" ${v.name === cur ? "selected" : ""}>${esc(v.name.replace(/^ru-ru-x-|-local|-network/g, ""))}${m === true ? " · муж." : m === false ? " · жен." : ""}${v.offline ? "" : " · сеть"}</option>`; }).join("");
+}
+/* Голос Dewiar Облака (озвучка по аккаунту или ключу dw-, если она включена в облаке): {url, key} или null.
+   Говорит, когда выбран («Голос Dewiar») или когда в устройстве нет русского голоса. Голос — свой у каждого персонажа. */
+function cloudVoice() {
+  if (loggedIn() && S.accCloud && S.accCloud.tts) return { url: S.accCloud.base.split("?")[0] + "?p=", key: S.account.token };
+  if (S.llm.cloud && S.llm.tts) return { url: cloudBase() + "?p=", key: S.llm.api_key };
+  return null;
+}
+/* Голос устройства для героя или героини. Выбран в настройках — он. Иначе подбираем сами: признак пола у голоса (у части
+   движков он есть) или голоса Google по имени (ru-ru-x-rud/ruf — мужские, ruc/rue — женские). -> {name, pitch}: нашёлся
+   голос нужного пола — без подстройки высоты; нет — один голос на всех, героям чуть ниже, героиням чуть выше (как раньше). */
+const EL_VOICES = { f: "EXAVITQu4vr4xnSDxMaL", m: "JBFqnCBsd6RMkjVDRZzb" };   // ElevenLabs по умолчанию: Sarah и George
+let voicesCache = null;
+function deviceVoices() {
+  if (!voicesCache) { try { voicesCache = JSON.parse(D.voices() || "[]"); } catch (e) { voicesCache = []; } }
+  return voicesCache;
+}
+function voiceIsMale(v) {
+  const f = (v.features || []).map(x => String(x).toLowerCase());
+  if (f.includes("male")) return true;
+  if (f.includes("female")) return false;
+  if (/-x-ru[df]-/i.test(v.name)) return true;
+  if (/-x-ru[ce]-/i.test(v.name)) return false;
+  return null;
+}
+function sysVoiceFor(gender) {
+  const male = gender !== "female";
+  const own = male ? S.tts.sys_voice_m : S.tts.sys_voice;
+  if (own) return { name: own, pitch: 1.0 };
+  const vs = deviceVoices(), pick = (want) => (vs.find(v => voiceIsMale(v) === want && v.offline) || vs.find(v => voiceIsMale(v) === want));
+  if (male) { const v = pick(true); if (v) return { name: v.name, pitch: 1.0 }; }
+  else if (!S.tts.sys_voice) { const v = pick(false); if (v) return { name: v.name, pitch: 1.0 }; }
+  return { name: S.tts.sys_voice || "", pitch: male ? 0.92 : 1.12 };
+}
+function say(text) {
+  const t = speechText(text); if (!t || S.textMode) return;     // текстовый режим — ответ только на экране
+  const id = "s" + (++sayN); sayLeft++;
+  const cv = (S.tts.engine === "cloud" || (S.tts.engine === "system" && !D.ttsReady())) ? cloudVoice() : null;
+  const fem = persona().gender === "female";
+  if (S.tts.engine === "eleven" && S.tts.el_key) {           // ElevenLabs своим ключом: голос героя или героини
+    const vid = (fem ? S.tts.el_voice_f : S.tts.el_voice_m) || EL_VOICES[fem ? "f" : "m"];
+    D.speakRemote(id, `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(vid)}?output_format=mp3_44100_128`, "xi-api-key:" + S.tts.el_key,
+      JSON.stringify({ text: t, model_id: S.tts.el_model || "eleven_flash_v2_5", voice_settings: { speed: Math.max(0.7, Math.min(1.2, +S.tts.rate || 1)) } }));
+  } else if ((S.tts.engine === "server" && S.tts.url) || cv) {
+    const u = cv ? cv.url : S.tts.url, url = u.replace(/\/+$/, "") + (/speech$/.test(u) ? "" : "/audio/speech");
+    const body = cv ? { model: "tts-1", input: t, voice: persona().voice_remote || (persona().gender === "female" ? "serena" : "aiden"), response_format: "wav", speed: +S.tts.rate || 1 }
+      : { model: S.tts.model || "tts-1", input: t, voice: (fem ? S.tts.voice : (S.tts.voice_m || S.tts.voice)) || "alloy", response_format: "mp3" };
+    D.speakRemote(id, url, cv ? cv.key : (S.tts.key || ""), JSON.stringify(body));
+  } else {
+    if (!D.ttsReady()) {
+      sayLeft--;
+      if (!voiceWarned && !D.mock) { voiceWarned = true; plog("warn", "голоса нет: в устройстве нет русского синтеза речи, озвучка облака " + (cloudVoice() ? "есть, но не выбрана" : "не включена") + " — отвечаю текстом"); toast("В устройстве нет русского голоса — отвечаю текстом. Как включить голос — Настройки → Слух и голос.", 6000); }
+      return;
+    }
+    const sv = sysVoiceFor(persona().gender);                 // героям — мужской голос устройства, героиням — женский
+    D.speak(id, t, S.tts.rate || 1.0, sv.pitch, sv.name, true);
+  }
+  if (state !== "speaking" && state !== "listening") setState("speaking");
+}
+N.on("tts_start", () => { if (state === "thinking") setState("speaking"); });
+N.on("tts_done", () => {
+  sayLeft = Math.max(0, sayLeft - 1);
+  if (sayLeft === 0 && state === "speaking" && !busy) finishTurn();
+});
+N.on("tts_error", e => { plog("warn", "голос сервера: " + e.error); toast("Голос сервера: " + e.error); });
+function stopVoice() { sayLeft = 0; D.stopSpeak(); }
+function finishTurn() {
+  setState("idle");
+  const f = afterSpeak; afterSpeak = null;
+  if (f) f();
+}
+
+/* ---------- мозг: модель с инструментами ---------- */
+let busy = false, turnAbort = null, lastDone = "";
+const CUR = (() => { const tz = (Intl.DateTimeFormat().resolvedOptions().timeZone || ""); return /Minsk/.test(tz) ? "BYN" : /Kiev|Kyiv/.test(tz) ? "UAH" : /Almaty|Astana/.test(tz) ? "KZT" : "RUB"; })();
+const WD = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"];
+const MON = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+const pad = (n) => String(n).padStart(2, "0");
+const isoLocal = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+function nowText() { const d = new Date(); return `${WD[d.getDay()]}, ${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()} года, ${pad(d.getHours())}:${pad(d.getMinutes())} (${isoLocal(d)})`; }
+
+/* Род речи: у героинь быстрые ответы без модели («Включил: свет») — в женском роде. Правила — те же, что на компьютере (core/gender.py; слова — window.DEWIAR_FEM из personas_json.py).
+   Меняем слово, только если перед ним начало фразы, «я», «уже», «сейчас», «хорошо,» и т. п. — иначе это не о себе. */
+const FEM_LEAD = /(?:^|[.!?…:—–]\s*|(?:^|[^А-ЯЁа-яёA-Za-z0-9_])[Яя]\s+(?:уже\s+)?|(?:^|[^А-ЯЁа-яёA-Za-z0-9_])уже\s+|(?:^|[^А-ЯЁа-яёA-Za-z0-9_])[Сс]ейчас\s+|(?:^|[^А-ЯЁа-яёA-Za-z0-9_])[Яя]\s+[^.!?…]{0,30}?\s(?:и|а|но)\s+|(?:^|[^А-ЯЁа-яёA-Za-z0-9_])(?:хорошо|готово|ладно|ок|окей|да|так|сейчас|секунду|итак),\s*)(?:не\s+)?$/i;
+function feminine(t) {
+  const FEM = window.DEWIAR_FEM || {};
+  if (!t) return t;
+  return String(t).replace(/[А-ЯЁа-яё]+/g, (w, i, all) => {
+    if (i > 0 && /[A-Za-z0-9_-]/.test(all[i - 1])) return w;
+    const f = FEM[w.toLowerCase()]; if (!f || /[A-Za-z0-9_-]/.test(all[i + w.length] || "")) return w;
+    if (!FEM_LEAD.test(all.slice(Math.max(0, i - 40), i))) return w;
+    return w[0] !== w[0].toLowerCase() ? f[0].toUpperCase() + f.slice(1) : f;
+  });
+}
+const gfix = (t) => persona().gender === "female" ? feminine(t) : t;
+
+function systemPrompt() {
+  const p = persona(), others = PERSONAS.filter(x => x.id !== p.id).map(x => `${x.name} — ${(x.role || "").toLowerCase()}`).join("; ");
+  const parts = [p.character, (window.DEWIAR_GENDER_RULES || {})[p.gender] || "", p.focus, window.DEWIAR_VOICE_RULES || "Отвечай коротко, живой речью, по-русски.",
+    `Ты — один из команды помощников: ${others}. Позвать коллегу — инструмент call_persona.`,
+    "Ты работаешь на телефоне пользователя (Android). Когда просят что-то сделать — вызывай инструмент, а не объясняй, как это сделать: "
+    + "напоминания, будильники и таймеры (set_reminder; время — точной датой ISO, ты знаешь, который час), звонки (call), SMS (send_sms — откроется сообщение, отправит пользователь), "
+    + "радио прямо здесь, в приложении (play_radio, radio_control — на любую просьбу про радио или «включи музыку», не сайты и не приложения), "
+    + "приложения (open_app), сайты (open_url), поиск в интернете (web_search, read_webpage), погода (weather), фонарик, громкость, заметки (save_note, find_notes), "
+    + "память о пользователе (remember), деньги (money_add, money_report), сообщения в MAX, Telegram, WhatsApp (send_message), "
+    + "мини-программы, страницы и презентации — калькулятор, игра, конвертер, таймер, слайды (make_app: сделай сам, она сразу откроется здесь; код программы не сохраняй заметкой; никогда не говори «готово», не вызвав make_app)" + (S.home.token ? ", умный дом Яндекса (smart_home)" : "")
+    + (loggedIn() ? ", документы и базы пользователя на сайте Dewiar (ask_knowledge)" : "") + ". После действия скажи итог одной фразой.",
+    "СЧЁТ: любые вычисления — проценты, суммы, скидки, даты, «сколько дней до…» — только инструментом calc, никогда в уме. Просят объяснить расчёт — покажи его с числами («2 350 × 17 / 100 = 399,5»), а не «использовал калькулятор». "
+    + "Просьба с условием («если завтра дождь — напомни…») — сначала узнай нужное (погоду — weather или web_search), потом сделай только подходящее. "
+    + "Просят подобрать песни или плейлист — назови конкретные песни (исполнитель — название): только известные, в которых уверен и в названии, и в исполнителе — не придумывай; не говори, что что-то открыл или включил, если не вызвал инструмент.",
+    BOUNDARY_RULE,
+    "Никогда не говори, что у тебя нет доступа к интернету или свежим данным: погода, новости, курсы — ищи (web_search) и отвечай по найденному. "
+    + "У тебя есть камера телефона (take_photo): «сфотографируй меня», «посмотри, что это», «прочитай надпись» — снимай и описывай. "
+    + "«Посмотри, как я выгляжу», «покажи мне моё лицо» — take_photo с camera: front (камера на человека); «где я», «что вокруг», «другой камерой» — camera: back. "
+    + "Снимок уже сделан и его просят показать снова («покажи фото», «покажи на экране») — show_photo. Не отвечай «Вот» и «Смотрю», не вызвав камеру: без вызова ничего не покажется.",
+    `Сейчас ${nowText()}.`];
+  const hands = typeof D.handsState === "function" ? D.handsState() : "";
+  parts.push(hands === "on"
+    ? "Ты умеешь работать в других приложениях телефона, как человек пальцем: open_app, затем phone_screen (что на экране), phone_tap, phone_type, phone_scroll, phone_nav. "
+      + "Просьбы вроде «напиши маме в Telegram, что я задержусь», «найди в YouTube…», «включи Bluetooth», «закажи такси» выполняй сам по шагам, глядя на экран после каждого действия; "
+      + "send_message — только если пользователь хочет сам выбрать получателя. Перед отправкой, оплатой, покупкой, удалением — спроси подтверждение, если об этом прямо не просили. "
+      + "Пароли и коды не вводи. Не получилось за несколько попыток — честно скажи, на чём остановился."
+    : "Нажимать в других приложениях (написать в мессенджере конкретному человеку, найти что-то внутри приложения) ты сможешь, если пользователь включит «Управлять приложениями» "
+      + "(Настройки Dewiar → Ещё). На такую просьбу вызови phone_screen — он объяснит, как включить; сам не притворяйся, что сделал.");
+  if (S.user_name) parts.push(`Собеседника зовут ${S.user_name}.`);
+  if (S.memory.length) parts.push("Что ты знаешь о пользователе:\n- " + S.memory.slice(-40).join("\n- "));
+  { const rl = Object.entries(S.relations || {}).filter(([, v]) => v && v.name); if (rl.length) parts.push("Кто есть кто в контактах (для звонков и сообщений): " + rl.map(([k, v]) => `${REL_RU[k] || k} — «${v.name}»`).join(", ") + "."); }
+  const mp = mindPrompt(); if (mp) parts.push(mp.trim());
+  try { const rp = recentPrompt(); if (rp) parts.push(rp); } catch (e) { }
+  if (S.sync.on && syncCred() && pcSeen()) parts.push("Большую задачу (исследование с отчётом, документ, презентация, работа с файлами или кодом) не делай в разговоре — передай компьютеру пользователя (start_task) и скажи, что взялся: ход и итог появятся здесь, в «Мой день» → «Сделанное».");
+  parts.push(convPrompt());
+  return parts.filter(Boolean).join("\n\n");
+}
+
+const llmBase = () => (S.llm.base_url || "").replace(/\/+$/, "");
+const isOllama = () => S.llm.kind === "ollama";
+const ollamaRoot = () => llmBase().replace(/\/v1$/, "");
+function llmHeaders() { const h = { "Content-Type": "application/json" }; if (S.llm.api_key) h.Authorization = "Bearer " + S.llm.api_key; if (/openrouter/.test(llmBase())) { h["HTTP-Referer"] = "https://dewiar.pro"; h["X-Title"] = "Dewiar"; } return h; }
+let modelOnce = "";                               // модель на один запрос (снимок — модели со зрением)
+async function resolveModel() {
+  if (modelOnce) return modelOnce;
+  if (S.llm.model) return S.llm.model;
+  try {
+    if (isOllama()) { const r = await http("GET", ollamaRoot() + "/api/tags", { timeout: 8000 }); const m = JSON.parse(r.body).models || []; if (m[0]) return S.llm.model = m[0].name; }
+    const r = await http("GET", llmBase() + "/models", { headers: llmHeaders(), timeout: 8000 }); const d = JSON.parse(r.body).data || [];
+    if (d[0]) return S.llm.model = d[0].id;
+  } catch (e) { }
+  throw new Error("не знаю, какую модель взять — укажите её в настройках (Мозг)");
+}
+
+const REASON_START = /^\s*(okay|ok,|alright|so,|hmm|well,|let me|let's|let us|i need|i should|i'll|i will|i must|first,|we need|we have|we should|the user|user (asks|wants|is|said)|looking at|analy[sz]|thinking|reasoning|хорошо, пользовател|итак, пользовател|пользователь (спрашивает|просит|хочет|сказал|написал|пишет)|мне нужно (понять|разобраться|ответить|вызвать|сначала)|так, пользовател)/i;
+const FINAL_MARK = /<\/think>|<\|channel\|>final<\|message\|>|assistantfinal/i;
+/* вызов JSON-объектом: модели пишут имя и аргументы кто как ({"tool_name": …, "arguments": …} — Ollama с «chat») — как _call_parts в llm.py */
+const callName = (o) => (o.function && typeof o.function === "object" ? o.function.name : null) ||
+  ["name", "tool_name", "tool", "function_name"].map(k => o[k]).find(v => typeof v === "string" && v.trim()) ||
+  (typeof o.function === "string" ? o.function : null);
+const callArgs = (o) => { const src = o.function && typeof o.function === "object" && o.function.arguments !== undefined ? o.function : o;
+  const k = ["arguments", "args", "parameters", "params", "input", "tool_input", "action_input"].find(k => src[k] !== undefined); return k ? src[k] : {}; };
+/* весь ответ — голые JSON-вызовы известных функций (без <tool_call>) -> [{name, args}] или [] — как BareCallCatcher в llm.py */
+function bareCalls(text, known) {
+  const t = String(text || "").replace(/```[a-zA-Z]*/g, "").trim(); if (!t.startsWith("{") && !t.startsWith("[")) return [];
+  let objs; try { objs = JSON.parse(t); } catch (e) { try { objs = JSON.parse("[" + t.replace(/\}\s*[,;]?\s*\{/g, "},{") + "]"); } catch (e2) { return []; } }
+  const out = [];
+  for (const o of (Array.isArray(objs) ? objs : [objs])) {
+    const nm = o && typeof o === "object" && callName(o); if (!nm || !known.has(nm)) return [];
+    let a = callArgs(o); if (typeof a === "string") { try { a = JSON.parse(a); } catch (e) { a = {}; } }
+    out.push({ name: nm, args: a && typeof a === "object" ? a : {} });
+  }
+  return out;
+}
+/* вызов голым JSON в тексте: имя-идентификатор и сразу ключ аргументов (обычный JSON для человека так не выглядит) */
+const BARE_CALL_RX = /\{\s*"(?:name|tool_name|function_name|tool)"\s*:\s*"[A-Za-z_][\w.-]*"\s*,\s*"(?:arguments|args|parameters|params|input)"\s*:/;
+/* конец JSON-объекта с начала s (кавычки и экранирование учтены) -> индекс после «}» или -1, если ещё не пришёл целиком */
+function jsonEnd(s) {
+  let depth = 0, str = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (str) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === '"') str = false; continue; }
+    if (ch === '"') str = true; else if (ch === "{" || ch === "[") depth++; else if (ch === "}" || ch === "]") { depth--; if (depth === 0) return i + 1; }
+  }
+  return -1;
+}
+/* вызов функции из текста: JSON (Qwen/Hermes), GLM (<arg_key>/<arg_value>), Qwen3-Coder (<function=…><parameter=…>), «имя {json}» */
+function parseToolCall(raw) {
+  raw = String(raw || "").trim(); if (!raw) return null;
+  const val = (v) => { v = v.trim(); try { return JSON.parse(v); } catch (e) { return v; } };
+  let m = raw.match(/<function=([\w.-]+)>([\s\S]*?)(?:<\/function>|$)/);
+  if (m) { const args = {}; for (const p of m[2].matchAll(/<parameter=([\w.-]+)>([\s\S]*?)(?:<\/parameter>|(?=<parameter=)|$)/g)) args[p[1]] = val(p[2]); return { name: m[1], args }; }
+  m = raw.match(/^([A-Za-z_][\w.-]*)\s*([\s\S]*)$/);
+  if (m && m[2].includes("<arg_key>")) { const args = {}; for (const p of m[2].matchAll(/<arg_key>\s*([\s\S]*?)\s*<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/g)) args[p[1]] = val(p[2]); return { name: m[1], args }; }
+  const j = raw.match(/\{[\s\S]*\}/);
+  if (j) { let o = null; try { o = JSON.parse(j[0]); } catch (e) { }
+    if (o && m && /^[A-Za-z_][\w.-]*\s*$/.test(raw.slice(0, j.index))) return { name: m[1], args: o };   // «имя {json}» — имя впереди важнее
+    const nm = o && callName(o);
+    if (nm) { let a = callArgs(o); if (typeof a === "string") { try { a = JSON.parse(a); } catch (e) { a = {}; } } return { name: nm, args: a }; }
+    if (o && m && /^[A-Za-z_][\w.-]*\s*$/.test(raw.slice(0, j.index))) return { name: m[1], args: o }; }
+  if (/^[A-Za-z_][\w.-]*$/.test(raw)) return { name: raw, args: {} };
+  return null;
+}
+const REJECT_RX = /\b4(00|22)\b|отклонил|invalid|tool|function|unsupported|roles must alternate|cannot parse|bad request/i;
+/* Размышления модели (Qwen3, GLM, DeepSeek…) выключены по умолчанию: голосовому помощнику прироста почти нет, а ответ
+   приходит на десятки секунд позже. Лимит ответа — не меньше 2048, как на компьютере: при меньшем размышление съедает
+   лимит и ответ обрывается. Если модель всё же ушла в размышления и ничего не сказала — повтор.
+   Включить можно только явно: S.llm.think = "on". */
+const thinkMode = () => (S.llm.think === "on" ? "on" : "off");
+/* Ответ модели потоком (OpenAI-совместимый /chat/completions или Ollama /api/chat). onText(кусок) — текст по мере прихода,
+   уже без размышлений и вызовов функций текстом; -> {text, calls:[{id,name,args}]} */
+async function llmStream(messages, tools, onText, signal, opt = {}) {
+  const model = await resolveModel();
+  const think = opt.think != null ? !!opt.think : thinkMode() === "on";
+  const limit = opt.max || (think ? 4096 : tools && tools.length ? 6144 : 2048);   // с инструментами — запас на make_app (целый HTML)
+  let body, url, ollama = isOllama();
+  if (ollama) {
+    url = ollamaRoot() + "/api/chat";
+    body = { model, stream: true, messages: messages.map(toOllama), options: { temperature: +S.llm.temperature || 0.7, num_predict: limit } };
+    if (!think && !S.llm.no_kwargs) body.think = false;
+    if (tools && tools.length) body.tools = tools.map(t => ({ type: "function", function: t }));
+  } else {
+    url = llmBase() + "/chat/completions";
+    /* сервер уже отказывался принимать функции полем (vLLM без --enable-auto-tool-choice, шлюзы) — описываем их текстом,
+       ответ «<tool_call>{…}</tool_call>» разбирается ниже так же, как у Qwen и GLM */
+    const inPrompt = tools && tools.length && S.llm.tools_prompt === llmBase();
+    body = { model, stream: true, messages: inPrompt ? promptToolMessages(messages, tools) : messages, max_tokens: limit, temperature: +S.llm.temperature || 0.7 };
+    if (!S.llm.no_kwargs && !/openai\.com|openrouter|deepseek|anthropic|googleapis/.test(url)) body.chat_template_kwargs = { enable_thinking: think };
+    if (tools && tools.length && !inPrompt) { body.tools = tools.map(t => ({ type: "function", function: t })); body.tool_choice = "auto"; }
+  }
+  let hold = null, held = "", text = "", buf = "", inThink = false, gate = true, gbuf = "", tcBuf = "", inTool = false, finish = "", sawReason = false;
+  let afterCall = false, dropped = "";      // текст после вызова — сочинённый до результата: не озвучиваем
+  const known = new Set((tools || []).map(x => x.name));
+  const tcRaw = [];
+  const calls = {};
+  /* начало ответа придерживаем, пока не ясно: это ответ или рассуждение без тега (…</think> ответ, gpt-oss «assistantfinal») */
+  const feedText = (piece) => {
+    if (!gate) return feedInner(piece);
+    gbuf += piece;
+    const m = gbuf.match(FINAL_MARK);
+    if (m) { gate = false; inThink = false; return feedInner(gbuf.slice(m.index + m[0].length).replace(/^\s+/, "")); }
+    if (/^\s*<think>/.test(gbuf)) { gate = false; return feedInner(gbuf); }
+    if (REASON_START.test(gbuf) && gbuf.length < 20000) return;
+    if (gbuf.trim().length < 60 && !gbuf.trim().includes("\n")) return;
+    gate = false; feedInner(gbuf);
+  };
+  const gateEnd = () => {
+    if (!gate) return; gate = false;
+    const letters = gbuf.slice(0, 1500).match(/[A-Za-zА-Яа-яЁё]/g) || [], latin = letters.filter(c => c < "\u0080").length / Math.max(1, letters.length);
+    if (REASON_START.test(gbuf) && gbuf.length > 400 && (latin > 0.5 || /пользовател/i.test(gbuf.slice(0, 300)))) return;   // одно рассуждение без ответа
+    feedInner(gbuf);
+  };
+  let thBuf = "";
+  const feedInner = (piece, last) => {    // вырезаем <think>…</think> «думающих» моделей (тег может прийти по кусочкам)
+    thBuf += piece;
+    let out = "";
+    for (;;) {
+      if (inThink) { const i = thBuf.indexOf("</think>"); if (i < 0) { thBuf = last ? "" : thBuf.slice(-8); break; } inThink = false; thBuf = thBuf.slice(i + 8); continue; }
+      const i = thBuf.indexOf("<think>");
+      if (i < 0) {
+        let keep = 0;
+        if (!last) for (let k = 1; k < 9; k++) if (thBuf.endsWith("</think>".slice(0, k)) || thBuf.endsWith("<think>".slice(0, k))) keep = k;
+        out += thBuf.slice(0, thBuf.length - keep); thBuf = thBuf.slice(thBuf.length - keep); break;
+      }
+      out += thBuf.slice(0, i); inThink = true; thBuf = thBuf.slice(i + 7);
+    }
+    out = out.replace(/<\/think>/g, "").replace(/<\|[a-z_]+\|>/g, "");
+    // вызов функции текстом (<tool_call>…</tool_call> — Qwen, GLM): не озвучиваем, разберём в конце
+    // и голым JSON {"name": …, "arguments": …} посреди текста, часто с одиноким «</tool_call>» после — как ToolTagStripper в llm.py
+    tcBuf += out; out = "";
+    const emit = (t) => { if (afterCall) dropped += t; else out += t; };
+    for (;;) {
+      if (inTool) { const i = tcBuf.indexOf("</tool_call>"); if (i < 0) break; tcRaw.push(tcBuf.slice(0, i)); tcBuf = tcBuf.slice(i + 12); inTool = false; afterCall = true; continue; }
+      const cands = [[tcBuf.indexOf("<tool_call>"), "open"], [tcBuf.indexOf("</tool_call>"), "stray"]].filter(x => x[0] >= 0);
+      const bm = known.size ? BARE_CALL_RX.exec(tcBuf) : null; if (bm) cands.push([bm.index, "bare"]);
+      if (!cands.length) {
+        let keep = 0;
+        if (!last) { for (const tag of ["<tool_call>", "</tool_call>"]) for (let k = 1; k < tag.length; k++) if (tcBuf.endsWith(tag.slice(0, k))) keep = Math.max(keep, k);
+          const b = known.size ? tcBuf.lastIndexOf("{") : -1;            // «{"name": "mo…» — может оказаться вызовом, придержим
+          if (b >= 0 && !tcBuf.slice(b).includes("}") && tcBuf.length - b < 160) keep = Math.max(keep, tcBuf.length - b); }
+        emit(tcBuf.slice(0, tcBuf.length - keep)); tcBuf = tcBuf.slice(tcBuf.length - keep); break;
+      }
+      cands.sort((a, b) => a[0] - b[0]); const [k, kind] = cands[0];
+      emit(tcBuf.slice(0, k));
+      if (kind === "open") { tcBuf = tcBuf.slice(k + 11); inTool = true; continue; }
+      if (kind === "stray") { tcBuf = tcBuf.slice(k + 12); continue; }
+      tcBuf = tcBuf.slice(k); const end = jsonEnd(tcBuf);
+      if (end < 0) { if (last) { tcRaw.push(tcBuf); tcBuf = ""; afterCall = true; } break; }
+      const raw = tcBuf.slice(0, end); let nm = null; try { nm = callName(JSON.parse(raw)); } catch (e) { }
+      if (!known.has(nm)) { emit(raw); tcBuf = tcBuf.slice(end); continue; }   // не наша функция — просто текст с JSON
+      tcRaw.push(raw); afterCall = true;
+      let rest = tcBuf.slice(end).replace(/^\s+/, "");
+      if (rest.startsWith("</tool_call>")) rest = rest.slice(12);
+      else if (!last && rest && "</tool_call>".startsWith(rest)) { tcBuf = rest; break; }
+      tcBuf = rest;
+    }
+    if (out) {
+      text += out;
+      // ответ начинается с «{» или «`» при включённых функциях — возможно, вызов голым JSON: не озвучиваем до конца
+      if (hold === null && text.trim()) hold = !!(tools && tools.length) && /^[{`\[]/.test(text.trim());
+      if (!hold) { onText && onText(held + out); held = ""; } else held += out;
+    }
+  };
+  const line = (l) => {
+    l = l.trim(); if (!l) return;
+    if (!ollama) { if (!l.startsWith("data:")) return; l = l.slice(5).trim(); if (l === "[DONE]") return; }
+    let o; try { o = JSON.parse(l); } catch (e) { return; }
+    if (o.error) throw new Error(typeof o.error === "string" ? o.error : (o.error.message || "ошибка модели"));
+    if (ollama) {
+      const m = o.message || {};
+      if (m.thinking) sawReason = true;
+      if (o.done_reason) finish = o.done_reason;
+      if (m.content) feedText(m.content);
+      (m.tool_calls || []).forEach((c, i) => { const k = "o" + Object.keys(calls).length + i; calls[k] = { id: "call_" + k, name: c.function.name, args: typeof c.function.arguments === "string" ? c.function.arguments : JSON.stringify(c.function.arguments || {}) }; });
+      return;
+    }
+    const ch = (o.choices || [])[0] || {}, d = ch.delta || {};
+    if (ch.finish_reason) finish = ch.finish_reason;
+    if (d.reasoning_content || d.reasoning) sawReason = true;
+    if (d.content) feedText(d.content);
+    (d.tool_calls || []).forEach(c => {
+      const k = c.index != null ? c.index : 0, x = calls[k] = calls[k] || { id: c.id || "call_" + k, name: "", args: "" };
+      if (c.id) x.id = c.id; if (c.function) { if (c.function.name) x.name += c.function.name; if (c.function.arguments) x.args += c.function.arguments; }
+    });
+  };
+  let err = null;
+  /* Сервер модели отклонил запрос: сначала — функции текстом (а не полем tools), потом — без chat_template_kwargs,
+     в конце — без функций вовсе. Возвращает новый вызов или null, если пробовать больше нечего. */
+  const retryRejected = () => {
+    if (body.tools) { S.llm.tools_prompt = llmBase(); saveS(); return llmStream(messages, tools, onText, signal, opt); }
+    if (body.chat_template_kwargs) { S.llm.no_kwargs = true; saveS(); return llmStream(messages, tools, onText, signal, opt); }
+    if (tools && tools.length) return llmStream(messages, null, onText, signal, opt);
+    return null;
+  };
+  const r = await http("POST", url, { headers: llmHeaders(), body, stream: true, timeout: 180000, signal, idle: 75000,
+    onChunk: (chunk) => { if (err) return; buf += chunk; const parts = buf.split("\n"); buf = parts.pop(); try { parts.forEach(line); } catch (e) { err = e; } } });
+  if (buf) { try { line(buf); } catch (e) { err = err || e; } }
+  if (!err) { gateEnd(); feedInner("", true); }      // остаток, придержанный на случай разрезанного тега
+  if (r.status >= 400) {
+    let msg = r.body || ""; try { const j = JSON.parse(msg); msg = (j.error && (j.error.message || j.error)) || j.detail || msg; } catch (e) { }
+    /* Сервер модели отклонил сам запрос (400/422; через облако Dewiar или шлюз — 502 с текстом «…400…», «отклонил»).
+       Обычно виноваты функции полем tools или chat_template_kwargs: «Проверить» (без них) проходит, а разговор — нет. */
+    const rejected = !ollama && (r.status === 400 || r.status === 422 || (r.status >= 500 && REJECT_RX.test(String(msg))));
+    if (rejected) { const again = retryRejected(); if (again) return again; }
+    if (S.llm.cloud && r.status === 401 && await fixDeadKey(msg)) return llmStream(messages, tools, onText, signal, opt);   // ключ удалили — думаем по аккаунту
+    if (S.llm.cloud && [401, 402, 403, 429, 502, 503].includes(r.status)) { cloudInfo = null; throw Object.assign(new Error(String(msg)), { human: true }); }
+    if (r.status === 401) msg = "ключ не подходит (401)";
+    if (r.status === 404 && !ollama) { const p = await http("GET", ollamaRoot() + "/api/tags", { timeout: 5000 }).catch(() => null); if (p && p.status === 200) { S.llm.kind = "ollama"; saveS(); return llmStream(messages, tools, onText, signal, opt); } }
+    if (tools && /tool|function/i.test(String(msg)) && r.status < 500) return llmStream(messages, null, onText, signal, opt);   // модель без инструментов
+    if (body.chat_template_kwargs && (r.status === 400 || r.status === 422)) { S.llm.no_kwargs = true; saveS(); return llmStream(messages, tools, onText, signal, opt); }
+    throw new Error(`модель ответила ${r.status}: ${String(msg).slice(0, 160)}`);
+  }
+  /* Ошибка пришла уже внутри потока (HTTP 200, строка «error»): так отвечают Ollama с облачными моделями и шлюзы —
+     «upstream returned HTTP 400». Это тот же отказ от запроса, если модель ещё ничего не успела сказать. */
+  if (err && !ollama && REJECT_RX.test(String(err.message)) && !text.trim() && !Object.keys(calls).length && !tcRaw.length) {
+    const again = retryRejected(); if (again) return again;
+  }
+  if (err) throw err;
+  if (inTool && tcBuf.trim()) tcRaw.push(tcBuf);
+  const found = Object.values(calls).filter(c => c.name);
+  tcRaw.forEach((raw, i) => { const c = parseToolCall(raw); if (c) found.push({ id: "call_t" + i, name: c.name, args: JSON.stringify(c.args) }); });
+  if (afterCall && !found.length && dropped.trim()) { text += dropped; onText && onText(dropped); }   // вызов так и не разобрался — текст не теряем
+  if (hold) {
+    const bare = found.length ? [] : bareCalls(text, new Set((tools || []).map(x => x.name)));
+    if (bare.length) { bare.forEach((c, i) => found.push({ id: "call_b" + i, name: c.name, args: JSON.stringify(c.args) })); text = ""; plog("info", "🛠 вызов голым JSON: " + bare.map(c => c.name).join(", ")); }
+    else if (held) onText && onText(held);
+  }
+  // модель ушла в размышления и упёрлась в лимит, так ничего и не сказав — повторяем без размышлений, с запасом
+  if (!text.trim() && !found.length && (finish === "length" || sawReason) && !opt.retried && !(signal && signal.aborted)) {
+    console.warn(`модель ушла в размышления (${finish || "без ответа"}) — повторяю без них`);
+    return llmStream(messages, tools, onText, signal, Object.assign({}, opt, { think: false, retried: true, max: 4096 }));
+  }
+  return { text, calls: found, finish };
+}
+/* История для модели — как на компьютере: реплики других персонажей приходят от «пользователя» с пометкой, две реплики
+   одной роли подряд склеиваются, разговор начинается с пользователя. Иначе строгие шаблоны (Gemma, Mistral, Llama на
+   vLLM/llama.cpp) отвечают 400 «roles must alternate» — например, после неудачного ответа в истории два «user» подряд. */
+function chatHistory(hist, text) {
+  const out = [], me = persona().id;
+  hist.concat([{ role: "user", content: text }]).forEach(m => {
+    if (!m || !m.content || (m.role !== "user" && m.role !== "assistant")) return;
+    const other = m.role === "assistant" && m.who && m.who !== me;
+    const x = other ? { role: "user", content: `[${(PERSONAS.find(p => p.id === m.who) || {}).name || "Коллега"} ответил(а)]: ${m.content}` }
+                    : { role: m.role, content: String(m.content) + (m.note ? "\n" + m.note : "") };
+    const last = out[out.length - 1];
+    if (last && last.role === x.role) last.content += "\n\n" + x.content; else out.push(x);
+  });
+  while (out.length && out[0].role === "assistant") out.shift();
+  return out;
+}
+/* Функции текстом: описание — в системное сообщение, прошлые вызовы и результаты — обычными репликами
+   (сервер, не принимающий tools, обычно не принимает и роль tool). */
+function promptToolMessages(messages, tools) {
+  const desc = "\n\n# Инструменты\nТы можешь вызывать функции. Их описания — внутри <tools></tools>:\n<tools>\n" +
+    tools.map(t => JSON.stringify({ type: "function", function: t })).join("\n") + "\n</tools>\n\nЧтобы вызвать функцию, выведи ровно так и больше ничего:\n<tool_call>\n" +
+    '{"name": "<имя функции>", "arguments": {<аргументы>}}\n</tool_call>\nРезультат придёт в <tool_response></tool_response>. Если функция не нужна — просто отвечай.';
+  const out = [];
+  messages.forEach((m, i) => {
+    if (i === 0 && m.role === "system") out.push({ role: "system", content: m.content + desc });
+    else if (m.role === "assistant" && m.tool_calls) out.push({ role: "assistant", content: (m.content ? m.content + "\n" : "") + m.tool_calls.map(c => "<tool_call>\n" + JSON.stringify({ name: c.function.name, arguments: safeJSON(c.function.arguments) }) + "\n</tool_call>").join("\n") });
+    else if (m.role === "tool") {
+      const t = "<tool_response>\n" + m.content + "\n</tool_response>", last = out[out.length - 1];
+      if (last && last.role === "user" && String(last.content).startsWith("<tool_response>")) last.content += "\n" + t; else out.push({ role: "user", content: t });
+    } else if (m.role === "user" && Array.isArray(m.content) && out.length && out[out.length - 1].role === "user") {   // снимок сразу после результата
+      const last = out[out.length - 1];
+      last.content = (Array.isArray(last.content) ? last.content : [{ type: "text", text: String(last.content) }]).concat(m.content);
+    } else out.push({ role: m.role, content: m.content });
+  });
+  if (!out.length || out[0].role !== "system") out.unshift({ role: "system", content: desc.trim() });
+  return out;
+}
+function toOllama(m) {
+  if (m.role === "assistant" && m.tool_calls) return { role: "assistant", content: m.content || "", tool_calls: m.tool_calls.map(c => ({ function: { name: c.function.name, arguments: safeJSON(c.function.arguments) } })) };
+  if (m.role === "tool") return { role: "tool", content: m.content, tool_name: m.name };
+  if (Array.isArray(m.content)) return { role: m.role, content: m.content.filter(x => x.type === "text").map(x => x.text).join("\n"),
+    images: m.content.filter(x => x.type === "image_url").map(x => String(x.image_url.url).replace(/^data:[^,]+,/, "")) };
+  return { role: m.role, content: m.content };
+}
+const safeJSON = (s) => { try { return typeof s === "string" ? JSON.parse(s || "{}") : (s || {}); } catch (e) { return {}; } };
+
+/* Разговорная очередь: показываем текст и озвучиваем по предложениям. */
+function sentenceSink() {
+  let pending = "", shown = "";
+  return {
+    push(piece) {
+      shown += piece; showBot(gfix(shown)); pending += piece;    // героиня, а модель сбилась на «рад», «понял» — правим сами
+      for (;;) {
+        const m = pending.match(/^([\s\S]*?[.!?…](?:["»)]?)(?:\s+|$)|[\s\S]*?\n)/);
+        if (!m || m[0].length < 2) break;
+        if (!/\s$/.test(m[0]) && m[0].length === pending.length) break;   // конец предложения ещё может продолжиться
+        say(gfix(m[0])); pending = pending.slice(m[0].length);
+      }
+    },
+    flush() { if (pending.trim()) say(gfix(pending)); pending = ""; },
+    text: () => gfix(shown),
+  };
+}
+
+/* Один ход разговора: быстрые команды без модели (quick) → модель с инструментами, до 6 кругов (шестой — без
+   инструментов, чтобы модель ответила словами). Ответ показывается и озвучивается по предложениям по мере прихода.
+   opts.hidden — служебный запрос: реплика человека не показывается и не пишется в историю. */
+async function ask(text, opts = {}) {
+  text = String(text || "").trim(); if (!text) return;
+  if (!opts.hidden) lastUserAct = Date.now();
+  stopListen(); interrupt(true);
+  if (!opts.hidden) showYou(text);
+  clearCard(); setState("thinking"); showBot("", "wait");
+  photoTurn = false;
+  convCheck();
+  const fast = opts.hidden ? null : await quick(text);
+  if (fast && fast.switchTo) { setState("idle"); showYou(text); switchPersona(fast.switchTo, fast.question); return; }
+  if (fast) { fast.say = gfix(fast.say); history.push({ role: "user", content: text }, { role: "assistant", content: fast.say, who: persona().id }); saveH(); convAfter(); dayTurn(text, fast.say); answerLocal(fast); return; }
+  if (!S.llm.base_url && loggedIn()) showBot("Подключаюсь к мозгу — секунду…", "wait");
+  await ensureBrain();                             // вошли аккаунтом, а мозг не выбран — модели Dewiar по аккаунту сами
+  if (!S.llm.base_url) {
+    answerLocal({ say: loggedIn() ? "Не получилось связаться с моделями Dewiar — проверьте интернет и попробуйте ещё раз."
+      : S.join ? "Заявка на Dewiar ещё ждёт проверки. Пока можно подключить свою модель или ключ сервиса — открываю выбор."
+      : "Чтобы думать, мне нужен «мозг»: своя модель, ключ любимого сервиса или Dewiar. Открываю выбор." });
+    setTimeout(() => openSettings("brain"), 1200); return;
+  }
+  busy = true;
+  const t0 = Date.now();
+  plog("info", `❓ ${clip(text)} → ${S.llm.cloud ? "Dewiar Облако" : (S.llm.name || S.llm.model || "модель")}`);
+  const ctl = turnAbort = new AbortController();
+  const sink = sentenceSink();
+  const rudeNow = !opts.hidden && isRude(text);
+  if (rudeNow) { hCount("rude"); plog("info", "🛡 грубость в адрес помощника — отвечу спокойно, с границей"); }
+  const msgs = [{ role: "system", content: systemPrompt() + (rudeNow ? BOUNDARY_NOTE : "") }]
+    .concat(chatHistory(liveHistory().slice(-2 * (CONV_TURNS + 2 * CONV_MARGIN)), text));
+  let final = "", switchTo = null;
+  lastDone = "";
+  try {
+    if (!opts.hidden) {
+      const kb = await personaKnowledge(text);
+      if (turnAbort !== ctl) return;
+      if (kb) { msgs[0].content += kb; showBot("", "wait"); }
+    }
+    const called = new Set(); let nudged = false;      // какие инструменты уже вызваны в этом ходе; напоминали ли «сделай по-настоящему»
+    let toolOk = false, toolErr = "", spoke = false;   // хоть один инструмент сработал; первая ошибка; просили ли ответить словами
+    let maxRounds = 6;                                 // работа в других приложениях — до 30 кругов (открыть, прочитать, нажать, ввести…)
+    /* Один круг модели с повтором при сбое связи: до 3 попыток (через 2, 5 и 10 с) — только этот круг, не весь ход,
+       поэтому уже выполненные действия (звонок, программа, напоминание) не повторяются. Облако ответило «200» и ни
+       слова, ни вызова, ни конца ответа — связь оборвалась на полпути: тоже повтор. */
+    const round1 = async (tools) => {
+      for (let tries = 0; ; tries++) {
+        try {
+          const r = await llmStream(msgs, tools, (p) => { if (turnAbort === ctl) sink.push(p); }, ctl.signal);
+          if (S.llm.cloud && !String(r.text || "").trim() && !r.calls.length && !r.finish && !ctl.signal.aborted)
+            throw Object.assign(new Error("связь оборвалась — ответ пришёл пустым"), { net: true });
+          return r;
+        } catch (e) {
+          if (!e.net || tries >= (HOME_URL.test(e.url || "") ? 1 : 3) || turnAbort !== ctl || ctl.signal.aborted || sink.text().trim()) throw e;
+          netIncident(e);
+          showBot(tries ? `Связь пропала — пробую ещё раз (${tries + 1})…` : "Связь пропала — пробую ещё раз…", "wait");
+          await sleep([2000, 5000, 10000][tries]);
+          if (turnAbort !== ctl) throw e;
+        }
+      }
+    };
+    for (let round = 0; round < maxRounds; round++) {
+      let r;
+      try {
+        r = await round1(round < maxRounds - 1 ? toolSpecs() : null);
+        const lm = msgs[msgs.length - 1];
+        if (lm && Array.isArray(lm.content) && !String(r.text || "").trim() && !r.calls.length) throw new Error("пустой ответ на снимок");
+      } catch (e) {
+        const last = msgs[msgs.length - 1];
+        if (!(last && Array.isArray(last.content)) || turnAbort !== ctl) throw e;
+        // модель не принимает картинки — снимок убираем и честно говорим, что нужна модель со зрением
+        msgs[msgs.length - 1] = { role: "user", content: "(Снимок сделан, но эта модель не умеет смотреть на картинки. Скажи это пользователю одной фразой и предложи выбрать в «Мозге» модель со зрением.)" };
+        modelOnce = "";
+        r = await llmStream(msgs, null, (p) => { if (turnAbort === ctl) sink.push(p); }, ctl.signal);
+      }
+      modelOnce = "";
+      if (turnAbort !== ctl) return;
+      final += r.text;
+      if (!r.calls.length && round === 0 && CAM_REFUSAL_RX.test(r.text || "") && String(r.text).length < 1200) {
+        // «нет доступа к камере» — а камера есть: один раз напоминаем про take_photo
+        msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: CAM_NUDGE });
+        sink.push(" Секунду — открываю камеру. ");
+        continue;
+      }
+      // и после других инструментов: «узнала погоду» (weather) и «сделала презентацию» словами — без make_app
+      const claim = !r.calls.length && !nudged && String(r.text || "").length < 1500 ? claimedAction(r.text || "", called, text) : null;
+      if (claim) {
+        nudged = true;
+        // «Звоню маме», «Включаю Маяк», «Фотографирую» — а инструмент не вызван (модель повторила прошлый ответ из истории):
+        // один раз просим сделать это по-настоящему
+        msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: `СТОП. Ты написал, что ${claim.what}, но не вызвал инструмент ${claim.tool} — ничего не произошло. Вызови ${claim.tool} сейчас, без лишних слов.` });
+        if (claim.tool === "make_app") sink.push(" Секунду — собираю. ");
+        else if (claim.tool.startsWith("take_photo")) sink.push(" Секунду — включаю камеру. ");
+        continue;
+      }
+      if (!r.calls.length && round === 0 && REFUSAL_RX.test(r.text || "") && String(r.text).length < 1200) {
+        // «у меня нет доступа к интернету», а поиск есть — один раз просим поискать (как в задачах на компьютере)
+        msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: REFUSAL_NUDGE });
+        sink.push(" Секунду — посмотрю в интернете. ");
+        continue;
+      }
+      if (!r.calls.length) break;
+      msgs.push({ role: "assistant", content: r.text || "", tool_calls: r.calls.map(c => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.args || "{}" } })) });
+      const shots = [];
+      if (r.calls.some(c => HANDS_SET.has(c.name))) maxRounds = 30;
+      for (const c of r.calls) {
+        called.add(c.name);
+        let res;
+        try { res = await runTool(c.name, safeJSON(c.args)); } catch (e) { res = "Ошибка: " + e.message; }
+        if (c.name === "call_persona" && res && res.switchTo) { switchTo = res.switchTo; res = res.text; }
+        if (res && res.image) { shots.push(res.image); res = res.text; }
+        if (/^Ошибка/.test(String(res))) toolErr = toolErr || String(res).replace(/^Ошибка:\s*/, "");
+        else toolOk = true;
+        if (r.finish === "length" && /^Ошибка/.test(String(res)))   // ответ оборвался по лимиту — вызов пришёл не целиком
+          res = String(res) + " (Твой ответ оборвался по лимиту длины, и вызов пришёл не целиком. Сделай короче: меньше текста и "
+            + "комментариев, компактный код — и вызови снова.)";
+        msgs.push({ role: "tool", tool_call_id: c.id, name: c.name, content: String(res).slice(0, 8000) });
+      }
+      if (shots.length) {                            // снимок с камеры — модели картинкой (сама модель со зрением, если есть)
+        msgs.push({ role: "user", content: [{ type: "text", text: "Снимок с камеры телефона:" }, ...shots.map(u => ({ type: "image_url", image_url: { url: u } }))] });
+        modelOnce = await visionModel();
+      }
+      if (!sink.text()) showBot("", "wait");
+    }
+    // действия были, а слов нет — один круг без инструментов: «скажи словами, что получилось» (иначе человек не знает итога)
+    if (!sink.text().trim() && called.size && !spoke && turnAbort === ctl && !lastDone) {
+      spoke = true;
+      msgs.push({ role: "user", content: "Скажи пользователю одной-двумя фразами, что получилось по результатам действий выше (или что не получилось и почему). Без вызовов функций." });
+      try { const r = await round1(null); final += r.text; } catch (e) { if (turnAbort !== ctl) return; }
+    }
+    sink.flush();
+    // модель сделала дело и ничего не сказала: говорим, что сделано (а не «Готово») — и пишем это в историю. Пустой ответ из
+    // истории выпадает, следующий вопрос склеивался с прошлой просьбой («сделай калькулятор»), и модель отвечала только «Готово».
+    // «Сделала» — только если хоть одно действие правда удалось; все с ошибкой — честно, что не вышло
+    let quiet = "";
+    if (!sink.text().trim()) {
+      quiet = lastDone || (toolOk ? (persona().gender === "female" ? "Сделала, что просили." : "Сделал, что просили.")
+        : toolErr ? `Не получилось: ${toolErr.slice(0, 160)}`
+        : "Не получилось ответить — переспросите, пожалуйста, иначе.");
+      quiet = gfix(quiet); showBot(quiet); say(quiet);
+    }
+    plog("info", `💬 ответ ${((sink.text() || final).trim() || quiet).length} симв.${quiet ? " (сам: " + clip(quiet) + ")" : ""} за ${((Date.now() - t0) / 1000).toFixed(1)} с`);
+    if (!opts.hidden) history.push({ role: "user", content: text });
+    history.push(Object.assign({ role: "assistant", content: (sink.text() || final).trim() || quiet, who: persona().id },
+      photoTurn ? { note: "[снимок с камеры показан на экране; показать снова — show_photo, новый — take_photo]" } : {})); saveH(); convAfter();
+    if (!opts.hidden) { dayTurn(text, (sink.text() || final).trim() || quiet); try { dayLogAdd(text, (sink.text() || final).trim() || quiet); } catch (x) { } }
+    netRecovered(); hCount("turns"); hCount("net_ok"); pauseOk();
+    if (isRefused(sink.text() || final)) hCount("refused");
+    if (S.llm.cloud) setTimeout(() => cloudBalance(false).catch(() => {}), 1500);
+  } catch (e) {
+    if (turnAbort !== ctl) return;
+    // своя модель (домашний сервер) не отвечает, а вход аккаунтом dewiar.pro есть — думают модели Dewiar, без настроек
+    if (!e.human && !S.llm.cloud && loggedIn() && !opts.fallback && !sink.text().trim()) {
+      let moved = false;
+      try {
+        const was = S.llm.name || S.llm.model || "ваша модель";
+        await cloudConnect(S.account.token, (S.accCloud && S.accCloud.base) || siteUrl((S.account.services || {}).cloud || "dwrapp/cloud.php"), { account: true });
+        moved = true;
+        toast(`«${was}» не отвечает — думают модели Dewiar по аккаунту`, 4500);
+      } catch (x) { console.log("облако по аккаунту: " + x.message); }
+      if (moved) { busy = false; turnAbort = null; return ask(text, Object.assign({}, opts, { fallback: true })); }
+    }
+    if (e.net) netIncident(e);                          // повторы — уже в round1 (по кругу, без повторных действий)
+    if (e.human) { plog("warn", "облако: " + e.message); showBot(e.message, "err"); say(e.message); }       // облако Dewiar объясняет само: «заряд закончился…»
+    else { const m = "Не получилось связаться с мозгом: " + e.message; console.warn(m); showBot(m, "err"); say("Не получилось связаться с мозгом."); }
+  } finally {
+    if (turnAbort === ctl) { busy = false; turnAbort = null; }
+  }
+  if (switchTo) afterSpeak = () => { S.persona = switchTo; saveS(); applyPersona(); ask("(Тебя позвали в разговор. Откликнись одной-двумя фразами от себя и продолжи то, о чём просил пользователь.)", { hidden: true }); };
+  else if ((S.follow === "always" || (S.follow === "ask" && /\?\s*$/.test(sink.text()))) && (D.recognizer() || (S.stt.engine === "server" && S.stt.url)))
+    afterSpeak = () => listen();
+  if (sayLeft === 0 && state !== "listening") finishTurn();
+}
+/* «Патрика», «Патрику», «Лиру» → персонаж (имя или прозвище с падежным окончанием). exact — только имя как есть. */
+function findPersona(word, exact) {
+  const want = String(word || "").toLowerCase().replace(/ё/g, "е").replace(/[^а-яa-z\s-]/g, "").trim();
+  if (!want) return null;
+  const names = (x) => [x.name, ...(x.aliases || [])].map(n => String(n).toLowerCase().replace(/ё/g, "е"));
+  const hit = PERSONAS.find(x => names(x).includes(want));
+  if (hit || exact) return hit || null;
+  const stem = (w) => w.length > 3 ? w.slice(0, w.length - 1) : w;
+  const w0 = want.split(/\s+/)[0];
+  // короткие имена на гласную («Эва») склоняются целиком: «Эву», «Эвой», «Эве» — основа без последней буквы и окончание
+  const short = (n) => n.length === 3 && /[аяео]$/.test(n) && new RegExp("^" + n.slice(0, 2) + "(?:а|у|ы|е|и|ой|ою|ей|я|ю)$").test(w0);
+  return PERSONAS.find(x => names(x).some(n => short(n) || (w0.startsWith(stem(n)) && w0.length - n.length <= 2))) || null;
+}
+function switchPersona(id, question) {             // «позови Патрика» — без модели: переключаемся, и новый персонаж отвечает сам
+  S.persona = id; saveS(); applyPersona();
+  ask(question || "(Тебя позвали в разговор. Откликнись одной-двумя фразами от себя и спроси, чем помочь.)", { hidden: !question });
+}
+function answerLocal(r) {
+  showBot(r.say); if (r.card) showCard(r.card);
+  if (r.silent) { setState("idle"); return; }
+  say(r.say);
+  if (sayLeft === 0) setState("idle");
+}
+function interrupt(quiet) {
+  if (turnAbort) { turnAbort.abort(); turnAbort = null; }
+  busy = false; afterSpeak = null; stopVoice();
+  if (!quiet) setState("idle");
+}
+
+/* ---------- время словами: «через 10 минут», «завтра в 9», «в 18:30», «в пятницу в 15:00», «каждый день в 8» ---------- */
+const NUMW = { "ноль": 0, "один": 1, "одну": 1, "одна": 1, "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6, "семь": 7, "восемь": 8,
+  "девять": 9, "десять": 10, "одиннадцать": 11, "двенадцать": 12, "тринадцать": 13, "четырнадцать": 14, "пятнадцать": 15, "шестнадцать": 16,
+  "семнадцать": 17, "восемнадцать": 18, "девятнадцать": 19, "двадцать": 20, "тридцать": 30, "сорок": 40, "пятьдесят": 50, "полчаса": 30, "полтора": 1.5, "пару": 2, "пять минут": 5 };
+function wordsNum(s) {
+  s = String(s || "").trim().toLowerCase().replace(/ё/g, "е");
+  if (/^\d+([.,]\d+)?$/.test(s)) return parseFloat(s.replace(",", "."));
+  let n = 0, any = false;
+  for (const w of s.split(/\s+/)) { if (w in NUMW) { n += NUMW[w]; any = true; } else if (w !== "и") return null; }
+  return any ? n : null;
+}
+const DOW = { "понедельник": 1, "вторник": 2, "сред": 3, "четверг": 4, "пятниц": 5, "суббот": 6, "воскресень": 0 };
+/* -> {at: Date, repeat: ""|daily|weekdays|weekly, rel?, rest} или null — времени во фразе нет. rest — фраза без слов о времени
+   (из неё берут, о чём напомнить). Только время без дня и оно уже прошло — завтра; день без времени — 9:00. */
+function parseWhen(t) {
+  t = " " + String(t || "").toLowerCase().replace(/ё/g, "е") + " ";
+  const now = new Date();
+  let m = t.match(/через\s+(?:(\S+(?:\s+(?:и\s+)?\S+)?)\s+)?(секунд[а-яё]*|минут[а-яё]*|час[а-яё]*|полчаса|полтора часа)/);
+  if (m) {
+    let n = m[2].startsWith("полчаса") ? 30 : m[2].startsWith("полтора") ? 90 : (m[1] ? wordsNum(m[1]) : 1);
+    if (n == null) n = 1;
+    const ms = m[2].startsWith("сек") ? n * 1000 : m[2].startsWith("мин") || m[2].startsWith("пол") ? n * 60000 : n * 3600000;
+    return { at: new Date(now.getTime() + ms), repeat: "", rel: true, rest: t.replace(m[0], " ") };
+  }
+  let day = new Date(now), hasDay = false, repeat = "";
+  if (/каждый день|ежедневно|каждое утро|каждый вечер/.test(t)) { repeat = "daily"; hasDay = true; }
+  else if (/по будням|в будни/.test(t)) { repeat = "weekdays"; hasDay = true; }
+  if (/послезавтра/.test(t)) { day.setDate(day.getDate() + 2); hasDay = true; }
+  else if (/завтра/.test(t)) { day.setDate(day.getDate() + 1); hasDay = true; }
+  for (const [k, v] of Object.entries(DOW)) {
+    const r = new RegExp("(?:в|во|каждый|каждую|каждое|по)\\s+" + k);
+    if (r.test(t)) { let d = (v - now.getDay() + 7) % 7; if (d === 0) d = 7; day = new Date(now); day.setDate(now.getDate() + d); hasDay = true; if (/кажд|по\s/.test(t.match(r)[0])) repeat = "weekly"; break; }
+  }
+  m = t.match(/(?:\sв|\sна|\sк)\s+(\d{1,2})(?:[:.\s](\d{2}))?(?:\s*(утра|дня|вечера|ночи))?(?=\s)/) || t.match(/\s(\d{1,2}):(\d{2})\s/);
+  let h = null, mi = 0;
+  if (m) { h = +m[1]; mi = m[2] ? +m[2] : 0; if (m[3] && /дня|вечера/.test(m[3]) && h < 12) h += 12; if (m[3] === "ночи" && h === 12) h = 0; }
+  else if (/утром|каждое утро/.test(t)) h = 9; else if (/вечером|каждый вечер/.test(t)) h = 20; else if (/днем/.test(t)) h = 13;
+  if (h == null && !hasDay) return null;
+  if (h == null) h = 9;
+  if (h > 23 || mi > 59) return null;
+  day.setHours(h, mi, 0, 0);
+  if (!hasDay && day <= now) day.setDate(day.getDate() + 1);
+  if (repeat && day <= now) day.setDate(day.getDate() + (repeat === "weekly" ? 7 : 1));
+  return { at: day, repeat, rest: t.replace(m ? m[0] : "", " ") };
+}
+const whenText = (d) => { const now = new Date(), tm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const dd = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
+  return dd === 0 ? "сегодня в " + tm : dd === 1 ? "завтра в " + tm : dd === 2 ? "послезавтра в " + tm : `${d.getDate()} ${MON[d.getMonth()]} в ${tm}`; };
+const REP_RU = { daily: "каждый день", weekdays: "по будням", weekly: "каждую неделю" };
+
+function addAlarm(title, at, kind, repeat) {
+  // who — кто ставил: его лицо и имя будут в уведомлении (Faces.java)
+  const x = JSON.parse(D.alarmSet(JSON.stringify({ title, at: at.getTime(), kind: kind || "reminder", repeat: repeat || "", who: S.persona || "" })) || "{}");
+  if (!D.exactAlarms()) toast("Чтобы будильники звонили минута в минуту, разрешите «Будильники и напоминания» в настройках.", 5000);
+  needPerm(NOTIF); syncSoon();
+  return x;
+}
+function alarmCard(x) {
+  return `<div class="pill"><span>${x.kind === "alarm" ? "⏰" : x.kind === "timer" ? "⏱" : "🔔"}</span><span><b>${esc(whenText(new Date(x.at)))}</b>${x.repeat ? " · " + REP_RU[x.repeat] : ""}<br>${esc(x.title)}</span><button onclick="cancelAlarm('${esc(x.id)}', this)">Отменить</button></div>`;
+}
+window.cancelAlarm = (id, btn) => { D.alarmCancel(id); syncSoon(); if (btn) btn.closest(".pill").innerHTML = "<span>Отменено</span>"; };
+
+/* ---------- быстрые команды без модели (работают и без интернета) ---------- */
+/* -> {say, card?, silent? (не озвучивать), switchTo?/question? (передать другому персонажу)} или null — тогда решает модель.
+   Фразы — только целиком (^…$): похожая, но длиннее просьба уходит модели, а не исполняется наполовину. */
+async function quick(text) {
+  { const bq = await bugQuick(text.replace(/^[А-ЯЁA-Z][а-яёa-z-]+\s*,\s*(?=\S)/, (m) => findPersona(m.replace(/[\s,]/g, ""), true) ? "" : m)); if (bq) return bq; }
+  const t = text.toLowerCase().replace(/ё/g, "е").replace(/[.!?,]+$/g, "").replace(/\s+/g, " ").trim();
+  if (NEW_CONV_RX.test(t) || NEW_CONV_RX.test(t.replace(/^\S+\s+/, ""))) { convReset(); return { say: "Хорошо, начинаем с чистого листа." }; }
+  { // позвать персонажа: «позови Патрика», «дай Лиру», «Патрик, как думаешь…»
+    let m = t.match(/^(?:позови(?:те)?|позвать|зови|пригласи|дай|переключи(?:сь)? на|передай(?: слово)?)\s+(\S+)(?:\s+(?:пожалуйста|сюда))?$/);
+    let p = m && findPersona(m[1]);
+    if (p) return p.id === persona().id ? { say: "Я здесь." } : { say: "", switchTo: p.id };
+    m = text.trim().match(/^([А-ЯЁA-Z][а-яёa-z-]+)\s*[,!]\s*([\s\S]+)$/);
+    p = m && findPersona(m[1], true);
+    if (p && p.id !== persona().id && m[2].trim().length > 1) return { say: "", switchTo: p.id, question: m[2].trim() };
+  }
+  const rq = await radioQuick(t); if (rq) return rq;
+  if (/^(стоп|хватит|замолчи|тихо|отмена)$/.test(t)) return { say: "Хорошо.", silent: true };
+  if (/^(который час|сколько времени|сколько сейчас времени)$/.test(t)) { const d = new Date(); return { say: `Сейчас ${d.getHours()}:${pad(d.getMinutes())}.` }; }
+  if (/^(какое (сегодня )?число|какой сегодня день)$/.test(t)) { const d = new Date(); return { say: `Сегодня ${WD[d.getDay()]}, ${d.getDate()} ${MON[d.getMonth()]}.` }; }
+  let m;
+  if ((m = t.match(/^(?:(включи|зажги|выключи|погаси)\s+(?:мне\s+)?(?:фонарик|фонарь|вспышку)|(посвети)(?:\s+мне)?(?:\s+фонариком)?)(?:,?\s+пожалуйста)?$/))) {
+    const on = !/выключи|погаси/.test(m[1] || ""); return { say: devTorch(on) ? (on ? "Фонарик включён." : "Фонарик выключен.") : "Фонарик не нашёлся." };
+  }
+  // «тише» — заметно (−20%), «чуть тише» — −10%, «намного тише» — −35%; и «сделай радио тише», «музыку потише»
+  if ((m = t.match(/^(?:сделай\s+)?(?:радио\s+|музыку\s+|звук\s+)?(?:(еще|ещё)\s+)?(чуть|чуть-чуть|немного|немножко|слегка|намного|гораздо|сильно|значительно|совсем)?\s*(?:по)?(громче|тише)(?:\s+(?:радио|музыку|звук))?(?:\s+пожалуйста)?$|^(прибавь|увеличь|убавь|уменьши)\s+(?:звук|громкость)$/))) {
+    const up = m[3] ? m[3] === "громче" : /прибавь|увеличь/.test(m[4]);
+    const step = /чуть|немн|слегка/.test(m[2] || "") ? 10 : /намного|гораздо|сильно|значит|совсем/.test(m[2] || "") ? 35 : 20;
+    return { say: `Громкость ${devVolume(up ? "up" : "down", step)}%.`, silent: true };
+  }
+  if ((m = t.match(/^(?:громкость|звук) (?:на )?(\d{1,3}|[а-я ]+?)(?: процент[а-яё]*|%)?$/)) && wordsNum(m[1]) != null) return { say: `Громкость ${devVolume("set", wordsNum(m[1]))}%.`, silent: true };
+  if (/^(выключи|отключи) звук$|^без звука$/.test(t)) { devVolume("mute", 0); return { say: "Звук выключен.", silent: true }; }
+  if ((m = t.match(/^(?:поставь |заведи |запусти )?таймер (?:на )?(.+?) (секунд[а-яё]*|минут[а-яё]*|час[а-яё]*)$/))) {
+    const n = wordsNum(m[1]); if (n != null && n > 0) {
+      const ms = m[2].startsWith("сек") ? n * 1000 : m[2].startsWith("мин") ? n * 60000 : n * 3600000;
+      const x = addAlarm(`Таймер на ${m[1]} ${m[2]}`, new Date(Date.now() + ms), "timer", "");
+      return { say: `Таймер на ${m[1]} ${m[2]}.`, card: alarmCard(x) };
+    }
+  }
+  if ((m = t.match(/^(?:поставь |заведи )?(?:будильник|разбуди меня)(.*)$/))) {
+    const w = parseWhen(" в " + m[1].replace(/^\s*(на|в)\s+/, "").trim() + " ") || parseWhen(m[1]);
+    if (w) { const x = addAlarm("Будильник", w.at, "alarm", w.repeat); return { say: `Будильник ${REP_RU[w.repeat] ? REP_RU[w.repeat] + ", " : ""}${whenText(w.at)}.`, card: alarmCard(x) }; }
+  }
+  if ((m = t.match(/^напомни(?:те)?(?: мне)?\s+(.+)$/)) || (m = t.match(/^напоминай(?: мне)?\s+(.+)$/))) {
+    const w = parseWhen(m[1]);
+    if (w) {
+      let what = w.rest.replace(/^\s*(о том,? что|о том|что|про|о|об)\s+/, "").replace(/(^|\s)(сегодня|послезавтра|завтра|утром|вечером|днем|каждый день|по будням|ежедневно)(?=\s|$)/g, " ")
+        .replace(/\s+(в|во|по|каждый|каждую)\s+(понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)[а-яё]*/g, " ").replace(/\s+/g, " ").trim();
+      what = what.replace(/^(чтобы|что)\s+/, "");
+      if (what) { const x = addAlarm(what[0].toUpperCase() + what.slice(1), w.at, "reminder", w.repeat);
+        return { say: `Напомню ${REP_RU[w.repeat] ? REP_RU[w.repeat] + ", " : ""}${whenText(w.at)}: ${what}.`, card: alarmCard(x) }; }
+    }
+  }
+  if ((m = text.trim().match(/^(?:напиши|отправь|скинь|перешли)(?: сообщение)?\s+(?:в|во)\s+(макс\S*|max|телеграм\S*|тг|телег\S*|ватсап\S*|вотсап\S*|вацап\S*|whatsapp|вайбер\S*|viber|вк|вконтакте)[\s:,—-]+([\s\S]+)$/i)))
+    return { say: sendTo(msgApp(m[1]), m[2].trim()) };
+  if (relAsk && Date.now() - relAsk.at < 90000 && t.split(/\s+/).length <= 5 && !/^(?:нет|не надо|отмена|не звони)/.test(t)) {
+    // ответ на «Как жена записана в контактах?» — звоним и запоминаем
+    const rel = relAsk.rel; relAsk = null;
+    const name = t.replace(/^(?:она|он)?\s*(?:записан[аоы]?|записана как|записан как|это)\s+/, "").replace(/^(?:позвони(?:ть)?|набери)\s+/, "").trim();
+    const r = await doCall(name);
+    if (r.ok && lastCall) { relRemember(rel, lastCall); lastCall.rel = rel; return { say: `${r.text} Запомнил${persona().gender === "female" ? "а" : ""}: ${REL_RU[rel]} — «${lastCall.name || name}».` }; }
+    return { say: r.text };
+  }
+  relAsk = null;
+  if ((m = t.match(/^нет(?=[\s,])[\s,]*(?:(?:ты\s+)?не\s+(?:понял[аи]?|туда|тому|та|тот)[\s,]*)?(?:(?:нужно|надо|я\s+(?:просил|сказал)[аи]?)\s+)?(?:позвони(?:ть)?|набери|набрать|звони)\s+(.+)$/))
+      && lastCall && lastCall.rel && Date.now() - lastCall.at < 300000) {
+    // «нет, нужно позвонить Наташа МТС» сразу после звонка «жене» — поправка: звоним и запоминаем, кто есть кто
+    const rel = lastCall.rel, r = await doCall(m[1]);
+    if (r.ok && lastCall) { relRemember(rel, lastCall); lastCall.rel = rel; return { say: `${r.text} Запомнил${persona().gender === "female" ? "а" : ""}: ${REL_RU[rel]} — «${lastCall.name || m[1]}».` }; }
+    if (r.final) return { say: r.text };
+  }
+  if (/^(?:перезвони|повтори звонок|набери ещ[её] раз|позвони ещ[её] раз|позвони снова)(?:\s+пожалуйста)?$/.test(t)) return { say: (await doCall("ещё раз")).text };
+  if (/^(?:(?:можешь|можно|пожалуйста|давай)\s+)?(?:позвони(?:ть)?|набери|набрать|звони|звякни)(?:\s+(?:пожалуйста|мне|кому-нибудь|кое-кому))?$/.test(t)) return { say: "Кому позвонить?" };
+  if ((m = t.match(/^(?:(?:можешь|можно|пожалуйста|давай)\s+)?(?:позвони(?:ть)?|набери|набрать|звони|звякни)\s+(.+)$/))) { const r = await doCall(m[1]); if (r.ok || r.final) return { say: r.text }; }
+  if ((m = t.match(/^(?:открой|запусти)\s+(.+)$/)) && !/сайт|страниц|ссылк/.test(m[1])) {
+    const name = openAppSmart(m[1]); if (name) return { say: `Открываю ${name}.`, silent: true };
+  }
+  if (S.home.token) { const r = await homeQuick(t); if (r) return r; }
+  return null;
+}
+
+/* радио голосом без модели: «включи радио», «поставь джаз», «Европа Плюс», «дальше», «пауза», «продолжи», «выключи радио» */
+const R_VERBS = "(?:включи(?:те)?|поставь(?:те)?|запусти(?:те)?|вруби|врубай|давай|хочу|сыграй|играй|поиграй)";
+async function radioQuick(t) {
+  const said = (r) => r.superseded ? { say: "", silent: true } : r.ok ? { say: `Играет «${r.station.name}».`, silent: false } : { say: r.text.replace(/^Ошибка: /, "").replace(/ Похоже на сеть.*$| Предложи.*$| Скажи пользователю.*$/, "") };
+  if (radio.on() && /^(стоп|хватит|пауза|паузу|поставь на паузу|тихо|замолчи|приостанови)$/.test(t)) { radio.pause(); return { say: "Пауза.", silent: true }; }
+  // «дальше», «другое радио поставь», «смени станцию» — и пока играет, и сразу после станции, которая не заиграла
+  if ((radio.on() || radio.recent()) && /^(?:(?:а|ну|давай|включи|поставь|еще|ещё)\s+)*(?:дальше|следующ[а-яё]*|другую|другое|друго[йе]|переключи(?:сь)?|смени|поменяй|не нравится|некст)(?:\s+(?:станци[а-яё]*|радио|радиостанци[а-яё]*|волн[а-яё]*|музык[а-яё]*))?(?:\s+(?:поставь|включи|давай))?(?:\s+пожалуйста)?$/.test(t))
+    return said(await radio.next());
+  if (radio.state().state === "paused" && /^(продолжи|продолжай|играй|сними с паузы|включи обратно|верни( радио| музыку)?|дальше играй|play|плей)$/.test(t)) {
+    radio.resume(); return { say: "Продолжаю.", silent: true };
+  }
+  if (/^(?:выключи|останови|убери|отключи|заглуши|хватит)\s+(?:музыку|радио|музычку)$/.test(t)) {
+    if (!radio.on()) return { say: "Радио и так не играет." }; radio.stop(); return { say: persona().gender === "female" ? "Выключила радио." : "Выключил радио.", silent: true };
+  }
+  if (new RegExp(`^(?:${R_VERBS}\\s+)?(?:мне\\s+)?(?:какую-нибудь\\s+|какую-то\\s+|немного\\s+)?(?:музыку|музычку|радио|что-нибудь\\s+послушать)(?:\\s+пожалуйста)?$`).test(t))
+    return said(await radio.play(""));
+  let m = t.match(new RegExp(`^${R_VERBS}\\s+(.+)$`)) || t.match(/^(?:музыку|радио)\s+(.+)$/);
+  if (m && !/яндекс|ютуб|youtube|spotify|спотифай|вк музык/.test(m[1])) {
+    const rest = m[1].replace(/\s+пожалуйста$/, "");
+    const exact = radio.list().some(x => [x.name.toLowerCase().replace(/ё/g, "е"), ...x.aliases].includes(rest.replace(/^радио\s+/, "").replace(/^станцию\s+/, "")) ||
+      [x.name.toLowerCase().replace(/ё/g, "е"), ...x.aliases].includes(rest));
+    if (exact || (/радио|музык|музычк|станци|волн/.test(rest) && radio.match(rest).length)) return said(await radio.play(rest));
+  }
+  return null;
+}
+
+/* «открой телеграм» → Telegram: названия приложений по-русски и по-английски */
+const APP_ALIAS = { "телеграм": ["Telegram"], "телеграмм": ["Telegram"], "макс": ["MAX", "Max", "МАКС"], "max": ["MAX", "Max"], "ютуб": ["YouTube"], "ютьюб": ["YouTube"], "ватсап": ["WhatsApp"], "вотсап": ["WhatsApp"],
+  "вацап": ["WhatsApp"], "вайбер": ["Viber"], "инстаграм": ["Instagram"], "хром": ["Chrome"], "гугл": ["Google"], "карты": ["Карты", "Maps", "Яндекс Карты"],
+  "навигатор": ["Навигатор", "Яндекс Навигатор"], "спотифай": ["Spotify"], "тикток": ["TikTok"], "тик ток": ["TikTok"], "вк": ["VK"], "вконтакте": ["VK"],
+  "почта": ["Gmail", "Почта", "Mail"], "почту": ["Gmail", "Почта", "Mail"], "камера": ["Камера", "Camera"], "камеру": ["Камера", "Camera"], "калькулятор": ["Калькулятор", "Calculator"],
+  "галерея": ["Галерея", "Gallery", "Фото", "Photos"], "галерею": ["Галерея", "Gallery", "Фото", "Photos"], "фото": ["Фото", "Photos", "Галерея", "Gallery"],
+  "настройки": ["Настройки", "Settings"], "часы": ["Часы", "Clock"], "календарь": ["Календарь", "Calendar"], "музыка": ["Музыка", "Music", "Яндекс Музыка"],
+  "музыку": ["Яндекс Музыка", "Музыка", "Music", "Spotify"], "сбер": ["СберБанк", "Сбербанк"], "тинькофф": ["Т-Банк", "Tinkoff"], "т банк": ["Т-Банк"],
+  "озон": ["Ozon"], "вайлдберриз": ["Wildberries"], "госуслуги": ["Госуслуги"], "алиса": ["Алиса", "Яндекс"], "переводчик": ["Переводчик", "Translate"], "заметки": ["Заметки", "Keep", "Notes"],
+  "браузер": ["Chrome", "Браузер", "Яндекс Браузер", "Firefox"], "контакты": ["Контакты", "Contacts"], "телефон": ["Телефон", "Phone"], "сообщения": ["Сообщения", "Messages"] };
+function openAppSmart(name) {
+  const n = String(name || "").toLowerCase().replace(/ё/g, "е").replace(/^(приложение|программу)\s+/, "").trim();
+  let r = D.openApp(n); if (r) return r;
+  for (const alt of APP_ALIAS[n] || []) { r = D.openApp(alt); if (r) return r; }
+  return "";
+}
+
+let lastCall = null;                               // «перезвони», «набери ещё раз» — тому же
+/* Родные словом: «позвони жене / маме / мужу». Контакт так обычно не записан («Наташа МТС»), а «жене» похоже на «Женя» —
+   поэтому родство не ищем по похожести имён: берём запомненного (S.relations), контакт с таким же словом целиком
+   («Мама», «Жена»), иначе спрашиваем «Как жена записана в контактах?» и запоминаем ответ. Поправка «нет, позвони
+   Наташа МТС» сразу после звонка родному — тоже запоминается. */
+const REL = { "жена": /^(?:жен[аеуы]|женой|жёнушк[аеуи]|женушк[аеуи])$/, "муж": /^(?:муж|мужу|мужа|мужем)$/, "мама": /^(?:мам[аеуы]|мамой|мамочк[аеуи]|мамуль?[аеуи]?)$/,
+  "папа": /^(?:пап[аеуы]|папой|папочк[аеуи])$/, "сын": /^(?:сын|сыну|сына|сыном|сынок|сынку)$/, "дочь": /^(?:доч[ьи]|дочер[иью]|дочк[аеуи]|дочкой)$/,
+  "брат": /^(?:брат|брату|брата|братом|братик[уа]?)$/, "сестра": /^(?:сестр[аеуы]|сестрой|сестрёнк[аеуи]|сестренк[аеуи])$/,
+  "бабушка": /^(?:бабушк[аеуи]|бабуле?|бабуля)$/, "дедушка": /^(?:дедушк[аеуи]|деду(?:ле)?|деда)$/ };
+const REL_RU = { "жена": "жена", "муж": "муж", "мама": "мама", "папа": "папа", "сын": "сын", "дочь": "дочь", "брат": "брат", "сестра": "сестра", "бабушка": "бабушка", "дедушка": "дедушка" };
+function relOf(who) {
+  const w = String(who || "").toLowerCase().replace(/ё/g, "е").replace(/^(?:мо(?:ей|ему|ю|й|я|им|его)|наш(?:ей|ему|у|а|ему|им)?|своей|своему|свою)\s+/, "").trim();
+  return Object.keys(REL).find(k => REL[k].test(w)) || "";
+}
+let relAsk = null;                                 // {rel, at} — спросили «как жена записана в контактах?», ждём имя
+function relRemember(rel, c) { if (!rel || !c || !c.number) return; S.relations = Object.assign({}, S.relations, { [rel]: { name: c.name || "", number: c.number } }); saveS(); }
+function dial(number, name) {
+  const ok = D.call(number);
+  if (!ok) return { ok: false, final: true, text: "Не получилось начать звонок — телефон не открыл звонилку." };
+  lastCall = { number, name, at: Date.now() };
+  return { ok: true, text: D.has(CALLP) ? (name ? `Звоню: ${name}.` : "Звоню.") : `Открыл${persona().gender === "female" ? "а" : ""} номер${name ? " — " + name : ""}: нажмите зелёную кнопку. Чтобы звонить сразу, разрешите Dewiar звонки.` };
+}
+async function doCall(who) {
+  who = who.replace(/^(мне|пожалуйста)\s+/, "").replace(/\s+пожалуйста$/, "").trim();
+  const rel = relOf(who);
+  if (rel) {
+    const known = (S.relations || {})[rel];
+    if (known && known.number) { await needPerm(CALLP); const r = dial(known.number, known.name || REL_RU[rel]); if (lastCall) lastCall.rel = rel; return r; }
+    let c = JSON.parse(D.contact(REL_RU[rel]) || "{}");
+    if (c.need) { if (!(await needPerm(CONTACTS))) return { final: true, text: "Чтобы звонить по имени, разрешите доступ к контактам." }; c = JSON.parse(D.contact(REL_RU[rel]) || "{}"); }
+    const same = c.number && String(c.name || "").toLowerCase().replace(/ё/g, "е").split(/[\s,.()-]+/).some(w => REL[rel].test(w));
+    if (same && !(c.alts || []).length) { relRemember(rel, c); await needPerm(CALLP); const r = dial(c.number, c.name); if (lastCall) lastCall.rel = rel; return r; }
+    relAsk = { rel, at: Date.now() };
+    return { ok: false, final: true, text: `Как ${REL_RU[rel]} записан${/а$|ь$/.test(REL_RU[rel]) ? "а" : ""} у вас в контактах? Скажите имя — запомню${persona().gender === "female" ? "" : ""}.` };
+  }
+  who = who.replace(/^(?:мо(?:ей|ему|ю|й|я|им|его)|наш(?:ей|ему|у|а|им)?)\s+/, "").trim();
+  if (/^(?:ещ[её]\s+раз|снова|опять|обратно)$/.test(who)) {
+    if (!lastCall) return { ok: false, final: true, text: "Не помню, кому мы звонили. Скажите, кому позвонить." };
+    await needPerm(CALLP); return dial(lastCall.number, lastCall.name);
+  }
+  const digits = who.replace(/[^\d+]/g, "");
+  if (digits.length >= 5) { await needPerm(CALLP); return dial(digits, ""); }
+  let c = JSON.parse(D.contact(who) || "{}");
+  if (c.need) { if (!(await needPerm(CONTACTS))) return { final: true, text: "Чтобы звонить по имени, разрешите доступ к контактам." }; c = JSON.parse(D.contact(who) || "{}"); }
+  if (!c.number) return { ok: false, final: false, text: `Не нашёл «${who}» в контактах. Скажите имя так, как оно записано в телефоне.` };
+  if ((c.alts || []).length) {                      // похожих несколько — спросим, а не позвоним не тому
+    const names = [c.name, ...c.alts.map(x => x.name)].slice(0, 4);
+    return { ok: false, final: true, text: `В контактах несколько похожих: ${names.join(", ")}. Кому позвонить? Скажите имя целиком.` };
+  }
+  await needPerm(CALLP);
+  return dial(c.number, c.name);
+}
+
+/* просьба про камеру: «посмотри на меня», «как я выгляжу», «покажи фото», «с фронтальной камеры», «что это» с камерой */
+const CAM_ASK_RX = /камер|фото|снимок|снимк|сфотограф|сним(?:и|ай)|посмотри на меня|как я выгляжу|мо[её] лицо|изображени|покажи (?:мне )?(?:меня|это|его|е[её])|что (?:ты )?видишь|где я нахожусь/i;
+/* ---------- границы помощника (как core/boundaries.py — менять вместе) ----------
+   Правило — в systemPrompt; грубость в адрес помощника — спокойная граница в этом ходе и счётчик rude в пульс;
+   отказ помощника — счётчик refused. Наружу — только числа. */
+const BOUNDARY_RULE = "Твои границы. Ты помогаешь охотно и с теплом, но у тебя есть достоинство. Если тебя оскорбляют или грубят тебе — отвечай спокойно, без обиды и без заискивания: одной фразой скажи, что так тебе неприятно, и предложи продолжить по делу; не извиняйся за чужую грубость. Ты вправе отказаться от просьб унизить или травить человека, навредить кому-то, обмануть или нарушить закон — откажи коротко и честно, без нотаций, и предложи, чем можешь помочь. Обычные просьбы, шутки, ирония и крепкое словцо не в твой адрес — не повод для отказа и не повод для замечаний.";
+const BOUNDARY_NOTE = "\n\nСейчас пользователь грубит тебе. Не обижайся и не заискивай: одной спокойной фразой обозначь, что так разговаривать с тобой неприятно, и, если в сообщении есть просьба, всё равно помоги с ней.";
+const RUDE_RX = new RegExp("(?<![а-яё])(?:ты|тебя|тебе|тобой|вы|вас)\\s+(?:(?:и|такая|такой|такое|просто|совсем|реально|полная|полный|настоящая|настоящий|вообще|же|абсолютно|конченая|конченый|последняя|последний|редкая|редкий)\\s+){0,2}(?:дур[аы]?|дурак[а-яё]*|дурочк[а-яё]*|туп(?:ая|ой|ое|ица|ые|орыл[а-яё]*)|идиот[а-яё]*|дебил[а-яё]*|кретин[а-яё]*|придур[а-яё]*|урод[а-яё]*|тварь|твар[иью]|сволоч[а-яё]*|мразь|мраз[иью]|скотин[а-яё]*|бездар[а-яё]*|никчем[а-яё]*|никчём[а-яё]*|бесполезн[а-яё]*|су[чк][аи]|сучк[а-яё]*|бля(?:дь|ди|дина)|шлюх[а-яё]*|гнид[а-яё]*|овощ|дно|чмо|лох[а-яё]*|мудак[а-яё]*|мудил[а-яё]*|долбо[её]б[а-яё]*|у[её]б[а-яё]*|пизд[а-яё]*|х[уy][йеёя][а-яё]*|еба(?:ть|н[а-яё]*|л[а-яё]*)|[её]баная|[её]баный)(?![а-яё])|(?<![а-яё])(?:дур[аы]?|дурак[а-яё]*|дурочк[а-яё]*|туп(?:ая|ой|ое|ица|ые|орыл[а-яё]*)|идиот[а-яё]*|дебил[а-яё]*|кретин[а-яё]*|придур[а-яё]*|урод[а-яё]*|тварь|твар[иью]|сволоч[а-яё]*|мразь|мраз[иью]|скотин[а-яё]*|бездар[а-яё]*|никчем[а-яё]*|никчём[а-яё]*|бесполезн[а-яё]*|су[чк][аи]|сучк[а-яё]*|бля(?:дь|ди|дина)|шлюх[а-яё]*|гнид[а-яё]*|овощ|дно|чмо|лох[а-яё]*|мудак[а-яё]*|мудил[а-яё]*|долбо[её]б[а-яё]*|у[её]б[а-яё]*|пизд[а-яё]*|х[уy][йеёя][а-яё]*|еба(?:ть|н[а-яё]*|л[а-яё]*)|[её]баная|[её]баный)\\s*,?\\s*(?:же\\s+)?(?:ты|тебя|тебе|тобой|вы|вас)(?![а-яё])|^(?:[а-я]+,\\s*)?(?:ну\\s+|эй,?\\s+)?(?:дур[аы]?|дурак[а-яё]*|дурочк[а-яё]*|туп(?:ая|ой|ое|ица|ые|орыл[а-яё]*)|идиот[а-яё]*|дебил[а-яё]*|кретин[а-яё]*|придур[а-яё]*|урод[а-яё]*|тварь|твар[иью]|сволоч[а-яё]*|мразь|мраз[иью]|скотин[а-яё]*|бездар[а-яё]*|никчем[а-яё]*|никчём[а-яё]*|бесполезн[а-яё]*|су[чк][аи]|сучк[а-яё]*|бля(?:дь|ди|дина)|шлюх[а-яё]*|гнид[а-яё]*|овощ|дно|чмо|лох[а-яё]*|мудак[а-яё]*|мудил[а-яё]*|долбо[её]б[а-яё]*|у[её]б[а-яё]*|пизд[а-яё]*|х[уy][йеёя][а-яё]*|еба(?:ть|н[а-яё]*|л[а-яё]*)|[её]баная|[её]баный)(?![а-яё])\\s*[!.]*$|,\\s*(?:дур[аы]?|дурак[а-яё]*|дурочк[а-яё]*|туп(?:ая|ой|ое|ица|ые|орыл[а-яё]*)|идиот[а-яё]*|дебил[а-яё]*|кретин[а-яё]*|придур[а-яё]*|урод[а-яё]*|тварь|твар[иью]|сволоч[а-яё]*|мразь|мраз[иью]|скотин[а-яё]*|бездар[а-яё]*|никчем[а-яё]*|никчём[а-яё]*|бесполезн[а-яё]*|су[чк][аи]|сучк[а-яё]*|бля(?:дь|ди|дина)|шлюх[а-яё]*|гнид[а-яё]*|овощ|дно|чмо|лох[а-яё]*|мудак[а-яё]*|мудил[а-яё]*|долбо[её]б[а-яё]*|у[её]б[а-яё]*|пизд[а-яё]*|х[уy][йеёя][а-яё]*|еба(?:ть|н[а-яё]*|л[а-яё]*)|[её]баная|[её]баный)\\s*(?:[,!]|$)|(?<![а-яё])(?:заткнись|заткни\\s+пасть|закрой\\s+(?:рот|пасть)|пош[её]л\\s+(?:ты\\s+)?(?:на|в)\\s|пошла\\s+(?:ты\\s+)?(?:на|в)\\s|отвали|отъебись|отьебись|иди\\s+(?:ты\\s+)?(?:на|в)\\s+(?:хуй|жопу|задницу|пизду))", "i");
+const REFUSED_RX = new RegExp("(?<![а-яё])(?:не\\s+(?:буду|стану)\\s+(?:этого\\s+)?(?:делать|помогать|писать|участвовать)|(?:вынужден[а]?\\s+)?отказать(?:ся)?|откажусь|в\\s+этом\\s+(?:я\\s+)?не\\s+помогу|с\\s+этим\\s+(?:я\\s+)?не\\s+помогу|так\\s+(?:со\\s+мной\\s+)?(?:разговаривать|говорить)\\s+(?:со\\s+мной\\s+)?неприятно|мне\\s+(?:так\\s+|очень\\s+|правда\\s+)?неприятно)", "i");
+const isRude = (t) => RUDE_RX.test(String(t || "").toLowerCase().replace(/ё/g, "е"));
+const isRefused = (t) => REFUSED_RX.test(String(t || "").toLowerCase().replace(/ё/g, "е"));
+/* модель «сделала» действие словами, а инструмент не вызвала — частая беда второго раза: в истории уже есть «Звоню: Мама» */
+const CLAIMS = [
+  { rx: /(?:^|[.!—–-]\s*|,\s*)(?:хорошо,?\s*|секунду,?\s*|сейчас\s+)?(?:звоню|набираю|перезваниваю|позвоню|вызываю)(?:\s|[.!:,]|$)/i, tool: "call", what: "звонишь" },
+  { rx: /(?:^|[.!]\s*)(?:хорошо,?\s*)?(?:включаю|ставлю|переключаю(?:сь)?(?:\s+на)?|запускаю)\s+(?:радио|станци|«|"|волну|[А-ЯЁA-Z])/, tool: "play_radio (или radio_control с action next, если просят другую станцию)", what: "включаешь радио" },
+  { rx: /(?:^|[.!]\s*)(?:сейчас\s+)?(?:фотографирую|делаю (?:снимок|фото)|смотрю через камеру|открываю камеру)/i, tool: "take_photo", what: "фотографируешь" },
+  // просили посмотреть или показать через камеру, а в ответ «Секунду, смотрю.», «Вот.», «Показываю» — без снимка ничего не произошло
+  { rx: /^(?:хорошо,?\s*|секунду,?\s*|сейчас,?\s*|конечно,?\s*)*(?:смотрю|посмотрю|гляжу|взгляну|показываю|покажу|вот(?:\s+(?:он|оно|она|фото|снимок|изображение|так))?|держи)(?:[\s,.!…]|$)/i,
+    tool: "take_photo (или show_photo, если снимок уже сделан и его просят показать снова)", what: "смотришь или показываешь", user: CAM_ASK_RX },
+  // «Готово, калькулятор сделан», «Я сделала мини-презентацию — она уже открылась на экране» — где угодно в ответе
+  { rx: /(?:^|[\s,.!—–-])(?:готово|сделал[аи]?|создал[аи]?|подготовил[аи]?|собрал[аи]?|написал[аи]?|вот)(?![а-яё])[^.!?]{0,80}(?:калькулятор|игр[уаы]|страниц|программ|приложени|таймер|конвертер|викторин|презентаци|слайд|открытк|шпаргалк)|(?:открыл[аио]?сь|открыт[аоы]?|появил[аио]?сь)\s+(?:у\s+тебя\s+|тебе\s+)?на\s+экран/i,
+    tool: "make_app", what: "сделал программу, страницу или презентацию" },
+];
+/* -> обещание из CLAIMS, инструмент которого в этом ходе так и не вызывали (called — вызванные), или null.
+   asked — просьба человека: у части обещаний («смотрю», «вот») смысл есть только при просьбе про камеру (c.user) */
+function claimedAction(text, called, asked) {
+  const t = String(text || "").trim();
+  // работал(а) пальцами в другом приложении — «открылось на экране», «включаю» там правда: не путаем с make_app и радио
+  if (called && [...called].some(n => HANDS_SET.has(n))) return null;
+  if (called && (called.has("take_photo") || called.has("show_photo")) && t.length < 400) return null;
+  return CLAIMS.find(c => c.rx.test(t) && (!c.user || c.user.test(String(asked || ""))) && !(called && called.has(c.tool.split(" ")[0]))) || null;
+}
+const REFUSAL_RX = /нет доступа к интернет|не имею доступа|нет прямого доступа|в реальном времени|как языковая модель|я языковая модель|не могу получить актуальн|не могу искать в интернет|нет возможности выйти в интернет|моя база знаний ограничена|у меня нет доступа|cannot access|don't have access|as an ai/i;
+const CAM_REFUSAL_RX = /нет доступа к камер|не могу (?:сфотограф|сделать (?:фото|снимок)|включить камер|видеть тебя|увидеть тебя|посмотреть на тебя)|не вижу тебя|у меня нет камер|не имею камер/i;
+const CAM_NUDGE = "СТОП. Ты сказал, что у тебя нет камеры, — это НЕВЕРНО: у тебя есть инструмент take_photo (camera front — на пользователя, "
+  + "back — основная). Вызови его сейчас, затем посмотри на снимок и ответь.";
+const REFUSAL_NUDGE = "СТОП. Ты отказался, сославшись на отсутствие доступа к интернету или свежим данным, — но это НЕВЕРНО: у тебя ЕСТЬ "
+  + "инструменты web_search и read_webpage, и ты ими не воспользовался. Не отказывайся и не пиши «как языковая модель». Сначала выполни "
+  + "web_search по сути вопроса, затем ответь по найденным фактам.";
+
+/* ---------- инструменты модели ---------- */
+const O = (props, req) => ({ type: "object", properties: props, required: req || [] });
+const STR = { type: "string" }, NUM = { type: "number" };
+
+/* ---------- руки в других приложениях: служба специальных возможностей (Hands.java) ----------
+   Модель открывает приложение (open_app), читает экран (phone_screen — элементы с номерами), нажимает, вводит, листает.
+   После каждого действия к ответу инструмента прикладывается свежий экран — модели не нужен лишний круг на чтение.
+   Служба выключена — инструмент отвечает, как её включить (Настройки → Ещё → «Управлять приложениями»). */
+let handsAsked = 0;
+const HANDS_OFF = "Управление другими приложениями выключено. Скажи пользователю одной-двумя фразами: чтобы я мог(ла) нажимать в других приложениях, "
+  + "включите это один раз — Настройки Dewiar → Ещё → «Управлять приложениями» → в списке «Специальные возможности» выберите Dewiar и включите. "
+  + "Не выполняй просьбу другим способом и не притворяйся, что сделал(а).";
+const HANDS_TOOLS = [
+  { name: "phone_screen", description: "Прочитать, что сейчас на экране телефона (в любом приложении): название приложения и пронумерованные элементы — кнопки, поля ввода, тексты, списки. "
+      + "Нужен, чтобы что-то сделать в другом приложении по просьбе пользователя: сначала open_app, потом phone_screen, потом phone_tap / phone_type / phone_scroll. "
+      + "Перед последним шагом, который нельзя отменить (отправить сообщение или письмо, оплатить, купить, удалить, опубликовать), спроси подтверждение, если пользователь не просил прямо об этом действии. "
+      + "Пароли и коды не вводи — попроси пользователя.", parameters: O({}) },
+  { name: "phone_tap", description: "Нажать на экране: id — номер элемента из phone_screen, или text — надпись на экране. long — долгое нажатие. В ответ — что стало на экране.",
+    parameters: O({ id: NUM, text: STR, long: { type: "boolean" } }) },
+  { name: "phone_type", description: "Ввести текст в поле: id — номер поля из phone_screen (без id — поле с курсором или первое на экране). submit true — нажать «Ввод» (поиск). Текст заменяет то, что было в поле. В ответ — что стало на экране.",
+    parameters: O({ id: NUM, text: STR, submit: { type: "boolean" } }, ["text"]) },
+  { name: "phone_scroll", description: "Пролистать экран или список: dir down (дальше) | up (назад); id — номер списка (необязательно). В ответ — что стало на экране.",
+    parameters: O({ dir: { type: "string", enum: ["down", "up"] }, id: NUM }, ["dir"]) },
+  { name: "phone_nav", description: "Системные кнопки: back — назад, home — домой, recents — недавние приложения, notifications — шторка уведомлений, dewiar — вернуться в Dewiar.",
+    parameters: O({ action: { type: "string", enum: ["back", "home", "recents", "notifications", "dewiar"] } }, ["action"]) },
+];
+const HANDS_SET = new Set(HANDS_TOOLS.map(t => t.name));
+const HANDS_APK = "https://dewiar.pro/dwrapp/Dewiar-hands.apk";
+function handsCard() {
+  const st = typeof D.handsState === "function" ? D.handsState() : "";
+  if (st === "none") return `<p class="hint" style="margin:0 0 10px">Ассистент может сам нажимать кнопки, вводить текст и листать в других приложениях: «напиши маме в Telegram…», «найди в YouTube…». Для этого нужна расширенная версия Dewiar — она ставится поверх этой, всё сохранится.
+    Android предупредит, что приложение просит «специальные возможности»: так он встречает любое приложение не из магазина, которое умеет нажимать за вас. Если установка не идёт — Настройки → Google → Play Защита → на время выключить проверку приложений.</p>
+    <button class="btn p w" id="hands-dl">Скачать версию с «руками»</button>`;
+  if (st === "on") return `<div class="row2"><span class="res ok" style="flex:1;margin:0">Включено</span><button class="btn" id="hands-go">Настройки</button></div>
+    <p class="hint" style="margin:8px 0 0">Просите голосом: «напиши маме в Telegram, что я задержусь», «найди в YouTube новости», «включи вайфай». Перед отправкой, оплатой и удалением ассистент спросит. Пароли не читаются и не вводятся.</p>`;
+  return `<p class="hint" style="margin:0 0 10px">${st === "pending" ? "Включено в настройках Android — подключается…" : "Ассистент сможет сам нажимать кнопки, вводить текст и листать в других приложениях — по вашей просьбе голосом: «напиши маме в Telegram…», «найди в YouTube…»."}
+    Включается один раз: «Специальные возможности» → Dewiar → включить. Если Android пишет «Ограниченная настройка» — Настройки → Приложения → Dewiar → ⋮ → «Разрешить ограниченные настройки», и снова сюда.</p>
+    <button class="btn p w" id="hands-go">Включить</button>`;
+}
+function wireHands() {
+  const dl = $("#hands-dl");
+  if (dl) dl.onclick = () => { D.openUrl(HANDS_APK); };
+  const b = $("#hands-go");
+  if (b) b.onclick = () => { handsAsked = Date.now(); if (!D.openSettings("accessibility")) toast("Откройте Настройки Android → Специальные возможности → Dewiar"); };
+}
+async function handsAfter(res) {
+  // действие сделано — экран меняется не сразу: ждём и прикладываем свежий экран (модели не нужен лишний круг)
+  if (res === "OFF") return HANDS_OFF;
+  if (/^Ошибка|^Пароли/.test(res)) return res;
+  await sleep(900);
+  const scr = D.handsScreen();
+  return scr === "OFF" ? res : res + "\n\nТеперь на экране:\n" + scr;
+}
+async function handsTool(name, a) {
+  if (name === "phone_screen") { const r = D.handsScreen(); return r === "OFF" ? HANDS_OFF : r; }
+  if (name === "phone_tap") {
+    const id = Math.round(+a.id || 0);
+    if (!id && !a.text) return "Ошибка: укажи id элемента из phone_screen или text — надпись на экране.";
+    return handsAfter(id ? D.handsTap(id, !!a.long) : D.handsTapText(String(a.text)));
+  }
+  if (name === "phone_type") return handsAfter(D.handsType(Math.round(+a.id || 0), String(a.text || ""), !!a.submit));
+  if (name === "phone_scroll") return handsAfter(D.handsScroll(Math.round(+a.id || 0), a.dir === "up" ? "up" : "down"));
+  if (name === "phone_nav") {
+    if (a.action === "dewiar") { D.toFront(); return "Dewiar снова на экране."; }
+    return handsAfter(D.handsNav(String(a.action || "back")));
+  }
+  return "Ошибка: неизвестное действие.";
+}
+
+/* Калькулятор модели (как tools.calc_eval на компьютере): числа, + - * / % ( ), 17% → 0.17, round abs min max sqrt,
+   даты days_until / days_between / weekday / date_add. Свой разбор — без eval. */
+// Бюджет, лимит, «заложим 70 тысяч» — план, а не трата (как core/tools.py is_plan)
+function isPlanMoney(t) {
+  return /(?:^|[^а-яё])(?:бюджет|лимит)[а-яё]*\s+(?:на|для)(?![а-яё])|^\s*(?:бюджет|лимит|план)|заложи|запланир|планиру|(?:увелич|уменьш|повыш|сниж)[а-яё]*\s+(?:с|до)\s+\d/i.test(t || "")
+    && !/из бюджета|потрат|купил|оплат|заплат|получил|пришл|зарплат/i.test(t || "");
+}
+function calcEval(src) {
+  const WD = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"];
+  const day = (x) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(x)); if (!m) throw new Error(`дата «${x}» — нужна в виде ГГГГ-ММ-ДД`); return new Date(+m[1], +m[2] - 1, +m[3]); };
+  const today = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); };
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const F = { round: (x, n) => +(+x).toFixed(n || 0), abs: Math.abs, min: Math.min, max: Math.max, sqrt: Math.sqrt, floor: Math.floor, ceil: Math.ceil,
+    days_until: (x) => Math.round((day(x) - today()) / 864e5), days_between: (a, b) => Math.round((day(b) - day(a)) / 864e5),
+    weekday: (x) => WD[day(x).getDay()], date_add: (x, n) => { const d = day(x); d.setDate(d.getDate() + (+n)); return iso(d); }, today: () => iso(today()) };
+  let s = String(src).replace(/×/g, "*").replace(/÷/g, "/").replace(/\^/g, "**").replace(/(\d)\s+(?=\d{3}\b)/g, "$1").replace(/(\d),(\d)/g, "$1.$2");
+  if (!s.trim() || s.length > 300) throw new Error("пустое или слишком длинное выражение");
+  const toks = s.match(/\d+(?:\.\d+)?|"[^"]*"|[A-Za-z_]+|\*\*|[-+*/%(),]|\S/g) || [];
+  let i = 0;
+  const peek = () => toks[i], eat = (t) => { if (toks[i] !== t) throw new Error(`ожидалось «${t}»`); i++; };
+  const prim = () => {
+    const t = toks[i++];
+    if (t === undefined) throw new Error("выражение оборвалось");
+    if (t === "(") { const v = expr(); eat(")"); return v; }
+    if (t === "-") return -unary();
+    if (t === "+") return unary();
+    if (/^\d/.test(t)) { let v = +t; if (peek() === "%" && !/^[\d(]/.test(toks[i + 1] || "")) { i++; v /= 100; } return v; }
+    if (t[0] === '"') return t.slice(1, -1);
+    if (F[t] && peek() === "(") { i++; const args = []; if (peek() !== ")") { args.push(expr()); while (peek() === ",") { i++; args.push(expr()); } } eat(")"); return F[t](...args); }
+    throw new Error("можно только числа, + - * / % ( ) и функции: " + Object.keys(F).join(", "));
+  };
+  const unary = () => prim();
+  const pow = () => { const b = unary(); if (peek() === "**") { i++; const e = pow(); if (Math.abs(e) > 100) throw new Error("слишком большая степень"); return b ** e; } return b; };
+  const term = () => { let v = pow(); for (;;) { const t = peek(); if (t === "*" || t === "/" || t === "%") { i++; const r = pow(); if ((t === "/" || t === "%") && r === 0) throw new Error("деление на ноль"); v = t === "*" ? v * r : t === "/" ? v / r : v % r; } else return v; } };
+  const expr = () => { let v = term(); for (;;) { const t = peek(); if (t === "+" || t === "-") { i++; const r = term(); v = t === "+" ? v + r : v - r; } else return v; } };
+  const v = expr();
+  if (i < toks.length) throw new Error(`не понял: «${toks.slice(i).join(" ")}»`);
+  return v;
+}
+
+function toolSpecs() {
+  const t = [
+    { name: "set_reminder", description: "Поставить напоминание, будильник или таймер. at — дата и время ISO (ГГГГ-ММ-ДДTЧЧ:ММ, местное) — посчитай сам от текущего времени; или in_minutes. kind: reminder | alarm (будильник) | timer. repeat: '' | daily | weekdays | weekly.",
+      parameters: O({ text: STR, at: STR, in_minutes: NUM, kind: { type: "string", enum: ["reminder", "alarm", "timer"] }, repeat: { type: "string", enum: ["", "daily", "weekdays", "weekly"] } }, ["text"]) },
+    { name: "list_reminders", description: "Какие напоминания и будильники стоят.", parameters: O({}) },
+    { name: "calc", description: "Посчитать точно: любые вычисления (проценты, суммы, скидки, деление) и даты. Считай ВСЕГДА этим инструментом, не в уме. Выражение: 2350 * 17 / 100, (1200 - 15%) * 3; даты ГГГГ-ММ-ДД: days_until(\"2027-01-01\") — сколько дней до даты, days_between(\"2026-10-01\", \"2026-12-31\"), weekday(\"2026-10-14\").",
+      parameters: O({ expression: STR }, ["expression"]) },
+    { name: "cancel_reminder", description: "Отменить напоминание или будильник (id из list_reminders или слова из текста).", parameters: O({ id: STR }, ["id"]) },
+    { name: "call", description: "Позвонить: who — имя из контактов («мама», «Лёша») или номер.", parameters: O({ who: STR }, ["who"]) },
+    { name: "send_sms", description: "Подготовить SMS: who — имя или номер, text — текст. Откроется приложение сообщений, отправит пользователь.", parameters: O({ who: STR, text: STR }, ["text"]) },
+    { name: "open_app", description: "Открыть приложение на телефоне по названию.", parameters: O({ name: STR }, ["name"]) },
+    { name: "open_url", description: "Открыть сайт или ссылку в браузере (YouTube, карты, поиск). Не для радио — для него play_radio.", parameters: O({ url: STR }, ["url"]) },
+    { name: "play_radio", description: "Включить радио онлайн прямо здесь, в приложении: query — название станции («Европа Плюс», «Маяк», «Рекорд»), жанр или настроение («джаз», «рок», «классика», «что-нибудь спокойное»), пусто — на мой вкус. На любую просьбу про радио или «включи музыку» — только этот инструмент: не открывай сайты, Яндекс Музыку и другие приложения.",
+      parameters: O({ query: STR }) },
+    { name: "radio_control", description: "Радио, которое уже играет здесь: pause — пауза, resume — продолжить, stop — выключить, next — другая станция.",
+      parameters: O({ action: { type: "string", enum: ["pause", "resume", "stop", "next"] } }, ["action"]) },
+    { name: "web_search", description: "Найти в интернете свежие сведения. Не выдумывай результаты.", parameters: O({ query: STR }, ["query"]) },
+    { name: "read_webpage", description: "Прочитать страницу по ссылке (текст).", parameters: O({ url: STR }, ["url"]) },
+    { name: "weather", description: "Погода сейчас и на ближайшие дни: city — город (если пользователь не назвал — из памяти о нём).", parameters: O({ city: STR, days: NUM }, ["city"]) },
+    { name: "flashlight", description: "Фонарик: on true/false.", parameters: O({ on: { type: "boolean" } }, ["on"]) },
+    { name: "take_photo", description: "Сфотографировать камерой телефона и посмотреть на снимок: camera front — фронтальная (на пользователя: «сфотографируй меня», «как я выгляжу»), back — основная (на то, что перед телефоном: «что это», «прочитай надпись»). Снимок придёт следующим сообщением — опиши его или ответь на вопрос.",
+      parameters: O({ camera: { type: "string", enum: ["front", "back"] }, question: STR }) },
+    { name: "set_volume", description: "Громкость: action up|down|set|mute|unmute, percent для set.", parameters: O({ action: { type: "string", enum: ["up", "down", "set", "mute", "unmute"] }, percent: NUM }, ["action"]) },
+    { name: "battery", description: "Заряд батареи телефона.", parameters: O({}) },
+    { name: "save_note", description: "Записать заметку или список (title — коротко, text — содержимое).", parameters: O({ title: STR, text: STR }, ["title", "text"]) },
+    { name: "find_notes", description: "Найти в заметках по словам.", parameters: O({ query: STR }, ["query"]) },
+    { name: "recall", description: "Вспомнить, о чём говорили и что делали за последние дни (журнал разговоров на телефоне и сделанное): «что мы делали на этой неделе», «о чём я спрашивал вчера». days — за сколько дней (1–14), query — слова для поиска (можно пусто).", parameters: O({ days: NUM, query: STR }) },
+    { name: "open_made", description: "Открыть на экране то, что ты уже сделал на телефоне (make_app: калькулятор, игра, страница): «покажи калькулятор», «где программа, которую ты сделал». title — часть названия; пусто — последнее.", parameters: O({ title: STR }) },
+    { name: "show_photo", description: "Снова показать на экране последний снимок с камеры (take_photo), с кнопкой «Сохранить».", parameters: O({}) },
+    { name: "remember", description: "Запомнить надолго факт о пользователе одной фразой в третьем лице.", parameters: O({ fact: STR }, ["fact"]) },
+    { name: "money_add", description: `Записать уже сделанный расход или полученный доход. Бюджет, лимит, план («бюджет на мебель — 50 тысяч», «заложим 70») — не расход: это remember. kind expense|income, amount — число, currency (по умолчанию ${CUR}), category по-русски, note.`,
+      parameters: O({ kind: { type: "string", enum: ["expense", "income"] }, amount: NUM, currency: STR, category: STR, note: STR }, ["kind", "amount"]) },
+    { name: "money_report", description: "Итоги по деньгам: period today|week|month|year.", parameters: O({ period: { type: "string", enum: ["today", "week", "month", "year"] } }) },
+    { name: "call_persona", description: "Позвать другого персонажа команды по имени (он ответит своим голосом).", parameters: O({ name: STR }, ["name"]) },
+    { name: "make_app", description: "Сделать мини-программу или страницу прямо на телефоне: калькулятор, игра, таймер, конвертер, викторина, шпаргалка, открытка, презентация (слайды листаются кнопками и свайпом). html — ОДИН самодостаточный HTML-файл: CSS и JS внутри, без внешних файлов и библиотек, компактный код; под экран телефона (крупные кнопки), тёмная тема, по-русски. title — короткое название. Программа сразу откроется на экране и сохранится в «Мой день» → «Сделанное».",
+      parameters: O({ title: STR, html: STR }, ["title", "html"]) },
+    { name: "send_message", description: "Отправить текст через мессенджер: app — max (по умолчанию), telegram, whatsapp, viber, vk; text — готовый текст сообщения. Откроется приложение, получателя выберет пользователь.",
+      parameters: O({ app: { type: "string", enum: ["max", "telegram", "whatsapp", "viber", "vk"] }, text: STR }, ["text"]) },
+  ];
+  if (typeof D.handsState === "function") t.push(...HANDS_TOOLS);
+  if (loggedIn()) t.push({ name: "ask_knowledge", description: "Спросить Знания пользователя на сайте Dewiar — его документы и папки, публичную библиотеку. Ответ с источниками. base — название папки или раздела, если пользователь его назвал.",
+    parameters: O({ question: STR, base: STR }, ["question"]) });
+  if (S.sync.on && syncCred() && pcSeen()) t.push({ name: "start_task", description: "Передать большую задачу компьютеру пользователя: исследование с отчётом, документ, презентация, работа с файлами или кодом. title — коротко, goal — что сделать и какой нужен результат, подробно. Ход и итог появятся в «Мой день» → «Сделанное».",
+    parameters: O({ title: STR, goal: STR }, ["goal"]) });
+  if (S.home.token) t.push({ name: "smart_home", description: "Умный дом Яндекса: action list|on|off|brightness|brighter|dimmer|temperature|scenario; target — устройство и/или комната словами («свет в спальне», «весь свет», «кондиционер»), value — число.",
+    parameters: O({ action: { type: "string", enum: ["list", "on", "off", "brightness", "brighter", "dimmer", "temperature", "scenario"] }, target: STR, value: NUM }, ["action"]) });
+  return t;
+}
+
+/* Аргументы — к описанию инструмента: модели присылают список вместо строки, «5» вместо 5, {"q": …} вместо {"query": …}. */
+function coerceArgs(name, a) {
+  a = a && typeof a === "object" && !Array.isArray(a) ? Object.assign({}, a) : { text: String(a || "") };
+  const spec = toolSpecs().find(t => t.name === name), props = (spec && spec.parameters && spec.parameters.properties) || {};
+  const req = (spec && spec.parameters && spec.parameters.required) || [];
+  const missing = req.filter(k => !(k in a)), unknown = Object.keys(a).filter(k => !(k in props));
+  if (Object.keys(props).length && missing.length === 1 && unknown.length === 1) { a[missing[0]] = a[unknown[0]]; delete a[unknown[0]]; }
+  for (const k of Object.keys(a)) {
+    const want = (props[k] || {}).type, v = a[k];
+    if (want === "string" && Array.isArray(v)) a[k] = v.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(k === "text" ? "\n" : " ");
+    else if (want === "string" && v && typeof v === "object") a[k] = JSON.stringify(v);
+    else if (want === "string" && v != null && typeof v !== "string") a[k] = String(v);
+    else if (want === "number" && typeof v === "string" && v.trim() && !isNaN(+v.replace(",", "."))) a[k] = +v.replace(",", ".");
+    else if (want === "boolean" && typeof v === "string") a[k] = /^(true|1|да|yes)$/i.test(v.trim());
+  }
+  return a;
+}
+/* Выполнить инструмент модели. -> строка для модели (ошибка — «Ошибка: …» с подсказкой, что сказать человеку);
+   take_photo -> {text, image}, call_persona -> {text, switchTo} — их разбирает ask(). */
+async function runTool(name, a) {
+  if (HANDS_SET.has(name)) return handsTool(name, a || {});
+  a = coerceArgs(name, a);
+  switch (name) {
+    case "set_reminder": {
+      let at = null;
+      if (a.in_minutes) at = new Date(Date.now() + a.in_minutes * 60000);
+      else if (a.when && !a.at) { const w = parseWhen(a.when); if (w) { at = w.at; if (!a.repeat && w.repeat) a.repeat = w.repeat; } }
+      else if (a.at) { at = new Date(a.at); if (isNaN(at)) { const w = parseWhen(a.at); at = w && w.at; } }
+      if (!at || isNaN(at)) return "Ошибка: не понял время — спроси у пользователя, когда напомнить.";
+      if (at < new Date(Date.now() - 60000) && !a.repeat) return "Ошибка: это время уже прошло — уточни.";
+      const x = addAlarm(a.text || "Напоминание", at, a.kind || "reminder", a.repeat || "");
+      showCard(alarmCard(x));
+      return `Поставлено: ${whenText(at)}${a.repeat ? ", " + REP_RU[a.repeat] : ""} — ${x.title} (id ${x.id}).`;
+    }
+    case "calc": {
+      try { const r = calcEval(String(a.expression || "")); return `${a.expression} = ${typeof r === "number" ? String(+r.toFixed(10)).replace(".", ",") : r}`; }
+      catch (e) { return "Ошибка: " + e.message; }
+    }
+    case "list_reminders": {
+      const l = JSON.parse(D.alarms() || "[]").sort((x, y) => x.at - y.at);
+      return l.length ? l.map(x => `${x.id}: ${whenText(new Date(x.at))}${x.repeat ? " (" + REP_RU[x.repeat] + ")" : ""} — ${x.title}`).join("\n") : "Напоминаний нет.";
+    }
+    case "cancel_reminder": {
+      const l = JSON.parse(D.alarms() || "[]"), q = String(a.id || "").toLowerCase();
+      // пустой запрос совпал бы с первым же напоминанием — ищем по словам, только если они есть
+      const x = l.find(i => i.id === a.id) || (q.trim() ? l.find(i => i.title.toLowerCase().includes(q.trim())) : null);
+      if (!x) return "Такого напоминания нет.";
+      D.alarmCancel(x.id); syncSoon(); return `Отменено: ${x.title}.`;
+    }
+    case "call": { const r = await doCall(a.who || ""); return r.text; }
+    case "send_sms": {
+      let num = String(a.who || "").replace(/[^\d+]/g, "");
+      if (a.who && num.length < 5) { let c = JSON.parse(D.contact(a.who) || "{}"); if (c.need && await needPerm(CONTACTS)) c = JSON.parse(D.contact(a.who) || "{}"); num = c.number || ""; }
+      D.sms(num, a.text || ""); return num ? "Открыл сообщение — пользователь проверит и отправит." : "Открыл сообщение без получателя — пусть выберет сам.";
+    }
+    case "open_app": {
+      const n = openAppSmart(a.name || "");
+      if (!n) return `Приложение «${a.name}» не найдено.`;
+      if (typeof D.handsState !== "function" || D.handsState() !== "on") return `Открыто: ${n}.`;
+      await sleep(1500);                              // приложение запускается — сразу показываем модели его экран
+      const scr = D.handsScreen();
+      return `Открыто: ${n}.` + (scr && scr !== "OFF" ? "\n\nНа экране:\n" + scr : "");
+    }
+    case "open_url": { let u = String(a.url || ""); if (!/^https?:|^[a-z]+:/.test(u)) u = "https://" + u; return D.openUrl(u) ? "Открыто." : "Не открылось."; }
+    case "play_radio": {
+      const r = await radio.play(a.query || "");
+      if (!r.ok) return r.text;
+      return `Играет радио «${r.station.name}». Остановить — «стоп» или «пауза», другая станция — «дальше».` +
+        (r.others.length ? ` Другие по запросу: ${r.others.join(", ")}.` : "") + " Скажи коротко, одной фразой, что включено.";
+    }
+    case "radio_control": {
+      const act = a.action || "pause";
+      if (act === "next") { const r = await radio.next(); return r.ok ? `Играет «${r.station.name}».` : r.text; }
+      if (!radio.on() && act !== "resume") return "Радио сейчас не играет.";
+      if (act === "stop") { radio.stop(); return "Радио выключено."; }
+      if (act === "resume") return radio.resume() ? "Радио снова играет." : "Нечего продолжать — скажи, какое радио включить.";
+      radio.pause(); return "Радио на паузе.";
+    }
+    case "web_search": return await webSearch(a.query || "");
+    case "read_webpage": return await readPage(a.url || "");
+    case "weather": return await weather(a.city || "", a.days || 3);
+    case "flashlight": return devTorch(!!a.on) ? (a.on ? "Фонарик включён." : "Фонарик выключен.") : "Фонарика нет.";
+    case "take_photo": {
+      const shot = await takePhoto(a.camera === "back" ? "environment" : "user");
+      if (!shot.ok) return "Ошибка: " + shot.error;
+      if (shot.dark) return { text: `Снимок сделан ${a.camera === "back" ? "основной (задней)" : "фронтальной"} камерой, но кадр почти чёрный — камера ничего не видит. `
+        + "Не выдумывай, что на нём. Скажи пользователю, что темно или камера закрыта (лежит объективом вниз, пальцем, чехлом), и предложи повторить"
+        + (a.camera === "back" ? " — или снять фронтальной." : " — или основной камерой."), image: shot.dataUrl };
+      return { text: "Снимок сделан, показан пользователю на экране телефона (под твоим обликом, с кнопкой «Сохранить») и приложен следующим сообщением — посмотри на него и ответь" + (a.question ? `: ${a.question}` : ".") + " Не говори, что не можешь показать: он уже на экране.", image: shot.dataUrl };
+    }
+    case "set_volume": return `Громкость ${devVolume(a.action, a.percent || (a.action === "set" ? 0 : 20))}%.`;
+    case "battery": { const b = JSON.parse(D.battery() || "{}"); return `Заряд ${b.percent}%${b.charging ? ", заряжается" : ""}.`; }
+    case "save_note": { const n = notes(); n.push({ id: "n" + Date.now(), title: a.title, text: a.text, time: Date.now() }); saveNotes(n); return `Записано: «${a.title}».`; }
+    case "recall": return recall(a.days, a.query);
+    case "open_made": {
+      const l = apps(), q = String(a.title || "").toLowerCase().trim();
+      const ap = q ? l.slice().reverse().find(x => x.title.toLowerCase().includes(q) || q.includes(x.title.toLowerCase().slice(0, 6))) : l[l.length - 1];
+      if (!ap) return l.length ? "Такого среди сделанного нет. Есть: " + l.slice(-6).map(x => `«${x.title}»`).join(", ") + "." : "На телефоне ещё ничего не сделано.";
+      setTimeout(() => { showCard(appCard(ap)); openApp(ap.id); }, 50);
+      return `«${ap.title}» — на экране. Скажи одной фразой; найти потом — «Мой день» → «Сделанное».`;
+    }
+    case "show_photo": {
+      const p = lastPhoto();
+      if (!p) return "Снимков пока нет — сделай take_photo.";
+      setTimeout(() => showPhotoCard(p), 50);
+      return "Снимок снова на экране, под ним кнопка «Сохранить». Скажи об этом одной фразой.";
+    }
+    case "find_notes": {
+      const w = String(a.query || "").toLowerCase().split(/\s+/).filter(x => x.length > 2).map(x => x.slice(0, 5));
+      const f = notes().filter(n => w.some(x => (n.title + " " + n.text).toLowerCase().includes(x))).slice(-8);
+      return f.length ? f.map(n => `«${n.title}»: ${n.text}`).join("\n\n") : "В заметках ничего не нашлось.";
+    }
+    case "remember": { const f = String(a.fact || "").trim(); if (f && !S.memory.includes(f)) { S.memory.push(f); S.memory = S.memory.slice(-80); saveS(); syncSoon(); } return "Запомнил."; }
+    case "money_add": {
+      if (isPlanMoney(`${a.category || ""} ${a.note || ""}`)) return "Не записано: это план (бюджет, лимит), а не трата или доход. Запомни его как факт (remember), например «Бюджет на мебель — 65 тысяч рублей».";
+      const m = money(); const x = { id: "m" + Date.now(), date: isoLocal(new Date()).slice(0, 10), kind: a.kind === "income" ? "income" : "expense", amount: +a.amount || 0,
+        currency: (a.currency || CUR).toUpperCase(), category: a.category || (a.kind === "income" ? "Доход" : "Разное"), note: a.note || "" };
+      if (!x.amount) return "Ошибка: нет суммы."; m.push(x); saveMoney(m);
+      return `Записано: ${x.kind === "income" ? "+" : "−"}${x.amount} ${x.currency}, ${x.category}.`;
+    }
+    case "money_report": return moneyReport(a.period || "month").text;
+    case "call_persona": {
+      const p = findPersona(a.name);
+      if (!p) return "Такого персонажа нет.";
+      return { text: `${p.name} сейчас ответит сам.`, switchTo: p.id };
+    }
+    case "make_app": {
+      const html = String(a.html || "").trim();
+      if (!/<(?:html|body|div|script|button|canvas|main|section)\b/i.test(html)) return "Ошибка: html не пришёл — пришли весь HTML-файл в поле html (компактный код).";
+      if (!/<\/(?:html|body|script|div|main|section)>\s*$/i.test(html)) return "Ошибка: HTML оборвался на середине — сделай короче и пришли целиком.";
+      const ap = saveApp(a.title || "Программа", html);
+      setTimeout(() => { showCard(appCard(ap)); openApp(ap.id); }, 50);
+      lastDone = `Сделано: «${ap.title}» — уже на экране. Потом найдёте в «Мой день» → «Сделанное» или скажите «покажи ${ap.title.toLowerCase()}».`;
+      return `Сделано: «${ap.title}» — на экране телефона, сохранено в «Мой день» → «Сделанное» (снова открыть — open_made). Скажи об этом одной фразой и где её найти, код не пересказывай.`;
+    }
+    case "start_task": {
+      try { taskToPc(a.title || String(a.goal || "").slice(0, 60), a.goal || a.title || ""); } catch (e) { return "Не получилось: " + e.message; }
+      return (pcOnline() ? "Задача передана компьютеру — он уже берётся." : "Компьютер сейчас не на связи — задачу делает облако Dewiar.")
+        + " Ход и итог — в «Мой день» → «Сделанное»; когда будет готово, пришлю уведомление, а файлы можно будет открыть и сохранить прямо здесь.";
+    }
+    case "smart_home": return await homeTool(a);
+    case "send_message": return sendTo(a.app || "max", a.text || "");
+    case "ask_knowledge": return await askKnowledge(a.question || "", a.base || "");
+  }
+  return "Неизвестный инструмент.";
+}
+
+/* HTML → простой текст: для поиска и чтения страниц (раздел «интернет» — ниже, после камеры) */
+const stripHtml = (h) => h.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ")
+  .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
+/* ---------- камера: «сфотографируй меня и опиши» ----------
+   Снимает сам интерфейс (getUserMedia в WebView; доступ даёт MainActivity.onPermissionRequest при разрешении CAMERA):
+   отсчёт 3-2-1, кадр JPEG до 1024 px — модели картинкой; почти чёрный кадр помечается dark, чтобы модель не выдумывала. */
+const CAMERA = "android.permission.CAMERA";
+async function visionModel() {                     // облако Dewiar: для снимка — модель, которая видит картинки
+  if (!S.llm.cloud) return "";
+  try {
+    const md = await cloudGet(cloudBase(), S.llm.api_key, "/models");
+    const cur = (md.data || []).find(m => m.id === S.llm.model);
+    if (cur && cur.vision) return "";
+    const v = (md.data || []).find(m => m.vision);
+    return v ? v.id : "";
+  } catch (e) { return ""; }
+}
+let camAt = 0;
+function lum(v, w = 32, h = 24) {                  // средняя яркость кадра 0…255 — чёрный кадр не отдаём модели
+  try { const c = document.createElement("canvas"); c.width = w; c.height = h; const x = c.getContext("2d"); x.drawImage(v, 0, 0, w, h);
+    const d = x.getImageData(0, 0, w, h).data; let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i] * .3 + d[i + 1] * .59 + d[i + 2] * .11; return sum / (w * h); }
+  catch (e) { return 255; }
+}
+/* Снимок — в разговоре, с кнопкой «Сохранить» (в «Загрузки»); последний хранится (last_photo.txt) — show_photo покажет снова. */
+const lastPhoto = () => { try { return fileGet("last_photo.txt") || ""; } catch (e) { return ""; } };
+function photoCard(url) {
+  return `<div class="appc"><img class="shot" src="${url}" alt="Снимок"><div class="row2"><button class="btn" onclick="savePhoto()">Сохранить в «Загрузки»</button></div></div>`;
+}
+function savePhoto() {
+  const u = lastPhoto(), b64 = u.split(",")[1] || "";
+  const d = new Date(), name = `Dewiar ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}-${pad(d.getMinutes())}.jpg`;
+  const where = b64 && D.saveDownloadB64 ? D.saveDownloadB64(name, "image/jpeg", b64) : "";
+  toast(where ? "Сохранено: " + where : "Не получилось сохранить", 3500);
+}
+async function takePhoto(facing) {
+  // камера, закрытая секунду назад, ещё освобождается — второй снимок подряд вышел бы чёрным
+  if (Date.now() - camAt < 1500) await sleep(1500 - (Date.now() - camAt));
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return { ok: false, error: "камера недоступна в этой версии Android" };
+  if (!(await needPerm(CAMERA))) return { ok: false, error: "нет разрешения на камеру — разрешите камеру для Dewiar в настройках телефона" };
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false }); }
+  catch (e) { return { ok: false, error: "камера не открылась (" + (e.message || e.name) + ")" }; }
+  const box = document.createElement("div");
+  box.id = "cam"; box.innerHTML = `<video autoplay playsinline muted class="${facing === "user" ? "mirror" : ""}"></video><b></b>`;
+  document.body.appendChild(box);
+  const v = box.querySelector("video"), cnt = box.querySelector("b");
+  try {
+    v.srcObject = stream; await v.play().catch(() => {});
+    for (let i = 0; i < 50 && !v.videoWidth; i++) await sleep(100);
+    for (let i = 0; i < 12 && lum(v) < 14; i++) await sleep(200);     // первые кадры у камеры тёмные — ждём, пока «проснётся»
+    for (const n of ["3", "2", "1"]) { cnt.textContent = n; D.vibrate(15); await sleep(650); }
+    cnt.textContent = ""; box.classList.add("flash");
+    let light = lum(v);
+    for (let i = 0; i < 6 && light < 14; i++) { await sleep(300); light = lum(v); }   // кадр всё ещё чёрный — ещё немного подождём
+    const k = Math.min(1, 1024 / Math.max(v.videoWidth || 1, v.videoHeight || 1)), cv = document.createElement("canvas");
+    cv.width = Math.round((v.videoWidth || 640) * k); cv.height = Math.round((v.videoHeight || 480) * k);
+    cv.getContext("2d").drawImage(v, 0, 0, cv.width, cv.height);
+    const dataUrl = cv.toDataURL("image/jpeg", 0.85);
+    await sleep(250);
+    try { fileSave("last_photo.txt", dataUrl); } catch (e) { }
+    showPhotoCard(dataUrl);
+    return { ok: true, dataUrl, dark: light < 14 };
+  } finally {
+    stream.getTracks().forEach(t => t.stop());
+    try { v.srcObject = null; } catch (e) { }
+    box.remove();
+    camAt = Date.now();
+  }
+}
+
+/* ---------- интернет: поиск (DuckDuckGo), страница, погода (open-meteo) ----------
+   Провайдер режет поисковик или сайт («Connection reset») — ищем и читаем через сервер Dewiar (cloud.php ?p=/search, /fetch),
+   как агент на сайте. Нужен вход в аккаунт dewiar.pro или ключ Dewiar. */
+async function dewiarWeb(kind, value) {
+  const c = syncCred();
+  if (!c) throw new Error("нет входа в аккаунт dewiar.pro и ключа Dewiar");
+  const r = await http("GET", c.base + "?p=/" + kind + "&" + (kind === "search" ? "q=" : "url=") + encodeURIComponent(value), { headers: { Authorization: "Bearer " + c.token }, timeout: 40000 });
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  if (r.status !== 200) throw new Error((d.error && d.error.message) || "сервер ответил " + r.status);
+  return d;
+}
+async function webSearch(q) {
+  q = String(q || "").trim();
+  if (!q) return "Ошибка: пустой запрос — напиши, что искать.";
+  let out = [];
+  try {
+    const r = await http("POST", "https://html.duckduckgo.com/html/", { headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Mozilla/5.0 (Linux; Android 14) Dewiar" },
+      body: "q=" + encodeURIComponent(q) + "&kl=ru-ru", timeout: 15000 });
+    if (r.status !== 200) throw new Error("поисковик ответил " + r.status);
+    const re = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+    let m;
+    while ((m = re.exec(r.body)) && out.length < 6) {
+      let u = m[1]; const uu = u.match(/uddg=([^&]+)/); if (uu) u = decodeURIComponent(uu[1]);
+      out.push(`${stripHtml(m[2])}\n${stripHtml(m[3])}\n${u}`);
+    }
+    if (!out.length && /anomaly|captcha/i.test(r.body || "")) throw new Error("поисковик просит капчу");
+  } catch (e) {
+    try { out = ((await dewiarWeb("search", q)).results || []).slice(0, 6).map(x => `${x.title}\n${x.snippet}\n${x.url}`); }
+    catch (e2) { return `Ошибка: поиск недоступен (${e.message}; через сервер Dewiar: ${e2.message}).`; }
+  }
+  return out.length ? out.join("\n\n") : "Поиск ничего не дал.";
+}
+async function readPage(url) {
+  if (!/^https?:/.test(url)) url = "https://" + url;
+  try {
+    const r = await http("GET", url, { headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 14) Dewiar" }, timeout: 20000 });
+    if (r.status === 403 || r.status === 451) throw new Error("сайт не пускает (" + r.status + ")");
+    return stripHtml(r.body || "").slice(0, 7000) || "Страница пустая.";
+  } catch (e) {
+    try { return String((await dewiarWeb("fetch", url)).text || "").slice(0, 7000) || "Страница пустая."; }
+    catch (e2) { return `Ошибка: страница не открылась (${e.message}).`; }
+  }
+}
+const WMO = { 0: "ясно", 1: "в основном ясно", 2: "переменная облачность", 3: "пасмурно", 45: "туман", 48: "изморозь", 51: "морось", 53: "морось", 55: "сильная морось",
+  61: "небольшой дождь", 63: "дождь", 65: "сильный дождь", 66: "ледяной дождь", 67: "ледяной дождь", 71: "небольшой снег", 73: "снег", 75: "сильный снег", 77: "снежная крупа",
+  80: "ливень", 81: "ливни", 82: "сильные ливни", 85: "снегопад", 86: "сильный снегопад", 95: "гроза", 96: "гроза с градом", 99: "гроза с градом" };
+async function weather(city, days) {
+  if (!city) return "Ошибка: спроси, в каком городе.";
+  const g = JSON.parse((await http("GET", "https://geocoding-api.open-meteo.com/v1/search?count=1&language=ru&name=" + encodeURIComponent(city), { timeout: 12000 })).body || "{}");
+  const p = (g.results || [])[0]; if (!p) return `Город «${city}» не нашёлся.`;
+  const u = `https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=${Math.min(7, Math.max(1, days))}`;
+  const w = JSON.parse((await http("GET", u, { timeout: 12000 })).body || "{}"), c = w.current || {}, d = w.daily || {};
+  const lines = [`${p.name}: сейчас ${Math.round(c.temperature_2m)}°, ощущается как ${Math.round(c.apparent_temperature)}°, ${WMO[c.weather_code] || ""}, ветер ${Math.round(c.wind_speed_10m)} км/ч.`];
+  (d.time || []).forEach((t, i) => lines.push(`${t}: ${Math.round(d.temperature_2m_min[i])}…${Math.round(d.temperature_2m_max[i])}°, ${WMO[d.weather_code[i]] || ""}, осадки ${d.precipitation_probability_max[i] != null ? d.precipitation_probability_max[i] : 0}%.`));
+  return lines.join("\n");
+}
+
+/* ---------- заметки и деньги — файлы notes.json и money.json в памяти приложения (Dewiar.files/saveFile);
+   после каждой записи — синхронизация с компьютером (syncSoon) ---------- */
+const notes = () => { try { return JSON.parse(fileGet("notes.json") || "[]"); } catch (e) { return []; } };
+const saveNotes = (n) => { fileSave("notes.json", JSON.stringify(n)); syncSoon(); };
+const money = () => { try { return JSON.parse(fileGet("money.json") || "[]"); } catch (e) { return []; } };
+const saveMoney = (m) => { fileSave("money.json", JSON.stringify(m)); syncSoon(); };
+function periodStart(p) { const d = new Date(); d.setHours(0, 0, 0, 0);
+  if (p === "week") d.setDate(d.getDate() - (d.getDay() + 6) % 7); else if (p === "month") d.setDate(1); else if (p === "year") { d.setMonth(0, 1); }
+  return isoLocal(d).slice(0, 10); }
+function moneyReport(p) {
+  const from = periodStart(p), items = money().filter(x => x.date >= from), by = {};
+  items.forEach(x => { const c = by[x.currency] = by[x.currency] || { inc: 0, exp: 0, cats: {} }; if (x.kind === "income") c.inc += x.amount; else { c.exp += x.amount; c.cats[x.category] = (c.cats[x.category] || 0) + x.amount; } });
+  const name = { today: "сегодня", week: "за неделю", month: "за месяц", year: "за год" }[p] || "";
+  const parts = Object.entries(by).map(([cur, c]) => `${cur}: доходы ${+c.inc.toFixed(2)}, расходы ${+c.exp.toFixed(2)}, остаток ${+(c.inc - c.exp).toFixed(2)}` +
+    (Object.keys(c.cats).length ? "; по категориям: " + Object.entries(c.cats).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${+v.toFixed(2)}`).join(", ") : ""));
+  return { text: parts.length ? `Деньги ${name}. ` + parts.join(". ") : `Записей ${name} нет.`, by, items };
+}
+
+/* ---------- умный дом Яндекса (тот же дом, что у Алисы) ----------
+   API api.iot.yandex.net с ключом OAuth (права iot:view, iot:control) из S.home.token. Простые команды («включи свет
+   в спальне») — без модели (homeQuick), остальное — инструментом smart_home. */
+const IOT = "https://api.iot.yandex.net/v1.0";
+let homeInfo = null, homeT = 0;                    // список устройств и комнат — кэш на 2 минуты
+async function homeReq(method, path, body) {
+  const r = await http(method, IOT + path, { headers: { Authorization: "Bearer " + S.home.token, "Content-Type": "application/json" }, body, timeout: 12000 });
+  if (r.status === 401) throw new Error("ключ умного дома больше не действует — подключите заново");
+  if (r.status === 403) throw new Error("у ключа нет прав iot:view и iot:control");
+  const d = JSON.parse(r.body || "{}"); if (d.status && d.status !== "ok") throw new Error(d.message || "умный дом ответил ошибкой"); return d;
+}
+async function homeGet(force) {
+  if (!force && homeInfo && Date.now() - homeT < 120000) return homeInfo;
+  const d = await homeReq("GET", "/user/info"), rooms = {};
+  (d.rooms || []).forEach(r => rooms[r.id] = r.name);
+  homeInfo = { rooms: d.rooms || [], scenarios: d.scenarios || [], devices: (d.devices || []).map(x => Object.assign(x, { room_name: rooms[x.room] || "" })) }; homeT = Date.now();
+  return homeInfo;
+}
+const HTYPES = { "свет": "devices.types.light", "ламп": "devices.types.light", "люстр": "devices.types.light", "торшер": "devices.types.light", "светильник": "devices.types.light",
+  "ночник": "devices.types.light", "подсветк": "devices.types.light", "розетк": "devices.types.socket", "кондиционер": "devices.types.thermostat.ac", "обогреват": "devices.types.thermostat",
+  "чайник": "devices.types.cooking.kettle", "пылесос": "devices.types.vacuum_cleaner", "телевизор": "devices.types.media_device.tv", "штор": "devices.types.openable.curtain",
+  "увлажнител": "devices.types.humidifier", "вентилятор": "devices.types.fan" };
+const HSKIP = new Set(["в", "во", "на", "мне", "пожалуйста", "у", "с", "и", "весь", "все", "всё", "везде", "всех", "сделай", "поставь"]);
+const HGEN = new Set(["свет", "света", "устройства", "лампы", "лампочки"]);
+const hw = (s) => String(s || "").toLowerCase().replace(/ё/g, "е").match(/[a-zа-я0-9]+/g) || [];
+function hsim(a, b) { if (a === b) return true; if (a.length < 4 || b.length < 4) return false; let n = 0; while (n < Math.min(a.length, b.length) && a[n] === b[n]) n++; return n >= 4 && n >= Math.min(a.length, b.length) - 2; }
+/* Устройства по словам: сначала по названию (в названной комнате, если она есть), потом по типу («свет», «розетка»),
+   потом «весь …» — всё в комнате. hsim — то же слово в другом падеже. -> [] — не нашли (быстрая команда уступит модели). */
+function homeMatch(target, info) {
+  const all = hw(target), words = all.filter(w => !HSKIP.has(w)), allw = all.some(w => /^(весь|все|всё|везде|всех)$/.test(w));
+  const rooms = info.rooms.filter(r => hw(r.name).some(a => words.some(b => hsim(a, b)))), rid = new Set(rooms.map(r => r.id));
+  const rw = new Set(words.filter(b => rooms.some(r => hw(r.name).some(a => hsim(a, b))))), rest = words.filter(w => !rw.has(w));
+  const inRoom = (d) => !rid.size || rid.has(d.room);
+  const sc = info.devices.map(d => [hw(d.name).reduce((s, a) => s + rest.filter(b => !HGEN.has(b) && hsim(a, b)).length, 0), d]).filter(([s, d]) => s && inRoom(d));
+  if (sc.length) { const top = Math.max(...sc.map(x => x[0])); return sc.filter(x => x[0] === top).map(x => x[1]); }
+  const k = Object.keys(HTYPES).find(k => rest.some(w => w.startsWith(k)));
+  if (k) return info.devices.filter(d => String(d.type).startsWith(HTYPES[k]) && inRoom(d));
+  if (allw && rid.size) return info.devices.filter(d => rid.has(d.room));
+  return [];
+}
+async function homeAct(devs, op, value) {
+  const cap = (d, t, inst) => (d.capabilities || []).find(c => c.type === t && (!inst || ((c.parameters || {}).instance === inst) || ((c.state || {}).instance === inst)));
+  const acts = [];
+  devs.forEach(d => {
+    const a = [], ON = "devices.capabilities.on_off", RG = "devices.capabilities.range";
+    if (op === "on" || op === "off") { if (cap(d, ON)) a.push({ type: ON, state: { instance: "on", value: op === "on" } }); }
+    else if (["brightness", "brighter", "dimmer"].includes(op)) { const c = cap(d, RG, "brightness"); if (c) { const cur = (c.state || {}).value || 50;
+      a.push({ type: RG, state: { instance: "brightness", value: Math.max(1, Math.min(100, Math.round(op === "brightness" ? value : cur + (op === "brighter" ? 25 : -25)))) } }); if (cap(d, ON)) a.push({ type: ON, state: { instance: "on", value: true } }); } }
+    else if (op === "temperature") { if (cap(d, RG, "temperature")) { a.push({ type: RG, state: { instance: "temperature", value: Math.round(value) } }); if (cap(d, ON)) a.push({ type: ON, state: { instance: "on", value: true } }); } }
+    if (a.length) acts.push({ id: d.id, actions: a });
+  });
+  if (!acts.length) throw new Error("эти устройства так не умеют");
+  await homeReq("POST", "/devices/actions", { devices: acts }); homeT = 0; return acts.length;
+}
+function homeParse(t) {
+  let m;
+  if ((m = t.match(/^(?:запусти|включи|активируй) сценари[йя] (.+)$/))) return { op: "scenario", target: m[1] };
+  if ((m = t.match(/^(?:сделай )?(.+?) (?:на|в) (\d+|[а-я ]+?) ?(?:%|процент[а-яё]*)$/)) && wordsNum(m[2]) != null && !/громк|звук/.test(m[1])) return { op: "brightness", target: m[1], value: wordsNum(m[2]) };
+  if ((m = t.match(/^(?:поставь )?(.*(?:кондиционер|обогреват|термостат)[а-яё]*.*?) (?:на )?(\d+|[а-я ]+?)(?: градус[а-яё]*)?$/)) && wordsNum(m[2]) >= 10 && wordsNum(m[2]) <= 35) return { op: "temperature", target: m[1], value: wordsNum(m[2]) };
+  if ((m = t.match(/^(?:сделай )?(.*?) ?(ярче|поярче|темнее|потемнее|приглуши) ?(.*)$/)) && /свет|ламп|люстр|торшер/.test(t)) return { op: /ярче/.test(m[2]) ? "brighter" : "dimmer", target: (m[1] + " " + m[3]).trim() || "свет" };
+  if ((m = t.match(/^(?:включи|зажги|открой|подними) (.+)$/))) return { op: "on", target: m[1] };
+  if ((m = t.match(/^(?:выключи|отключи|погаси|потуши|закрой|опусти) (.+)$/))) return { op: "off", target: m[1] };
+  return null;
+}
+async function homeQuick(t) {
+  const c = homeParse(t); if (!c) return null;
+  let info; try { info = await homeGet(); } catch (e) { return null; }
+  try {
+    if (c.op === "scenario") { const s = info.scenarios.find(s => hw(s.name).some(a => hw(c.target).some(b => hsim(a, b)))); if (!s) return null;
+      await homeReq("POST", `/scenarios/${s.id}/actions`, {}); return { say: `Запустил сценарий «${s.name}».` }; }
+    const devs = homeMatch(c.target, info); if (!devs.length) return null;
+    await homeAct(devs, c.op, c.value);
+    const what = devs.length === 1 ? devs[0].name : devs.every(d => String(d.type).startsWith("devices.types.light")) ? "свет" : `${devs.length} устройства`;
+    const verb = { on: "Включил", off: "Выключил", brighter: "Сделал ярче", dimmer: "Приглушил" }[c.op];
+    return { say: c.op === "brightness" ? `${what[0].toUpperCase() + what.slice(1)} — ${c.value}%.` : c.op === "temperature" ? `${what} — ${c.value}°.` : `${verb}: ${what}.` };
+  } catch (e) { return { say: "Умный дом: " + e.message }; }
+}
+async function homeTool(a) {
+  const info = await homeGet();
+  if (a.action === "list") return info.devices.map(d => `${d.name}${d.room_name ? " (" + d.room_name + ")" : ""}`).join("; ") + (info.scenarios.length ? ". Сценарии: " + info.scenarios.map(s => s.name).join(", ") : "");
+  if (a.action === "scenario") { const s = info.scenarios.find(s => hw(s.name).some(x => hw(a.target).some(y => hsim(x, y)))); if (!s) return "Нет такого сценария."; await homeReq("POST", `/scenarios/${s.id}/actions`, {}); return `Запущен «${s.name}».`; }
+  const devs = homeMatch(a.target || "", info); if (!devs.length) return "Не нашёл такого устройства. Есть: " + info.devices.map(d => d.name).join(", ");
+  const n = await homeAct(devs, a.action, a.value); return `Готово: ${devs.map(d => d.name).join(", ")} (${n}).`;
+}
+
+/* ---------- листы снизу (.sheet): открыть, закрыть, смахнуть вниз; за ними — содержимое каждого листа ---------- */
+function openSheet(id) { closeSheets(true); $(id).classList.add("on"); $("#dim").classList.add("on"); }
+function closeSheets(keepDim) { $$(".sheet.on").forEach(s => s.classList.remove("on")); if (!keepDim) $("#dim").classList.remove("on"); }
+$("#dim").onclick = () => closeSheets();
+let touchY = null;
+document.addEventListener("touchstart", e => { const s = e.target.closest(".sheet"); touchY = s && s.scrollTop <= 0 ? e.touches[0].clientY : null; }, { passive: true });
+document.addEventListener("touchend", e => { if (touchY != null && e.changedTouches[0].clientY - touchY > 90) closeSheets(); touchY = null; }, { passive: true });
+
+/* персонаж */
+let pEnts = [];
+$("#who").onclick = () => {
+  pEnts.forEach(e => e.dead = true); pEnts = [];
+  $("#plist").innerHTML = PERSONAS.map(p => `<button class="pi${p.id === S.persona ? " on" : ""}" data-id="${p.id}"><canvas></canvas><span><b>${esc(p.name)}</b><small>${esc(p.role || "")}${p.tagline ? " · " + esc(p.tagline) : ""}</small></span></button>`).join("");
+  $$("#plist .pi").forEach(b => {
+    const p = PERSONAS.find(x => x.id === b.dataset.id);
+    const e = new DewiarEntity($("canvas", b), { style: p.avatar && p.style !== "aura" ? "photo" : p.style, color: p.color, image: p.avatar || null, plate: true, ring: false });
+    e.set({ state: "idle" }); pEnts.push(e);
+    b.onclick = () => { S.persona = p.id; saveS(); applyPersona(); closeSheets(); showYou(""); showBot(`Теперь отвечает ${p.name}.`); say(`Привет! Это ${p.name}.`); };
+  });
+  renderKbPanel();
+  openSheet("#sh-persona");
+};
+
+/* разговор */
+$("#b-hist").onclick = () => {
+  const h = history.slice(-40);
+  $("#hlist").innerHTML = h.length ? h.map(m => `<div class="msg ${m.role === "user" ? "u" : "a"}"><div>${esc(m.content)}</div>${m.role !== "user" && m.who ? `<small>${esc((PERSONAS.find(p => p.id === m.who) || {}).name || "")}</small>` : ""}</div>`).join("")
+    : `<div class="empty">Разговор пуст. Нажмите микрофон и спросите что-нибудь.</div>`;
+  openSheet("#sh-hist"); setTimeout(() => $("#sh-hist").scrollTop = 1e6, 50);
+};
+$("#h-clear").onclick = () => { history = []; saveH(); convReset(); $("#b-hist").onclick(); toast("Начинаем заново"); };
+
+/* мой день */
+let dayTab = "rem";
+$$("#day-tabs button").forEach(b => b.onclick = () => { dayTab = b.dataset.t; $$("#day-tabs button").forEach(x => x.classList.toggle("on", x === b)); renderDay(); });
+$("#b-day").onclick = () => { renderDay(); openSheet("#sh-day"); };
+/* Голосом / текстом: в дороге, на встрече, в транспорте ответ удобнее читать. Микрофон работает как прежде —
+   выключается только голос ответа; выбор помнится. */
+function voiceBtn() {
+  const b = $("#b-voice"), off = !!S.textMode;
+  b.classList.toggle("off", off); b.setAttribute("aria-pressed", String(off));
+  b.title = off ? "Отвечать голосом" : "Отвечать текстом, без голоса";
+}
+$("#b-voice").onclick = () => {
+  S.textMode = !S.textMode; saveS(); voiceBtn();
+  if (S.textMode) { stopVoice(); if (state === "speaking" && !busy) finishTurn(); }
+  toast(S.textMode ? "Отвечаю текстом — голос выключен" : "Отвечаю голосом", 1800);
+};
+voiceBtn();
+const X_SVG = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+function renderDay() {
+  const box = $("#day-body");
+  if (dayTab === "rem") {
+    const l = JSON.parse(D.alarms() || "[]").sort((a, b) => a.at - b.at);
+    const jobs = (mind().jobs || []).filter(j => !j.paused);       // дела по расписанию — их делает компьютер (утренняя сводка, итоги)
+    box.innerHTML = (l.length ? l.map(x => { const d = new Date(x.at); return `<div class="it"><div class="tm">${pad(d.getHours())}:${pad(d.getMinutes())}</div><div class="bd"><b>${esc(x.title)}</b><small>${x.kind === "alarm" ? "⏰ будильник" : x.kind === "timer" ? "⏱ таймер" : "🔔 напоминание"} · ${esc(whenText(d))}${x.repeat ? " · " + REP_RU[x.repeat] : ""}</small></div><button class="x" data-id="${esc(x.id)}">${X_SVG}</button></div>`; }).join("")
+      : jobs.length ? "" : `<div class="empty">Напоминаний нет.<br>Скажите: «напомни завтра в 9 позвонить маме» или «будильник на 7».</div>`)
+      + (jobs.length ? `<div class="bugh">По расписанию — делает компьютер</div>` + jobs.map(j => { const d = new Date(j.at);
+          return `<div class="it job"><div class="tm">${pad(d.getHours())}:${pad(d.getMinutes())}</div><div class="bd"><b>${esc(String(j.text).split(":")[0].slice(0, 80))}</b><small>${esc(j.repeat || whenText(d))}</small></div></div>`; }).join("")
+        + `<p class="hint" style="margin:6px 4px 0">Изменить или выключить — на компьютере: студия → «Напоминания».</p>` : "")
+      + (D.exactAlarms() ? "" : `<div class="card"><b>Будильники могут опаздывать</b><p class="hint">Разрешите точное время: «Будильники и напоминания».</p><button class="btn p" onclick="Dewiar.openSettings('alarms')">Разрешить</button></div>`);
+    $$(".x", box).forEach(b => b.onclick = () => { D.alarmCancel(b.dataset.id); syncSoon(); renderDay(); });
+  } else if (dayTab === "notes") {
+    const n = notes().slice().reverse();
+    const body = (t) => String(t || "").replace(/^\s*#[^\n]*\n+(\*[^\n]*\*\n+)?/, "");      // заметка с компьютера: без заголовка и даты
+    box.innerHTML = n.length ? n.map(x => `<div class="it"><div class="bd"><b>${esc(x.title)}</b><small>${esc(body(x.text).slice(0, 220))}</small></div><button class="x" data-id="${esc(x.id)}">${X_SVG}</button></div>`).join("")
+      : `<div class="empty">Заметок нет.<br>Скажите: «запиши: купить хлеб и молоко».</div>`;
+    $$(".x", box).forEach(b => b.onclick = () => { saveNotes(notes().filter(x => x.id !== b.dataset.id)); renderDay(); });
+  } else if (dayTab === "made") {
+    const l = apps().slice().reverse();
+    box.innerHTML = tasksHtml() + (l.length ? `<div class="bugh">Сделано на телефоне</div>` + l.map(x => `<div class="it"><div class="bd" data-open="${esc(x.id)}"><b>${esc(x.title)}</b><small>${esc(whenText(new Date(x.ts)))} · ${Math.max(1, Math.round(x.size / 1024))} КБ · нажмите, чтобы открыть</small></div><button class="x" data-id="${esc(x.id)}">${X_SVG}</button></div>`).join("")
+      : Object.keys(mind().tasks).length ? "" : `<div class="empty">Пока ничего не сделано.<br>Скажите: «сделай презентацию о погоде на завтра» или «сделай игру в крестики-нолики».</div>`);
+    wireTasks(box, renderDay);
+    $$("[data-open]", box).forEach(b => b.onclick = () => openApp(b.dataset.open));
+    $$(".x", box).forEach(b => b.onclick = () => { fileSave("app-" + b.dataset.id + ".html", ""); fileSave("apps.json", JSON.stringify(apps().filter(x => x.id !== b.dataset.id))); renderDay(); });
+  } else {
+    const r = moneyReport("month"), c = r.by[CUR] || Object.values(r.by)[0] || { inc: 0, exp: 0 }, cur = r.by[CUR] ? CUR : (Object.keys(r.by)[0] || CUR);
+    const items = money().slice(-30).reverse();
+    box.innerHTML = `<div class="sum"><div><b style="color:var(--good)">${+c.inc.toFixed(2)}</b><small>доходы</small></div><div><b style="color:#FF8FA8">${+c.exp.toFixed(2)}</b><small>расходы</small></div><div><b>${+(c.inc - c.exp).toFixed(2)}</b><small>остаток, ${cur}</small></div></div>`
+      + (items.length ? items.map(x => `<div class="it"><div class="tm" style="color:${x.kind === "income" ? "var(--good)" : "#FF8FA8"};font-size:15px">${x.kind === "income" ? "+" : "−"}${x.amount}</div><div class="bd"><b>${esc(x.note || x.category)}</b><small>${esc(x.category)} · ${esc(x.date)} · ${esc(x.currency)}</small></div><button class="x" data-id="${esc(x.id)}">${X_SVG}</button></div>`).join("")
+      : `<div class="empty">Записей нет.<br>Скажите: «купил кофе за восемь пятьдесят».</div>`);
+    $$(".x", box).forEach(b => b.onclick = () => { saveMoney(money().filter(x => x.id !== b.dataset.id)); renderDay(); });
+  }
+}
+
+/* ---------- сделанное: мини-программы и страницы, которые ассистент сделал прямо на телефоне (make_app) ----------
+   Программа сразу открывается на экране — иначе после «Готово» непонятно, где её взять; хранится в «Мой день» →
+   «Сделанное» (последние 40: файлы app-<id>.html и список apps.json), её можно сохранить в «Загрузки».
+   Показ — в iframe sandbox без allow-same-origin: код, написанный моделью, не достаёт до window.Dewiar и данных приложения. */
+const apps = () => { try { return JSON.parse(fileGet("apps.json") || "[]") || []; } catch (e) { return []; } };
+function saveApp(title, html) {
+  const id = "a" + Date.now().toString(36);
+  fileSave("app-" + id + ".html", html);
+  const l = apps().concat([{ id, title: String(title).slice(0, 60), ts: Date.now(), size: html.length }]);
+  l.slice(0, -40).forEach(x => fileSave("app-" + x.id + ".html", ""));
+  fileSave("apps.json", JSON.stringify(l.slice(-40)));
+  return l[l.length - 1];
+}
+const appHtml = (id) => fileGet("app-" + id + ".html") || "";
+function appCard(ap) {
+  return `<div class="appc"><b>${esc(ap.title)}</b><small>сделано сейчас · откроется на весь экран</small><div class="row2"><button class="btn p" onclick="openApp('${ap.id}')">Открыть</button><button class="btn" onclick="saveAppDl('${ap.id}')">В «Загрузки»</button></div></div>`;
+}
+function openApp(id) {
+  const ap = apps().find(x => x.id === id), html = appHtml(id);
+  if (!ap || !html) { toast("Не нашёл — возможно, удалена"); return; }
+  openHtmlView(ap.title, html, () => saveAppDl(id));
+}
+function saveAppDl(id) {
+  const ap = apps().find(x => x.id === id), html = appHtml(id);
+  if (!ap || !html) return;
+  const name = (ap.title.replace(/[\\/:*?"<>|]/g, " ").trim() || "Dewiar") + ".html";
+  const where = D.saveDownload ? D.saveDownload(name, "text/html", html) : "";
+  toast(where ? "Сохранено: " + where + " — откроется в браузере" : "Не получилось сохранить", 3500);
+}
+
+/* ---------- файлы результатов задач: компьютер или облако кладут их в облако (?p=/files), здесь — открыть и сохранить.
+   HTML (страница, презентация, программа) открывается тут же, в том же безопасном окне, что и «Сделанное»; остальное
+   сохраняется в «Загрузки/Dewiar». ---------- */
+/* Что открывается прямо в приложении: страницы — как есть, текст и код — моноширинным текстом, картинки — картинкой;
+   остальное (pptx, docx, zip…) — «В «Загрузки»» и откроется в своей программе. */
+const VIEWABLE = /\.(?:html?|md|txt|log|csv|tsv|json|ya?ml|srt|vtt|py|js|ts|css|sh|java|kt|c|cpp|h|go|rs|php|sql|xml|ini|toml|png|jpe?g|gif|webp|svg)$/i;
+function fileViewHtml(name, b64, type) {
+  const page = (body) => `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;background:#101018;color:#e8e8f0;font:14px/1.5 system-ui">${body}</body>`;
+  if (/\.html?$/i.test(name)) return b64text(b64);
+  if (/\.(?:png|jpe?g|gif|webp|svg)$/i.test(name)) {
+    const mime = type || (/\.svg$/i.test(name) ? "image/svg+xml" : /\.png$/i.test(name) ? "image/png" : /\.gif$/i.test(name) ? "image/gif" : /\.webp$/i.test(name) ? "image/webp" : "image/jpeg");
+    return page(`<img src="data:${mime};base64,${b64}" style="display:block;max-width:100%;margin:0 auto">`);
+  }
+  return page(`<pre style="margin:0;padding:14px;white-space:pre-wrap;word-break:break-word;font:13px/1.45 ui-monospace,monospace">${esc(b64text(b64))}</pre>`);
+}
+function taskFiles(t) {
+  const f = t.files || [];
+  if (!f.length) return (t.outputs || []).length ? `<small class="hint">Файлы на компьютере: ${t.outputs.map(esc).join(", ")}</small>` : "";
+  return `<div class="tfiles">${f.map(x => `<div class="tf"><span>${esc(x.title || x.name)}<small>${esc(x.name)} · ${fsize(x.size)}</small></span>`
+    + (VIEWABLE.test(x.name) ? `<button class="btn p" data-fo="${esc(x.id)}" data-fn="${esc(x.name)}">Открыть</button>` : "")
+    + `<button class="btn" data-fs="${esc(x.id)}" data-fn="${esc(x.name)}">В «Загрузки»</button></div>`).join("")}</div>`;
+}
+const fsize = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + " МБ" : Math.max(1, Math.round((n || 0) / 1024)) + " КБ";
+function wireFiles(root) {
+  $$("[data-fo]", root).forEach(b => b.onclick = (e) => { e.stopPropagation(); taskFileOpen(b.dataset.fo, b.dataset.fn); });
+  $$("[data-fs]", root).forEach(b => b.onclick = (e) => { e.stopPropagation(); taskFileSave(b.dataset.fs, b.dataset.fn); });
+}
+async function taskFileGet(id) {
+  const c = syncCred(); if (!c) throw new Error("нет входа в аккаунт или ключа Dewiar");
+  const r = await http("GET", c.base + "?p=/files&b64=1&id=" + encodeURIComponent(id), { headers: { Authorization: "Bearer " + c.token }, timeout: 60000 });
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  if (r.status >= 400 || !d.b64) throw new Error((d.error && d.error.message) || "файл не скачался (" + r.status + ")");
+  return d;
+}
+const b64text = (b) => { try { return decodeURIComponent(escape(atob(b))); } catch (e) { return atob(b); } };
+async function taskFileOpen(id, name) {
+  try { toast("Открываю…", 1200); const d = await taskFileGet(id); openHtmlView(name.replace(/\.html?$/i, ""), fileViewHtml(name, d.b64, d.type), () => taskFileSave(id, name, d)); }
+  catch (e) { plog("warn", "файл задачи: " + e.message); toast("Не открылся: " + e.message, 4000); }
+}
+async function taskFileSave(id, name, got) {
+  try {
+    const d = got || await taskFileGet(id);
+    const where = D.saveDownloadB64 ? D.saveDownloadB64(d.name || name, d.type || "application/octet-stream", d.b64)
+      : (D.saveDownload ? D.saveDownload(d.name || name, d.type || "text/plain", b64text(d.b64)) : "");
+    toast(where ? "Сохранено: " + where : "Не получилось сохранить", 3500);
+  } catch (e) { plog("warn", "файл задачи: " + e.message); toast("Не сохранился: " + e.message, 4000); }
+}
+function openHtmlView(title, html, onSave) {
+  let v = $("#appview");
+  if (!v) { v = document.createElement("div"); v.id = "appview"; document.body.appendChild(v); }
+  v.innerHTML = `<div class="avh"><b>${esc(title)}</b><button class="btn" id="av-dl">В «Загрузки»</button><button class="ib" id="av-x" title="Закрыть">${X_SVG}</button></div><iframe sandbox="allow-scripts allow-forms allow-modals" title="${esc(title)}"></iframe>`;
+  $("iframe", v).srcdoc = html;
+  v.classList.add("on");
+  $("#av-x").onclick = () => { v.classList.remove("on"); v.innerHTML = ""; };
+  $("#av-dl").onclick = onSave;
+}
+/* задача закончилась — карточка в разговоре: итог и файлы, чтобы не искать их по меню */
+function taskDoneCard(id) {
+  const t = mind().tasks[id]; if (!t) return;
+  showCard(`<div class="appc task-done"><b>${t.status === "done" ? "✓" : "⚠"} ${esc(t.title)}</b><small>${t.status === "done" ? "задача готова" + (t.where === "cloud" ? " · сделано в облаке Dewiar" : " · сделано на компьютере") : esc(String(t.error || "не вышло").slice(0, 160))}</small>`
+    + (t.result ? `<div class="tres">${mdLite(String(t.result).slice(0, 700))}</div>` : "") + taskFiles(t) + `</div>`);
+  wireFiles($("#card"));
+}
+
+/* ---------- душа: дневник, душа персонажа, конституция, задачи (с компьютера) ---------- */
+let soulTab = "diary";
+$$("#soul-tabs button").forEach(b => b.onclick = () => { soulTab = b.dataset.t; $("#soul-body").dataset.edit = ""; $$("#soul-tabs button").forEach(x => x.classList.toggle("on", x === b)); renderSoul(); });
+$("#b-soul").onclick = () => { renderSoul(); openSheet("#sh-soul"); syncSoon(); };
+const MON_G = MON;
+function dayHuman(iso) { const d = new Date(iso + "T12:00"); if (isNaN(d)) return iso; const t = new Date(); const y = new Date(Date.now() - 864e5);
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  return same(d, t) ? "Сегодня" : same(d, y) ? "Вчера" : `${d.getDate()} ${MON_G[d.getMonth()]}` + (d.getFullYear() !== t.getFullYear() ? ` ${d.getFullYear()}` : ""); }
+function mdLite(t) {          // Markdown дневника → HTML: сначала экранируем, потом размечаем — пришедший текст не вставит свой HTML
+  return esc(String(t || "").replace(/^# [^\n]*\n+/, "").replace(/\n{3,}/g, "\n\n").trim()).replace(/^## (.*)$/gm, "<h4>$1</h4>").replace(/^### (.*)$/gm, "<h5>$1</h5>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>").replace(/^_(.*)_$/gm, "<i>$1</i>").replace(/^- (.*)$/gm, "• $1").replace(/<\/(h4|h5)>\n+/g, "</$1>");
+}
+/* Задачи (большая работа на компьютере или в облаке) — в «Мой день» → «Сделанное»: там их и ищут, рядом со сделанным
+   на телефоне. Поручить — taskToPc; ход и итог приходят синхронизацией (mind().tasks). */
+function tasksHtml() {
+  const m = mind(), on = !!(S.sync.on && syncCred());
+  const ts = Object.entries(m.tasks).sort((a, b) => String(b[1].updated).localeCompare(String(a[1].updated))), q = qGet("taskq");
+  if (!on) return `<div class="card"><b>Большие задачи</b><p class="hint">Презентации, отчёты, исследования делает компьютер с Dewiar или облако Dewiar — нужна синхронизация: тот же ключ Dewiar или вход аккаунтом, что на компьютере.</p><button class="btn p" id="so-sync">Открыть настройки</button></div>`;
+  return `<div class="card"><label class="f"><span>Поручить большую задачу</span><textarea id="tk-goal" rows="2" placeholder="Например: «сделай презентацию о погоде на завтра» или «сравни 5 ноутбуков до 1500 рублей»"></textarea></label>
+      <button class="btn p w" id="tk-go">Передать</button><p class="hint">${pcOnline() ? "Компьютер на связи — сделает он." : "Компьютер не на связи — сделает облако Dewiar: найдёт, напишет, соберёт файл. Программы на компьютере облако не запускает."}</p></div>`
+    + q.map(x => `<div class="it"><div class="bd"><b>${esc(x.title)}</b><small>⏳ отправляю…</small></div></div>`).join("")
+    + (ts.length ? `<div class="bugh">Задачи</div>` + ts.map(([id, t]) => `<details class="dday task ${esc(t.status || "")}"${t.status === "done" && (t.files || []).length ? " open" : ""}><summary><div class="bd"><b>${esc(t.title)}</b><small><span class="tst">${esc(TASK_RU[t.status] || t.status || "")}</span>${t.where === "cloud" ? " · в облаке" : ""}${t.activity && t.status === "running" ? " · " + esc(t.activity) : ""}</small></div></summary>
+        <div class="dtext tk">${t.question && t.status === "waiting" ? `<p><b>Вопрос:</b> ${esc(t.question)}</p>` : ""}${t.result ? `<p>${mdLite(t.result)}</p>` : `<p class="hint">${esc(t.goal || "")}</p>`}${t.error ? `<p style="color:#FF8FA8">${esc(t.error)}</p>` : ""}${taskFiles(t)}</div></details>`).join("") : "");
+}
+function wireTasks(box, again) {
+  if ($("#tk-go")) $("#tk-go").onclick = () => { const g = $("#tk-goal").value.trim(); if (!g) return; try { taskToPc(g.slice(0, 60), g); toast(pcOnline() ? "Передано компьютеру" : "Делаю в облаке Dewiar — пришлю, когда будет готово", 3000); again(); } catch (e) { toast(e.message); } };
+  if ($("#so-sync")) $("#so-sync").onclick = () => openSettings("more");
+  wireFiles(box);
+}
+function renderSoul() {
+  if (!["diary", "soul", "const"].includes(soulTab)) soulTab = "diary";      // «Задачи» переехали в «Мой день» → «Сделанное»
+  const box = $("#soul-body"), m = mind(), on = !!(S.sync.on && syncCred());
+  $$("#soul-tabs button").forEach(x => x.classList.toggle("on", x.dataset.t === soulTab));
+  const off = on ? "" : `<div class="card"><b>Нужна синхронизация</b><p class="hint">Дневник и душу персонажей ведёт компьютер с Dewiar — они приходят сюда через синхронизацию. Нужен тот же ключ Dewiar или вход аккаунтом, что на компьютере.</p><button class="btn p" id="so-sync">Открыть настройки</button></div>`;
+  if (soulTab === "diary") {
+    const days = Object.keys(m.diary).sort().reverse(), ins = m.insights;
+    box.innerHTML = off + (ins && (ins.lines || []).length ? `<div class="card soulins"><small class="hint" style="margin:0">Выводы на завтра${ins.title ? " · «" + esc(ins.title) + "»" : ""}</small>${ins.lines.map(x => `<div>• ${esc(x)}</div>`).join("")}</div>` : "")
+      + (days.length ? days.map(k => { const e = m.diary[k]; const night = /## 🌙/.test(e.text);
+        return `<details class="dday"><summary><div class="tm">${esc(dayHuman(k))}</div><div class="bd"><b>${esc(e.title || (night ? "Ночная запись" : "Записи дня"))}</b><small>${esc(e.mood || "")}${e.mood ? " · " : ""}${esc(String(e.text).replace(/^#+ [^\n]*$/gm, "").replace(/[#*_]/g, "").replace(/\s+/g, " ").trim().slice(0, 120))}</small></div></summary><div class="dtext">${mdLite(e.text)}</div></details>`; }).join("")
+        : (on ? `<div class="empty">Дневник пока пуст.<br>Его ведёт ассистент на компьютере: ночью пишет о прожитом дне — о разговорах и там, и здесь.</div>` : ""));
+  } else if (soulTab === "soul") {
+    const p = persona(), names = [...new Set([p.name, ...Object.keys(m.souls)])];
+    const cur = box.dataset.sname && names.includes(box.dataset.sname) ? box.dataset.sname : p.name;
+    box.innerHTML = off + `<div class="card"><p class="hint" style="margin-top:0">Автопортрет, который персонаж пишет сам по своему дневнику (на компьютере — раз в неделю). Здесь его можно прочитать и поправить — правка уйдёт и на компьютер.</p>
+      ${names.length > 1 ? `<div class="chips">${names.map(n => `<button class="chip${n === cur ? " on" : ""}" data-n="${esc(n)}">${esc(n)}</button>`).join("")}</div>` : ""}
+      ${box.dataset.edit === "soul" ? `<label class="f"><span>Душа · ${esc(cur)}</span><textarea id="so-text" rows="14" placeholder="Душа появится, когда в дневнике наберётся пара ночных записей.">${esc((m.souls[cur] || {}).text || "")}</textarea></label>
+      <div class="row2"><button class="btn p" id="so-save" style="flex:1">Сохранить</button><button class="btn" id="so-cancel" style="flex:1">Отмена</button></div>`
+      : `${((m.souls[cur] || {}).text || "").trim() ? `<div class="dtext soulv">${mdLite(m.souls[cur].text)}</div>` : `<div class="empty">Душа появится, когда в дневнике наберётся пара ночных записей.</div>`}
+      <button class="btn w" id="so-edit">Изменить</button>`}</div>`;
+    $$(".chip[data-n]", box).forEach(b => b.onclick = () => { box.dataset.sname = b.dataset.n; box.dataset.edit = ""; renderSoul(); });
+    if ($("#so-edit")) $("#so-edit").onclick = () => { box.dataset.edit = "soul"; renderSoul(); };
+    if ($("#so-cancel")) $("#so-cancel").onclick = () => { box.dataset.edit = ""; renderSoul(); };
+    if ($("#so-save")) $("#so-save").onclick = () => { const mm = mind(); mm.souls[cur] = { text: $("#so-text").value, u: Date.now() }; saveMind(mm); syncSoon(); box.dataset.edit = ""; renderSoul(); toast("Душа сохранена"); };
+  } else if (soulTab === "const") {
+    box.innerHTML = off + `<div class="card"><p class="hint" style="margin-top:0">Принципы, которые все персонажи соблюдают всегда — с любым характером и настроением. Пишете вы; правка уйдёт и на компьютер.</p>
+      ${box.dataset.edit === "const" ? `<label class="f"><span>Конституция</span><textarea id="co-text" rows="16" placeholder="Придёт с компьютера после синхронизации.">${esc(m.constitution || "")}</textarea></label>
+      <div class="row2"><button class="btn p" id="co-save" style="flex:1">Сохранить</button><button class="btn" id="co-cancel" style="flex:1">Отмена</button></div>`
+      : `${(m.constitution || "").trim() ? `<div class="dtext soulv">${mdLite(m.constitution)}</div>` : `<div class="empty">Придёт с компьютера после синхронизации.</div>`}
+      <button class="btn w" id="co-edit">Изменить</button>`}</div>`;
+    if ($("#co-edit")) $("#co-edit").onclick = () => { box.dataset.edit = "const"; renderSoul(); };
+    if ($("#co-cancel")) $("#co-cancel").onclick = () => { box.dataset.edit = ""; renderSoul(); };
+    if ($("#co-save")) $("#co-save").onclick = () => { const mm = mind(); mm.constitution = $("#co-text").value; saveMind(mm); syncSoon(); box.dataset.edit = ""; renderSoul(); toast("Конституция сохранена"); };
+  }
+  if ($("#so-sync")) $("#so-sync").onclick = () => openSettings("more");
+}
+
+/* ---------- лист настроек: вкладки «Мозг», «Слух и голос», «Ещё»; разметка собирается строкой, обработчики вешаются
+   после вставки; мастера подключения мозга (плитки data-w) — в wizard() ---------- */
+const UPD_URL = "https://dewiar.pro/dwrapp/latest.json";
+const CLOUD = {
+  openrouter: { name: "OpenRouter", url: "https://openrouter.ai/api/v1", model: "google/gemini-2.5-flash", key: "https://openrouter.ai/keys" },
+  openai: { name: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-4.1-mini", key: "https://platform.openai.com/api-keys" },
+  deepseek: { name: "DeepSeek", url: "https://api.deepseek.com/v1", model: "deepseek-chat", key: "https://platform.deepseek.com/api_keys" },
+  anthropic: { name: "Claude (Anthropic)", url: "https://api.anthropic.com/v1", model: "claude-sonnet-5-5", key: "https://platform.claude.com/settings/keys" },
+};
+const ICON = {
+  dewiar: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v5M12 15.5v5M3.5 12h5M15.5 12h5"/></svg>',
+  server: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01"/></svg>',
+  cloud: '<svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 9.5z"/></svg>',
+  pc: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+  key: '<svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3M16 7l3 3M14 9l2 2"/></svg>',
+  user: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/></svg>',
+};
+let setTab = "brain";
+function openSettings(tab) { if (!$("#sh-set").classList.contains("on")) bugSnapTake(); setTab = tab || setTab; renderSettings(); openSheet("#sh-set"); }
+$("#b-set").onclick = () => openSettings();
+$("#r-pp").onclick = () => { D.vibrate(12); if (radio.state().state === "paused") radio.resume(); else radio.pause(); };
+$("#r-x").onclick = () => { D.vibrate(12); radio.stop(); };
+
+/* Что умеет облако Dewiar сейчас (распознавание, озвучка — /models): при запуске и при открытии настроек, чтобы
+   включённая администратором озвучка заработала без повторного входа. */
+async function cloudCaps() {
+  const bases = [];
+  if (loggedIn() && S.accCloud) bases.push([S.accCloud, S.accCloud.base, S.account.token]);
+  if (S.llm.cloud) bases.push([S.llm, cloudBase(), S.llm.api_key]);
+  for (const [o, base, key] of bases) {
+    try { const md = await cloudGet(base, key, "/models"); o.stt = !!md.stt; o.tts = !!md.tts; } catch (e) { }
+  }
+  if (bases.length) saveS();
+}
+/* Вошли аккаунтом, а мозг не выбран (облако не ответило при входе, сайт не назвал облако) — подключить модели Dewiar
+   по аккаунту. Тихо: при запуске, при открытии «Мозга» и перед вопросом. -> true, если мозг есть. */
+let brainBusy = null;
+function ensureBrain() {
+  if (S.llm.base_url) return Promise.resolve(true);
+  if (!loggedIn()) return Promise.resolve(false);
+  if (!brainBusy) brainBusy = cloudConnect(S.account.token, (S.accCloud && S.accCloud.base) || siteUrl((S.account.services || {}).cloud || "dwrapp/cloud.php"), { account: true })
+    .then(() => { plog("info", "мозг: модели Dewiar по аккаунту"); return true; }).catch(e => { plog("warn", "мозг по аккаунту: " + e.message); return false; })
+    .finally(() => { brainBusy = null; });
+  return brainBusy;
+}
+function openBrain(w) { openSettings("brain"); if (w) setTimeout(() => { const t = $(`.tile[data-w="${w}"]`); if (t) t.click(); }, 250); }
+function startLogin() { openSettings("brain"); setTimeout(() => { const t = $('.tile[data-w="account"]'); if (t) t.click(); }, 250); }
+function brainName() { if (S.llm.cloud) return "Dewiar Облако"; return S.llm.base_url ? `${S.llm.name || S.llm.base_url.replace(/^https?:\/\//, "")}${S.llm.model ? " · " + S.llm.model : ""}` : "не подключён"; }
+function renderSettings() {
+  const info = JSON.parse(D.info() || "{}");
+  const h = [];
+  h.push(`<div class="tabs">${[["brain", "Мозг"], ["voice", "Слух и голос"], ["more", "Ещё"]].map(([k, n]) => `<button data-st="${k}" class="${setTab === k ? "on" : ""}">${n}</button>`).join("")}</div>`);
+  if (setTab === "brain") {
+    if (loggedIn()) h.push(`<div class="card acc" id="acc-card"><div class="row2"><div class="acc-ava">${esc((S.account.login || "?").slice(0, 1).toUpperCase())}</div><div style="flex:1;min-width:0"><b>${esc(S.account.login)}</b>
+      <small class="hint" style="margin:2px 0 0;display:block">Аккаунт ${esc(siteHost())}${S.account.problem ? " · " + esc(S.account.problem) : ""}</small></div><button class="btn" id="acc-out">Выйти</button></div>
+      ${S.accCloud && !S.llm.cloud ? `<button class="btn p w" id="acc-use" style="margin-top:10px">Думать моделями Dewiar</button><p class="hint" style="margin:8px 0 0">Сейчас думает ваша модель. Модели Dewiar по аккаунту — с зарядом в талерах.</p>` : ""}
+      <p class="hint" style="margin:10px 0 0">Знания сайта подключаются персонажу: нажмите имя персонажа вверху → «Знания». Или просто спросите: «что в моих документах про отпуск?»</p></div>`);
+    else if (S.account.problem) h.push(`<div class="card"><div class="res bad" style="margin:0">${esc(S.account.problem)}</div></div>`);
+    const on = !!S.llm.base_url;
+    h.push(`<div class="card brain ${on ? "ok" : ""}"><div class="row2"><div style="flex:1;min-width:0"><small class="hint" style="margin:0">${on ? "Подключено · думает" : "Мозг"}</small>
+      <div style="font-weight:600">${esc(on ? brainName() : loggedIn() ? "подключаю модели Dewiar…" : "не подключён")}</div>
+      ${on && S.llm.title ? `<small class="hint" style="margin:2px 0 0;display:block">${esc(S.llm.title)}${S.llm.cloud ? " · " + esc(cloudWho()) : ""}</small>` : ""}</div>
+      ${on || loggedIn() ? `<button class="btn" id="br-test">Проверить</button>` : ""}</div><div class="res" id="br-res"></div></div>`);
+    if (S.llm.cloud) h.push(`<div class="card cloudc" id="cl-card"><div class="row2"><div style="flex:1"><b>Баланс</b><small class="hint" style="margin:2px 0 0;display:block" id="cl-sub">${esc(cloudWho())}</small></div><div class="cl-pct" id="cl-pct">…</div></div>
+      <div class="cl-bar"><i id="cl-fill"></i></div><div class="hint" id="cl-turns" style="margin:0"></div>
+      <div class="cl-use" id="cl-use"></div>
+      <div class="row2" style="margin-top:10px"><button class="btn" id="cl-ref" style="flex:1">Обновить</button><button class="btn p" id="cl-how" style="flex:1">Пополнить</button></div>
+      ${S.llm.account ? "" : `<button class="btn w" id="cl-pair" style="margin-top:8px">Добавить устройство — компьютер или другой телефон</button><div class="res" id="cl-pair-res"></div>
+      <div class="row2" style="margin-top:8px">${loggedIn() ? `<button class="btn" id="cl-acc" style="flex:1">Думать по аккаунту</button>` : ""}<button class="btn" id="cl-forget" style="flex:1;color:#FFB3C3">Забыть ключ</button></div>`}
+      <div id="cl-pay" style="display:none;margin-top:12px"><div class="hint" id="cl-top" style="margin:0 0 8px;white-space:pre-line;line-height:1.5"></div>
+        <div class="row2"><label class="f" style="flex:1"><span>Талеров</span><input id="cl-amt" inputmode="decimal" placeholder="5"></label>
+        <label class="f" style="flex:2"><span>Комментарий</span><input id="cl-note" placeholder="как оплатили"></label></div>
+        <label class="cl-shot" id="cl-shot"><input type="file" id="cl-file" accept="image/*" hidden><span id="cl-shot-t">Приложить снимок оплаты</span><img id="cl-img" alt=""></label>
+        <button class="btn p w" id="cl-send" style="margin-top:8px">Отправить заявку</button><div class="res" id="cl-res"></div><div id="cl-reqs"></div></div></div>`);
+    if (S.join && S.join.id && !on) h.push(`<div class="card"><b>Заявка на Dewiar №${esc(S.join.id)} отправлена</b><p class="hint" style="margin:4px 0 10px">Как только её одобрят, ключ придёт сюда сам — ничего вводить не нужно. Пока можно подключить свою модель или ключ сервиса.</p>
+      <div class="row2"><button class="btn p" id="jn-check" style="flex:1">Проверить</button><button class="btn" id="jn-cancel" style="flex:1">Забыть заявку</button></div><div class="res" id="jn-res"></div></div>`);
+    const tiles = `<p class="hint" style="margin:4px 2px 10px">Мозг — модель, которая думает за всех персонажей. Выберите любой — поменять можно в любой момент.</p><div class="tiles">
+      <button class="tile" data-w="server">${ICON.server}<b>Своя модель</b><small>Ollama, LM Studio, vLLM — на вашем компьютере или сервере дома</small></button>
+      <button class="tile" data-w="cloud">${ICON.cloud}<b>Ключ любимого сервиса</b><small>OpenAI, Claude (Anthropic), OpenRouter, DeepSeek — своим ключом</small></button>
+      ${loggedIn() || S.join ? "" : `<button class="tile" data-w="join">${ICON.dewiar}<b>Попробовать Dewiar</b><small>Заявка за минуту, без регистрации — ключ придёт сюда сам, с талером на счёте</small></button>`}
+      ${loggedIn() ? "" : `<button class="tile" data-w="account">${ICON.user}<b>Аккаунт dewiar.pro</b><small>Есть логин на сайте — модели, слух, голос и заряд настроятся сами</small></button>`}
+      <button class="tile" data-w="dwkey">${ICON.key}<b>Ключ или код Dewiar</b><small>Ключ dw-… или 6 цифр с другого своего устройства</small></button>
+      <button class="tile" data-w="pc">${ICON.pc}<b>Как на компьютере</b><small>Файл настроек из студии или адрес от администратора</small></button></div><div id="wz"></div>`;
+    // мозг уже есть — другие способы свёрнуты: видно, что подключено, и не тянет нажать лишнее
+    h.push(on || loggedIn() ? `<details class="more brainalt"><summary>Подключить другой мозг</summary>${tiles}</details>` : tiles);
+    h.push(`<div class="card" id="px-card" style="margin-top:12px"><b>Сеть</b><p class="hint" style="margin:4px 0 10px">Провайдер блокирует dewiar.pro? Укажите прокси — через него пойдут только запросы к Dewiar (вход, модели, Знания), остальное — напрямую.</p>
+      <div class="row2" style="align-items:flex-end"><label class="f" style="flex:1;min-width:0;margin:0"><span>Прокси</span><input id="px-in" placeholder="socks5://адрес:порт" autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(hideProxy(S.net.proxy))}"></label><button class="btn p" id="px-save">Сохранить</button></div>
+      <div class="sw" style="margin-top:8px"><div>Использовать прокси Dewiar<small>Свой прокси не нужен — его выдаёт dewiar.pro, если вы вошли аккаунтом или подключили ключ. Только для серверов Dewiar.</small></div>
+      <label class="tg"><input type="checkbox" id="px-dw" ${S.net.dewiar ? "checked" : ""}><i></i></label></div>
+      <div class="res" id="px-res">${S.net.proxy ? "Запросы к Dewiar идут через ваш прокси." : S.net.dewiar && S.net.dewiar_secret ? "Запросы к Dewiar идут через прокси Dewiar." : ""}</div></div>`);
+  } else if (setTab === "voice") {
+    const voices = JSON.parse(D.voices() || "[]");
+    h.push(`<h3>Слух</h3><div class="card">
+      <label class="f"><span>Кто распознаёт речь</span><select id="stt-eng"><option value="system">Это устройство${info.recognizer ? "" : " (не найдено)"}</option>${cloudEars() ? `<option value="dewiar">Сервер Dewiar (GigaAM)</option>` : ""}<option value="server">Мой сервер распознавания</option></select></label>
+      <div id="stt-srv"><label class="f"><span>Адрес (OpenAI-совместимый, …/v1)</span><input id="stt-url" placeholder="http://192.168.1.10:8090/v1" value="${esc(S.stt.url)}"></label>
+      <div class="row2"><label class="f" style="flex:1"><span>Ключ</span><input id="stt-key" type="password" value="${esc(S.stt.key)}"></label><label class="f" style="flex:1"><span>Модель</span><input id="stt-model" placeholder="whisper-1" value="${esc(S.stt.model)}"></label></div></div>
+      <p class="hint">${S.stt.auto ? "Распознавание этого устройства не отвечало — слушает сервер Dewiar. " : ""}${info.recognizer ? "Распознавание устройства работает и без интернета, если скачан русский язык (Google → Распознавание речи офлайн)." : cloudEars() ? "В устройстве нет распознавания речи — слушает сервер Dewiar." : "В устройстве нет распознавания речи — войдите аккаунтом dewiar.pro (слушать будет сервер Dewiar) или укажите свой сервер."}</p></div>
+      <h3>Голос</h3><div class="card">
+      <label class="f"><span>Кто говорит</span><select id="tts-eng"><option value="system">Голос устройства</option>${cloudVoice() ? `<option value="cloud">Голос Dewiar — у каждого персонажа свой</option>` : ""}<option value="eleven">ElevenLabs — своим ключом</option><option value="server">Голос моего сервера</option></select></label>
+      <div id="tts-sys"><div class="row2"><label class="f" style="flex:1"><span>Голос героинь</span><select id="tts-voice"><option value="">Сам подберу</option>${voiceOpts(voices, S.tts.sys_voice)}</select></label>
+        <label class="f" style="flex:1"><span>Голос героев</span><select id="tts-voice-m"><option value="">Сам подберу</option>${voiceOpts(voices, S.tts.sys_voice_m)}</select></label></div>
+        <p class="hint" style="margin-top:0">Голосов устройства бывает несколько: у «Синтеза речи Google» есть и мужские — героям (Патрику, Джарвису, Агенту) достаётся мужской.</p></div>
+      <div id="tts-el"><label class="f"><span>Ключ ElevenLabs</span><input id="el-key" type="password" placeholder="sk_…" value="${esc(S.tts.el_key)}"></label>
+        <div class="row2"><label class="f" style="flex:1"><span>Голос героинь (ID)</span><input id="el-vf" placeholder="${EL_VOICES.f} (Sarah)" value="${esc(S.tts.el_voice_f)}"></label>
+          <label class="f" style="flex:1"><span>Голос героев (ID)</span><input id="el-vm" placeholder="${EL_VOICES.m} (George)" value="${esc(S.tts.el_voice_m)}"></label></div>
+        <label class="f"><span>Модель</span><select id="el-model"><option value="eleven_flash_v2_5">Быстрая (Flash v2.5)</option><option value="eleven_multilingual_v2">Лучшее качество (Multilingual v2)</option></select></label>
+        <p class="hint" style="margin-top:0">Ключ — на elevenlabs.io → Профиль → API Keys. Платите вы сами по тарифу ElevenLabs; ключ хранится только в этом телефоне. ID голоса — в «Voices» на сайте (кнопка «ID»).</p></div>
+      <label class="f"><span>Скорость речи: <b id="rate-v">${(+S.tts.rate || 1).toFixed(2)}</b></span><input id="tts-rate" type="range" min="0.7" max="2" step="0.05" value="${+S.tts.rate || 1}"></label>
+      ${info.tts || D.mock ? "" : cloudVoice() ? `<p class="hint">В устройстве нет русского голоса — говорит голос Dewiar.</p>`
+        : `<p class="hint">В устройстве нет русского голоса, поэтому ответы только текстом. Установите голос: «Синтез речи Google» из Play Маркета или бесплатный RHVoice (есть и для устройств без Google — в AppGallery и F-Droid), затем выберите его в настройках Android → «Синтез речи». <a href="#" id="tts-get">Открыть</a></p>`}</div>
+      <div id="tts-srv"><label class="f"><span>Адрес (OpenAI-совместимый, …/v1)</span><input id="tts-url" placeholder="http://192.168.1.10:8091/v1" value="${esc(S.tts.url)}"></label>
+      <div class="row2"><label class="f" style="flex:1"><span>Ключ</span><input id="tts-key" type="password" value="${esc(S.tts.key)}"></label><label class="f" style="flex:1"><span>Модель</span><input id="tts-model" placeholder="tts-1" value="${esc(S.tts.model)}"></label></div>
+      <div class="row2"><label class="f" style="flex:1"><span>Голос героинь</span><input id="tts-v" placeholder="alloy" value="${esc(S.tts.voice)}"></label><label class="f" style="flex:1"><span>Голос героев</span><input id="tts-vm" placeholder="как у героинь" value="${esc(S.tts.voice_m)}"></label></div></div>
+      <button class="btn w" id="tts-try">Послушать</button></div>
+      <h3>Разговор</h3><div class="card">
+      <label class="f"><span>Как вас зовут</span><input id="u-name" placeholder="необязательно" value="${esc(S.user_name)}"></label>
+      <label class="f"><span>Слушать после ответа</span><select id="follow"><option value="ask">Только если ассистент спросил</option><option value="always">Всегда</option><option value="never">Нет</option></select></label>
+      <div class="sw" style="margin-top:8px"><div>Сам замечает, что вы вернулись<small>Открыли приложение после перерыва — коротко скажет главное: что готово, что скоро; утром — сводка дня. Сказать нечего — промолчит.</small></div>
+      <label class="tg"><input type="checkbox" id="wl-on" ${(S.welcome || {}).on !== false ? "checked" : ""}><i></i></label></div></div>`);
+  } else {
+    const perms = [[MIC, "Микрофон"], [NOTIF, "Уведомления (напоминания)"], [CONTACTS, "Контакты (звонки по имени)"], [CALLP, "Звонки без лишнего нажатия"]];
+    h.push(`<h3>Сообщить о проблеме</h3><div class="card" id="bug-card"><p class="hint" style="margin-top:0">Напишите пару слов — разработчик увидит их вместе со снимком экрана и журналом работы (без ключей и паролей), ответит сюда, а когда исправит — я скажу. Голосом тоже можно: «сообщи об ошибке: …».</p>
+      ${bugSnap && Date.now() - bugSnap.ts < 30 * 6e4 ? `<div class="bugsnap"><img src="data:image/jpeg;base64,${bugSnap.b64}" alt="Снимок экрана" id="bug-img"><label class="chk"><input type="checkbox" id="bug-use" checked><span>Приложить снимок экрана — каким он был до настроек</span></label></div>` : ""}
+      <label class="f"><span>Что случилось</span><textarea id="rep-note" rows="3" maxlength="2000" placeholder="Например: «прошу другое радио — играет старое»"></textarea></label>
+      <label class="f"><span>Как подписать вас в «Помощниках проекта» — необязательно</span><input id="bug-who" maxlength="40" value="${esc(S.who || "")}" placeholder="Имя или ник"></label>
+      <button class="btn p w" id="rep-send">Отправить разработчику</button><div class="res" id="rep-res"></div>
+      <div id="bug-mine">${complaintsHtml()}</div><div id="bug-thx"></div>
+      <div class="sw" style="margin-top:8px"><div>Отправлять отчёт самому при сбое<small>Только при ошибках приложения, не чаще раза в полдня на одну и ту же</small></div>
+      <label class="tg"><input type="checkbox" id="rep-auto" ${(S.report || {}).auto ? "checked" : ""}><i></i></label></div>
+      <div class="sw"><div>Анонимный пульс для разработчика<small>Раз в несколько часов: версия, телефон, скорость запуска, сколько было сбоев — без разговоров, файлов и ключей</small></div>
+      <label class="tg"><input type="checkbox" id="pulse-on" ${S.pulse !== false ? "checked" : ""}><i></i></label></div></div>
+      <h3>Кнопка помощника</h3><div class="card"><p class="hint" style="margin-top:0">Назначьте Dewiar помощником телефона — тогда долгое нажатие кнопки питания (или «Домой») сразу его слушает.
+      Настройки → Приложения → По умолчанию → <b>Цифровой помощник</b> → Dewiar.</p><button class="btn w" id="assist">Открыть настройки помощника</button></div>
+      <h3>Управлять приложениями</h3><div class="card" id="hands-card">${handsCard()}</div>
+      <h3>Telegram</h3><div class="card" id="tg-card">${!tgOn() ? `<p class="hint" style="margin:0 0 10px">Бот Dewiar в Telegram подключается на компьютере: студия → «Подключение» → Telegram. Бот один для всех ваших устройств: пишите или присылайте голосовые — ответит компьютер, а когда он выключен — сервер Dewiar. На телефоне ничего настраивать не нужно.</p><button class="btn w" id="tg-bot" disabled>Открыть бота в Telegram</button>`
+        : (S.tg || {}).linked ? `<div class="row2"><span class="res ok" style="flex:1;margin:0">Подключён${S.tg.name ? ": " + esc(S.tg.name) : ""}${S.tg.bot ? " · @" + esc(S.tg.bot) : ""}</span><button class="btn" id="tg-off">Отключить</button></div>
+          <p class="hint" style="margin:8px 0 0">Пишите боту или присылайте голосовые — ответит ${esc(persona().name)}. Заметки, списки и напоминания из Telegram появятся здесь, в «Мой день». Компьютер с Dewiar включён — отвечает он.</p>${S.tg.bot ? `<button class="btn w" id="tg-open" style="margin-top:8px">Открыть бота</button>` : ""}`
+        : `<p class="hint" style="margin:0 0 10px">Пишите и присылайте голосовые боту Dewiar в Telegram — ассистент ответит, даже когда телефон убран: поставит напоминание, запишет заметку, ответит голосом.</p><button class="btn p w" id="tg-go">Подключить Telegram</button>`}<div class="res" id="tg-res"></div></div>
+      <h3>Умный дом Яндекса</h3><div class="card">${S.home.token ? `<div class="row2"><span class="res ok" style="flex:1" id="home-st">Подключён</span><button class="btn" id="home-off">Отключить</button></div>` :
+      `<p class="hint" style="margin-top:0">Тот же дом, что у Алисы: «включи свет в спальне», «кондиционер на 22».</p>
+      <p class="hint"><b>1.</b> «Получить ключ» → войдите в Яндекс тем же аккаунтом, что в «Доме с Алисой» → «Разрешить».<br><b>2.</b> Скопируйте ключ, который покажет Яндекс (начинается с y0_), и вставьте сюда.</p>
+      <button class="btn w" id="home-auth" style="margin-bottom:10px">Получить ключ</button>
+      <label class="f"><span>Ключ от Яндекса</span><input id="home-tok" type="password" placeholder="y0_…"></label><button class="btn p w" id="home-go">Подключить</button>`}<div class="res" id="home-res"></div></div>
+      <h3>Синхронизация</h3><div class="card">${syncCard()}</div>
+      <h3>Разрешения</h3><div class="card">${perms.map(([p, n]) => `<div class="sw"><div>${n}</div>${D.has(p) ? `<span class="res ok" style="margin:0">есть</span>` : `<button class="btn" data-perm="${p}">Разрешить</button>`}</div>`).join("")}
+      <div class="sw"><div>Точные будильники</div>${D.exactAlarms() ? `<span class="res ok" style="margin:0">есть</span>` : `<button class="btn" onclick="Dewiar.openSettings('alarms')">Разрешить</button>`}</div></div>
+      <h3>О приложении</h3><div class="card"><div>Dewiar ${esc(info.version || "")} · Android ${esc(info.android || "")}</div><small class="hint" style="margin:2px 0 0;display:block">${esc(info.device || "")}</small>
+      <div class="res" id="upd-res"></div><button class="btn w" id="upd-check" style="margin-top:6px">Проверить обновление</button></div>
+      <details class="danger"><summary>Начать с чистого листа</summary><p class="hint">Ассистент забудет разговор и всё, что запомнил о вас: имя, привычки, просьбы. Дневник, душа персонажей, напоминания и заметки останутся. Отменить нельзя.</p>
+      <button class="btn w" id="reset">Забыть разговор и память</button></details>
+      ${info.crash ? `<h3>Последняя ошибка</h3><div class="card"><div class="crash">${esc(info.crash)}</div><div class="row2" style="margin-top:8px"><button class="btn" id="cr-send" style="flex:1">Отправить</button><button class="btn" id="cr-clear" style="flex:1">Очистить</button></div></div>` : ""}`);
+  }
+  $("#set-body").innerHTML = h.join("");
+  $$("[data-st]").forEach(b => b.onclick = () => { setTab = b.dataset.st; renderSettings(); });
+  wireSettings(info);
+}
+
+function wireSettings(info) {
+  const g = (id) => $("#" + id);
+  if (setTab === "brain") {
+    if (g("br-test")) g("br-test").onclick = async () => { const b = g("br-test"), r = g("br-res"); b.disabled = true; r.className = "res"; r.textContent = "спрашиваю модель…";
+      try {
+        if (!S.llm.base_url && !(await ensureBrain())) throw new Error("модели Dewiar по аккаунту сейчас не отвечают — проверьте интернет");
+        const t0 = Date.now(); const x = await llmStream([{ role: "user", content: "Ответь одним словом: готово" }], null, null);
+        r.className = "res ok"; r.textContent = `Работает: ответ за ${((Date.now() - t0) / 1000).toFixed(1)} с — «${x.text.trim().slice(0, 60)}»`;
+        if (!g("cl-card") && S.llm.cloud) setTimeout(renderSettings, 1500);
+      } catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { b.disabled = false; } };
+    if (!S.llm.base_url && loggedIn()) ensureBrain().then(ok => { if (ok && setTab === "brain" && $("#sh-set").classList.contains("on")) renderSettings(); });
+    cloudCaps();
+    $$(".tile").forEach(b => b.onclick = () => { $$(".tile").forEach(x => x.classList.toggle("on", x === b)); wizard(b.dataset.w); });
+    if (g("jn-check")) g("jn-check").onclick = async () => { const r = g("jn-res"); r.className = "res"; r.textContent = "проверяю…";
+      try { const d = await joinPoll(true); r.className = d && d.status === "no" ? "res bad" : "res ok"; r.textContent = (d && d.text) || "Пока ждёт проверки."; if (d && d.key) setTimeout(renderSettings, 1200); }
+      catch (e) { r.className = "res bad"; r.textContent = e.message; } };
+    if (g("jn-cancel")) g("jn-cancel").onclick = () => { S.join = null; saveS(); renderSettings(); };
+    if (g("px-save")) g("px-save").onclick = () => saveProxy(g("px-in").value, g("px-res"), g("px-save"));
+    if (g("px-dw")) g("px-dw").onchange = async () => { const on = g("px-dw").checked, r = g("px-res"); S.net.dewiar = on; saveS();
+      r.className = "res"; r.textContent = on ? "получаю прокси с dewiar.pro…" : "";
+      const err = on ? await dwProxyFetch(true) : ""; applyProxy();
+      r.className = "res " + (err ? "bad" : "ok"); r.textContent = !on ? "Прокси Dewiar выключен." : err ? "Прокси Dewiar: " + err : (S.net.proxy ? "Прокси Dewiar получен; сейчас главнее ваш прокси." : "Запросы к Dewiar идут через прокси Dewiar."); };
+    if (g("acc-out")) g("acc-out").onclick = () => { if (!confirm("Выйти из аккаунта dewiar.pro? Модели и Знания по аккаунту отключатся.")) return; accountLogout(); toast("Вы вышли из аккаунта"); renderSettings(); };
+    if (g("acc-use")) g("acc-use").onclick = async () => { const b = g("acc-use"); b.disabled = true;
+      try { await cloudConnect(S.account.token, S.accCloud.base, { account: true }); toast("Думают модели Dewiar"); renderSettings(); } catch (e) { b.disabled = false; toast(e.message); } };
+    if (g("cl-card")) {
+      cloudFill(cloudInfo); cloudBalance(true).then(cloudFill).catch(async e => {
+        if (await fixDeadKey(e.message)) { renderSettings(); return; }            // ключ удалён, а аккаунт есть — переключились сами
+        g("cl-turns").textContent = e.message + (keyGone(e.message) ? " Нажмите «Забыть ключ»" + (loggedIn() ? " или «Думать по аккаунту»." : " и подключите мозг заново.") : ""); g("cl-pct").textContent = "—"; });
+      if (g("cl-acc")) g("cl-acc").onclick = async () => { g("cl-acc").disabled = true; if (await fixDeadKey()) renderSettings(); else { g("cl-acc").disabled = false; toast("Не получилось подключиться по аккаунту — проверьте интернет"); } };
+      if (g("cl-pair")) g("cl-pair").onclick = async () => { const r = g("cl-pair-res"); r.className = "res"; r.textContent = "получаю код…";
+        try { const d = await cloudPost("/pair/new", {});
+          if (!d.code) { r.textContent = d.text || "Код не выдан."; return; }
+          r.className = "res ok"; r.innerHTML = `Код: <b style="font-size:22px;letter-spacing:3px">${esc(d.code.slice(0, 3) + " " + d.code.slice(3))}</b><br>На другом устройстве: «Мозг» → «Ключ или код Dewiar» → введите код. Действует 10 минут.`; }
+        catch (e) { r.className = "res bad"; r.textContent = e.message; } };
+      if (g("cl-forget")) g("cl-forget").onclick = async () => {
+        if (!confirm(loggedIn() ? "Забыть ключ Dewiar? Думать буду по аккаунту " + (S.account.login || "") + "." : "Забыть ключ Dewiar? Мозг нужно будет подключить заново.")) return;
+        await forgetKey(); toast("Ключ забыт"); renderSettings(); };
+      g("cl-ref").onclick = () => cloudBalance(true).then(cloudFill).catch(e => toast(e.message));
+      g("cl-how").onclick = () => { const t = g("cl-pay"), open = t.style.display === "none"; t.style.display = open ? "" : "none"; if (open) clPayLoad(); };
+      cloudUsage();
+      let img = "";
+      g("cl-file").onchange = (e) => { const f = e.target.files[0]; if (!f) return; if (f.size > 6e6) { toast("Снимок больше 6 МБ"); return; }
+        const fr = new FileReader(); fr.onload = () => { img = fr.result; g("cl-img").src = img; g("cl-shot").classList.add("has"); g("cl-shot-t").textContent = "Снимок приложен"; }; fr.readAsDataURL(f); };
+      g("cl-send").onclick = async () => { const r = g("cl-res"), amount = +(g("cl-amt").value.replace(",", ".")) || 0;
+        if (!amount && !img) { r.className = "res bad"; r.textContent = "Укажите сумму или приложите снимок"; return; }
+        r.className = "res"; r.textContent = "отправляю…";
+        try { const x = await cloudPost("/topup", { amount, note: g("cl-note").value.trim(), image: img }); r.className = "res ok"; r.textContent = "Заявка отправлена — после проверки заряд пополнится сам.";
+          img = ""; g("cl-shot").classList.remove("has"); g("cl-shot-t").textContent = "Приложить снимок оплаты"; g("cl-amt").value = ""; g("cl-note").value = ""; clReqs(x.requests); }
+        catch (e) { r.className = "res bad"; r.textContent = e.message; } };
+    }
+  } else if (setTab === "voice") {
+    const sttDw = ((S.stt.engine === "server" && /cloud\.php/.test(S.stt.url || "")) || (S.stt.engine === "system" && !info.recognizer)) && cloudEars();
+    if (g("wl-on")) g("wl-on").addEventListener("change", () => { S.welcome = Object.assign({}, S.welcome || {}, { on: g("wl-on").checked }); saveS(); });
+    g("stt-eng").value = sttDw ? "dewiar" : S.stt.engine; g("tts-eng").value = S.tts.engine === "cloud" && !cloudVoice() ? "system" : S.tts.engine; g("follow").value = S.follow;
+    const vis = () => { const te = g("tts-eng").value; g("stt-srv").style.display = g("stt-eng").value === "server" ? "" : "none";
+      g("tts-srv").style.display = te === "server" ? "" : "none"; g("tts-el").style.display = te === "eleven" ? "" : "none";
+      g("tts-sys").style.display = te === "system" || te === "cloud" ? "" : "none"; };
+    g("el-model").value = S.tts.el_model || "eleven_flash_v2_5";
+    vis();
+    const saveV = () => { const se = g("stt-eng").value, ce = cloudEars();
+      S.stt = se === "dewiar" && ce ? { engine: "server", url: ce.url, key: ce.key, model: "gigaam", from_account: loggedIn() }
+        : { engine: se, url: se === "server" && /cloud\.php/.test(g("stt-url").value) ? "" : g("stt-url").value.trim(), key: g("stt-key").value.trim(), model: g("stt-model").value.trim() };
+      Object.assign(S.tts, { engine: g("tts-eng").value, url: g("tts-url").value.trim(), key: g("tts-key").value.trim(), model: g("tts-model").value.trim(), sys_voice: g("tts-voice").value,
+        sys_voice_m: g("tts-voice-m").value, voice: g("tts-v").value.trim(), voice_m: g("tts-vm").value.trim(), el_key: g("el-key").value.trim(),
+        el_voice_f: g("el-vf").value.trim(), el_voice_m: g("el-vm").value.trim(), el_model: g("el-model").value, rate: +g("tts-rate").value });
+      S.user_name = g("u-name").value.trim(); S.follow = g("follow").value; saveS(); vis(); g("rate-v").textContent = (+S.tts.rate).toFixed(2); };
+    $$("#set-body input, #set-body select").forEach(x => x.onchange = saveV);
+    const rateFill = () => { const r = g("tts-rate"); r.style.setProperty("--p", ((r.value - r.min) / (r.max - r.min) * 100) + "%"); };
+    rateFill();
+    g("tts-rate").oninput = () => { g("rate-v").textContent = (+g("tts-rate").value).toFixed(2); rateFill(); };
+    g("tts-try").onclick = () => { saveV(); say(`Привет! Это ${persona().name}. Так звучит мой голос.`); };
+    if (g("tts-get")) g("tts-get").onclick = (e) => { e.preventDefault(); D.openSettings("tts") || D.openUrl("https://play.google.com/store/apps/details?id=com.google.android.tts"); };
+  } else {
+    g("assist").onclick = () => { if (!D.openSettings("assistant")) toast("Откройте: Настройки → Приложения → По умолчанию → Цифровой помощник"); };
+    $$("[data-perm]").forEach(b => b.onclick = async () => { await needPerm(b.dataset.perm); renderSettings(); });
+    if (g("home-go")) g("home-go").onclick = async () => { const r = g("home-res"); let tok = g("home-tok").value.trim(); const m = tok.match(/access_token=([^&\s]+)/); if (m) tok = m[1];
+      if (/^[0-9a-f]{32}$/i.test(tok)) { r.className = "res bad"; r.textContent = "Это ClientID приложения, а не ключ. Нажмите «Получить ключ» → «Разрешить» — Яндекс покажет ключ (начинается с y0_)"; return; }
+      if (tok.length < 20) { r.className = "res bad"; r.textContent = tok ? "Это не похоже на ключ — скопируйте его целиком (начинается с y0_)" : "Сначала «Получить ключ» — Яндекс покажет ключ, вставьте его сюда"; return; }
+      const old = S.home.token; S.home.token = tok; r.className = "res"; r.textContent = "проверяю…";
+      try { const i = await homeGet(true); saveS(); r.className = "res ok"; r.textContent = `Готово: устройств ${i.devices.length}, сценариев ${i.scenarios.length}. Скажите «включи свет».`; setTimeout(renderSettings, 1800); }
+      catch (e) { S.home.token = old; r.className = "res bad"; r.textContent = e.message; } };
+    if (g("home-auth")) g("home-auth").onclick = () => D.openUrl("https://oauth.yandex.ru/authorize?response_type=token&client_id=" + ((S.home.client_id || "").trim() || YANDEX_CID));
+    if (g("home-off")) { homeGet().then(i => g("home-st") && (g("home-st").textContent = `Подключён: устройств ${i.devices.length}`)).catch(e => g("home-st") && (g("home-st").textContent = e.message));
+      g("home-off").onclick = () => { S.home.token = ""; homeInfo = null; saveS(); renderSettings(); }; }
+    wireHands();
+    if (g("tg-go")) g("tg-go").onclick = async () => { const b = g("tg-go"), r = g("tg-res"); b.disabled = true; r.className = "res"; r.textContent = "готовлю ссылку…";
+      try { await tgLink(r); toast("Telegram подключён"); renderSettings(); } catch (e) { r.className = "res bad"; r.textContent = e.message; b.disabled = false; } };
+    if (g("tg-off")) g("tg-off").onclick = async () => { if (!confirm("Отключить Telegram? Бот перестанет отвечать вам.")) return;
+      try { await tgCall("dewiarUnlink"); S.tg = { linked: false }; saveS(); renderSettings(); } catch (e) { g("tg-res").className = "res bad"; g("tg-res").textContent = e.message; } };
+    if (g("tg-open")) g("tg-open").onclick = () => D.openUrl("https://t.me/" + S.tg.bot);
+    if (g("tg-bot")) tgBotName().then(n => { const b = g("tg-bot"); if (!b) return; if (!n) { b.remove(); return; }
+      b.disabled = false; b.textContent = "Открыть @" + n; b.onclick = () => D.openUrl("https://t.me/" + n); }).catch(() => { if (g("tg-bot")) g("tg-bot").remove(); });
+    if (tgOn() && g("tg-card")) tgStatus().then(t => { if (!!t.linked !== !!$("#tg-off") && setTab === "more") renderSettings(); }).catch(() => {});
+    g("upd-check").onclick = () => checkUpdate(true);
+    if (g("cr-send")) g("cr-send").onclick = () => reportSend("Падение приложения", false, String(info.crash).split("\n")[0]).then(d => toast(`Отчёт №${d.id} отправлен — спасибо!`))
+      .catch(e => { toast(e.message); D.share("Dewiar — ошибка:\n" + info.crash); });
+    if (g("rep-send")) g("rep-send").onclick = async () => { const b = g("rep-send"), r = g("rep-res"); b.disabled = true; r.className = "res"; r.textContent = "отправляю…";
+      try {
+        const d = await complaintSend(g("rep-note").value, g("bug-who").value, !!(g("bug-use") && g("bug-use").checked), "кнопкой");
+        r.className = "res ok"; r.textContent = `Жалоба №${d.id} у разработчика — спасибо! Ответ придёт сюда.`; g("rep-note").value = "";
+        if (g("bug-mine")) g("bug-mine").innerHTML = complaintsHtml(); if (g("bug-img")) g("bug-img").parentNode.remove();
+      } catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { b.disabled = false; } };
+    if (g("rep-auto")) g("rep-auto").onchange = () => { S.report = Object.assign({}, S.report, { auto: g("rep-auto").checked }); saveS(); };
+    if (g("pulse-on")) g("pulse-on").onchange = () => { S.pulse = g("pulse-on").checked; saveS(); };
+    if (g("bug-img")) g("bug-img").onclick = () => g("bug-img").classList.toggle("zoom");
+    if (g("bug-thx")) thanksGet().then(th => { if (g("bug-thx") && th.length) g("bug-thx").innerHTML = `<div class="bugh">Помощники проекта — их жалобы сделали Dewiar лучше</div><div class="thx">`
+      + th.slice(0, 30).map(p => `<span>${esc(p.name)}<b>${p.n}</b></span>`).join("") + "</div>"; }).catch(() => {});
+    if (g("bug-mine") && (S.complaints || []).length) complaintsCheck().then(n => { if (n.length && g("bug-mine")) g("bug-mine").innerHTML = complaintsHtml(); }).catch(() => {});
+    if (g("cr-clear")) g("cr-clear").onclick = () => { D.clearCrash(); renderSettings(); };
+    g("reset").onclick = () => {                       // два вопроса подряд: случайным нажатием отношения с ассистентом не стереть
+      if (!confirm(`Забыть разговор и всё, что ${persona().name} помнит о вас (${(S.memory || []).length} записей)?`)) return;
+      if (!confirm("Точно? Это нельзя отменить. Память сотрётся и на компьютере после синхронизации.")) return;
+      history = []; saveH(); convReset(); S.memory = []; saveS(); syncSoon(); toast("Забыл"); };
+    if (g("sy-now")) g("sy-now").onclick = async () => { const r = g("sy-res"); r.className = "res"; r.textContent = "синхронизирую…"; await syncRun(true); renderSettings(); };
+    if (g("sy-on")) g("sy-on").onchange = () => { S.sync.on = g("sy-on").checked; saveS(); if (S.sync.on) syncSoon(); renderSettings(); };
+  }
+}
+
+/* ---------- синхронизация с компьютером через облако Dewiar (cloud.php ?p=/sync) ----------
+   Напоминания и будильники, заметки, расходы, память «Обо мне» — одинаковые на телефоне и компьютере. Раз в минуту, пока
+   приложение открыто, при открытии и сразу после своих изменений: отправляем то, что поменялось с прошлого раза
+   (отпечатки — в pref «sync»), и забираем чужое. Одну запись правили на двух устройствах — остаётся более поздняя правка.
+   Запись, которой больше нет в syncSnapshot(), уходит как удаление — и другие устройства её тоже удалят.
+   Формат записей, виды (SYNC_KINDS) и порядок обмена — общие с core/sync.py (компьютер) и ?p=/sync в cloud.php:
+   меняешь здесь — меняй и там. Дополнительные виды (soul, mind, diary, dayturn, taskreq, task) шлём, только если их знает сервер. */
+const SYNC_KINDS = ["reminder", "note", "money", "memory", "soul", "mind", "diary", "dayturn", "taskreq", "task"];
+let syncTimer = null, syncBusy = false, syncStatus = { ok: null, at: 0, error: "", devices: [], counts: {} };
+/* Чьи данные: аккаунт dewiar.pro (если вошли) или ключ Dewiar (dw-…). Есть и то и другое — ключ уходит в link
+   (X-Sync-Link): сервер связывает их в одно пространство. -> {token, link, base, via} или null — синхронизировать нечем. */
+function syncCred() {
+  const key = S.llm.cloud && !S.llm.account && /^dw-/.test(S.llm.api_key || "") ? S.llm.api_key : (S.sync && S.sync.key) || "";
+  if (loggedIn()) return { token: S.account.token, link: key, base: ((S.accCloud && S.accCloud.base) || siteUrl("dwrapp/cloud.php")).split("?")[0], via: "аккаунт " + (S.account.login || "") };
+  if (key) return { token: key, link: "", base: (S.llm.cloud ? cloudBase() : CLOUD_URL).split("?")[0], via: "ключ Dewiar …" + key.slice(-4) };
+  return null;
+}
+const syncSt = () => { try { return JSON.parse(prefGet("sync") || "") || null; } catch (e) { return null; } };
+function syncHash(o) {                         // FNV-1a по каноническому JSON — отпечаток «как запись лежит у нас»
+  const canon = (x) => Array.isArray(x) ? "[" + x.map(canon).join(",") + "]" : x && typeof x === "object"
+    ? "{" + Object.keys(x).sort().map(k => JSON.stringify(k) + ":" + canon(x[k])).join(",") + "}" : JSON.stringify(x === undefined ? null : x);
+  const s = canon(o); let h1 = 0x811c9dc5, h2 = 0x01000193;
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619) >>> 0; h2 = Math.imul(h2 ^ c, 2246822519) >>> 0; }
+  return h1.toString(16) + h2.toString(16);
+}
+function sha1hex(str) {                        // SHA-1 текста (UTF-8) — для factId ниже
+  const b = unescape(encodeURIComponent(str)), n = b.length, w = [], H = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
+  for (let i = 0; i < n; i++) w[i >> 2] |= b.charCodeAt(i) << (24 - (i % 4) * 8);
+  w[n >> 2] |= 0x80 << (24 - (n % 4) * 8); w[((n + 8 >> 6) + 1) * 16 - 1] = n * 8;
+  for (let i = 0; i < w.length; i += 16) {
+    const W = [], [a0, b0, c0, d0, e0] = H; let a = a0, b1 = b0, c = c0, d = d0, e = e0;
+    for (let t = 0; t < 80; t++) {
+      W[t] = t < 16 ? (w[i + t] | 0) : ((x) => (x << 1) | (x >>> 31))(W[t - 3] ^ W[t - 8] ^ W[t - 14] ^ W[t - 16]);
+      const f = t < 20 ? (b1 & c) | (~b1 & d) : t < 40 ? b1 ^ c ^ d : t < 60 ? (b1 & c) | (b1 & d) | (c & d) : b1 ^ c ^ d;
+      const k = t < 20 ? 0x5A827999 : t < 40 ? 0x6ED9EBA1 : t < 60 ? 0x8F1BBCDC : 0xCA62C1D6;
+      const tmp = (((a << 5) | (a >>> 27)) + f + e + k + W[t]) | 0; e = d; d = c; c = (b1 << 30) | (b1 >>> 2); b1 = a; a = tmp;
+    }
+    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b1) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0; H[4] = (H[4] + e) | 0;
+  }
+  return H.map(x => (x >>> 0).toString(16).padStart(8, "0")).join("");
+}
+// id строки памяти по её тексту: нормализация и sha1 — как _fact_id в core/sync.py, иначе одна и та же строка задвоится
+const factId = (t) => "f" + sha1hex(String(t).trim().toLowerCase().replace(/\.+$/, "").replace(/\s+/g, " ")).slice(0, 12);
+/* повтор: строка телефона («daily», «weekdays», «weekly») ↔ описание компьютера ({kind, time, days}; дни — как в Python,
+   понедельник = 0) */
+function repToDict(rep, at) {
+  if (!rep) return null;
+  const d = new Date(at), time = pad(d.getHours()) + ":" + pad(d.getMinutes());
+  if (rep === "daily") return { kind: "daily", time };
+  if (rep === "weekdays") return { kind: "weekly", days: [0, 1, 2, 3, 4], time };
+  if (rep === "weekly") return { kind: "weekly", days: [(d.getDay() + 6) % 7], time };
+  return null;
+}
+function repFromDict(r) {
+  if (!r || typeof r !== "object") return "";
+  const days = (r.days || []).slice().sort().join(",");
+  if (r.kind === "daily" && (!r.days || r.days.length === 7)) return "daily";
+  if ((r.kind === "daily" || r.kind === "weekly") && days === "0,1,2,3,4") return "weekdays";
+  if (r.kind === "weekly" && (r.days || []).length === 1) return "weekly";
+  return "";                                  // раз в месяц, через N минут и т. п. — телефон позвонит один раз, а следующий срок пришлёт компьютер
+}
+/* ---------- душа, конституция, дневник и задачи — с компьютера через синхронизацию (хранятся в файле mind.json) ----------
+   Душу персонажа и конституцию можно править и здесь; дневник пишет компьютер ночью — по разговорам и с компьютером, и с
+   телефоном (реплики отсюда уходят ему очередью «dayturn»); большую задачу телефон передаёт компьютеру («taskreq»), ход и
+   итог задач приходят сюда («task»). */
+const MIND_F = "mind.json";
+function mind() { let m = {}; try { m = JSON.parse(fileGet(MIND_F) || "{}") || {}; } catch (e) { } return Object.assign({ souls: {}, constitution: "", insights: null, diary: {}, tasks: {} }, m); }
+function saveMind(m) { fileSave(MIND_F, JSON.stringify(m)); }
+const qGet = (k) => { try { return JSON.parse(prefGet(k) || "[]") || []; } catch (e) { return []; } };
+const qSet = (k, v) => prefSet(k, JSON.stringify(v.slice(-300)));
+/* Журнал последних дней на самом телефоне (days.json, 14 дней): разговор сбрасывается после 8 часов тишины, а «что мы
+   делали на этой неделе» должно отвечаться — коротко в подсказке (recentPrompt), подробно — инструментом recall. */
+const DAYS_F = "days.json";
+function dayLog() { try { return JSON.parse(fileGet(DAYS_F) || "[]") || []; } catch (e) { return []; } }
+function dayLogAdd(you, bot, kind) {
+  const now = Date.now(), l = dayLog().filter(x => now - x.ts < 14 * 864e5);
+  l.push({ ts: now, who: persona().id, you: String(you || "").slice(0, 300), bot: String(bot || "").slice(0, 300), kind: kind || "" });
+  fileSave(DAYS_F, JSON.stringify(l.slice(-400)));
+}
+const ddmm = (t) => { const d = new Date(t); return pad(d.getDate()) + "." + pad(d.getMonth() + 1); };
+function recentPrompt() {
+  const now = Date.now(), byDay = {};
+  dayLog().filter(x => now - x.ts < 7 * 864e5 && x.you).forEach(x => { (byDay[ddmm(x.ts)] = byDay[ddmm(x.ts)] || []).push(x.you.replace(/\s+/g, " ").slice(0, 60)); });
+  const lines = Object.entries(byDay).slice(-7).map(([d, l]) => `${d}: ${[...new Set(l)].slice(-6).join("; ")}`);
+  const made = apps().slice(-5).reverse().map(x => `«${x.title}» (${ddmm(x.ts)})`);
+  const tasks = Object.values(mind().tasks || {}).sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || ""))).slice(0, 5)
+    .map(t => `«${t.title}» — ${({ done: "готово", running: "делается", waiting: "ждёт ответа", failed: "не вышло" })[t.status] || t.status || ""}`);
+  if (!lines.length && !made.length && !tasks.length) return "";
+  let out = "ЧТО БЫЛО НЕДАВНО (ваши разговоры и дела за неделю; спросят «что мы делали», «где калькулятор» — отвечай по этому, подробнее — recall; открыть сделанное — open_made):";
+  if (lines.length) out += "\nРазговоры по дням: " + lines.join(" | ").slice(0, 1400);
+  if (made.length) out += "\nСделано на телефоне («Мой день» → «Сделанное»): " + made.join(", ");
+  if (tasks.length) out += "\nБольшие задачи: " + tasks.join("; ");
+  return out;
+}
+function recall(days, query) {
+  const now = Date.now(), d = Math.max(1, Math.min(14, +days || 7)), w = String(query || "").toLowerCase().split(/\s+/).filter(x => x.length > 2).map(x => x.slice(0, 5));
+  const hit = (x) => !w.length || w.some(k => (x.you + " " + x.bot).toLowerCase().includes(k));
+  const l = dayLog().filter(x => now - x.ts < d * 864e5 && hit(x)).slice(-40)
+    .map(x => { const t = new Date(x.ts); return `${ddmm(x.ts)} ${pad(t.getHours())}:${pad(t.getMinutes())} — Вы: ${x.you}${x.bot ? " — Ответ: " + x.bot.slice(0, 160) : ""}`; });
+  const made = apps().filter(x => now - x.ts < d * 864e5).map(x => `«${x.title}» (${ddmm(x.ts)}) — откроет open_made`);
+  return (l.length ? "Разговоры:\n" + l.join("\n") : "Разговоров за это время не нашлось.") + (made.length ? "\n\nСделано на телефоне: " + made.join(", ") : "");
+}
+function dayTurn(you, bot) {
+  if (!syncCred() || !S.sync.on || !String(you || "").trim()) return;
+  const q = qGet("dayq"); q.push({ id: "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), ts: Date.now(), who: persona().name, you: String(you).slice(0, 1500), bot: String(bot || "").slice(0, 2500) });
+  qSet("dayq", q); syncSoon();
+}
+function taskToPc(title, goal) {
+  if (!syncCred() || !S.sync.on) throw new Error("передать задачу компьютеру можно, когда включена синхронизация (Настройки → Ещё)");
+  // cloud — компьютера нет на связи: задачу сделает облако Dewiar (исполнитель на сервере, см. core/cloudrunner.py)
+  const q = qGet("taskq"); q.push({ id: "q" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), title: String(title || goal).slice(0, 80), goal: String(goal || title).slice(0, 4000), ts: Date.now(), cloud: true });
+  qSet("taskq", q); syncSoon();
+}
+const pcOnline = () => (syncStatus.devices || []).some(x => x.pc && x.name !== "Облако Dewiar" && Date.now() / 1000 - (x.seen || 0) < 180);
+const pcSeen = () => (syncStatus.devices || []).some(x => x.pc && Date.now() / 1000 - (x.seen || 0) < 14 * 86400);   // компьютер на связи (за 2 недели)
+function mindPrompt() {
+  const m = mind(), p = persona(), body = (t) => String(t || "").replace(/^\s*#[^\n]*\n+/, "").replace(/^_[^\n]*_\s*\n+/gm, "").trim();
+  let out = "";
+  const c = body(m.constitution).slice(0, 1800);
+  if (c) out += "\n\nТВОЯ КОНСТИТУЦИЯ — принципы, которые ты соблюдаешь всегда, с любым характером и в любом настроении (их написал пользователь; ты их не меняешь):\n" + c;
+  const sl = body((m.souls[p.name] || {}).text).slice(0, 1400);
+  if (sl) out += "\n\nТВОЯ ДУША — автопортрет, который ты сам(а) пишешь по своему дневнику. Это ты; но характер и конституция важнее:\n" + sl;
+  const ins = m.insights;
+  if (ins && (ins.lines || []).length && (Date.now() - new Date(ins.day + "T12:00").getTime()) < 3 * 864e5)
+    out += "\n\nТвои выводы после прошлого дня (ты записал их ночью в дневник" + (ins.title ? `, «${ins.title}»` : "") + "):\n" + ins.lines.map(x => "- " + x).join("\n") + "\nУчитывай их естественно; не пересказывай без повода.";
+  return out;
+}
+/* Всё, что телефон синхронизирует, в виде {"вид:id": данные} — тот же формат, что snapshot() в core/sync.py.
+   Отпечаток syncHash каждой записи сравнивается с отправленным: изменилась — уходит, пропала — уходит удалением. */
+function syncSnapshot() {
+  const out = {};
+  JSON.parse(D.alarms() || "[]").forEach(x => { out["reminder:" + x.id] = { text: x.title || "", at: +x.at, kind: x.kind || "reminder", repeat: repToDict(x.repeat, x.at), paused: false }; });
+  notes().forEach(x => { out["note:" + x.id] = { title: x.title || "", text: x.text || "", folder: x.folder || "" };
+    if (+x.time) Object.defineProperty(out["note:" + x.id], "t", { value: +x.time, enumerable: false }); });   // когда написана: старая копия не перебьёт новую
+  money().forEach(x => { out["money:" + x.id] = { date: x.date, kind: x.kind, amount: +x.amount, currency: x.currency, category: x.category || "", note: x.note || "" }; });
+  (S.memory || []).forEach(f => { out["memory:" + factId(f)] = { text: f }; });
+  const ks = (syncSt() || {}).kinds || [];
+  if (ks.includes("soul") || ks.includes("mind")) {
+    const m = mind();
+    if (ks.includes("soul")) for (const n in m.souls) if ((m.souls[n].text || "").trim()) out["soul:" + n] = { text: m.souls[n].text };
+    if (ks.includes("mind") && m.constitution.trim()) out["mind:constitution"] = { text: m.constitution };
+  }
+  if (ks.includes("dayturn")) qGet("dayq").forEach(x => { out["dayturn:" + x.id] = { ts: x.ts, who: x.who, you: x.you, bot: x.bot }; });
+  if (ks.includes("taskreq")) qGet("taskq").forEach(x => { out["taskreq:" + x.id] = { title: x.title, goal: x.goal, ts: x.ts, cloud: !!x.cloud }; });
+  return out;
+}
+const TASK_RU = { running: "в работе", waiting: "ждёт ответа", paused: "на паузе", done: "готово", failed: "не вышло", sleeping: "ждёт времени", stopped: "остановлена" };
+/* Применить чужую запись. -> false — её нет и не будет в нашем снимке (прошедшее разовое напоминание; дневник, задачи,
+   выводы — их ведёт компьютер; очереди dayturn/taskreq): syncRun помечает её skip, чтобы не отправить обратно удалением. */
+function syncApply(it) {
+  const d = it.data || {}, del = it.deleted;
+  if (it.kind === "reminder") {
+    if (del) { D.alarmCancel(it.id); return true; }
+    const exists = JSON.parse(D.alarms() || "[]").some(x => x.id === it.id);
+    if (!d.repeat && +d.at < Date.now() - 300000 && !exists) return false;
+    if (d.paused) { if (exists) D.alarmCancel(it.id); return true; }
+    D.alarmSet(JSON.stringify({ id: it.id, title: d.text || "Напоминание", at: +d.at, kind: ["alarm", "timer"].includes(d.kind) ? d.kind : "reminder", repeat: repFromDict(d.repeat) }));
+  } else if (it.kind === "note") {
+    let n = notes().filter(x => x.id !== it.id);
+    if (!del) n.push({ id: it.id, title: d.title || "Заметка", text: d.text || "", folder: d.folder || "", time: it.updated || Date.now() });
+    fileSave("notes.json", JSON.stringify(n));
+  } else if (it.kind === "money") {
+    let m = money().filter(x => x.id !== it.id);
+    if (!del && +d.amount > 0) m.push({ id: it.id, date: d.date, kind: d.kind, amount: +d.amount, currency: d.currency, category: d.category || "", note: d.note || "" });
+    fileSave("money.json", JSON.stringify(m));
+  } else if (it.kind === "memory") {
+    S.memory = (S.memory || []).filter(f => factId(f) !== it.id);
+    if (!del && d.text) S.memory.push(d.text);
+    S.memory = S.memory.slice(-120); prefSet("settings", JSON.stringify(S));
+  } else if (["soul", "mind", "diary", "task"].includes(it.kind)) {
+    if (del) return false;                                   // душа, дневник и задачи удалением не стираются
+    const m = mind();
+    if (it.kind === "soul") { if (!d.text) return false; m.souls[it.id] = { text: String(d.text), u: it.updated }; }
+    else if (it.kind === "mind" && it.id === "constitution") { if (!d.text) return false; m.constitution = String(d.text); }
+    else if (it.kind === "mind" && it.id === "insights") { m.insights = { day: d.day || "", title: d.title || "", lines: d.lines || [] }; saveMind(m); return false; }
+    else if (it.kind === "mind" && it.id.startsWith("jobs")) {        // дела по расписанию компьютеров (jobs-<устройство>) — только показать
+      m.jobs_by = Object.assign({}, m.jobs_by || {}, { [it.id]: del ? [] : (Array.isArray(d.items) ? d.items : []) });
+      m.jobs = [].concat(...Object.values(m.jobs_by)).sort((a, b) => a.at - b.at); saveMind(m); return false; }
+    else if (it.kind === "diary") { m.diary[it.id] = { text: String(d.text || ""), title: d.title || "", mood: d.mood || "" };
+      const days = Object.keys(m.diary).sort().reverse(); days.slice(40).forEach(k => delete m.diary[k]); saveMind(m); return false; }
+    else if (it.kind === "task") {
+      const was = m.tasks[it.id]; m.tasks[it.id] = Object.assign({}, d, { u: it.updated });
+      const ids = Object.keys(m.tasks).sort((a, b) => String(m.tasks[b].updated).localeCompare(String(m.tasks[a].updated))); ids.slice(20).forEach(k => delete m.tasks[k]);
+      const fresh = (!was || was.status !== d.status) && ["done", "failed", "waiting"].includes(d.status) && Date.now() - (it.updated || 0) < 6 * 3600e3;
+      if (fresh)
+        D.notify("Задача: " + (d.title || ""), d.status === "done" ? "Готово. " + String(d.result || "").slice(0, 160) : d.status === "waiting" ? "Ждёт ответа: " + String(d.question || "").slice(0, 160) : "Не вышло: " + String(d.error || "").slice(0, 160));
+      saveMind(m);
+      if (fresh && d.status !== "waiting") setTimeout(() => { if (!busy && state === "idle") taskDoneCard(it.id); }, 300);
+      return false;
+    } else return false;
+    saveMind(m);
+  } else if (it.kind === "dayturn" || it.kind === "taskreq") {
+    return false;                                            // очередь для компьютера — не наше
+  }
+  return true;
+}
+/* Один обмен с облаком: отправить свои изменения и удаления, забрать чужие начиная с номера st.rev — порциями, пока
+   сервер отвечает more (не больше 20 порций). Состояние (rev, отпечатки idx, id устройства) — в pref «sync»; сменился
+   аккаунт или ключ (who) — начинаем с нуля. manual — ошибку показать человеку. */
+async function syncRun(manual) {
+  if ((S.tg || {}).linked && Date.now() - (S.tg.at || 0) > 600000) tgSync();      // ключ и персонаж для бота — раз в 10 минут
+  if (syncBusy) return; const c = syncCred();
+  if (!c || !S.sync.on) { syncStatus = Object.assign(syncStatus, { ok: null, error: "" }); return; }
+  syncBusy = true;
+  try {
+    const who = syncHash(c.token);
+    let st = syncSt();
+    if (!st || st.who !== who) st = { rev: 0, idx: {}, who, device: (st && st.device) || "phone-" + Math.random().toString(36).slice(2, 12) };
+    const snap = syncSnapshot(), now = Date.now(), changes = [];
+    for (const k in snap) { const h = syncHash(snap[k]), e = st.idx[k];
+      if (e && e.h === h && !e.del) continue;
+      const [kind, id] = [k.slice(0, k.indexOf(":")), k.slice(k.indexOf(":") + 1)]; changes.push({ kind, id, data: snap[k], updated: (!e && snap[k].t) ? Math.min(now, snap[k].t) : now, _h: h }); }
+    for (const k in st.idx) { const e = st.idx[k];
+      if (!(k in snap) && !e.del && !e.skip) changes.push({ kind: k.slice(0, k.indexOf(":")), id: k.slice(k.indexOf(":") + 1), data: {}, updated: now, deleted: true, _h: null }); }
+    const info = JSON.parse(D.info() || "{}");
+    let body = { since: st.rev || 0, device: st.device, name: info.device || "Телефон", kinds: SYNC_KINDS, changes: changes.map(({ _h, ...x }) => x) }, got = 0, d = {};
+    const hdr = { Authorization: "Bearer " + c.token, "Content-Type": "application/json" };
+    if (c.link && c.link !== c.token) hdr["X-Sync-Link"] = c.link;
+    for (let round = 0; round < 20; round++) {
+      const r = await http("POST", c.base + "?p=/sync", { headers: hdr, body, timeout: 30000 });
+      try { d = JSON.parse(r.body || "{}"); } catch (e) { d = {}; }
+      if (r.status >= 400) throw new Error((d.error && d.error.message) || "облако ответило " + r.status);
+      const srv = d.kinds || ["reminder", "note", "money", "memory"];
+      const qdone = { dayturn: [], taskreq: [] };
+      body.changes.forEach(x => { if (!srv.includes(x.kind)) return;
+        const k = x.kind + ":" + x.id, src = changes.find(y => y.kind === x.kind && y.id === x.id);
+        if (x.kind in qdone) { qdone[x.kind].push(x.id); st.idx[k] = { h: null, u: x.updated, skip: true }; return; }   // отдали компьютеру — у себя забываем
+        st.idx[k] = { h: src ? src._h : null, u: x.updated, del: !!x.deleted }; });
+      if (qdone.dayturn.length) qSet("dayq", qGet("dayq").filter(x => !qdone.dayturn.includes(x.id)));
+      if (qdone.taskreq.length) qSet("taskq", qGet("taskq").filter(x => !qdone.taskreq.includes(x.id)));
+      body.changes = [];
+      if (srv.some(k => !(st.kinds || []).includes(k))) { st.kinds = srv; st.rev = 0; body.since = 0; prefSet("sync", JSON.stringify(st)); continue; }   // сервер узнал новое — история с начала
+      for (const it of d.items || []) {
+        const k = it.kind + ":" + it.id, e = st.idx[k] || {};
+        if (it.dev === st.device && e.u === it.updated) continue;     // наша же правка вернулась — уже применена
+        let okApply; try { okApply = syncApply(it); } catch (e2) { console.error("sync", it.kind, it.id, e2); continue; }
+        if (okApply === false) { st.idx[k] = { h: null, u: it.updated, skip: true }; continue; }
+        got++; st.idx[k] = it.deleted ? { h: null, u: it.updated, del: true } : { h: null, u: it.updated };
+      }
+      st.rev = d.rev || st.rev; body.since = st.rev;
+      if (!d.more) break;
+    }
+    // полученное запоминаем отпечатком «как оно легло у нас» — иначе следующий обмен отправил бы его обратно как своё
+    if (got) { const s2 = syncSnapshot(); for (const k in st.idx) { const e = st.idx[k]; if (e.h === null && !e.del && !e.skip && k in s2) e.h = syncHash(s2[k]); } }
+    prefSet("sync", JSON.stringify(st));
+    syncStatus = { ok: true, at: Date.now(), error: "", devices: d.devices || [], counts: { sent: changes.length, got }, via: c.via };
+    if (got && $("#sh-day") && $("#sh-day").classList.contains("on") && document.activeElement !== $("#tk-goal")) renderDay();
+    if (got && $("#sh-soul") && $("#sh-soul").classList.contains("on") && soulTab === "diary") renderSoul();
+  } catch (e) {
+    syncStatus = Object.assign(syncStatus, { ok: false, at: Date.now(), error: e.message, via: c.via });
+    if (manual) toast("Синхронизация: " + e.message);
+  } finally { syncBusy = false; }
+}
+function syncSoon() { clearTimeout(syncTimer); syncTimer = setTimeout(() => syncRun(false), 3000); }   // несколько правок подряд — один обмен
+function syncCard() {
+  const c = syncCred(), s = syncStatus, t = s.at ? new Date(s.at) : null;
+  if (!c) return `<p class="hint" style="margin-top:0">Напоминания, заметки, расходы и память — одинаковые на телефоне и компьютере. Нужен ключ Dewiar или вход аккаунтом dewiar.pro (Настройки → Мозг) — тот же, что на компьютере.</p>`;
+  const devs = (s.devices || []).filter(x => x.name).map(x => esc(x.name));
+  return `<div class="sw"><div>Телефон и компьютер — одно и то же<small class="hint" style="display:block;margin:2px 0 0">напоминания, заметки, расходы, память · ${esc(c.via)}</small></div>
+    <label class="tg"><input type="checkbox" id="sy-on" ${S.sync.on ? "checked" : ""}><i></i></label></div>
+    <div class="res ${s.ok === false ? "bad" : s.ok ? "ok" : ""}" id="sy-res">${s.ok === false ? esc(s.error) : t ? `Синхронизировано в ${pad(t.getHours())}:${pad(t.getMinutes())}` + (devs.length ? ` · ещё устройства: ${devs.join(", ")}` : "") : S.sync.on ? "первая синхронизация — в течение минуты" : "выключено"}</div>
+    <button class="btn w" id="sy-now" style="margin-top:6px">Синхронизировать сейчас</button>`;
+}
+setInterval(() => { if (!document.hidden) syncRun(false); }, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) syncSoon(); });
+
+/* ---------- Dewiar Облако (server/dwrapp/cloud.php): ключ dw-… или вход аккаунтом, заряд в талерах ----------
+   Пути — параметром ?p=: /balance, /models, /usage, /topup, /netcfg, /report, /sync. Для модели base_url облака
+   кончается на «?p=», и llmStream дописывает «/chat/completions» — выходит ?p=/chat/completions, как у OpenAI. */
+const CLOUD_URL = window.DEWIAR_CLOUD_URL || "https://dewiar.pro/dwrapp/cloud.php";
+let cloudInfo = null, cloudAt = 0;
+const cloudBase = () => (S.llm.base_url || "").split("?")[0] || CLOUD_URL;
+/* ---------- заявка на Dewiar из приложения и перенос кодом ----------
+   joinSend — заявка без ключа (cloud.php ?p=/join); S.join {id, secret, base} хранит, чью заявку ждём; joinPoll — раз в
+   минуту, пока приложение открыто, и при каждом открытии: одобрили — cloudConnect(ключ) и «Dewiar подключён».
+   pairClaim — код из 6 цифр с другого устройства → тот же ключ (одни данные и заряд). */
+async function joinSend(name, contact, note) {
+  const base = CLOUD_URL.split("?")[0];
+  const r = await http("POST", base + "?p=/join", { headers: { "Content-Type": "application/json" }, body: { name: String(name || "").trim(), contact: String(contact || "").trim(), note: String(note || "").trim(), device: "телефон" }, timeout: 20000 });
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  if (r.status >= 400) throw new Error((d.error && d.error.message) || ("сервер ответил " + r.status));
+  S.join = { id: d.id, secret: d.secret, base, at: Date.now() }; saveS();
+  if (d.key) await joinDone(d.key, d);
+  return d;
+}
+async function joinPoll(force) {
+  const j = S.join; if (!j || !j.id || S.llm.base_url && !force) return null;
+  const r = await http("GET", j.base + "?p=/join&id=" + encodeURIComponent(j.id) + "&s=" + encodeURIComponent(j.secret), { timeout: 15000 });
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  if (r.status === 404) { S.join = null; saveS(); return { status: "gone", text: "Заявка не нашлась — отправьте новую." }; }
+  if (r.status >= 400) throw new Error((d.error && d.error.message) || ("сервер ответил " + r.status));
+  if (d.status === "ok" && d.key) await joinDone(d.key, d);
+  if (d.status === "no") { S.join = null; saveS(); }
+  return d;
+}
+async function joinDone(key, d) {
+  await cloudConnect(key, S.join && S.join.base);
+  S.join = null; saveS();
+  const msg = gfix("Готово — Dewiar подключён" + (d && d.reply ? ` («${d.reply}»)` : "") + ". Спросите меня что-нибудь!");
+  showBot(msg); toast("Мозг подключён: модели Dewiar", 3500); say(msg);
+}
+async function pairClaim(code) {
+  const r = await http("POST", CLOUD_URL.split("?")[0] + "?p=/pair/claim", { headers: { "Content-Type": "application/json" }, body: { code: String(code).replace(/\D/g, "") }, timeout: 15000 });
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  if (r.status >= 400 || !d.key) throw new Error((d.error && d.error.message) || ("сервер ответил " + r.status));
+  return d.key;
+}
+setInterval(() => { if (S.join && !document.hidden && !busy) joinPoll(false).catch(() => {}); }, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && S.join) setTimeout(() => joinPoll(false).catch(() => {}), 1500); });
+async function cloudGet(base, key, path) {
+  const r = await http("GET", base.split("?")[0] + "?p=" + path, { headers: { Authorization: "Bearer " + key }, timeout: 10000 });
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  if (r.status >= 400) throw new Error((d.error && d.error.message) || ("облако ответило " + r.status));
+  return d;
+}
+async function cloudPost(path, body) {
+  const r = await http("POST", cloudBase() + "?p=" + path, { headers: { Authorization: "Bearer " + S.llm.api_key, "Content-Type": "application/json" }, body, timeout: 40000 });
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  if (r.status >= 400) throw new Error((d.error && d.error.message) || ("облако ответило " + r.status));
+  return d;
+}
+const RQ = { new: "на проверке", done: "зачислено", rejected: "отклонено" };
+function clReqs(list) {
+  const el = $("#cl-reqs"); if (!el) return;
+  el.innerHTML = (list || []).map(r => `<div class="rqi ${r.status}"><span>${new Date(r.ts * 1000).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}${r.amount ? " · " + r.amount + " тал." : ""}${r.reply ? " · «" + esc(r.reply) + "»" : ""}</span><b>${RQ[r.status] || r.status}${r.status === "done" ? " +" + r.credited : ""}</b></div>`).join("");
+}
+async function clPayLoad() { try { const r = await cloudGet(cloudBase(), S.llm.api_key, "/topup"); $("#cl-top").textContent = r.text || ""; clReqs(r.requests); } catch (e) { $("#cl-top").textContent = e.message; } }
+async function cloudUsage() {
+  try {
+    const u = await cloudGet(cloudBase(), S.llm.api_key, "/usage"), days = u.days || [], mx = Math.max(1, ...days.map(d => d.answers));
+    if (!$("#cl-use") || !days.length) return;
+    $("#cl-use").innerHTML = `<div class="uh"><span>Две недели</span><span>${u.answers} ${turnsWord(u.answers)}</span></div><div class="ub">${days.map(d => `<i class="${d.answers ? "on" : ""}" style="height:${Math.max(6, d.answers / mx * 100)}%"></i>`).join("")}</div>`;
+  } catch (e) { }
+}
+async function cloudBalance(force) {
+  if (!S.llm.cloud) return null;
+  if (!force && cloudInfo && Date.now() - cloudAt < 20000) return cloudInfo;
+  const prev = cloudInfo;
+  cloudInfo = await cloudGet(cloudBase(), S.llm.api_key, "/balance"); cloudAt = Date.now();
+  if (prev && ((cloudInfo.low && !prev.low) || (cloudInfo.empty && !prev.empty)))          // один раз, когда стало мало; site — общий счёт с сайтом (вход аккаунтом)
+    D.notify(cloudInfo.site ? (cloudInfo.empty ? "На счёте dewiar.pro закончились ИИ-талеры" : `На счёте dewiar.pro: ${cloudInfo.balance_text || cloudInfo.balance + " тал."}`)
+      : cloudInfo.empty ? "Заряд Dewiar Облака закончился" : `Заряд Dewiar Облака: ${cloudInfo.percent}%`, cloudInfo.site ? "Пополнить — в личном кабинете на сайте" : "Настройки → Мозг → Пополнить");
+  if (cloudInfo.empty || cloudInfo.low) $("#who").classList.add("low"); else $("#who").classList.remove("low");
+  return cloudInfo;
+}
+/* Ключ Dewiar удалили или перевыпустили на сайте, а вход в аккаунт есть — не мучаем человека ошибкой: думаем по аккаунту. */
+const keyGone = (m) => /ключ dewiar не найден|invalid_api_key|ключ отозван/i.test(String(m || ""));
+async function fixDeadKey(msg) {
+  if (!S.llm.cloud || S.llm.account || !loggedIn() || (msg !== undefined && !keyGone(msg))) return false;
+  const sv = S.account.services || {};
+  try { await cloudConnect(S.account.token, (S.accCloud && S.accCloud.base) || siteUrl(sv.cloud || "dwrapp/cloud.php"), { account: true }); }
+  catch (e) { return false; }
+  toast("Ключ Dewiar больше не действует — думаю по аккаунту " + (S.account.login || "dewiar.pro"), 4500);
+  syncSoon();
+  return true;
+}
+function forgetKey() {                          // «Забыть ключ»: есть аккаунт — думаем по нему, нет — мозг не подключён
+  if (loggedIn()) return fixDeadKey();
+  S.llm = Object.assign({}, DEF.llm); cloudInfo = null; S.accCloud = null;
+  if (S.stt.engine === "server" && /cloud\.php/.test(S.stt.url || "") && !S.stt.from_account) S.stt = Object.assign({}, DEF.stt);
+  saveS(); $("#who").classList.remove("low");
+  return Promise.resolve(true);
+}
+const cloudWho = () => S.llm.account ? "по аккаунту " + (S.account.login || "") : "ключ …" + S.llm.api_key.slice(-4);
+const turnsWord = (n) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? "ответ" : a >= 2 && a <= 4 && (b < 12 || b > 14) ? "ответа" : "ответов"; };
+function cloudFill(c) {
+  if (!c || !$("#cl-card")) return;
+  const pct = Math.max(0, Math.min(100, c.percent || 0));
+  $("#cl-card").className = "card cloudc" + (c.empty ? " empty" : c.low ? " low" : "");
+  const bal = c.balance_text || (c.balance != null ? String(c.balance).replace(".", ",") + " тал." : "");
+  $("#cl-pct").textContent = c.site ? bal : pct + "%"; $("#cl-fill").style.width = Math.max(pct, c.empty ? 0 : 2) + "%";
+  $("#cl-sub").textContent = c.site ? "счёт dewiar.pro · " + (S.account.login || c.label || "") : S.llm.account ? cloudWho() : (c.label ? c.label + " · " : "") + cloudWho();
+  $("#cl-turns").textContent = c.site ? (c.frozen ? "Доступ к ИИ на сайте приостановлен — напишите администратору." : c.empty ? "На счёте dewiar.pro закончились ИИ-талеры — пополните в личном кабинете."
+      : `Общий счёт с сайтом: ${bal}` + (c.turns ? ` — примерно на ${c.turns.toLocaleString("ru-RU")} ${turnsWord(c.turns)}` : ""))
+    : c.frozen ? "Ключ приостановлен — напишите администратору." : c.empty ? "Заряд закончился — пополните, и ассистент снова будет отвечать."
+    : `Хватит примерно на ${c.turns.toLocaleString("ru-RU")} ${turnsWord(c.turns)}` + (c.low ? " — скоро понадобится пополнить" : "");
+  $("#cl-top").textContent = c.topup || "";
+}
+/* key — ключ dw-… или (account) токен входа на сайт: его регистр не трогаем. activate:false — только запомнить, своя модель остаётся. */
+async function cloudConnect(key, base, opts = {}) {
+  key = String(key || "").replace(/\s+/g, "").replace(/^[«"']|[»"']$/g, ""); base = (base || CLOUD_URL).split("?")[0];
+  if (!opts.account) { key = key.toLowerCase(); if (!/^dw-/.test(key)) throw new Error("это не ключ Dewiar: он начинается с dw-. Вошли аккаунтом dewiar.pro — ключ не нужен"); }
+  const info = await cloudGet(base, key, "/balance"), md = await cloudGet(base, key, "/models"), m = (md.data || [])[0];
+  if (!m) throw new Error("в облаке пока нет доступных моделей — напишите администратору");
+  if (opts.activate === false) { S.accCloud = { base, model: m.id, title: m.title || m.id, stt: !!md.stt, tts: !!md.tts }; saveS(); return info; }
+  S.accCloud = opts.account ? { base, model: m.id, title: m.title || m.id, stt: !!md.stt, tts: !!md.tts } : null;
+  S.llm = Object.assign({}, DEF.llm, { kind: "openai", name: "Dewiar Облако", base_url: base + "?p=", api_key: key, model: m.id, cloud: true, title: m.title || m.id,
+    disable_thinking: false, account: !!opts.account, stt: !!md.stt, tts: !!md.tts });
+  if (md.stt && !D.recognizer()) S.stt = { engine: "server", url: base + "?p=", key, model: "gigaam" };      // в телефоне нет своего распознавания
+  saveS(); cloudInfo = info; cloudAt = Date.now();
+  return info;
+}
+
+/* ---------- аккаунт dewiar.pro: вход логином сайта, модели по аккаунту, Знания ----------
+   Вход — dwrapp/login.php (выдаёт токен и список услуг services: cloud, stt…; приложение называет себя X-App-Id),
+   Знания — synapbase/api_rag и api_scope. Пароль не хранится — только токен; 401 — вход устарел (accountExpired). */
+const SITE = "https://dewiar.pro", APP_ID = "dewiar-app";
+const YANDEX_CID = "bd46169129964deea1f608cf45f7122a";   // приложение «Dewiar» на oauth.yandex.ru (iot:view, iot:control) — как в core/smarthome.py
+const loggedIn = () => !!(S.account && S.account.token);
+const siteHost = () => (S.account.server || SITE).replace(/^https?:\/\//, "");
+function siteAddr(a) {
+  a = String(a || "").trim().replace(/\/+$/, ""); if (!a) return SITE;
+  if (!/^https?:\/\//.test(a)) a = "https://" + a;
+  if (/^http:\/\//.test(a) && !/^http:\/\/(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|localhost)/.test(a)) throw new Error("нужен адрес с https:// — иначе пароль ушёл бы открытым");
+  return a;
+}
+const siteUrl = (p) => /^https?:/.test(p || "") ? p : (S.account.server || SITE) + "/" + String(p || "").replace(/^\/+/, "");
+const siteHeaders = () => ({ "Content-Type": "application/json", "X-App-Id": APP_ID, Authorization: "Bearer " + S.account.token });
+function accountExpired() {
+  S.account = Object.assign({}, DEF.account, { server: S.account.server, login: S.account.login, problem: "Вход устарел — войдите в аккаунт заново (Настройки → Мозг)." });
+  scopeCache = null; saveS();
+}
+function siteParse(r) {
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { if (r.status === 200) throw new Error("сайт ответил непонятно"); }
+  if (r.status === 401) { accountExpired(); throw new Error("вход в аккаунт устарел — войдите заново: Настройки → Мозг"); }
+  if (r.status === 429) throw new Error("слишком много вопросов подряд — сайт просит подождать");
+  if (r.status !== 200) throw new Error((d.error && (d.error.message || d.error)) || "сайт ответил " + r.status);
+  return d;
+}
+async function accountLogin(server, login, password) {
+  server = siteAddr(server); login = String(login || "").trim();
+  if (!login || !password) throw new Error("введите логин и пароль");
+  applyProxy([server]);
+  let r;
+  try { r = await http("POST", server + "/dwrapp/login.php", { headers: { "Content-Type": "application/json", "X-App-Id": APP_ID }, body: { login, password }, timeout: 20000 }); }
+  catch (e) { throw new Error(e.message + "." + blockedHint()); }
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  if (r.status === 403 && /API-токен/.test(d.error || ""))     // старый login.php сайта не выдаёт токен сам — есть путь без него
+    throw new Error("у этого аккаунта пока нет доступа для приложения (API-токена). Можно без него: «Мозг» → «Попробовать Dewiar» — "
+      + "заявка, ключ придёт сам. Или попросите администратора сайта выдать токен");
+  if (r.status !== 200 || !d.ok || !d.token)
+    throw new Error(d.error || ({ 401: "неверный логин или пароль", 404: "на сайте нет входа для приложения (dwrapp/login.php)", 429: "слишком много попыток — подождите 15 минут" }[r.status] || "сайт ответил " + r.status));
+  const sv = d.services || {};
+  S.account = { server, login: (d.user && d.user.login) || login, token: d.token, user: d.user || {}, rag_url: d.rag_url || "/synapbase/api_rag", services: sv, problem: "", since: Date.now() };
+  scopeCache = null; saveS();
+  const out = { login: S.account.login, cloud: null, activated: false };
+  let ownKey = S.llm.cloud && !S.llm.account;
+  const mine = !!S.llm.base_url && !S.llm.cloud;
+  if (ownKey) {                                    // свой ключ dw- ещё действует? Удалённый на сайте — не держимся за него
+    try { await cloudGet(cloudBase(), S.llm.api_key, "/balance"); } catch (e) { if (keyGone(e.message)) ownKey = false; }
+  }
+  // облако по аккаунту: свой рабочий ключ dw-… и своя модель остаются, облако — запасом. Адрес — из services, а если
+  // сайт его не назвал (старый login.php) — обычный dwrapp/cloud.php; не ответило — ещё раз (первый запрос бывает долгим)
+  for (let i = 0; i < 2 && !out.cloud; i++) {
+    try { out.cloud = await cloudConnect(d.token, siteUrl(sv.cloud || "dwrapp/cloud.php"), { account: true, activate: !mine && !ownKey }); out.activated = !mine && !ownKey; }
+    catch (e) { plog("warn", "облако по аккаунту: " + e.message); if (i) out.cloud = { error: e.message }; }
+  }
+  if (sv.stt && !D.recognizer() && S.stt.engine !== "server") S.stt = { engine: "server", url: siteUrl(sv.stt), key: d.token, model: "", from_account: true };
+  saveS(); applyPersona();
+  return out;
+}
+function accountLogout() {
+  if (S.llm.cloud && S.llm.account) { S.llm = Object.assign({}, DEF.llm); cloudInfo = null; }
+  if (S.stt.from_account) S.stt = Object.assign({}, DEF.stt);
+  S.account = Object.assign({}, DEF.account, { server: S.account.server && S.account.server !== SITE ? S.account.server : "" });
+  S.accCloud = null; scopeCache = null; saveS(); $("#who").classList.remove("low");
+}
+async function accountCheck() {                    // при запуске: вход ещё действует?
+  if (!loggedIn()) return;
+  try {
+    const r = await http("GET", S.account.server + "/dwrapp/login.php", { headers: siteHeaders(), timeout: 15000 });
+    if (r.status === 401) { accountExpired(); if (S.llm.account) toast("Вход в аккаунт dewiar.pro устарел — войдите заново", 4000); return; }
+    if (r.status === 200) { const d = JSON.parse(r.body || "{}"); if (d.user) S.account.user = d.user; if (d.services) S.account.services = d.services; S.account.problem = ""; saveS(); }
+  } catch (e) { }
+  if (S.llm.cloud && !S.llm.account && loggedIn()) {        // свой ключ dw- удалили на сайте — сразу по аккаунту, без ошибок в разговоре
+    try { await cloudGet(cloudBase(), S.llm.api_key, "/balance"); } catch (e) { await fixDeadKey(e.message); }
+  }
+}
+
+/* базы сайта: свои папки, публичные библиотеки и их разделы */
+let scopeCache = null;
+const ragUrl = () => siteUrl(S.account.rag_url || "/synapbase/api_rag");
+const scopeUrl = () => ragUrl().replace(/api_rag(\.php)?(?=$|\?)/, (m0, ext) => "api_scope" + (ext || ""));
+async function siteScope(force) {
+  if (!loggedIn()) throw new Error("нужен вход в аккаунт dewiar.pro: Настройки → Мозг");
+  if (!force && scopeCache && Date.now() - scopeCache.t < 300000) return scopeCache.v;
+  const d = siteParse(await http("POST", scopeUrl(), { headers: siteHeaders(), body: {}, timeout: 20000 }));
+  const bases = [];
+  for (const f of d.folders || []) bases.push({ kind: "folder", id: String(f.id), label: f.name || "Папка", docs: +f.doc_count || 0, group: "Мои папки" });
+  for (const lib of d.libraries || []) {
+    const lab = lib.label || "Публичная библиотека";
+    bases.push({ kind: "library", id: String(lib.id), label: lab, docs: +lib.doc_count || 0, group: lab, whole: true });
+    for (const f of lib.folders || []) bases.push({ kind: "library_folder", id: String(f.id), lib: String(lib.id), label: f.name || "Раздел", docs: +f.doc_count || 0, group: lab });
+  }
+  scopeCache = { t: Date.now(), v: { bases, docs: (d.docs || []).length } };
+  return scopeCache.v;
+}
+const numId = (x) => /^\d+$/.test(String(x)) ? +x : x;
+function ragOptions(b) {
+  if (!b) return {};
+  if (b.kind === "folder") return { bd_id: b.id };
+  if (b.kind === "doc") return { doc_id: b.id };
+  if (b.kind === "library") return { library_id: numId(b.id) };
+  if (b.kind === "library_folder") { const o = { library_bd_id: b.id }; if (b.lib) o.library_id = numId(b.lib); return o; }
+  return {};
+}
+function ragSources(meta, limit = 6) {
+  const out = [];
+  const walk = (x, depth) => {
+    if (depth > 6 || out.length >= limit || !x) return;
+    if (Array.isArray(x)) { x.forEach(v => walk(v, depth + 1)); return; }
+    if (typeof x !== "object") return;
+    const k = ["title", "doc_name", "document", "filename", "file_name", "name", "source"].find(k => typeof x[k] === "string" && x[k].trim());
+    if (k && x[k].length < 200 && !out.includes(x[k].trim())) out.push(x[k].trim());
+    Object.values(x).forEach(v => walk(v, depth + 1));
+  };
+  walk(meta, 0); return out;
+}
+function ragImages(d, limit = 4) {
+  const out = [], base = (S.account.server || SITE).replace(/\/+$/, ""), rx = /\.(jpe?g|png|gif|webp)(\?|#|$)/i;
+  const url = (p) => {
+    p = String(p || "").trim().replace(/\\/g, "/"); if (!p) return "";
+    const i = p.indexOf("user_uploads/"); if (i > 0) p = p.slice(i);
+    if (/^https?:/.test(p)) return p;
+    if (!/^(\/|user_uploads\/)/.test(p)) return "";
+    return base + "/" + p.replace(/^\/+/, "");
+  };
+  const add = (u, title) => { if (u && !out.some(x => x.url === u)) out.push({ url: u, title: title || "" }); };
+  for (const a of d.media_anchors || []) if (a && (a.media_type === "image" || rx.test(String(a.media_url || "")))) add(url(a.media_url || a.embed_url), a.title || a.description);
+  const docs = (d.rag_meta || {}).retrieved_docs;
+  for (const x of Array.isArray(docs) ? docs : []) {
+    if (!x || typeof x !== "object") continue;
+    const k = ["meta_path", "image_url", "media_url", "img_url", "image_path", "visual_path"].find(k => typeof x[k] === "string" && rx.test(x[k]));
+    if (k) add(url(x[k]), x.name || x.doc_name);
+  }
+  return out.slice(0, limit);
+}
+async function ragRetrieve(question, b, hist) {
+  const msgs = (hist || []).slice(-4).concat([{ role: "user", content: question }]);
+  const d = siteParse(await http("POST", ragUrl(), { headers: siteHeaders(), timeout: 60000,
+    body: { messages: msgs, stream: false, _sid: APP_ID, rag_options: Object.assign(ragOptions(b), { response_mode: "retrieval_only", history_depth: 4 }) } }));
+  const ctx = String(d.ready_to_use_context || "").trim(), ans = (((d.choices || [])[0] || {}).message || {}).content || "";
+  const found = !!ctx && !/ДАННЫЕ_НЕ_НАЙДЕНЫ/.test(ans);
+  return { context: found ? ctx : "", sources: ragSources(d.rag_meta), images: ragImages(d), found };
+}
+const kbOf = (pid) => (S.kb || {})[pid || persona().id] || [];
+/* У персонажа подключены базы сайта — ищем в них по вопросу и даём модели найденное (как на компьютере). */
+async function personaKnowledge(text) {
+  const bases = kbOf(), q = String(text || "").trim();
+  if (!bases.length || !loggedIn() || q.length < 3) return "";
+  const labels = bases.map(b => `«${b.label}»`).join(", ");
+  showBot(`Ищу в ${labels}`, "wait");
+  const hist = history.slice(-4).filter(m => (m.role === "user" || m.role === "assistant") && typeof m.content === "string").map(m => ({ role: m.role, content: m.content }));
+  const got = await Promise.all(bases.map(b => ragRetrieve(q, b, hist).then(r => ({ b, r }), e => ({ b, err: e.message }))));
+  const parts = [], empty = [], errs = [], srcs = []; let images = [];
+  const per = Math.max(1500, Math.floor(7000 / bases.length));
+  for (const { b, r, err } of got) {
+    if (err) errs.push(`«${b.label}»: ${err}`);
+    else if (r.found) { parts.push(`### Из «${b.label}»\n${r.context.slice(0, per)}`); images = images.concat(r.images); srcs.push(...r.sources); }
+    else empty.push(`«${b.label}»`);
+  }
+  if (images.length) showImages(images);
+  let out = "";
+  if (parts.length) {
+    out = "\n\nТВОЯ БАЗА ЗНАНИЙ (сайт Dewiar) — найдено по вопросу пользователя. Отвечай, опираясь на это: где уместно, приводи дословные цитаты "
+      + "и называй источник (книга, глава и стих — или документ и страница). Не выдумывай того, чего в найденном нет; если найденное не отвечает "
+      + "на вопрос — скажи об этом честно и бережно ответь от себя.\n\n" + parts.join("\n\n");
+    if (srcs.length) out += "\n\nИсточники: " + [...new Set(srcs)].join("; ");
+  } else if (empty.length) out = `\n\nВ твоей базе знаний (${empty.join(", ")}) по этому вопросу ничего не нашлось. Если отвечаешь от себя — так и скажи одной фразой.`;
+  if (errs.length && !parts.length) out += `\n\nБаза знаний сейчас недоступна (${errs[0]}). Ответь от себя и коротко скажи, что база не ответила.`;
+  return out;
+}
+function showImages(list) {
+  showCard(`<div class="kbimgs">${list.map((x, i) => `<button class="kbimg" data-i="${i}" title="${esc(x.title)}"><img src="${esc(x.url)}" alt="" loading="lazy" onerror="this.parentNode.remove()"></button>`).join("")}</div>`);
+  $$("#card .kbimg").forEach(b => b.onclick = () => D.openUrl(list[+b.dataset.i].url));
+}
+/* инструмент: вопрос к Знаниям сайта целиком (ответ пишет сайт) */
+async function askKnowledge(question, baseName) {
+  if (!loggedIn()) return "Нужен вход в аккаунт dewiar.pro (Настройки → Мозг → Аккаунт).";
+  let b = null;
+  if (baseName) {
+    const want = baseName.toLowerCase().replace(/ё/g, "е").slice(0, 6);
+    try { b = (await siteScope()).bases.find(x => x.label.toLowerCase().replace(/ё/g, "е").includes(want)) || null; } catch (e) { }
+  }
+  const body = { messages: [{ role: "user", content: question }], stream: false, _sid: APP_ID };
+  if (b) body.rag_options = ragOptions(b);
+  const d = siteParse(await http("POST", ragUrl(), { headers: siteHeaders(), body, timeout: 150000 }));
+  const ans = ((((d.choices || [])[0] || {}).message || {}).content || "").trim();
+  const imgs = ragImages(d); if (imgs.length) showImages(imgs);
+  const src = ragSources(d.rag_meta);
+  return (ans || "В Знаниях ничего не нашлось.") + (src.length ? "\n\nИсточники: " + src.join("; ") : "");
+}
+
+/* Знания персонажа — в листе «Кто отвечает» */
+function renderKbPanel() {
+  const box = $("#pkb"); if (!box) return;
+  const p = persona(), mine = kbOf(p.id);
+  if (!loggedIn()) {
+    box.innerHTML = `<div class="card kbc"><b>Знания персонажа</b><p class="hint" style="margin:6px 0 10px">Персонажу можно дать базы с сайта dewiar.pro — свои папки или раздел публичной библиотеки, например «Библию». Тогда он отвечает по источнику, с цитатами.</p>
+      <button class="btn w" id="kb-login">Войти в аккаунт dewiar.pro</button></div>`;
+    $("#kb-login").onclick = () => { openSettings("brain"); setTimeout(() => { const t = $('.tile[data-w="account"]'); if (t) t.click(); }, 250); };
+    return;
+  }
+  box.innerHTML = `<div class="card kbc"><div class="row2"><div style="flex:1;min-width:0"><b>Знания · ${esc(p.name)}</b><small class="hint" style="margin:2px 0 0;display:block">${mine.length ? "Перед ответом ищет здесь" : "Базы сайта не подключены"}</small></div>
+    <button class="btn" id="kb-edit">${mine.length ? "Изменить" : "Подключить"}</button></div>
+    ${mine.length ? `<div class="chips">${mine.map(b => `<span class="chip">${esc(b.label)}</span>`).join("")}</div>` : ""}<div id="kb-pick"></div></div>`;
+  $("#kb-edit").onclick = () => kbPicker(p.id);
+}
+async function kbPicker(pid) {
+  const el = $("#kb-pick"); el.innerHTML = `<p class="hint">загружаю базы сайта…</p>`;
+  let bases;
+  try { bases = (await siteScope(true)).bases; } catch (e) { el.innerHTML = `<div class="res bad">${esc(e.message)}</div>`; return; }
+  if (!bases.length) { el.innerHTML = `<p class="hint">На сайте пока нет ваших папок и публичных библиотек. Загрузите документы на dewiar.pro — и они появятся здесь.</p>`; return; }
+  const key = (b) => b.kind + ":" + b.id, sel = new Set(kbOf(pid).map(key));
+  const groups = []; for (const b of bases) { let g = groups.find(x => x.name === b.group); if (!g) groups.push(g = { name: b.group, items: [] }); g.items.push(b); }
+  el.innerHTML = groups.map(g => `<div class="kbg">${esc(g.name)}</div>` + g.items.map(b => `<label class="kbi"><input type="checkbox" value="${esc(key(b))}" ${sel.has(key(b)) ? "checked" : ""}>
+    <span>${esc(b.whole ? "Вся библиотека" : b.label)}</span><small>${b.docs} док.</small></label>`).join("")).join("")
+    + `<p class="hint" style="margin:8px 0 0">До 6 баз. Чем точнее раздел, тем точнее ответы.</p>`;
+  $$("input", el).forEach(i => i.onchange = () => {
+    const on = $$("input:checked", el).map(x => x.value);
+    if (on.length > 6) { i.checked = false; toast("Не больше 6 баз у одного персонажа"); return; }
+    S.kb = S.kb || {}; S.kb[pid] = bases.filter(b => on.includes(key(b))).map(b => { const o = { kind: b.kind, id: b.id, label: b.whole ? b.group : b.label }; if (b.lib) o.lib = b.lib; return o; });
+    saveS();
+    const chips = $(".kbc .chips"), mine = S.kb[pid];
+    $(".kbc .hint").textContent = mine.length ? "Перед ответом ищет здесь" : "Базы сайта не подключены";
+    $("#kb-edit").textContent = mine.length ? "Изменить" : "Подключить";
+    if (chips) chips.innerHTML = mine.map(b => `<span class="chip">${esc(b.label)}</span>`).join("");
+    else if (mine.length) $(".kbc .row2").insertAdjacentHTML("afterend", `<div class="chips">${mine.map(b => `<span class="chip">${esc(b.label)}</span>`).join("")}</div>`);
+  });
+}
+
+/* ---------- Telegram: общий бот Dewiar (dwrapp/tg.php на сайте, вход — аккаунтом) ----------
+   Подключение — как на компьютере: телефон регистрирует код (setLinkCode) и открывает ссылку t.me/<бот>?start=<код>;
+   кто нажал «Старт» — тот владелец. Компьютера нет — бот отвечает сам моделями Dewiar (заметки, списки, напоминания;
+   сделанное приходит на телефон синхронизацией): для этого телефон отдаёт ему ключ и персонажа (dewiarSync с
+   device=phone — «компьютер на связи» он не отмечает). Есть компьютер — главный он, телефон его настройки не трогает. */
+const tgOn = () => loggedIn() && !!(S.account.services || {}).tg;
+/* Имя общего бота Dewiar — с сайта (dwrapp/tg.php?health, без входа): кнопка «Открыть бота» на телефоне. */
+let tgBotCache = null;
+async function tgBotName() {
+  if (tgBotCache !== null) return tgBotCache;
+  const r = await http("GET", (loggedIn() ? siteUrl("dwrapp/tg.php") : CLOUD_URL.replace(/cloud\.php.*$/, "tg.php")) + "?health", { timeout: 10000 });
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  tgBotCache = String(d.bot || "").replace(/^@/, "");
+  return tgBotCache;
+}
+async function tgCall(m, body) {
+  const r = await http("POST", siteUrl((S.account.services || {}).tg || "dwrapp/tg.php") + "?m=" + m, { headers: siteHeaders(), body: body || {}, timeout: 20000 });
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  if (r.status === 401) throw new Error("вход в аккаунт устарел — войдите заново: Настройки → Мозг");
+  if (r.status >= 400 || d.ok === false) throw new Error(d.description || "бот ответил " + r.status);
+  return d.result;
+}
+async function tgSync() {
+  if (!tgOn() || !(S.tg || {}).linked) return;
+  const p = persona(), off = -new Date().getTimezoneOffset(), tz = (off >= 0 ? "+" : "-") + pad(Math.floor(Math.abs(off) / 60)) + ":" + pad(Math.abs(off) % 60);
+  const base = (S.accCloud && S.accCloud.base) || siteUrl((S.account.services || {}).cloud || "dwrapp/cloud.php");
+  try {
+    await tgCall("dewiarSync", { device: "phone", key: S.account.token, cloud: base.split("?")[0], model: (S.llm.cloud && S.llm.account ? S.llm.model : (S.accCloud || {}).model) || "",
+      voice: p.voice_remote || "", tz, persona: { name: p.name, gender: p.gender || "male", character: p.character || "" }, offline: true, voice_reply: true, sync_on: !!S.sync.on });
+    S.tg.at = Date.now(); saveS();
+  } catch (e) { plog("warn", "Telegram: " + e.message); }
+}
+async function tgStatus() { const r = await tgCall("dewiarStatus"); S.tg = Object.assign({}, S.tg, { linked: !!r.linked, bot: r.bot || "", name: r.name || "" }); saveS(); return S.tg; }
+async function tgLink(res) {
+  const a = new Uint8Array(18); crypto.getRandomValues(a);
+  const code = btoa(String.fromCharCode(...a)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");   // как secrets.token_urlsafe на компьютере
+  const st = await tgStatus();
+  if (!st.bot) throw new Error("на сайте не настроен бот Telegram");
+  await tgCall("setLinkCode", { code });
+  D.openUrl("https://t.me/" + st.bot + "?start=" + code);
+  res.className = "res"; res.textContent = "В Telegram нажмите «Старт» — жду…";
+  for (let i = 0; i < 60; i++) {                   // 3 минуты: человек переключился в Telegram и вернулся
+    await new Promise(r => setTimeout(r, 3000));
+    if ((await tgStatus().catch(() => ({}))).linked) { await tgSync(); return true; }
+  }
+  throw new Error("не дождался «Старт» в Telegram — попробуйте ещё раз");
+}
+
+/* ---------- мессенджеры: MAX, Telegram, WhatsApp… — текст уходит в приложение, получателя выбирает человек ---------- */
+const MESSENGERS = {
+  max: { name: "MAX", pkgs: ["ru.oneme.app"] },
+  telegram: { name: "Telegram", pkgs: ["org.telegram.messenger", "org.telegram.messenger.web", "org.thunderdog.challegram"] },
+  whatsapp: { name: "WhatsApp", pkgs: ["com.whatsapp", "com.whatsapp.w4b"] },
+  viber: { name: "Viber", pkgs: ["com.viber.voip"] },
+  vk: { name: "VK", pkgs: ["com.vkontakte.android"] },
+};
+function msgApp(w) {
+  w = String(w || "").toLowerCase();
+  return /^(тел|тг|tele)/.test(w) ? "telegram" : /^(ват|вот|вац|whats)/.test(w) ? "whatsapp" : /^(вай|viber)/.test(w) ? "viber" : /^(вк|вконт)/.test(w) ? "vk" : "max";
+}
+function sendTo(app, text) {
+  const m = MESSENGERS[app] || MESSENGERS.max; text = String(text || "").trim();
+  if (!text) return "Нечего отправлять — скажите текст сообщения.";
+  for (const p of m.pkgs) if (D.shareTo && D.shareTo(p, text)) return `Открыл ${m.name} с текстом — выберите, кому отправить.`;
+  D.share(text); return `${m.name} на телефоне не нашёлся — открыл выбор приложения.`;
+}
+
+/* мастер «Мозг» по плитке: account — вход на сайт, dwkey — ключ Dewiar, dewiar — сервер Dewiar по манифесту,
+   server — свой сервер в сети, cloud — облачный сервис по ключу, иначе — файл настроек с компьютера */
+function wizard(kind) {
+  const w = $("#wz");
+  if (kind === "account") {
+    w.innerHTML = `<div class="card"><label class="f"><span>Логин на dewiar.pro</span><input id="w-login" autocapitalize="off" autocomplete="username" spellcheck="false"></label>
+      <label class="f"><span>Пароль</span><input id="w-pass" type="password" autocomplete="current-password"></label>
+      <details class="more"><summary>Другой сайт</summary><label class="f"><span>Адрес сайта</span><input id="w-site" inputmode="url" placeholder="dewiar.pro" value="${esc(S.account.server && S.account.server !== SITE ? S.account.server : "")}"></label></details>
+      <button class="btn p w" id="w-go">Войти</button><div class="res" id="w-res"></div>
+      <p class="hint">Пароль не сохраняется — телефон получает только ключ входа. Нет своей модели — подключатся модели Dewiar с зарядом в талерах; персонажам можно будет дать базы знаний сайта.</p></div>`;
+    const go = async () => { const r = $("#w-res"); r.className = "res"; r.textContent = "вхожу…"; $("#w-go").disabled = true;
+      try { const x = await accountLogin($("#w-site").value, $("#w-login").value, $("#w-pass").value);
+        r.className = "res ok"; r.textContent = `Вы вошли: ${x.login}.` + (x.cloud && x.cloud.error ? " Модели Dewiar сейчас недоступны: " + x.cloud.error : x.activated ? ` Думают модели Dewiar, заряд ${x.cloud.percent}%.` : x.cloud ? " Модели Dewiar можно включить кнопкой." : "");
+        toast("Аккаунт подключён"); setTimeout(renderSettings, 1600); }
+      catch (e) { r.className = "res bad"; r.textContent = e.message; $("#w-go").disabled = false; } };
+    $("#w-go").onclick = go; $("#w-pass").onkeydown = (e) => { if (e.key === "Enter") go(); };
+    setTimeout(() => $("#w-login").focus(), 200);
+  } else if (kind === "join") {
+    w.innerHTML = `<div class="card"><b>Попробовать модели Dewiar</b><p class="hint" style="margin:4px 0 8px">Без регистрации: напишите, как к вам обращаться и как связаться. Как только заявку одобрят, ключ придёт сюда сам — с талером на счёте, этого хватит, чтобы попробовать.</p>
+      <label class="f"><span>Как к вам обращаться</span><input id="w-name" autocomplete="name"></label>
+      <label class="f"><span>Как связаться: почта, Telegram или телефон</span><input id="w-contact" autocapitalize="off" spellcheck="false" placeholder="@ник или почта"></label>
+      <label class="f"><span>Пара слов, зачем (необязательно)</span><input id="w-note" placeholder="например: попробовать помощника"></label>
+      <button class="btn p w" id="w-go">Отправить заявку</button><div class="res" id="w-res"></div>
+      <p class="hint">Тот же ключ потом подключится на компьютере и других телефонах кодом из 6 цифр — данные и заряд будут общими.</p></div>`;
+    $("#w-go").onclick = async () => { const r = $("#w-res"); r.className = "res"; r.textContent = "отправляю…"; $("#w-go").disabled = true;
+      try { const d = await joinSend($("#w-name").value, $("#w-contact").value, $("#w-note").value);
+        r.className = "res ok"; r.textContent = d.text || "Заявка отправлена."; if (d.key) setTimeout(renderSettings, 1400); else setTimeout(renderSettings, 2500); }
+      catch (e) { r.className = "res bad"; r.textContent = e.message; $("#w-go").disabled = false; } };
+    setTimeout(() => $("#w-name").focus(), 200);
+  } else if (kind === "dwkey") {
+    w.innerHTML = `<div class="card"><label class="f"><span>Ключ Dewiar или код с другого устройства</span><input id="w-key" placeholder="dw-xxxxxx-… или 6 цифр" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+      <button class="btn p w" id="w-go">Подключить</button><div class="res" id="w-res"></div>
+      <p class="hint">Код из 6 цифр покажет ваше другое устройство, где Dewiar уже подключён: «Мозг» → «Добавить устройство». Данные и заряд будут общими. Думает сервер Dewiar — телефону не нужно ничего мощного.</p></div>`;
+    $("#w-go").onclick = async () => { const r = $("#w-res"); r.className = "res"; r.textContent = "проверяю…";
+      try { let k = $("#w-key").value.trim();
+        if (/^\d[\d\s-]{4,8}\d$/.test(k)) { k = await pairClaim(k); }
+        const c = await cloudConnect(k); r.className = "res ok"; r.textContent = `Подключено${c.label ? ": " + c.label : ""}. Заряд ${c.percent}%.`; toast("Мозг подключён"); setTimeout(renderSettings, 1400); }
+      catch (e) { r.className = "res bad"; r.textContent = e.message; } };
+  } else if (kind === "server") {
+    w.innerHTML = `<div class="card"><label class="f"><span>Адрес сервера</span><input id="w-addr" placeholder="192.168.1.10 или 192.168.1.10:11434" inputmode="url"></label>
+      <button class="btn p w" id="w-go">Найти</button><div class="res" id="w-res"></div><div id="w-found"></div>
+      <p class="hint">Порт можно не указывать — проверю обычные: Ollama 11434, vLLM 8000, llama.cpp 8080, LM Studio 1234. Сервер дома доступен только в домашней сети (Wi-Fi).</p></div>`;
+    $("#w-go").onclick = async () => { const r = $("#w-res"); r.className = "res"; r.textContent = "ищу…"; $("#w-found").innerHTML = "";
+      try { const f = await probeServer($("#w-addr").value); r.className = "res ok"; r.textContent = `Нашёл: ${f.kind === "ollama" ? "Ollama" : "OpenAI-совместимый сервер"} — ${f.base}`;
+        $("#w-found").innerHTML = `<label class="f"><span>Модель</span><select id="w-model">${f.models.map(m => `<option>${esc(m)}</option>`).join("")}</select></label><button class="btn p w" id="w-use">Подключить</button>`;
+        $("#w-use").onclick = () => { S.llm = Object.assign({}, DEF.llm, { kind: f.kind, name: "Сервер " + f.base.replace(/^https?:\/\//, "").replace(/\/v1$/, ""), base_url: f.base, model: $("#w-model").value }); saveS(); toast("Мозг подключён"); renderSettings(); }; }
+      catch (e) { r.className = "res bad"; r.textContent = e.message; } };
+  } else if (kind === "cloud") {
+    w.innerHTML = `<div class="card"><label class="f"><span>Сервис</span><select id="w-prov">${Object.entries(CLOUD).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join("")}</select></label>
+      <label class="f"><span>Ключ</span><input id="w-key" type="password" placeholder="sk-…"></label><label class="f"><span>Модель</span><input id="w-model"></label>
+      <p class="hint" id="w-hint"></p><button class="btn p w" id="w-go">Подключить</button><div class="res" id="w-res"></div></div>`;
+    const fill = () => { const c = CLOUD[$("#w-prov").value]; $("#w-model").value = c.model; $("#w-hint").innerHTML = `Ключ — на <a href="${c.key}">${c.key.replace("https://", "")}</a>.`; };
+    $("#w-prov").onchange = fill; fill();
+    $("#w-go").onclick = async () => { const c = CLOUD[$("#w-prov").value], r = $("#w-res"); const old = S.llm;
+      S.llm = Object.assign({}, DEF.llm, { kind: "openai", name: c.name, base_url: c.url, api_key: $("#w-key").value.trim(), model: $("#w-model").value.trim(), disable_thinking: false });
+      r.className = "res"; r.textContent = "проверяю ключ…";
+      try { await llmStream([{ role: "user", content: "Ответь одним словом: готово" }], null, null); saveS(); r.className = "res ok"; r.textContent = "Готово — мозг подключён."; setTimeout(renderSettings, 1400); }
+      catch (e) { S.llm = old; r.className = "res bad"; r.textContent = e.message; } };
+  } else {
+    w.innerHTML = `<div class="card"><b>Адрес от администратора</b><p class="hint" style="margin:4px 0 8px">Если администратор дал адрес своего сервера Dewiar — модель, слух и голос подключатся по нему сразу.</p>
+      <label class="f"><span>Адрес сервера</span><input id="w-addr" placeholder="например: ai.company.ru" inputmode="url"></label>
+      <label class="f"><span>Код доступа (если выдали)</span><input id="w-akey" type="password"></label><button class="btn p w" id="w-ago">Подключить</button><div class="res" id="w-ares"></div></div>
+      <div class="card"><b>Файл настроек с компьютера</b><p class="hint" style="margin-top:4px">На компьютере: студия → «Подключение» → «Файл настроек» → отметьте «включить ключи доступа» → «Экспортировать…».
+      Пришлите файл себе (например, в Telegram) и откройте его на телефоне — Dewiar подхватит настройки. Или вставьте содержимое файла сюда:</p>
+      <label class="f"><textarea id="w-json" rows="5" style="width:100%;padding:12px;border-radius:14px;border:0;background:var(--field);color:var(--ink)" placeholder='{"dewiar": 1, …}'></textarea></label>
+      <button class="btn p w" id="w-go">Применить</button><div class="res" id="w-res"></div></div>`;
+    $("#w-go").onclick = () => { const r = $("#w-res"); try { const m = JSON.parse($("#w-json").value); applyConfig(m, ""); r.className = "res ok"; r.textContent = "Настройки применены."; setTimeout(renderSettings, 1400); }
+      catch (e) { r.className = "res bad"; r.textContent = "Не получилось: " + e.message; } };
+    $("#w-ago").onclick = async () => { const r = $("#w-ares"); r.className = "res"; r.textContent = "ищу сервер…";
+      try { const m = await fetchManifest($("#w-addr").value); applyConfig(m, $("#w-akey").value.trim()); r.className = "res ok"; r.textContent = `Подключено: ${m.name || "сервер Dewiar"}.`; setTimeout(renderSettings, 1500); }
+      catch (e) { r.className = "res bad"; r.textContent = e.message; } };
+  }
+}
+function normAddr(a) { a = String(a || "").trim().replace(/\/+$/, ""); if (!a) throw new Error("укажите адрес"); if (!/^https?:\/\//.test(a)) a = (/^(\d+\.){3}\d+|^localhost|:\d+$/.test(a) ? "http://" : "https://") + a; return a; }
+async function fetchManifest(addr) {
+  const base = normAddr(addr);
+  for (const u of base.endsWith(".json") ? [base] : [base + "/.well-known/dewiar.json", base + "/dewiar.json"]) {
+    try { const r = await http("GET", u, { timeout: 10000 }); if (r.status === 200) { const d = JSON.parse(r.body); if (d.dewiar) return d; } } catch (e) { }
+  }
+  throw new Error("по этому адресу нет сервера Dewiar (нужен файл /.well-known/dewiar.json)");
+}
+async function probeServer(addr) {
+  let a = normAddr(addr).replace(/\/v1$/, "");
+  const hasPort = /:\d+$/.test(a), cands = hasPort ? [a] : [a + ":11434", a + ":8000", a + ":8080", a + ":1234", a];
+  for (const b of cands) {
+    try { const r = await http("GET", b + "/api/tags", { timeout: 4000 }); if (r.status === 200) { const m = (JSON.parse(r.body).models || []).map(x => x.name); if (m.length) return { kind: "ollama", base: b + "/v1", models: m }; } } catch (e) { }
+    try { const r = await http("GET", b + "/v1/models", { timeout: 4000 }); if (r.status === 200) { const m = (JSON.parse(r.body).data || []).map(x => x.id); if (m.length) return { kind: "openai", base: b + "/v1", models: m }; } } catch (e) { }
+  }
+  throw new Error("сервер не нашёлся. Телефон в той же сети Wi-Fi? Адрес и порт верные?");
+}
+/* Файл настроек или манифест сервера Dewiar (формат компьютера: llm.profiles, stt/tts.remote) → настройки телефона.
+   ${KEY} в строках — место для кода доступа, который выдал администратор. */
+function applyConfig(m, key) {
+  const fill = (v) => typeof v === "string" ? v.replace(/\$\{KEY\}/g, key || "") : v;
+  const l = m.llm || {}, prof = (l.profiles || {})[l.active] || Object.values(l.profiles || {})[0];
+  if (!prof) throw new Error("в файле нет настроек модели");       // проверяем до правок: иначе слух и персонаж менялись бы, а мозг — нет
+  if (prof) S.llm = Object.assign({}, DEF.llm, { kind: prof.kind === "ollama" ? "ollama" : "openai", name: fill(prof.name) || m.name || "", base_url: fill(prof.base_url), api_key: fill(prof.api_key || ""),
+    model: fill(prof.model || ""), disable_thinking: prof.cloud ? false : prof.disable_thinking !== false, temperature: prof.temperature || 0.7,
+    cloud: !!prof.cloud || /cloud\.php\?p=/.test(prof.base_url || ""), title: prof.title || "" });
+  if (m.stt && m.stt.engine === "remote" && m.stt.remote && m.stt.remote.base_url) S.stt = { engine: "server", url: fill(m.stt.remote.base_url), key: fill(m.stt.remote.api_key || ""), model: fill(m.stt.remote.model || "") };
+  if (m.tts && m.tts.engine === "remote" && m.tts.remote && m.tts.remote.base_url) Object.assign(S.tts, { engine: "server", url: fill(m.tts.remote.base_url), key: fill(m.tts.remote.api_key || ""), model: fill(m.tts.remote.model || ""), voice: fill(m.tts.remote.voice || "") });
+  if (m.persona && PERSONAS.some(p => p.id === m.persona)) S.persona = m.persona;
+  if (m.user_name) S.user_name = m.user_name;
+  saveS(); applyPersona();
+}
+function cmpVer(a, b) {
+  const x = String(a).split(/[.-]/).map(n => parseInt(n) || 0), y = String(b).split(/[.-]/).map(n => parseInt(n) || 0);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); }
+  return 0;
+}
+async function checkUpdate(manual) {
+  const r = $("#upd-res");
+  try {
+    const d = JSON.parse((await http("GET", UPD_URL, { timeout: 10000 })).body || "{}"), a = d.android;
+    const newer = a && cmpVer(a.version, JSON.parse(D.info() || "{}").version || "0") > 0;
+    if (newer) {
+      const hands = typeof D.handsState === "function" && D.handsState() !== "none";     // стоит версия с «руками» — и обновляем её
+      const url = UPD_URL.replace(/latest\.json$/, hands && a.hands_apk ? a.hands_apk : a.apk);
+      if (r) { r.className = "res ok"; r.innerHTML = `Есть Dewiar ${esc(a.version)}. <a href="${esc(url)}">Скачать</a> — откройте файл и нажмите «Обновить».`; }
+      else D.notify("Новая версия Dewiar " + a.version, "Настройки → Ещё → О приложении → Скачать");
+    } else if (manual && r) { r.className = "res ok"; r.textContent = "У вас последняя версия."; }
+  } catch (e) { if (manual && r) { r.className = "res bad"; r.textContent = "Не проверилось: " + e.message; } }
+}
+
+/* ---------- кнопки и запуск ---------- */
+/* Пауза конца фразы под манеру речи: человек нажал микрофон, пока модель ещё думает над только что сказанным (до 6 с), —
+   значит, его оборвали: дальше ждём тишину дольше (S.stt.pauseExtra +150 мс, до +900 — Speech.java), а сказанное сейчас
+   склеиваем с прошлым в один вопрос. Ответы без обрыва понемногу возвращают паузу (−10 мс). */
+let lastStt = null, pausePrefix = null;
+function pauseSync() { try { D.pauseExtra(+(S.stt.pauseExtra || 0)); } catch (e) { } }
+function pauseCut() {
+  if (!lastStt || lastStt.cut || state !== "thinking" || Date.now() - lastStt.at > 6000) return false;
+  lastStt.cut = true; pausePrefix = { at: Date.now(), text: lastStt.text };
+  S.stt.pauseExtra = Math.min(900, (+S.stt.pauseExtra || 0) + 150); saveS(); pauseSync();
+  plog("info", `⏸ оборвали на полуслове — жду конца фразы дольше: +${S.stt.pauseExtra} мс`);
+  toast(gfix("Понял — буду ждать, пока договорите"), 2500);
+  return true;
+}
+function pauseOk() {
+  if (!lastStt || lastStt.cut || lastStt.ok || Date.now() - lastStt.at > 180000 || !(+S.stt.pauseExtra > 0)) return;
+  lastStt.ok = true; S.stt.pauseExtra = Math.max(0, +S.stt.pauseExtra - 10); saveS(); pauseSync();
+}
+setTimeout(pauseSync, 0);
+$("#mic").onclick = () => {
+  if (state === "thinking") pauseCut();
+  if (state === "listening") {                    // «хватит слушать»: запись кончается сразу (stt_end продлит ожидание на распознавание); ни звука 2 с — заканчиваем сами
+    if (!sttActive) { setState("idle"); return; }
+    D.stopListen(); sttGuard(2000, "stop"); return;
+  }
+  if (state !== "idle") interrupt(true); listen(); };
+$("#orbwrap").onclick = () => $("#mic").onclick();
+$("#b-kb").onclick = () => { const b = $("#typebox"); b.classList.toggle("on"); if (b.classList.contains("on")) $("#typed").focus(); };
+const sendTyped = () => { const t = $("#typed").value.trim(); if (!t) return; $("#typed").value = ""; $("#typed").blur(); ask(t); };
+$("#send").onclick = sendTyped;
+$("#typed").onkeydown = (e) => { if (e.key === "Enter") sendTyped(); };
+N.on("intent", (e) => handleIntent(e));
+// вернулись из настроек Android после «Включить» — карточка «Управлять приложениями» показывает новое состояние
+N.on("resume", () => { if (handsAsked && Date.now() - handsAsked < 10 * 60000 && $("#hands-card")) { $("#hands-card").innerHTML = handsCard(); wireHands(); } });
+N.on("pause", () => { if (state === "listening") stopListen(), setState("idle"); });
+/* Что пришло снаружи (MainActivity.handle): при запуске — через Dewiar.takeIntent(), когда страница уже открыта — событием
+   intent. listen — кнопка помощника, type — ярлык «написать», say — текст из «Поделиться», import — файл настроек,
+   link — ссылка dewiar:// (QR с настройками или адрес сервера). */
+function handleIntent(e) {
+  if (!e || !e.action) return;
+  if (e.action === "listen") { closeSheets(); listen(); }
+  else if (e.action === "say") ask(e.text);
+  else if (e.action === "type") { closeSheets(); $("#typebox").classList.add("on"); setTimeout(() => $("#typed").focus(), 300); }
+  else if (e.action === "import") { try { applyConfig(JSON.parse(e.text), ""); showBot("Настройки с компьютера применены. Мозг: " + brainName() + "."); } catch (x) { showBot("Файл настроек не подошёл: " + x.message, "err"); } }
+  else if (e.action === "link" && /^dewiar:\/\/import/.test(e.url || "")) {        // QR из студии на компьютере
+    try {
+      let c = (/[?&]c=([^&]+)/.exec(e.url) || [])[1] || ""; c = c.replace(/-/g, "+").replace(/_/g, "/"); while (c.length % 4) c += "=";
+      const m = JSON.parse(decodeURIComponent(escape(atob(c))));
+      applyConfig(m, ""); if (m.home && m.home.token) { S.home.token = m.home.token; saveS(); }
+      showBot(`Готово — настройки с компьютера перенесены. Мозг: ${brainName()}. Нажмите микрофон и спросите что-нибудь.`); say("Готово! Настройки перенесены.");
+    } catch (x) { showBot("Код с настройками не подошёл: " + x.message, "err"); }
+  }
+  else if (e.action === "link") { const m = /server=([^&]+)/.exec(e.url || ""); if (m) { openSettings("brain"); setTimeout(() => { const d = $(".brainalt"); if (d) d.open = true; $('.tile[data-w="pc"]').click(); $("#w-addr").value = decodeURIComponent(m[1]); }, 300); } }
+}
+/* ---------- «сам замечает»: открыли приложение после перерыва — коротко о главном (как core/presence.py) ----------
+   Перерыв считается от того, когда приложение последний раз было на экране (S.welcome.seen). Первый раз за день после 3 часов —
+   короткая сводка дня; после 30 минут — только если есть что сказать: готовые с тех пор задачи, задача ждёт ответа, скоро
+   напоминание. Ночью (23–7), чаще раза в 40 минут, если человек сам заговорил или приложение открыли кнопкой помощника — молчим. */
+let lastUserAct = 0;
+function welcomePlan(now, seen, lastGreet, tasks, alarms) {
+  const h = new Date(now).getHours();
+  if (!seen || h >= 23 || h < 7) return null;
+  if (lastGreet && now - lastGreet < 40 * 60000) return null;
+  const gone = now - seen;
+  if (gone < 30 * 60000) return null;
+  const facts = [], since = new Date(seen).toISOString().slice(0, 19);
+  const done = tasks.filter(t => t.status === "done" && String(t.updated || "") >= since), wait = tasks.filter(t => t.status === "waiting");
+  if (done.length) facts.push("Пока пользователя не было, готовы задачи: " + done.slice(0, 3).map(t => `«${t.title}»`).join("; ") + ".");
+  if (wait.length) facts.push("Ждёт ответа пользователя задача: " + wait.slice(0, 2).map(t => `«${t.title}»`).join("; ") + ".");
+  const soon = alarms.filter(a => a.kind !== "timer" && a.at > now && a.at - now < 2 * 3600000).sort((a, b) => a.at - b.at);
+  const hm = (t) => { const d = new Date(t); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+  if (soon.length) facts.push("Скоро: " + soon.slice(0, 3).map(a => `в ${hm(a.at)} — ${a.title}`).join("; ") + ".");
+  const goneTxt = gone < 3600000 ? Math.round(gone / 60000) + " мин" : Math.floor(gone / 3600000) + " ч";
+  const firstToday = (!lastGreet || new Date(lastGreet).toDateString() !== new Date(now).toDateString()) && gone >= 3 * 3600000;
+  if (firstToday) {
+    const today = alarms.filter(a => a.kind !== "timer" && a.at > now && new Date(a.at).toDateString() === new Date(now).toDateString()).sort((a, b) => a.at - b.at);
+    if (today.length) facts.push("Напоминания и будильники на сегодня: " + today.slice(0, 5).map(a => `${hm(a.at)} ${a.title}`).join("; ") + ".");
+    return { kind: "day", facts, gone: goneTxt };
+  }
+  return facts.length ? { kind: "back", facts, gone: goneTxt } : null;
+}
+function welcomePrompt(p) {
+  const d = new Date(), wd = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"][d.getDay()];
+  if (p.kind === "day") return `Сегодня ${d.toLocaleDateString("ru-RU")}, ${wd}, сейчас ${pad(d.getHours())}:${pad(d.getMinutes())}.\n` + p.facts.join("\n")
+    + `\n\n[Пользователь открыл приложение — первый раз за день, не было ${p.gone}] Поздоровайся первым (в своём роде), по имени, если знаешь, и коротко скажи главное на сегодня из этих данных. 2–3 коротких предложения, живо и тепло, без списков, без вопросов в конце, без инструментов.`;
+  return p.facts.join("\n") + `\n\n[Пользователь вернулся в приложение, не было ${p.gone}] Коротко поприветствуй и скажи главное из этого — 1–2 коротких предложения, живо, без списков и без вопросов в конце, без инструментов.`;
+}
+async function welcomeCheck(shownAt) {
+  const w = S.welcome || {};
+  if (w.on === false || busy || state !== "idle" || lastUserAct > shownAt || document.hidden) return false;
+  const p = welcomePlan(Date.now(), w.seen, w.at, Object.values(mind().tasks || {}), JSON.parse(D.alarms() || "[]"));
+  if (!p) return false;
+  await ensureBrain();
+  if (!S.llm.base_url || busy || lastUserAct > shownAt) return false;
+  S.welcome = Object.assign({}, w, { at: Date.now() }); saveS();
+  plog("info", `👋 ${p.kind === "day" ? "сводка дня" : "с возвращением"} (не было ${p.gone})`);
+  ask(welcomePrompt(p), { hidden: true });
+  return true;
+}
+function welcomeSeen() { S.welcome = Object.assign({}, S.welcome || {}, { seen: Date.now() }); saveS(); }
+let welcomeT = 0;
+function welcomeArm(byIntent) {                   // приложение на экране: через 6 с (успели синхронизироваться) — проверить
+  const shownAt = Date.now(), seen = (S.welcome || {}).seen;
+  clearTimeout(welcomeT);
+  if (!byIntent) welcomeT = setTimeout(() => welcomeCheck(shownAt).finally(welcomeSeen), 6000);
+  else welcomeSeen();
+  return seen;
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden) { clearTimeout(welcomeT); welcomeSeen(); } else welcomeArm(false); });
+addEventListener("pagehide", welcomeSeen);
+setInterval(() => { if (!document.hidden) welcomeSeen(); }, 60000);     // пока открыто — «последний раз видели» свежее
+
+(function boot() {
+  applyPersona(); setState("idle"); quietCheck();
+  const last = history.filter(m => m.role === "assistant").slice(-1)[0];
+  if (!S.llm.base_url && !loggedIn()) {
+    if (S.join) { showBot(gfix(`Привет! Я ${persona().name}. Заявка на Dewiar ждёт проверки — как только одобрят, я подключусь сама.`)); setTimeout(() => joinPoll(false).catch(() => {}), 2500); }
+    else showBot(gfix(`Привет! Я ${persona().name}. Чтобы думать и отвечать, мне нужен «мозг» — выберите любой: свою модель, ключ любимого сервиса или Dewiar.`));
+    showCard(`<div class="row2"><button class="btn p" onclick="openBrain()" style="flex:1">Выбрать мозг</button>${S.join ? "" : `<button class="btn" onclick="openBrain('join')" style="flex:1">Попробовать Dewiar</button>`}</div>`); }
+  else if (last) showBot(last.content.slice(0, 400));
+  const it = D.takeIntent(); if (it) { try { handleIntent(JSON.parse(it)); } catch (e) { } }
+  welcomeArm(!!it);                                // открыли кнопкой помощника — сразу слушаем, не здороваемся
+  if (S.llm.base_url && !it) needPerm(MIC);
+  setTimeout(hReady, 0);                           // экран и персонаж готовы — запуск записан для «Здоровья»
+  setTimeout(() => checkUpdate(false), 8000);
+  setTimeout(() => accountCheck().then(ensureBrain).then(cloudCaps).then(tgSync), 3000);
+  setTimeout(() => syncRun(false), 4000);
+  setTimeout(() => radio.refresh(), 10000);
+  // радио одно на приложение и переживает пересоздание экрана (Radio.java) — подхватываем, что сейчас играет
+  try { const r = JSON.parse(D.radioState() || "{}"); if (r.state) N.ev({ type: "radio", state: r.state, name: r.name || "", error: r.error || "" }); } catch (e) { }
+})();

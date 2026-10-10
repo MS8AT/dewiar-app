@@ -1,0 +1,1761 @@
+#!/usr/bin/env python3
+"""Интерфейс Dewiar: плавающий виджет (hud.html), студия (settings.html), окно напоминания (alarm.html), трей.
+
+    python3 ui/app.py              # виджет
+    python3 ui/app.py --settings   # сразу открыть студию
+    python3 ui/app.py ФАЙЛ.dewiar | dewiar://connect?…   # студия с импортом настроек / подключением
+
+Отдельный процесс от ядра: если окно на каком-то рабочем столе поведёт себя странно, слушать и отвечать
+ассистент всё равно продолжит. Страницы говорят с ядром сами (WebSocket, токен и порт — в адресе страницы,
+см. assets/dewiar.js), а с окнами — через класс Api (window.pywebview.api). Окна — pywebview: на Linux GTK +
+WebKitGTK (форма окна — X Shape, см. shape_window), на Windows WebView2 (Win32 — в winshell.py).
+Здесь же сторожа: версия на диске, главный цикл окон (Linux), запуск ядра и загрузка виджета (Windows).
+"""
+
+import argparse
+import json
+import os
+import re
+import socket
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+sys.path.insert(0, str(ROOT / "core"))
+from settings import SETTINGS_PATH, WS_PORT, ensure_token, migrate_from_cortex  # noqa: E402
+from version import VERSION as UI_VERSION  # noqa: E402 — версия, с которой запущен этот процесс
+
+WIN = os.name == "nt"
+if WIN:
+    import winshell  # noqa: E402
+else:
+    import fcntl  # noqa: E402
+
+# Два непрозрачных окна: карточка и значок (переключение — set_mode). Скругление — формой окна (X Shape на Linux,
+# SetWindowRgn на Windows), тень рисует сама система (GNOME даёт тень непрозрачным окнам без рамки). Прозрачное
+# окно не годится: на части систем его полупрозрачные пиксели накапливаются между кадрами.
+SIZES = {"card": (300, 420), "mini": (96, 96)}
+TITLES = {"card": "Dewiar", "mini": "Dewiar — значок"}
+CARD_RADIUS = 28
+ALARM_TITLE = "Dewiar — напоминание"
+ALARM_RADIUS = 26
+PROMPTER_TITLE = "Dewiar — суфлёр"
+PROMPTER_RADIUS = 24
+STUDIO_TITLE = "Dewiar — студия"
+STUDIO_RADIUS = 12              # скругление углов студии (своя рамка в Linux)
+STUDIO_BAR = 38                 # высота своей полосы заголовка, px — как в settings.html
+STUDIO_BTNS = 132               # ширина кнопок «свернуть/развернуть/закрыть» справа на полосе
+STUDIO_EDGE = 6                 # толщина края, за который тянут размер
+MARGIN = 24                     # отступ виджета от края экрана при первом запуске
+
+
+def ui_settings():
+    try:
+        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8")).get("ui", {})
+    except (OSError, ValueError):
+        return {}
+
+
+def core_alive():
+    try:
+        with socket.create_connection(("127.0.0.1", WS_PORT), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
+def ensure_core():
+    """Поднять ядро, если оно не отвечает на своём порту. Linux: служба systemd dewiar-core; её нет (запуск из
+    исходников) — свой процесс с журналом в $XDG_RUNTIME_DIR/dewiar-core.log. Windows: служб нет — отдельный
+    процесс без окна (запомнен в CORE_PROC). Ждёт ядро несколько секунд, но не дольше."""
+    if core_alive():
+        return
+    if WIN:
+        CORE_PROC[:] = [winshell.start_core(ROOT)]
+        for _ in range(40):                    # первый запуск на Windows — несколько секунд (импорт библиотек)
+            if core_alive():
+                return
+            time.sleep(0.25)
+        return
+    subprocess.run(["systemctl", "--user", "start", "dewiar-core.service"], capture_output=True)
+    for _ in range(10):
+        if core_alive():
+            return
+        time.sleep(0.3)
+    if subprocess.run(["systemctl", "--user", "cat", "dewiar-core.service"], capture_output=True).returncode != 0:
+        log = open(Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "dewiar-core.log", "a")
+        subprocess.Popen([sys.executable, str(ROOT / "core/main.py")], stdout=log, stderr=log, start_new_session=True)
+
+
+def _core_call(token, cmd, timeout=4):
+    """Одна команда ядру по WebSocket (Linux; на Windows — winshell.core_call): hello с токеном, затем {id, cmd}."""
+    from websockets.sync.client import connect
+    with connect(f"ws://127.0.0.1:{WS_PORT}", open_timeout=timeout, close_timeout=1) as ws:
+        ws.send(json.dumps({"cmd": "hello", "token": token}))
+        ws.recv(timeout=timeout)
+        ws.send(json.dumps({"id": 1, "cmd": cmd, "args": {}}))
+        ws.recv(timeout=timeout)
+
+
+CORE_PROC = []          # Windows: процесс ядра, запущенный этим интерфейсом (сторож видит, если он упал)
+
+
+def core_watch(api=None, limit=240):
+    """Windows: ядро не вышло на связь (упало при запуске или так и не поднялось) — понять почему и объяснить
+    по-человечески. Чаще всего это антивирус: убрал файлы в карантин или не даёт загрузить библиотеку.
+    Причину берём из core.fail (его пишет упавшее ядро), иначе — из хвоста core.log; разбор — core/winav.py.
+    Блокирует (запускать в потоке): limit — сколько секунд ждать, -> True, если ядро на связи."""
+    from settings import STATE_DIR
+    t0 = time.monotonic()
+    while True:
+        if core_alive():
+            return True
+        proc, waited = (CORE_PROC[0] if CORE_PROC else None), time.monotonic() - t0
+        if proc is not None and proc.poll() is not None and waited > 3:
+            break                                       # ядро завершилось само — ждать дальше нечего
+        if waited > limit and not (proc is not None and proc.poll() is None and waited < 600):
+            break                                       # процесс жив — грузится (медленный диск, проверка антивирусом): ждём до 10 минут
+        time.sleep(2)
+    if core_alive():
+        return True
+    error = ""
+    try:
+        error = json.loads((STATE_DIR / "core.fail").read_text(encoding="utf-8")).get("error", "")
+    except (OSError, ValueError):
+        try:                                            # ошибки нет в core.fail — последние строки журнала
+            tail = (winshell.log_dir() / "core.log").read_text(encoding="utf-8", errors="replace").splitlines()[-30:]
+            error = next((x for x in reversed(tail) if re.search(r"Error|Ошибка|error", x)), "")
+        except OSError:
+            pass
+    print(f"Ядро не запустилось: {error or 'без ошибки в журнале'}", file=sys.stderr)
+    try:
+        import winav
+        st = winav.status(ROOT)
+    except Exception as e:  # noqa: BLE001
+        print(f"Проверка антивируса не удалась: {e}", file=sys.stderr)
+        st = {}
+    if st and winav.looks_blocked(error, st.get("missing")):
+        winav.copy_text(st["paths"][0])
+        text = "Dewiar не смог запуститься.\n\n" + winav.message(st, error)
+        if (st.get("main") or {}).get("kind") == "defender":
+            if winshell.ask_yes_no(text + "\n\nДобавить Dewiar в исключения Защитника Windows сейчас?"):
+                winav.defender_exclude(st["paths"])
+                time.sleep(8)
+                if st.get("missing"):
+                    winshell.message_box("Готово. Теперь запустите установщик Dewiar ещё раз — он вернёт убранные файлы.")
+                else:
+                    CORE_PROC[:] = [winshell.start_core(ROOT)]
+                    return core_watch(api, 120) if limit > 120 else False
+        else:
+            winshell.message_box(text + "\n\nПотом запустите Dewiar снова.", wait=True)
+        return False
+    winshell.message_box("Ядро Dewiar не запустилось" + (f": {error[:300]}" if error else "") + ".\n\nСделайте, пожалуйста: "
+                         "меню «Пуск» → «Dewiar — диагностика» — на рабочем столе появится файл отчёта, пришлите его разработчику.")
+    return False
+
+
+def lock(name):
+    """Замок «один экземпляр»: -> держать, пока работаем (Linux — flock на файле, отпускается вместе с процессом;
+    Windows — именованный мьютекс в winshell), или None, если экземпляр уже запущен."""
+    if WIN:
+        return True if winshell.single_instance(name) else None
+    path = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / f"dewiar-{name}-{os.getuid()}.lock"
+    fh = open(path, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fh
+    except OSError:
+        fh.close()
+        return None
+
+
+_UI_HTTP = []
+
+
+def ui_http_base():
+    """http://127.0.0.1:<порт>/ — страницы интерфейса (папка ui) для окон и браузера. Слушает только этот компьютер,
+    порт — любой свободный; запускается один раз (поток ui-http), списка файлов папки не отдаёт.
+    Типы файлов заданы явно: на Windows mimetypes берёт их из реестра, а там .js бывает text/plain.
+    no-store — после обновления окна не должны показывать старые страницы из кэша."""
+    if _UI_HTTP:
+        return _UI_HTTP[0]
+    import functools
+    import http.server
+    import threading
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        extensions_map = dict(http.server.SimpleHTTPRequestHandler.extensions_map, **{
+            ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
+            ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp",
+            ".woff2": "font/woff2", ".wav": "audio/wav", ".mp3": "audio/mpeg", ".ogg": "audio/ogg"})
+
+        def log_message(self, *a):
+            pass
+
+        def end_headers(self):
+            self.send_header("Cache-Control", "no-store")
+            super().end_headers()
+
+        def list_directory(self, path):
+            self.send_error(404)
+            return None
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(HERE)))
+    threading.Thread(target=srv.serve_forever, name="ui-http", daemon=True).start()
+    _UI_HTTP.append(f"http://127.0.0.1:{srv.server_address[1]}/")
+    return _UI_HTTP[0]
+
+
+def _shape_rects(kind, w, h, radius=None):
+    """Форма окна прямоугольниками -> [(x, y, ш, в)]: kind "rect" — без скругления, "mini" — круг (полоска в 1 px
+    на каждую строку), иначе скруглённый прямоугольник (карточка, напоминание, студия): полоски углов + середина.
+    Размеры — в физических пикселях окна."""
+    import math
+    out = []
+    if kind == "rect":
+        return [(0, 0, w, h)]
+    if kind == "mini":
+        r = w / 2
+        for y in range(h):
+            dy = y + 0.5 - r
+            x0 = int(round(r - math.sqrt(max(0.0, r * r - dy * dy))))
+            out.append((x0, y, w - 2 * x0, 1))
+        return out
+    r = radius or CARD_RADIUS
+    for y in range(r):
+        dy = r - y - 0.5
+        inset = int(round(r - math.sqrt(max(0.0, r * r - dy * dy))))
+        out += [(inset, y, w - 2 * inset, 1), (inset, h - 1 - y, w - 2 * inset, 1)]
+    out.append((0, r, w, h - 2 * r))
+    return out
+
+
+_XDPY = []
+
+
+def shape_window(gw, kind, size=None, radius=None):
+    """Форма окна через расширение SHAPE (libXext, ctypes). Задаётся до показа окна — так её видит GNOME.
+    Если окно не X11 (чистый Wayland) — просто остаётся прямоугольным (-> False). size — физические пиксели
+    (по умолчанию SIZES[kind]). Своё соединение с X-сервером открываем один раз и держим (_XDPY).
+    Вызывать в главном потоке GTK."""
+    import ctypes
+    import ctypes.util
+    import gi
+    gi.require_version("GdkX11", "3.0")
+    from gi.repository import GdkX11
+    gdkw = gw.get_window()
+    if not isinstance(gdkw, GdkX11.X11Window):
+        return False
+
+    class XRect(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_short), ("y", ctypes.c_short), ("width", ctypes.c_ushort), ("height", ctypes.c_ushort)]
+    x11 = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
+    xext = ctypes.CDLL(ctypes.util.find_library("Xext") or "libXext.so.6")
+    if not _XDPY:
+        x11.XOpenDisplay.restype, x11.XOpenDisplay.argtypes = ctypes.c_void_p, [ctypes.c_char_p]
+        d = x11.XOpenDisplay(None)
+        if not d:
+            return False
+        _XDPY.append(d)
+    w, h = size or SIZES[kind]
+    rects = _shape_rects(kind, w, h, radius)
+    arr = (XRect * len(rects))(*[XRect(*r) for r in rects])
+    xext.XShapeCombineRectangles.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                             ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    xext.XShapeCombineRectangles(_XDPY[0], gdkw.get_xid(), 0, 0, 0, arr, len(rects), 0, 0)   # ShapeBounding, ShapeSet
+    x11.XFlush.argtypes = [ctypes.c_void_p]
+    x11.XFlush(_XDPY[0])
+    return True
+
+
+class Api:
+    """Окна интерфейса и то, что страницам нужно от программы. Методы без «_» страницы вызывают как
+    window.pywebview.api.<имя>(…) (hud.html, settings.html, alarm.html) — переименование ломает кнопки там.
+    Вызовы приходят из потоков pywebview, поэтому с окнами GTK работаем только через _gtk() / GLib.idle_add."""
+
+    def __init__(self, token):
+        self.token = token
+        self._hud = None
+        self._studio = None
+        self.wins = {}
+        self.mode = "card"
+        self.auto = False
+        self.in_tray = False          # виджет убран в трей: появляется сам на имя, напоминание, уведомление
+        self.popped = False           # показан ненадолго из трея — после разговора спрячется обратно
+        self._tray = None
+
+    def _url(self, page, extra=""):
+        # Windows: окно (WebView2 через .NET Uri) и браузер через «открыть файл» теряют «?token=…» у адресов file://
+        # и показывают «Файл не найден» — поэтому там страницы отдаёт маленький локальный веб-сервер (только папка ui).
+        base = ui_http_base() if WIN or os.environ.get("DEWIAR_UI_HTTP") else None
+        return (base + page if base else (HERE / page).as_uri()) + f"?token={self.token}&port={WS_PORT}{extra}"
+
+    # ---------- окна виджета: карточка и значок ----------
+
+    def _gw(self, mode):
+        from gi.repository import Gtk
+        return next((w for w in Gtk.Window.list_toplevels() if w.get_title() == TITLES[mode]), None)
+
+    def _gtk(self, fn, timeout=3):
+        """Выполнить fn() в главном потоке GTK и дождаться результата (не дольше timeout; не успели или ошибка — None)."""
+        import threading
+        from gi.repository import GLib
+        box, done = {}, threading.Event()
+
+        def run():
+            try:
+                box["r"] = fn()
+            except Exception as e:  # noqa: BLE001
+                print(f"окно виджета: {e}", file=sys.stderr, flush=True)
+            finally:
+                done.set()
+            return False
+        GLib.idle_add(run, priority=GLib.PRIORITY_HIGH_IDLE)
+        done.wait(timeout)
+        return box.get("r")
+
+    @staticmethod
+    def _offset(mode):
+        """Сдвиг окна режима относительно карточки: правые нижние углы совпадают."""
+        (cw, ch), (w, h) = SIZES["card"], SIZES[mode]
+        return cw - w, ch - h
+
+    def _clamp(self, mode, x, y):
+        from gi.repository import Gdk
+        w, h = SIZES[mode]
+        try:
+            disp = Gdk.Display.get_default()
+            g = disp.get_monitor_at_point(int(x) + w // 2, int(y) + h // 2).get_geometry()
+            return (max(g.x, min(int(x), g.x + g.width - w)), max(g.y, min(int(y), g.y + g.height - h)))
+        except Exception:  # noqa: BLE001
+            return max(0, int(x)), max(0, int(y))
+
+    def _hwnd(self, mode):
+        """Windows: дескриптор окна режима (у pywebview — Form.Handle; запасной путь — по заголовку)."""
+        try:
+            return int(self.wins[mode].native.Handle.ToInt64())
+        except Exception:  # noqa: BLE001
+            return winshell.hwnd(TITLES[mode])
+
+    def get_pos(self, mode="card"):
+        if WIN:
+            h = self._hwnd(mode)
+            return winshell.get_pos(h) if h else [0, 0]
+        return self._gtk(lambda: list(self._gw(mode).get_position())) or [0, 0]
+
+    def move_to(self, mode, x, y):
+        if WIN:
+            h = self._hwnd(mode)
+            if h:
+                winshell.move(h, x, y)
+            return
+        from gi.repository import GLib
+
+        def mv():
+            gw = self._gw(mode)
+            if gw is not None and gw.get_window() is not None:
+                gw.get_window().move(int(x), int(y))      # напрямую окну: mutter не всегда слушает gtk_window_move
+            return False
+        GLib.idle_add(mv, priority=GLib.PRIORITY_HIGH_IDLE)
+
+    def save_pos(self, mode="card"):
+        """Положение в «координатах карточки» — его и храним в настройках."""
+        x, y = self.get_pos(mode)
+        dx, dy = self._offset(mode)
+        return [x - dx, y - dy]
+
+    def _place(self, mode, cx, cy):
+        """Поставить окно режима так, как если бы карточка стояла в (cx, cy), и показать (Linux — в главном потоке
+        GTK). Окно не выходит за край экрана -> итоговое положение в «координатах карточки»."""
+        dx, dy = self._offset(mode)
+        if WIN:
+            h = self._hwnd(mode)
+            w, hh = SIZES[mode]
+            x, y = winshell.clamp(h, cx + dx, cy + dy, w, hh) if h else (cx + dx, cy + dy)
+            if h:
+                winshell.move(h, x, y)
+            self.wins[mode].show()
+            if h:                              # и после показа: показ скрытой формы может вернуть её на прежнее место
+                winshell.move(h, x, y)
+            self._win_shape(mode)
+            return [x - dx, y - dy]
+        x, y = self._clamp(mode, cx + dx, cy + dy)
+        gw = self._gw(mode)
+        gw.move(x, y)
+        gw.realize()
+        try:
+            shape_window(gw, mode)             # перед каждым показом: GNOME читает форму окна при появлении
+        except Exception as e:  # noqa: BLE001
+            print(f"Форма окна не задана: {e}", file=sys.stderr)
+        gw.show_all()
+        gw.get_window().move(x, y)
+        return [x - dx, y - dy]
+
+    def _win_shape(self, mode, delays=(0, 0.4, 1.2, 3.0)):
+        """Windows: скруглённая карточка и круглый значок. Форму окна сбрасывают показ окна, смена масштаба и
+        пересоздание окна WinForms (тогда у него новый дескриптор) — поэтому ставим её после каждого показа, по
+        событиям окна и ещё несколько раз с задержкой; каждый раз по свежему дескриптору."""
+        import threading
+
+        def run():
+            for d in delays:
+                time.sleep(d)
+                h = self._hwnd(mode)
+                if h:
+                    try:
+                        winshell.shape(h, mode, CARD_RADIUS)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"Форма окна не задана: {e}", file=sys.stderr)
+        threading.Thread(target=run, daemon=True).start()
+
+    def _win_shape_events(self, mode):
+        """Подписка на события формы WinForms: показали, поменяли размер, пересоздали — форма заново."""
+        try:
+            form = self.wins[mode].native
+            hook = lambda *_a: self._win_shape(mode, delays=(0, 0.5))  # noqa: E731
+            for ev in ("SizeChanged", "VisibleChanged", "HandleCreated", "DpiChanged", "Shown"):
+                if hasattr(form, ev):
+                    getattr(form, ev).__iadd__(hook)
+        except Exception as e:  # noqa: BLE001
+            print(f"События окна для формы: {e}", file=sys.stderr)
+
+    def start_hud(self, mode, cx, cy):
+        """Первый показ виджета (из on_start). Оба окна убираем с панели задач и из Alt+Tab, задаём им форму —
+        до показа, иначе GNOME её не заметит, — и следим, чтобы форма не слетала (Windows — по событиям формы
+        WinForms, Linux — _keep_shape)."""
+        if WIN:
+            for m in SIZES:
+                h = self._hwnd(m)
+                if h:
+                    try:
+                        winshell.tool_window(h)
+                        winshell.shape(h, m, CARD_RADIUS)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"Форма окна не задана: {e}", file=sys.stderr)
+                self._win_shape_events(m)
+            self.mode = mode
+            self._place(mode, cx, cy)
+            self._activate()
+            return
+
+        # pywebview создаёт окна по очереди, а on_start может прийти раньше, чем готово второе окно: тогда у него нет
+        # формы (квадратный значок до первого сворачивания). Ждём до 10 с, пока появятся оба окна.
+        for _ in range(100):
+            if self._gtk(lambda: all(self._gw(m) is not None and self._gw(m).get_child() is not None for m in SIZES)):
+                break
+            time.sleep(0.1)
+
+        def run():
+            for m in SIZES:
+                gw = self._gw(m)
+                if gw is None:
+                    continue
+                gw.set_skip_taskbar_hint(True)         # виджет — не окно приложения: в доке и Alt+Tab его нет
+                gw.set_skip_pager_hint(True)
+                gw.realize()
+                try:
+                    shape_window(gw, m)
+                except Exception as e:  # noqa: BLE001
+                    print(f"Форма окна не задана: {e}", file=sys.stderr)
+                self._keep_shape(gw, m)
+            self.mode = mode
+            return self._place(mode, cx, cy)
+        self._gtk(run, timeout=10)
+        self._activate()
+
+    @staticmethod
+    def _keep_shape(gw, mode):
+        """pywebview/GTK может поменять размер окна уже после того, как задана форма, — и виджет остаётся квадратным
+        до сворачивания. Поэтому форму ставим заново по настоящему размеру (с учётом масштаба экрана) при каждом
+        изменении размера и ещё трижды после показа окна."""
+        from gi.repository import GLib
+        st = {"key": None}
+
+        def reshape(*_a, force=False):
+            gdkw = gw.get_window()
+            if gdkw is None:
+                return False
+            w, h, k = gdkw.get_width(), gdkw.get_height(), gdkw.get_scale_factor()
+            if w < 8 or h < 8 or (st["key"] == (w, h, k) and not force):
+                return False
+            st["key"] = (w, h, k)
+            try:
+                shape_window(gw, mode, (w * k, h * k), CARD_RADIUS * k)
+            except Exception as e:  # noqa: BLE001
+                print(f"Форма окна не задана: {e}", file=sys.stderr)
+            return False
+
+        def on_map(*_a):
+            for ms in (60, 400, 1500):
+                GLib.timeout_add(ms, lambda: reshape(force=True))
+            return False
+        gw.connect("size-allocate", reshape)
+        gw.connect("map", on_map)
+
+    def _activate(self):
+        """Сказать страницам, какое окно сейчас на виду (hudActive в hud.html): спрятанное не анимирует облик —
+        не тратим процессор."""
+        import threading
+
+        def run():
+            for m, win in self.wins.items():
+                try:
+                    win.evaluate_js(f"window.hudActive && hudActive({'true' if m == self.mode else 'false'})")
+                except Exception:  # noqa: BLE001
+                    pass
+        threading.Thread(target=run, daemon=True).start()
+
+    def set_mode(self, mode, auto=False):
+        """Карточка ↔ значок. Правый нижний угол остаётся на месте — виджет обычно стоит в углу экрана.
+        auto — раскрыли сами ради вопроса «Да/Нет» (auto_back потом вернёт значок).
+        -> положение в «координатах карточки» (страница сохраняет его в настройки) или None."""
+        if mode not in SIZES:
+            return None
+        self.auto = bool(auto)
+        if mode == self.mode:
+            return self.save_pos(mode)
+        src = self.mode
+        if WIN:
+            x, y = self.get_pos(src)
+            dx, dy = self._offset(src)
+            p = self._place(mode, x - dx, y - dy)
+            self.wins[src].hide()
+            self.mode = mode
+            self._activate()
+            return p
+
+        def run():
+            x, y = self._gw(src).get_position()
+            dx, dy = self._offset(src)
+            p = self._place(mode, x - dx, y - dy)
+            self._gw(src).hide()
+            self.mode = mode
+            return p
+        p = self._gtk(run)
+        self._activate()
+        return p
+
+    def auto_back(self):
+        """Карточку раскрыли ради «Да/Нет» — через 2,5 с вернуться в значок."""
+        if self.auto:
+            self.auto = False
+            import threading
+            threading.Timer(2.5, lambda: self.set_mode("mini")).start()
+
+    def show(self):
+        """Показать виджет. Если он в трее — ненадолго: после разговора спрячется обратно (tray_back)."""
+        if self.in_tray:
+            self.popped = True
+        if WIN:
+            self.wins[self.mode].show()
+            self._win_shape(self.mode)
+            return
+        self._gtk(lambda: self._gw(self.mode).show_all())
+
+    # ---------- трей ----------
+
+    def _hide_now(self):
+        if WIN:
+            self.wins[self.mode].hide()
+            return
+        self._gtk(lambda: self._gw(self.mode).hide())
+
+    def to_tray(self, quiet=False):
+        """Кнопка «В трей»: виджет прячется, ассистент слушает. Вернётся сам — на имя, напоминание, уведомление."""
+        first = not self.in_tray
+        self.in_tray, self.popped = True, False
+        self._hide_now()
+        if first and not quiet:
+            where = "значок Dewiar возле часов" if WIN or self._tray else "«Dewiar» в меню приложений"
+            _notify(f"Dewiar в трее и слушает. Появится сам, когда позовёте по имени или придёт напоминание. "
+                    f"Вернуть — {where} или скажите «покажись»; выключить совсем — «Выйти из Dewiar» там же.")
+        return True
+
+    def tray_back(self):
+        """Поговорили — спрятаться обратно (только если показались сами, а не по кнопке)."""
+        if self.in_tray and self.popped:
+            self.popped = False
+            self._hide_now()
+        return True
+
+    def from_tray(self):
+        """Значок в трее / меню приложений: вернуть виджет насовсем."""
+        was = self.in_tray
+        self.in_tray, self.popped = False, False
+        self.show()
+        if was:
+            self._js("window.trayLeft && trayLeft()")
+        return True
+
+    def tray_state(self):
+        # icon — есть ли значок в трее (на Linux без AppIndicator вернуть виджет можно только из меню приложений)
+        return {"in_tray": self.in_tray, "icon": bool(WIN or self._tray)}
+
+    def _js(self, code):
+        """Выполнить код во всех окнах виджета — в фоне: evaluate_js ждёт ответа страницы."""
+        import threading
+
+        def run():
+            for win in self.wins.values():
+                try:
+                    win.evaluate_js(code)
+                except Exception:  # noqa: BLE001
+                    pass
+        threading.Thread(target=run, daemon=True).start()
+
+    def open_url(self, url):
+        """Ссылка наружу: сайт, Telegram (tg://), Obsidian (obsidian://) — системой. Только эти схемы: страница не
+        должна суметь открыть через систему файл или запустить программу (file:, ms-…: и подобные)."""
+        url = str(url or "")
+        if not url.split(":", 1)[0].lower() in ("http", "https", "obsidian", "tg"):
+            return False
+        if WIN:
+            os.startfile(url)  # noqa: S606
+        else:
+            subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+
+    def pick_folder(self):
+        """Выбор папки проекта (для задач по коду). -> путь или "" (отказались)."""
+        import webview
+        # новые pywebview — webview.FileDialog.*, старые — webview.*_DIALOG (так же в pick_file и save_file*)
+        kind = getattr(getattr(webview, "FileDialog", None), "FOLDER", None) or webview.FOLDER_DIALOG
+        res = (self._studio or self._hud).create_file_dialog(kind, directory=str(Path.home()))
+        if not res:
+            return ""
+        return res if isinstance(res, str) else res[0]
+
+    def pick_file(self, kind=""):
+        """Выбор файла (например, резервной копии): kind — «Описание (*.ext)». Начинаем с папки резервных копий."""
+        import webview
+        k = getattr(getattr(webview, "FileDialog", None), "OPEN", None) or webview.OPEN_DIALOG
+        types = (kind, "Все файлы (*.*)") if kind else ("Все файлы (*.*)",)
+        try:
+            from backup import default_dir
+            start = str(default_dir()) if default_dir().is_dir() else str(Path.home())
+        except Exception:  # noqa: BLE001
+            start = str(Path.home())
+        res = (self._studio or self._hud).create_file_dialog(k, directory=start, file_types=types)
+        if not res:
+            return ""
+        return res if isinstance(res, str) else res[0]
+
+    def install_update(self, path):
+        """Поставить обновление, которое ядро скачало и проверило. Путь приходит со страницы, поэтому принимаем
+        только файл из STATE_DIR/updates. Linux: pkexec apt-get (GNOME спросит пароль) в фоне — ход в
+        update_progress(); после установки интерфейс перезапускается сам, ядро перезапускает установщик пакета.
+        DEWIAR_UPDATE_CMD — команда вместо pkexec apt-get, для проверок без root."""
+        p = Path(path or "").resolve()
+        from settings import STATE_DIR
+        allowed = STATE_DIR.resolve() / "updates"
+        if WIN:
+            return self._install_update_win(p, allowed)
+        if allowed not in p.parents or p.suffix != ".deb" or not p.is_file():
+            return {"ok": False, "error": "это не скачанное обновление Dewiar"}
+        cmd = os.environ.get("DEWIAR_UPDATE_CMD")
+        # APT::Status-Fd=1 — apt пишет в вывод строки «pmstatus:…:процент:…», по ним _run_update считает ход
+        cmd = cmd.split() + [str(p)] if cmd else ["pkexec", "apt-get", "install", "-y", "--allow-downgrades",
+                                                  "-o", "APT::Status-Fd=1", str(p)]
+        if getattr(self, "_upd", {}).get("stage") in ("auth", "install"):
+            return {"ok": True, "started": True}                  # уже ставится — студия просто покажет ход
+        self._upd = {"stage": "auth", "pct": 0, "line": "", "error": "", "t0": time.time()}
+        import threading
+        threading.Thread(target=self._run_update, args=(cmd,), name="update", daemon=True).start()
+        return {"ok": True, "started": True}
+
+    def _run_update(self, cmd):
+        """Ставим пакет (поток update) и рассказываем студии, что происходит (update_progress):
+        auth (ждём пароль) → install → restart или error. Проценты грубые: dpkg — до 60 %, шаги установщика
+        пакета (строки «Dewiar: …») — 62 и 85 %."""
+        u = self._upd
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+                                    env=dict(os.environ, LC_ALL="C.UTF-8"))
+        except FileNotFoundError:
+            u.update(stage="error", error="нет pkexec — установите вручную: sudo apt install " + cmd[-1])
+            return
+        tail = []
+        for raw in proc.stdout:
+            ln = raw.strip()
+            if not ln:
+                continue
+            tail = (tail + [ln])[-60:]
+            if u["stage"] == "auth":
+                u["stage"] = "install"                        # пароль принят — пошёл вывод установки
+            m = re.match(r"pmstatus:[^:]*:([\d.]+):(.*)", ln)
+            if m:                                            # прогресс dpkg: распаковка → настройка
+                u["pct"] = max(u["pct"], min(95, int(float(m.group(1)) * 0.6)))
+                continue
+            if ln.startswith("Dewiar:"):                     # шаги нашего установщика (библиотеки, модель)
+                u["line"] = ln[7:].strip()
+                u["pct"] = max(u["pct"], 62 if "готовлю" in ln else 85 if "установлены" in ln or "модель" in ln else u["pct"])
+            elif ln.startswith(("Unpacking", "Распаковывается", "Preparing", "Подготовка")):
+                u["line"], u["pct"] = "распаковываю новую версию…", max(u["pct"], 25)
+            elif ln.startswith(("Setting up", "Настраивается")):
+                u["line"], u["pct"] = "настраиваю…", max(u["pct"], 55)
+        rc = proc.wait()
+        if rc and not WIN:
+            # apt мог «упасть» из-за чужого сломанного пакета (например, драйвер NVIDIA под новое ядро), а Dewiar
+            # при этом поставился. Проверяем сам пакет: стоит нужная версия — значит, обновление удалось.
+            m = re.search(r"_(\d+(?:\.\d+)+)_all\.deb$", cmd[-1])
+            try:
+                q = subprocess.run(["dpkg-query", "-W", "-f=${Status}|${Version}", "dewiar-assistant"],
+                                   capture_output=True, text=True, timeout=10).stdout
+            except (OSError, subprocess.SubprocessError):
+                q = ""
+            if m and q.startswith("install ok installed|") and q.split("|", 1)[1].strip() == m.group(1):
+                others = sorted({mm.group(1) for x in tail for mm in [re.search(r"dpkg: (?:ошибка при обработке пакета|error processing package) (\S+)", x)] if mm} - {"dewiar-assistant"})
+                u["note"] = ("Dewiar обновлён. В системе есть другие недонастроенные пакеты"
+                             + (f" ({', '.join(others[:3])})" if others else "") + " — это не мешает Dewiar.")
+                rc = 0
+        if rc:
+            # настоящая причина — строки dpkg/E:, а не предупреждение dpkg-preconfigure про stdin
+            # pkexec: 126 — окно пароля закрыли, 127 — не разрешили
+            why = [x for x in tail if re.search(r"dpkg:|error|ошибк|E:|не удалось|failed", x, re.I) and "preconfigure" not in x]
+            err = "установка отменена (пароль не введён)" if rc in (126, 127) else (" ".join((why or tail)[-4:]) or f"код {rc}")[-600:]
+            try:
+                (Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "dewiar-update.log").write_text("\n".join(tail), encoding="utf-8")
+            except OSError:
+                pass
+            u.update(stage="error", error=err)
+            try:                                          # установщик успел остановить ядро — поднимем прежнее
+                ensure_core()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        u.update(stage="restart", pct=100, line=u.get("note") or "перезапускаюсь новой версией…")
+        import threading
+        threading.Timer(1.5, self.restart).start()
+
+    def update_progress(self):
+        """Ход установки для студии: stage, pct, line, error, note и secs — сколько секунд идёт."""
+        u = dict(getattr(self, "_upd", None) or {"stage": ""})
+        if u.get("t0"):
+            u["secs"] = int(time.time() - u.pop("t0"))
+        return u
+
+    def _install_update_win(self, p, allowed):
+        """Windows: остановить ядро (иначе его файлы заняты), запустить установщик тихо (/S /UPDATE) и выйти —
+        установщик заменит файлы и сам запустит новую версию. Права администратора не нужны (установка в профиль)."""
+        if allowed not in p.parents or p.suffix.lower() != ".exe" or not p.is_file():
+            return {"ok": False, "error": "это не скачанное обновление Dewiar"}
+        try:
+            winshell.core_call(WS_PORT, self.token, "quit")
+        except Exception:  # noqa: BLE001
+            pass
+        _notify("Dewiar обновляется — через минуту-две откроется сам.")
+        try:
+            subprocess.Popen([str(p), "/S", "/UPDATE"], creationflags=winshell.DETACHED, close_fds=True)
+        except OSError as e:
+            return {"ok": False, "error": f"установщик не запустился: {e}"}
+        import threading
+        threading.Timer(1.0, lambda: os._exit(0)).start()
+        return {"ok": True}
+
+    def restart_core(self):
+        """Кнопка в виджете, когда ядро не отвечает: перезапустить только ядро (окна остаются, разговор начнётся
+        заново). Работает в фоне: зависшее ядро может не завершиться сразу. Windows — номер из core.pid и свой
+        процесс; Linux — служба, а без неё (из исходников) — pkill по core/main.py."""
+        import threading
+
+        def run():
+            from settings import STATE_DIR
+            try:
+                if WIN:
+                    try:
+                        winshell.kill_pid((STATE_DIR / "core.pid").read_text(encoding="ascii").strip())
+                    except OSError:
+                        pass
+                    for p in CORE_PROC:
+                        try:
+                            p.kill()
+                        except Exception:  # noqa: BLE001
+                            pass
+                    time.sleep(1.5)
+                    CORE_PROC[:] = [winshell.start_core(ROOT)]
+                elif subprocess.run(["systemctl", "--user", "cat", "dewiar-core.service"], capture_output=True).returncode == 0:
+                    subprocess.run(["systemctl", "--user", "restart", "dewiar-core.service"], capture_output=True, timeout=30)
+                else:                                      # из исходников: ядро — просто процесс на нашем порту
+                    subprocess.run(["pkill", "-f", "core/main.py"], capture_output=True)
+                    time.sleep(1.5)
+                    ensure_core()
+                _ui_log("ядро перезапущено по кнопке в виджете")
+            except Exception as e:  # noqa: BLE001
+                _ui_log(f"перезапуск ядра не удался: {e}")
+        threading.Thread(target=run, daemon=True).start()
+        return True
+
+    def quit_all(self):
+        """«Выход» из трея, голосом («отключись») или конец главного цикла окон (Windows) — завершить ядро и
+        интерфейс. Linux: ядро — служба systemd --user; stop не отключает её автозапуск, так что при следующем
+        входе в систему или запуске Dewiar из меню всё снова работает. Без службы (из исходников) — команда quit."""
+        _ui_log("выход: ядро и интерфейс завершаются")
+        if WIN:
+            try:
+                winshell.core_call(WS_PORT, self.token, "quit")
+            except Exception:  # noqa: BLE001
+                pass
+        elif subprocess.run(["systemctl", "--user", "cat", "dewiar-core.service"], capture_output=True).returncode == 0:
+            subprocess.run(["systemctl", "--user", "stop", "--no-block", "dewiar-core.service"], capture_output=True, timeout=10)
+        else:
+            try:
+                _core_call(self.token, "quit")
+            except Exception:  # noqa: BLE001
+                subprocess.run(["pkill", "-f", "core/main.py"], capture_output=True)
+        if getattr(self, "_tray", None) and hasattr(self._tray, "stop"):
+            self._tray.stop()
+        os._exit(0)
+
+    def restart(self):
+        """Перезапустить интерфейс новой версией (после обновления)."""
+        _notify("Dewiar обновлён.")
+        if WIN:
+            subprocess.Popen([winshell.pythonw(), "-X", "utf8", str(Path(__file__).resolve())],
+                             creationflags=winshell.DETACHED, close_fds=True)
+            os._exit(0)
+        launcher = ROOT / "dewiar"               # /opt/dewiar/dewiar: донастроит службу ядра и откроет виджет
+        try:                                     # DEWIAR_UPDATE_CMD — проверка: перезапускаем этот же файл, без пускача
+            if launcher.is_file() and not os.environ.get("DEWIAR_UPDATE_CMD"):
+                os.execv("/bin/sh", ["/bin/sh", str(launcher)])
+            os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve())])
+        except OSError as e:
+            print(f"Перезапуск не удался: {e}", file=sys.stderr)
+
+    def hide(self):
+        if WIN:
+            self.wins[self.mode].hide()
+            _notify("Dewiar продолжает слушать. Вернуть виджет — значок Dewiar возле часов.")
+            return
+        self._gtk(lambda: self._gw(self.mode).hide())
+        _notify("Dewiar продолжает слушать. Вернуть виджет — «Dewiar» в меню приложений.")
+
+    def save_file(self, content, filename):
+        """Сохранение через системный диалог (в окне pywebview обычные загрузки не работают)."""
+        import webview
+        kind = getattr(getattr(webview, "FileDialog", None), "SAVE", None) or webview.SAVE_DIALOG
+        res = (self._studio or self._hud).create_file_dialog(kind, directory=str(Path.home()), save_filename=filename,
+                                                            file_types=("Настройки Dewiar (*.dewiar)", "Все файлы (*.*)"))
+        if not res:
+            return ""
+        path = res if isinstance(res, str) else res[0]
+        Path(path).write_text(content, encoding="utf-8")
+        os.chmod(path, 0o600)                    # в выгрузке настроек бывают ключи — читать только владельцу
+        return path
+
+    def save_file_b64(self, b64, filename):
+        """То же для двоичного файла: страница передаёт содержимое в base64. -> путь или ""."""
+        import base64
+        import webview
+        kind = getattr(getattr(webview, "FileDialog", None), "SAVE", None) or webview.SAVE_DIALOG
+        res = (self._studio or self._hud).create_file_dialog(kind, directory=str(Path.home()), save_filename=filename)
+        if not res:
+            return ""
+        path = res if isinstance(res, str) else res[0]
+        Path(path).write_bytes(base64.b64decode(b64))
+        return path
+
+    def open_skills_folder(self, path=""):
+        """Папка навыков — внутри папки ассистента («Навыки»); путь подсказывает студия."""
+        d = Path(path) if path else SETTINGS_PATH.parent / "skills"
+        d.mkdir(parents=True, exist_ok=True)
+        if WIN:
+            os.startfile(str(d))  # noqa: S606
+            return
+        subprocess.Popen(["xdg-open", str(d)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def open_settings(self, page="", query=""):
+        """Открыть студию на разделе page. Окно одно: уже открыто — показываем его; с query (импорт файла,
+        ссылка подключения) окно создаётся заново, чтобы страница получила новые параметры адреса."""
+        import webview
+        _ui_log(f"студия: открыть {page or ''}{' (с параметрами)' if query else ''}")
+        if self._studio is not None and not WIN and self._gtk(lambda: self._studio_gw() is not None) is False:
+            self._studio = None                         # окна уже нет (закрыто мимо нас) — откроем новое
+        if self._studio is not None and not query:
+            try:
+                self._studio.show()
+                self._raise_studio()
+                if ui_settings().get("studio_max", True):
+                    self._studio.maximize()             # как оставили в прошлый раз (по умолчанию — во весь экран)
+                else:
+                    self._studio.restore()
+                if page:
+                    self._studio.evaluate_js(f"(document.querySelector('nav button[data-p=\"{page}\"]') || {{click(){{}}}}).click()")
+                return
+            except Exception:  # noqa: BLE001
+                self._studio = None
+        if self._studio is not None:
+            try:
+                self._studio.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+        # Linux: своя рамка — чёрная полоса заголовка и скруглённые углы со всех сторон (системная рамка GNOME
+        # светлая и снизу квадратная). Перетаскивание и размер — через сам оконный менеджер (прилипание к краям
+        # работает). Вернуть системную рамку: settings.ui.studio_frame = "native".
+        own = not WIN and ui_settings().get("studio_frame", "custom") != "native"
+        self._studio = webview.create_window(STUDIO_TITLE, self._url("settings.html", ("&frame=1" if own else "") + query + ("#" + page if page else "")),
+                                            width=1120, height=760, min_size=(820, 560), background_color="#0a0a0f",
+                                            maximized=bool(ui_settings().get("studio_max", True)),
+                                            frameless=own, easy_drag=False,
+                                            js_api=self)     # без этого в студии нет «Обновить», выбора папки, сохранения
+        win = self._studio
+        win.events.closed += lambda *a: self._studio_closed(win)
+        if not WIN:
+            win.events.shown += lambda *a: __import__("threading").Thread(target=self._raise_studio, daemon=True).start()
+        if own:
+            import threading
+            hook = lambda *a: threading.Thread(target=self._gtk, args=(self._studio_frame,), daemon=True).start()  # noqa: E731
+            win.events.shown += hook
+            win.events.loaded += hook
+        elif WIN:
+            def dark():
+                try:
+                    winshell.dark_title(int(win.native.Handle.ToInt64()))
+                except Exception as e:  # noqa: BLE001
+                    print(f"Тёмный заголовок: {e}", file=sys.stderr)
+            win.events.shown += lambda *a: __import__("threading").Thread(target=dark, daemon=True).start()
+
+            def remember(m):                           # развернули / вернули размер — так и открывать в следующий раз
+                try:
+                    winshell.core_call(WS_PORT, self.token, "settings_save", {"patch": {"ui": {"studio_max": m}}})
+                except Exception:  # noqa: BLE001
+                    pass
+            for ev, m in (("maximized", True), ("restored", False)):
+                if hasattr(win.events, ev):
+                    getattr(win.events, ev).__iadd__(lambda *a, m=m: __import__("threading").Thread(target=remember, args=(m,), daemon=True).start())
+
+    # ---------- своя рамка студии (Linux) ----------
+
+    def _studio_frame(self):
+        """Окно студии без системной рамки: форма со скруглёнными углами (меняется вместе с размером), нажатия
+        на полосе заголовка и по краям передаём оконному менеджеру — он двигает и тянет окно сам.
+        Развёрнутое или прижатое к краю окно — без скругления и без краёв; об этом говорим странице (frameState
+        в settings.html). Главный поток GTK; подключается к окну один раз (_dw_frame)."""
+        from gi.repository import Gdk, Gtk
+        gw = next((g for g in Gtk.Window.list_toplevels() if g.get_title() == STUDIO_TITLE), None)
+        if gw is None or getattr(gw, "_dw_frame", False):
+            return
+        gw._dw_frame = True
+        view = [gw]                             # нажатия ловим у самого WebView: он занимает всё окно
+        while not type(view[-1]).__name__ == "WebView" and isinstance(view[-1], Gtk.Bin) and view[-1].get_child():
+            view.append(view[-1].get_child())
+        wv = view[-1]
+        st = {"key": None, "max": False}
+
+        def reshape(*a):
+            gdkw = gw.get_window()
+            if gdkw is None:
+                return
+            w, h, k = gdkw.get_width(), gdkw.get_height(), gdkw.get_scale_factor()
+            key = (w, h, k, st["max"])
+            if key == st["key"]:
+                return
+            st["key"] = key
+            try:
+                shape_window(gw, "rect" if st["max"] else "alarm", (w * k, h * k), STUDIO_RADIUS * k)
+            except Exception as e:  # noqa: BLE001
+                print(f"Форма студии: {e}", file=sys.stderr)
+
+        def tell_page():
+            import threading
+            js = f"window.frameState && frameState({'true' if st['max'] else 'false'})"
+            threading.Thread(target=lambda: self._studio and self._studio.evaluate_js(js), daemon=True).start()
+
+        def on_state(_w, ev):
+            m = bool(ev.new_window_state & (Gdk.WindowState.MAXIMIZED | Gdk.WindowState.FULLSCREEN | Gdk.WindowState.TILED))
+            if m != st["max"]:
+                st["max"] = m
+                reshape()
+                tell_page()
+            return False
+
+        def on_press(_w, ev):
+            if ev.button != 1:
+                return False
+            w, h = wv.get_allocated_width(), wv.get_allocated_height()
+            x, y = ev.x, ev.y
+            e = STUDIO_EDGE
+            if not st["max"]:
+                edge = None
+                left, right, top, bottom = x < e, x > w - e, y < e, y > h - e
+                if top and left: edge = Gdk.WindowEdge.NORTH_WEST
+                elif top and right: edge = Gdk.WindowEdge.NORTH_EAST
+                elif bottom and left: edge = Gdk.WindowEdge.SOUTH_WEST
+                elif bottom and right: edge = Gdk.WindowEdge.SOUTH_EAST
+                elif left: edge = Gdk.WindowEdge.WEST
+                elif right: edge = Gdk.WindowEdge.EAST
+                elif top: edge = Gdk.WindowEdge.NORTH
+                elif bottom: edge = Gdk.WindowEdge.SOUTH
+                if edge is not None and ev.type == Gdk.EventType.BUTTON_PRESS:
+                    gw.begin_resize_drag(edge, ev.button, int(ev.x_root), int(ev.y_root), ev.time)
+                    return True
+            if y < STUDIO_BAR and x < w - STUDIO_BTNS:
+                st["press"] = None
+                if ev.type == Gdk.EventType._2BUTTON_PRESS:          # двойной щелчок по заголовку — развернуть
+                    import threading
+                    threading.Thread(target=self.studio_max, daemon=True).start()
+                elif ev.type == Gdk.EventType.BUTTON_PRESS:          # двигать начнём, когда мышь сдвинется (иначе нет двойного щелчка)
+                    st["press"] = (ev.x_root, ev.y_root)
+                return True
+            return False
+
+        def on_motion(_w, ev):
+            p0 = st.get("press")
+            if p0 and abs(ev.x_root - p0[0]) + abs(ev.y_root - p0[1]) > 3:
+                st["press"] = None
+                gw.begin_move_drag(1, int(ev.x_root), int(ev.y_root), ev.time)
+                return True
+            return False
+
+        def on_release(_w, ev):
+            st["press"] = None
+            return False
+
+        gw.connect("size-allocate", reshape)
+        gw.connect("window-state-event", on_state)
+        wv.connect("button-press-event", on_press)
+        wv.connect("motion-notify-event", on_motion)
+        wv.connect("button-release-event", on_release)
+        reshape()
+
+    def _studio_gw(self):
+        from gi.repository import Gtk
+        return next((g for g in Gtk.Window.list_toplevels() if g.get_title() == STUDIO_TITLE), None)
+
+    def _raise_studio(self):
+        """Linux: поднять студию наверх и дать ей фокус. GNOME не пускает вперёд окна фоновой программы (защита от
+        кражи фокуса): со второго раза студия открывалась ЗА другими окнами — казалось, что кнопки «Настройки»,
+        «Календарь», «Память» ничего не делают. Свёрнутую — развернуть; на миг «поверх всех» и present с временем
+        X-сервера (его GNOME считает действием пользователя)."""
+        if WIN:
+            return
+
+        def run():
+            from gi.repository import GLib, Gdk
+            gw = self._studio_gw()
+            if gw is None:
+                return False
+            gw.deiconify()
+            gw.set_keep_above(True)
+            ts = Gdk.CURRENT_TIME
+            try:
+                gi_win = gw.get_window()
+                from gi.repository import GdkX11
+                if gi_win is not None and isinstance(gi_win, GdkX11.X11Window):
+                    ts = GdkX11.x11_get_server_time(gi_win)
+            except Exception:  # noqa: BLE001 — не X11 (Wayland без XWayland)
+                pass
+            gw.present_with_time(ts)
+            GLib.timeout_add(700, lambda: (gw.set_keep_above(False), False)[1])
+            return True
+        try:
+            self._gtk(run)
+        except Exception as e:  # noqa: BLE001
+            print(f"Студия наверх: {e}", file=sys.stderr)
+
+    def studio_min(self):
+        if self._studio is not None:
+            self._studio.minimize()
+
+    def studio_max(self):
+        """Развернуть/вернуть. -> развёрнуто ли теперь."""
+        def run():
+            gw = self._studio_gw()
+            if gw is None:
+                return False
+            if gw.is_maximized():
+                gw.unmaximize()
+                return False
+            gw.maximize()
+            return True
+        return bool(self._gtk(run))
+
+    def studio_close(self):
+        st, self._studio = self._studio, None          # следующее «открыть» создаст окно заново, даже если closed не придёт
+        if st is not None:
+            st.destroy()
+
+    def _studio_closed(self, win=None):
+        if win is None or self._studio is win:         # закрылось старое окно, а новое уже открыто — его не забываем
+            self._studio = None
+        _ui_log("студия: закрыта")
+
+    # ---------- окно-будильник ----------
+
+    def show_alarm(self, payload=None):
+        """Напоминание сработало: окно alarm.html чуть выше центра экрана, поверх всех. Одно на напоминание: повторный
+        вызов с тем же id только показывает его, новое напоминание заменяет старое окно. Окно создаётся скрытым и
+        показывается после загрузки страницы (не позже чем через 4 с) — уже скруглённым."""
+        import webview
+        from urllib.parse import urlencode
+        p = payload if isinstance(payload, dict) else {}
+        rid = str(p.get("id") or "")
+        old = getattr(self, "_alarm", None)
+        if old is not None:
+            if getattr(self, "_alarm_id", "") == rid:
+                try:
+                    old.show()
+                    old.restore()
+                except Exception:  # noqa: BLE001
+                    pass
+                return
+            try:
+                old.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+        w, h = 520, 440
+        try:
+            if WIN:
+                l, t_, r, b = winshell.work_area()
+                sw, sh, ox, oy = r - l, b - t_, l, t_
+            else:
+                scr = webview.screens[0]
+                sw, sh, ox, oy = scr.width, scr.height, getattr(scr, "x", 0), getattr(scr, "y", 0)
+            x, y = int(ox + (sw - w) / 2), int(oy + (sh - h) / 2.4)
+        except Exception:  # noqa: BLE001
+            x = y = None
+        q = "&" + urlencode({"id": rid, "text": p.get("text", ""), "title": p.get("title", ""), "rep": p.get("repeat_text", ""),
+                             "late": "1" if p.get("late") else "", "at": p.get("at", "")})
+        self._alarm_id = rid
+        win = webview.create_window(ALARM_TITLE, self._url("alarm.html", q), width=w, height=h, x=x, y=y,
+                                    resizable=False, frameless=True, easy_drag=True, on_top=True, focus=True, hidden=True,
+                                    background_color="#0c0a12", js_api=self, **_no_shadow())
+        self._alarm = win
+        win.events.closed += self._alarm_closed
+        done = []
+
+        def reveal():
+            """Скругляем углы до показа (как у виджета), потом показываем — иначе система запомнит квадрат."""
+            if done:
+                return
+            done.append(1)
+            try:
+                if WIN:
+                    hwnd = int(win.native.Handle.ToInt64())
+                    winshell.shape(hwnd, "alarm", ALARM_RADIUS)
+                    win.show()
+                    return
+
+                def run():
+                    from gi.repository import Gtk
+                    gw = next((g for g in Gtk.Window.list_toplevels() if g.get_title() == ALARM_TITLE), None)
+                    if gw is None:
+                        return False
+                    gw.set_skip_taskbar_hint(True)
+                    gw.realize()
+                    shape_window(gw, "alarm", (w, h), ALARM_RADIUS)
+                    gw.show_all()
+                    if x is not None:
+                        gw.get_window().move(x, y)
+                    gw.present()
+                    return True
+                if not self._gtk(run, timeout=5):
+                    win.show()
+            except Exception as e:  # noqa: BLE001 — не удалось скруглить: покажем как есть
+                print(f"Окно напоминания: {e}", file=sys.stderr)
+                try:
+                    win.show()
+                except Exception:  # noqa: BLE001
+                    pass
+        import threading
+        lock = threading.Lock()
+
+        def reveal_once():
+            with lock:
+                reveal()
+        win.events.loaded += lambda *a: threading.Thread(target=reveal_once, daemon=True).start()
+        threading.Timer(4.0, reveal_once).start()       # страница грузилась долго — всё равно показать
+
+    def close_alarm(self, rid=""):
+        win = getattr(self, "_alarm", None)
+        if win is not None and (not rid or rid == getattr(self, "_alarm_id", "")):
+            self._alarm = None
+            try:
+                win.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _alarm_closed(self):
+        self._alarm = None
+
+    # ---------- суфлёр: окно-карточка у правого края, поверх всех окон ----------
+
+    def open_prompter(self):
+        """Окно суфлёра (prompter.html): одно; уже открыто — показать. У правого края рабочей области, сверху; скругляем
+        до показа (как напоминание). Windows: окно не попадает в показ экрана и запись (SetWindowDisplayAffinity) —
+        собеседник в Zoom, Teams, Телемосте его не увидит."""
+        import threading
+        import webview
+        old = getattr(self, "_prompter", None)
+        if old is not None:
+            try:
+                old.show()
+                old.restore()
+                return True
+            except Exception:  # noqa: BLE001
+                self._prompter = None
+        w, h = 440, 680
+        try:
+            if WIN:
+                l, t_, r, b = winshell.work_area()
+                sw, sh, ox, oy = r - l, b - t_, l, t_
+            else:
+                scr = webview.screens[0]
+                sw, sh, ox, oy = scr.width, scr.height, getattr(scr, "x", 0), getattr(scr, "y", 0)
+            h = min(h, int(sh) - 60)
+            x, y = int(ox + sw - w - 28), int(oy + 40)
+        except Exception:  # noqa: BLE001
+            x = y = None
+        win = webview.create_window(PROMPTER_TITLE, self._url("prompter.html"), width=w, height=h, x=x, y=y,
+                                    resizable=False, frameless=True, easy_drag=False, on_top=True, hidden=True,
+                                    background_color="#16131d", js_api=self, **_no_shadow())
+        self._prompter = win
+        win.events.closed += lambda *a: setattr(self, "_prompter", None)
+        done, lock = [], threading.Lock()
+
+        def reveal():
+            with lock:
+                if done:
+                    return
+                done.append(1)
+            try:
+                if WIN:
+                    hwnd = int(win.native.Handle.ToInt64())
+                    winshell.shape(hwnd, "prompter", PROMPTER_RADIUS)
+                    winshell.no_capture(hwnd)
+                    win.show()
+                    return
+
+                def run():
+                    from gi.repository import Gtk
+                    gw = next((g for g in Gtk.Window.list_toplevels() if g.get_title() == PROMPTER_TITLE), None)
+                    if gw is None:
+                        return False
+                    gw.set_skip_taskbar_hint(False)
+                    gw.realize()
+                    shape_window(gw, "prompter", (w, h), PROMPTER_RADIUS)
+                    gw.show_all()
+                    if x is not None:
+                        gw.get_window().move(x, y)
+                    gw.present()
+                    return True
+                if not self._gtk(run, timeout=5):
+                    win.show()
+            except Exception as e:  # noqa: BLE001 — не удалось скруглить: покажем как есть
+                print(f"Окно суфлёра: {e}", file=sys.stderr)
+                try:
+                    win.show()
+                except Exception:  # noqa: BLE001
+                    pass
+        win.events.loaded += lambda *a: threading.Thread(target=reveal, daemon=True).start()
+        threading.Timer(4.0, reveal).start()
+        return True
+
+    def close_prompter(self):
+        win = getattr(self, "_prompter", None)
+        self._prompter = None
+        if win is not None:
+            try:
+                win.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+        return True
+
+
+def _raise_idle_priority():
+    """Linux: pywebview выполняет всё с окнами (показать, спрятать, открыть студию, ответить странице) через
+    GLib.idle_add — с самым низким приоритетом главного цикла, «когда больше нечего делать». Пока облик анимируется
+    с программной отрисовкой, а то и в трёх окнах сразу, цикл может так и не освободиться — и кнопки «Память»,
+    «Календарь», «Настройки», пункты меню в трее молча не работают до перезапуска интерфейса. Ставим эти вызовы
+    выше перерисовки (HIGH_IDLE): они короткие. Подменяем glib внутри webview.platforms.gtk — это устройство
+    pywebview; если оно другое, ничего не трогаем. Вызывать до webview.start."""
+    try:
+        from gi.repository import GLib
+        import webview.platforms.gtk as G
+
+        class _GLib:
+            def __getattr__(self, k):
+                return getattr(GLib, k)
+
+            @staticmethod
+            def idle_add(fn, *a, **kw):
+                kw.setdefault("priority", GLib.PRIORITY_HIGH_IDLE)
+                return GLib.idle_add(fn, *a, **kw)
+        if getattr(G, "glib", None) is GLib:
+            G.glib = _GLib()
+    except Exception as e:  # noqa: BLE001
+        print(f"Приоритет окон не поднят: {e}", file=sys.stderr)
+
+
+def _ui_log(text):
+    """Строка в журнал интерфейса STATE_DIR/logs/ui.log (он попадает в отчёт разработчику). -> путь или None."""
+    try:
+        from settings import STATE_DIR
+        d = STATE_DIR / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / "ui.log", "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n")
+        return d / "ui.log"
+    except OSError:
+        return None
+
+
+def _loop_watchdog(api):
+    """Linux: сторож главного цикла окон (поток ui-watchdog). Каждые 5 с ставит в цикл две отметки: обычного
+    приоритета и самого низкого. Обычная не выполнилась 40 с — виджет «замёрз» (кнопки и трей не работают):
+    пишем в ui.log, где застряли потоки, и перезапускаем интерфейс (ядро и разговор не прерываются; код выхода 3).
+    Низкая не выполняется 60 с — цикл занят перерисовкой: только запись в журнал.
+    DEWIAR_UI_NO_RESTART — только журнал, без перезапуска."""
+    import faulthandler
+    from gi.repository import GLib
+    beat = {"t": time.monotonic(), "idle": time.monotonic()}
+
+    def tick():
+        beat["t"] = time.monotonic()
+        return False
+
+    def idle_tick():
+        beat["idle"] = time.monotonic()
+        return False
+    warned = False
+    while True:
+        GLib.idle_add(tick, priority=GLib.PRIORITY_DEFAULT)
+        GLib.idle_add(idle_tick)                          # самый низкий приоритет: проверяем, бывает ли цикл свободен
+        time.sleep(5)
+        now = time.monotonic()
+        if now - beat["idle"] > 60 and not warned:
+            warned = True
+            _ui_log(f"главный цикл окон занят перерисовкой уже {now - beat['idle']:.0f} с (вызовы окон подняты в приоритете)")
+        elif now - beat["idle"] < 10:
+            warned = False
+        if now - beat["t"] > 40:
+            f = _ui_log(f"главный цикл окон не отвечает {now - beat['t']:.0f} с — перезапускаю интерфейс. Потоки:")
+            try:
+                if f:
+                    with open(f, "a", encoding="utf-8") as fh:
+                        faulthandler.dump_traceback(file=fh, all_threads=True)
+            except (OSError, ValueError):
+                pass
+            if os.environ.get("DEWIAR_UI_NO_RESTART"):
+                beat["t"] = time.monotonic()
+                continue
+            launcher = ROOT / "dewiar"
+            cmd = ["/bin/sh", str(launcher)] if launcher.is_file() else [sys.executable, str(Path(__file__).resolve())]
+            try:                                              # новый — через 2 с, когда этот уже отпустит замок экземпляра
+                subprocess.Popen(["/bin/sh", "-c", 'sleep 2; exec "$@"', "dewiar-ui"] + cmd, start_new_session=True,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            finally:
+                os._exit(3)
+
+
+class LinuxTray:
+    """Значок в области уведомлений Ubuntu (AppIndicator; Ayatana или старый). Нет библиотеки — значка нет, всё
+    остальное работает. Создавать в главном потоке GTK; пункты меню выполняются в отдельных потоках.
+    «Убрать в трей» — виджет спрятан, ассистент слушает; «Выйти из Dewiar» — завершает и ядро (Api.quit_all),
+    иначе служба ядра продолжала бы слушать и отвечать без окна."""
+
+    def __init__(self, api):
+        import gi
+        try:
+            gi.require_version("AyatanaAppIndicator3", "0.1")
+            from gi.repository import AyatanaAppIndicator3 as AI
+        except (ValueError, ImportError):
+            gi.require_version("AppIndicator3", "0.1")
+            from gi.repository import AppIndicator3 as AI
+        from gi.repository import Gtk
+        icon = ROOT / "icons" / "dewiar-tray.png"           # белый знак — панель Ubuntu тёмная
+        if not icon.exists():
+            icon = ROOT / "icons" / "dewiar-64.png"
+        self.ind = AI.Indicator.new("dewiar", str(icon), AI.IndicatorCategory.APPLICATION_STATUS)
+        self.ind.set_title("Dewiar")
+        menu = Gtk.Menu()
+        for title, fn in (("Показать Dewiar", api.from_tray), ("Убрать в трей", api.to_tray),
+                          ("Студия", lambda: api.open_settings()), (None, None), ("Выйти из Dewiar", api.quit_all)):
+            if title is None:
+                menu.append(Gtk.SeparatorMenuItem())
+                continue
+            it = Gtk.MenuItem(label=title)
+            it.connect("activate", lambda _w, f=fn: __import__("threading").Thread(target=f, daemon=True).start())
+            menu.append(it)
+            if title == "Показать Dewiar":
+                self.ind.set_secondary_activate_target(it)        # щелчок колёсиком/средней — сразу показать
+        menu.show_all()
+        self.ind.set_menu(menu)
+        self.ind.set_status(AI.IndicatorStatus.ACTIVE)
+
+
+_TRAY = []
+
+
+def _no_shadow():
+    """Окна без рамки режем по форме (скруглённая карточка, круг) — им не нужна тень DWM: с ней pywebview 6 включает
+    рамку DWM, и Windows перестаёт резать окно по форме. У старых pywebview параметра нет — тогда ничего не передаём."""
+    import inspect
+    import webview
+    try:
+        return {"shadow": False} if "shadow" in inspect.signature(webview.create_window).parameters else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def _notify(text):
+    """Уведомление системы: Windows — сообщение от значка в трее (значка нет — молча), Linux — notify-send,
+    а без него — тот же вызов напрямую по D-Bus (gdbus)."""
+    if WIN:
+        if _TRAY:
+            _TRAY[0].notify(text)
+        return
+    try:
+        if shutil.which("notify-send"):
+            subprocess.Popen(["notify-send", "-a", "Dewiar", "Dewiar", text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif shutil.which("gdbus"):
+            subprocess.Popen(["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path",
+                              "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify",
+                              "Dewiar", "0", "dewiar-assistant", "Dewiar", text, "[]", "{}", "-1"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
+
+def _disk_version():
+    """Версия, которая сейчас лежит на диске (core/version.py), — после обновления она новее UI_VERSION."""
+    try:
+        import re
+        return re.search(r'^VERSION = "([^"]+)"', (ROOT / "core" / "version.py").read_text(encoding="utf-8"), re.M).group(1)
+    except (OSError, AttributeError):
+        return ""
+
+
+def watch_version(api):
+    """Linux: пакет обновили мимо студии (например, из терминала), а интерфейс ещё старый (новые страницы + старая
+    программа = сломанные кнопки). Раз в 15 с сверяем версию на диске; она сменилась — перезапускаемся новой.
+    Предохранитель от круга перезапусков: только настоящий номер (цифры через точки) и не больше раза на версию —
+    метка restart.ver в папке состояния; новый процесс с той же версией на диске второй раз не перезапускается."""
+    import re
+    from settings import STATE_DIR
+    mark = STATE_DIR / "restart.ver"
+    mine = UI_VERSION
+    while True:
+        time.sleep(15)
+        v = _disk_version()
+        if v and v != mine and re.fullmatch(r"\d+(\.\d+)+", v):
+            try:
+                if mark.read_text(encoding="utf-8").strip() == f"{mine}>{v}":
+                    print(f"Версия на диске {v}, у окна {mine}, перезапуск уже был — не повторяю", file=sys.stderr)
+                    return
+            except OSError:
+                pass
+            try:
+                mark.write_text(f"{mine}>{v}", encoding="utf-8")
+            except OSError:
+                pass
+            time.sleep(5)                       # установщик мог ещё не дописать файлы
+            print(f"Dewiar обновлён до {v} — перезапускаю интерфейс", file=sys.stderr)
+            api.restart()
+            return
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--settings", action="store_true")
+    ap.add_argument("target", nargs="?", help="файл .dewiar или ссылка dewiar://connect?server=…")
+    args = ap.parse_args()
+    from urllib.parse import quote
+    extra = ""
+    if args.target:
+        t = args.target
+        if t.startswith("file://"):
+            from urllib.parse import unquote, urlparse
+            t = unquote(urlparse(t).path)
+        extra = ("&address=" + quote(t, safe="")) if t.startswith("dewiar:") else ("&import=" + quote(str(Path(t).resolve()), safe=""))
+        args.settings = True
+
+    if WIN:
+        return main_win(args, extra)
+    migrate_from_cortex()
+    fresh = not SETTINGS_PATH.exists() or ui_settings().get("welcome") == ""   # первый запуск — откроем «Первые шаги»
+    uis = ui_settings()
+    if uis.get("force_x11", True) and os.environ.get("WAYLAND_DISPLAY"):
+        # На Wayland окно не может само держаться поверх других и двигаться — работаем через XWayland.
+        os.environ.setdefault("GDK_BACKEND", "x11")
+    os.environ.setdefault("WEBKIT_DISABLE_DMABUF_RENDERER", "1")     # частая причина белых/чёрных окон на NVIDIA
+    if not uis.get("gpu", False):
+        # Программная отрисовка: ускоренный WebKitGTK на части систем неверно смешивает полупрозрачные
+        # пиксели — отсюда «пересвеченные» пятна и рваный текст. Виджет маленький, процессору это почти
+        # ничего не стоит (но см. _raise_idle_priority). Включить ускорение: settings.ui.gpu = true.
+        os.environ.setdefault("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
+
+    held = lock("ui")
+    if held is None:
+        # Интерфейс уже запущен — просим его показаться и выходим. Сигнал-файл: «hud» или «settings» + параметры
+        # студии (&import=…, &address=…); его ждёт watch() в on_start, на Windows — то же в main_win.
+        (Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / f"dewiar-show-{os.getuid()}").write_text(
+            ("settings" + extra) if args.settings else "hud")
+        return
+
+    ensure_core()
+    try:                                       # окна — «Dewiar» с нашим значком (а не «app.py» с шестерёнкой в доке)
+        import gi
+        from gi.repository import GLib                 # имя программы — до запуска GTK (иначе окно-лидер «app.py»)
+        GLib.set_prgname("dewiar")
+        GLib.set_application_name("Dewiar")
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("Gdk", "3.0")
+        from gi.repository import Gdk, Gtk
+        Gdk.set_program_class("Dewiar")
+        Gtk.Window.set_default_icon_from_file(str(ROOT / "icons" / "dewiar-256.png"))
+    except Exception as e:  # noqa: BLE001
+        print(f"Значок окна не задан: {e}", file=sys.stderr)
+    import webview
+    token = ensure_token()
+    api = Api(token)
+
+    mode = "mini" if uis.get("hud_mode") == "mini" else "card"
+    x, y = uis.get("hud_x"), uis.get("hud_y")                 # положение карточки
+    if x is None or y is None:
+        try:
+            scr = webview.screens[0]
+            x, y = scr.width - SIZES["card"][0] - MARGIN, scr.height - SIZES["card"][1] - MARGIN - 40
+        except Exception:  # noqa: BLE001
+            x, y = 100, 100
+    for m in ("card", "mini"):
+        w, h = SIZES[m]
+        api.wins[m] = webview.create_window(TITLES[m], api._url("hud.html", "&mode=" + m), width=w, height=h,
+                                            resizable=False, min_size=(w, h), frameless=True, easy_drag=False,
+                                            on_top=True, hidden=True, background_color="#0b0b0e", js_api=api)
+    api._hud = api.wins["card"]
+
+    def on_start():
+        api.start_hud(mode, x, y)
+
+        def make_tray():
+            try:
+                api._tray = LinuxTray(api)
+            except Exception as e:  # noqa: BLE001 — нет AppIndicator (не Ubuntu) — без значка
+                print(f"Значок в трее недоступен: {e}", file=sys.stderr)
+            return False
+        from gi.repository import GLib
+        GLib.idle_add(make_tray)
+        if uis.get("hud_tray") and not args.settings:
+            api.to_tray(quiet=True)
+        if args.settings:
+            api.open_settings("connect" if extra else "", extra)
+        elif fresh:
+            api.open_settings("")
+        import threading
+        sig = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / f"dewiar-show-{os.getuid()}"
+
+        def watch():
+            while True:
+                time.sleep(0.5)
+                if sig.exists():
+                    what = sig.read_text().strip()
+                    sig.unlink()
+                    api.from_tray()
+                    if what.startswith("settings"):
+                        q = what[len("settings"):]
+                        api.open_settings("connect" if q else "", q)
+        threading.Thread(target=watch, daemon=True).start()
+        threading.Thread(target=watch_version, args=(api,), daemon=True).start()
+        threading.Thread(target=_loop_watchdog, args=(api,), name="ui-watchdog", daemon=True).start()
+
+    _raise_idle_priority()
+    webview.start(on_start, gui="gtk", debug=bool(os.environ.get("DEWIAR_UI_DEBUG")))
+    del held
+
+
+def main_win(args, extra):
+    """Windows: один экземпляр, ядро отдельным процессом (и его сторож core_watch), значок в трее, окна на WebView2.
+    Свой номер процесса и «версия|папка» — в ui.pid / ui.ver: по ним следующий запуск решает, показать нас или
+    сменить устаревший интерфейс, их же собирает диагностика (doctor.py). Нет WebView2 или виджет дважды не
+    загрузился — работаем без окон: значок в трее + студия в браузере."""
+    sig = winshell.signal_path()
+    from settings import STATE_DIR
+    me = f"{UI_VERSION}|{ROOT}"
+    if lock("ui") is None:
+        # Уже запущен. Та же версия — просим показаться и выходим. Другая версия (старый интерфейс остался после
+        # обновления, может быть, с ошибкой в окне) — завершаем его и запускаемся сами.
+        try:
+            other = (STATE_DIR / "ui.ver").read_text(encoding="utf-8").strip()
+        except OSError:
+            other = ""
+        if other == me:
+            sig.write_text(("settings" + extra) if args.settings else "hud", encoding="utf-8")
+            return
+        print(f"Запущен другой интерфейс ({other or 'старая версия'}) — завершаю его", file=sys.stderr)
+        for name in ("ui.pid", "core.pid"):
+            try:
+                winshell.kill_pid((STATE_DIR / name).read_text(encoding="ascii").strip())
+            except OSError:
+                pass
+        for _ in range(30):
+            time.sleep(0.3)
+            if lock("ui") is not None:
+                break
+        else:
+            sig.write_text(("settings" + extra) if args.settings else "hud", encoding="utf-8")
+            return
+    ensure_core()
+    import threading as _th
+    _th.Thread(target=core_watch, name="core-watch", daemon=True).start()
+    try:
+        (STATE_DIR / "ui.pid").write_text(str(os.getpid()), encoding="ascii")
+        (STATE_DIR / "ui.ver").write_text(me, encoding="utf-8")
+        import atexit
+        atexit.register(lambda: [(STATE_DIR / n).unlink(missing_ok=True) for n in ("ui.pid", "ui.ver")])
+    except OSError:
+        pass
+    token = ensure_token()
+    api = Api(token)
+    fresh = not SETTINGS_PATH.exists() or ui_settings().get("welcome") == ""   # первый запуск — откроем «Первые шаги»
+    uis = ui_settings()
+    icon = ROOT / "icons" / "dewiar.ico"
+
+    def studio_in_browser():
+        os.startfile(api._url("settings.html"))  # noqa: S606 — адрес http://127.0.0.1:… открывает браузер по умолчанию
+
+    import threading
+    started = threading.Event()
+    api._tray = winshell.Tray(icon, on_show=lambda: api.from_tray() if started.is_set() else studio_in_browser(),
+                             on_studio=lambda: api.open_settings() if started.is_set() else studio_in_browser(),
+                             on_quit=api.quit_all)
+    _TRAY.append(api._tray)
+    try:
+        if os.environ.get("DEWIAR_NO_WEBVIEW"):        # проверка запасного пути (как без WebView2)
+            raise ImportError("DEWIAR_NO_WEBVIEW")
+        if int(uis.get("widget_fail2") or 0) >= 2:      # виджет дважды не загрузился — работаем без окна
+            raise ImportError("виджет дважды не загрузился — включить снова: студия → «Звук и поведение»")
+        import webview
+    except Exception as e:  # noqa: BLE001
+        print(f"Окна недоступны ({e}) — студия откроется в браузере", file=sys.stderr)
+        if "дважды" in str(e):
+            _notify("Dewiar работает без окна виджета (оно не загружалось). Ассистент слушает; студия — значок в трее.")
+            if fresh or args.settings:
+                studio_in_browser()
+        else:
+            _notify("Окно виджета недоступно (нет Microsoft Edge WebView2). Ассистент слушает, настройки — в браузере.")
+            studio_in_browser()
+        threading.Event().wait()
+        return
+
+    mode = "mini" if uis.get("hud_mode") == "mini" else "card"
+    x, y = uis.get("hud_x"), uis.get("hud_y")
+    if x is None or y is None:
+        l, t_, r, b = winshell.work_area()
+        x, y = int(r - SIZES["card"][0] - MARGIN), int(b - SIZES["card"][1] - MARGIN)
+    for m in ("card", "mini"):
+        w, h = SIZES[m]
+        # shadow=False (_no_shadow): pywebview 6 для окон «с тенью» включает рамку DWM (DwmExtendFrameIntoClientArea +
+        # NCRENDERING_POLICY) — с ней Windows перестаёт резать окно по форме SetWindowRgn: углы остаются острыми,
+        # значок — квадратным.
+        api.wins[m] = webview.create_window(TITLES[m], api._url("hud.html", "&mode=" + m), width=w, height=h,
+                                            resizable=False, min_size=(w, h), frameless=True, easy_drag=False,
+                                            on_top=True, hidden=True, background_color="#0b0b0e", js_api=api, **_no_shadow())
+    api._hud = api.wins["card"]
+
+    def on_start():
+        started.set()
+        try:
+            api.start_hud(mode, x, y)
+            if uis.get("hud_tray") and not args.settings:
+                api.to_tray(quiet=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"Виджет не показан: {e}", file=sys.stderr)
+        if args.settings:
+            api.open_settings("connect" if extra else "", extra)
+        elif fresh:
+            api.open_settings("")
+
+        def watch():
+            while True:
+                time.sleep(0.5)
+                if sig.exists():
+                    what = sig.read_text(encoding="utf-8").strip()
+                    sig.unlink()
+                    api.from_tray()
+                    if what.startswith("settings"):
+                        q = what[len("settings"):]
+                        api.open_settings("connect" if q else "", q)
+        threading.Thread(target=watch, daemon=True).start()
+        threading.Thread(target=page_guard, daemon=True).start()
+
+    def remember_fail(n):
+        """Сколько запусков подряд виджет не загрузился: после двух — запускаемся без окна (значок в трее + студия
+        в браузере), чтобы не держать зависшие окна WebView2. Вернуть: студия → «Звук и поведение»."""
+        try:
+            winshell.core_call(WS_PORT, token, "settings_save", {"patch": {"ui": {"widget_fail2": n}}})
+        except Exception as e:  # noqa: BLE001
+            print(f"Не сохранил счётчик сбоев виджета: {e}", file=sys.stderr)
+
+    def page_guard():
+        """Сторож загрузки виджета. Окно без рамки: если страница не загрузилась (ошибка вместо виджета), закрыть
+        его нечем. Примерно через 10, 25 и 50 с спрашиваем страницу, на месте ли карточка, облик и связь (window.core).
+        Видно, что в окне не наша страница, — убираем окна, объясняем по-человечески, открываем студию в браузере
+        (ассистент работает) и считаем сбой (remember_fail); загрузилась — счётчик сбоев обнуляем."""
+        res = ""
+        for pause in (10, 15, 25):
+            time.sleep(pause)
+            box = {}
+
+            def probe():
+                try:
+                    box["r"] = api._hud.evaluate_js("(document.getElementById('card') && document.getElementById('orb') && window.core ? 'ok ' : 'bad ') + location.href")
+                except Exception as e:  # noqa: BLE001
+                    box["r"] = f"ошибка проверки: {e}"
+            t = threading.Thread(target=probe, daemon=True)
+            t.start()
+            t.join(10)
+            res = str(box.get("r", "нет ответа от окна"))
+            if res.startswith("ok "):
+                print(f"Виджет загружен: {res[3:].split('?')[0]}", file=sys.stderr)
+                if uis.get("widget_fail2"):
+                    remember_fail(0)
+                return
+            print(f"Проверка виджета: {res[:200]}", file=sys.stderr)
+        if not res.startswith("bad "):
+            # окно не ответило на проверку — это ещё не значит, что оно сломано (не прячем рабочий виджет);
+            # прячем только когда точно видно: в окне не наша страница (ошибка загрузки)
+            print("Виджет: проверить не удалось — оставляю как есть", file=sys.stderr)
+            return
+        print(f"Виджет не загрузился ({res}) — окна скрыты, студия в браузере", file=sys.stderr)
+        remember_fail(int(uis.get("widget_fail2") or 0) + 1)
+        for w in api.wins.values():
+            try:
+                w.hide()
+            except Exception:  # noqa: BLE001
+                pass
+        winshell.message_box("Окно виджета Dewiar не загрузилось, поэтому оно скрыто. Ассистент работает и слушает; "
+                             "настройки открываются в браузере.\n\nЕсли так повторяется — меню «Пуск» → «Dewiar — диагностика» "
+                             "и пришлите снимок отчёта. Выйти из Dewiar — значок в трее (возле часов) → «Выход».")
+        studio_in_browser()
+
+    print(f"Виджет: {api._url('hud.html').split('?')[0]}", file=sys.stderr)
+    try:
+        webview.start(on_start, gui="edgechromium", debug=bool(os.environ.get("DEWIAR_UI_DEBUG")))
+    except Exception as e:  # noqa: BLE001 — нет WebView2: ассистент работает, студия — в браузере
+        print(f"WebView2 недоступен ({e}) — студия откроется в браузере", file=sys.stderr)
+        _notify("Окно виджета не открылось (нет Microsoft Edge WebView2). Ассистент слушает, студия — в браузере.")
+        studio_in_browser()
+        threading.Event().wait()
+    api.quit_all()
+
+
+if __name__ == "__main__":
+    if WIN and sys.stderr is None:              # pythonw: без консоли — ошибки интерфейса в файл журнала
+        try:
+            sys.stderr = sys.stdout = open(winshell.log_dir() / "ui.log", "a", encoding="utf-8", buffering=1)
+        except OSError:
+            pass
+    try:
+        main()
+    except Exception as e:  # noqa: BLE001
+        print(f"Интерфейс не запустился: {e}", file=sys.stderr)
+        if WIN:
+            import traceback
+            traceback.print_exc()
+        else:
+            print("Ядро продолжает работать. Проверьте: sudo apt install python3-gi gir1.2-webkit2-4.1", file=sys.stderr)
+        sys.exit(1)

@@ -1,0 +1,1156 @@
+"""Движок Dewiar — ответ: ask() (быстрые пути без модели, передача специалисту), ход разговора с моделью
+(_run_turn: поток событий модели → фразы → озвучка, вызовы инструментов, запасные пути при ошибках), история
+и системная подсказка, «Проверить всё», отчёты разработчику, связь с фоновыми задачами (TaskManager.host).
+Часть класса Engine (core/engine.py): методы смешиваются в него, self — это Engine.
+Озвучка фраз — _speak_worker (engine_remote.py), инструменты — _use_tool (engine_tools.py).
+Текст с «\\n\\nВложения:» — вопрос с файлами (см. _attach_files): быстрые пути его не перехватывают."""
+from engine_base import *  # noqa: F401,F403 — общие импорты и помощники движка
+
+# инструменты «узнать» (не «сделать»): после них ответ без слов — не ответ, «Готово.» вместо сути не подставляем
+INFO_TOOLS = {"web_search", "read_webpage", "find_notes", "read_file", "calc", "list_reminders", "calendar_list", "money_report",
+              "read_emails", "read_email", "search_documents", "ask_knowledge", "system_status", "task_status", "look_at_screen",
+              "look_through_camera"}
+
+
+class AnswerMixin:
+    # ---------- ответ ----------
+
+    def ask(self, text, images=None, quiet=False, via=None, raw=False, shown=None, report=None):
+        """Вопрос → ответ. Сначала быстрые пути без модели (будильник, «спрячься»/«отключись», команды компьютера, сейф, умный дом, деньги,
+        дела, заметки, напоминания, «замолчи», новый разговор, позвать персонажа, радио, музыка), затем, возможно,
+        передача специалисту (_route) и ход разговора в потоке turn-N; прежний ход отменяется.
+        images — картинки; quiet — служебный вопрос: не показываем «услышал», без быстрых путей; via — вопрос
+        не голосом (Telegram/MAX, см. Turn.via); raw — без быстрых путей и передачи специалисту (дела по расписанию);
+        shown — что показать вместо текста; report(ok, text) — чем кончился ход (дела по расписанию: повтор при сбое)."""
+        text = text.strip()
+        if not text and images:
+            text = "Что на этой картинке?"
+        if not text:
+            return
+        if via:
+            quiet = False
+        if not raw and not quiet and not images and self.alarm and not via and self._alarm_voice(text):
+            return
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._bug_cmd(text, via):
+            return                                       # «сообщи об ошибке: …» — жалоба разработчику (core/health.py)
+        if not raw and not quiet and not via and not images and re.match(
+                r"^(?:\w+,\s*)?(?:включи|запусти|открой|начни|позови)\s+(?:режим\s+)?суфл[её]р\w*|^(?:\w+,\s*)?режим\s+суфл[её]ра", text.strip(), re.I):
+            self.emit("prompter", kind="open")             # суфлёр — окно ui/prompter.html (core/prompter.py)
+            self._say_quick("Открываю суфлёр. На встрече я молчу и подсказываю на экране.", text)
+            return
+        if not raw and not quiet and not via and not images and self._window_cmd(text):
+            return
+        if not raw and not quiet and not via and not images and self._pc_cmd(text):
+            return
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._vault_cmd(text, via):
+            return
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._home_cmd(text, via):
+            return
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._money_cmd(text, via):
+            return
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._job_cmd(text, via):
+            return
+        if not raw and not quiet and not images and "\n\nВложения:" not in text:
+            from quickmath import parse as parse_math      # «сколько будет 17% от 2350» — точно и сразу (tools.calc_eval)
+            qm = parse_math(text)
+            if qm:
+                self._say_quick(qm["say"], text, via, note=qm.get("how"))
+                return
+        if not raw and not quiet and not images and "\n\nВложения:" not in text:
+            from capture import parse as parse_capture
+            c = parse_capture(text)
+            if c and self._capture(c, text, via):
+                return
+        if not raw and not quiet and not images:
+            from when import parse as parse_when
+            r = parse_when(text)
+            if r:
+                r["said"] = text
+                self._set_reminder_fast(r, via)
+                return
+        if not raw and not quiet and not via and not images and is_sleep_phrase(text):
+            self.emit("heard", text=text)
+            self.go_sleep(text)
+            return
+        if not raw and not quiet and not images and "\n\nВложения:" not in text:
+            from conversation import is_new_conversation
+            if is_new_conversation(text):
+                self.new_conversation()
+                self._say_quick("Хорошо, начинаем с чистого листа.", text, via)
+                return
+        if not raw and not quiet and not via and not images and self._direct_call(text):
+            return
+        if not raw and not quiet and not via and not images and self.radio.paused and \
+                re.sub(r"[^\w ]", "", text.lower()).strip() in {"продолжи", "продолжай", "включи обратно", "верни радио",
+                                                                "включи радио", "играй", "продолжи радио"}:
+            st = self.radio.resume()
+            self.emit("heard", text=text)
+            self.emit("answer", text=f"Снова играет «{st['name']}».", done=True)
+            self.set_state("idle")
+            return
+        if not raw and not quiet and not via and not images and self._music_cmd(text):
+            return
+        with self._turn_lock:
+            self._cancel_locked()      # прежний ход — до выбора специалиста: перебитый специалист возвращает слово главному, и вопрос распределяет уже он
+        handoff = None if quiet or images or raw else self._route(text)
+        if handoff:
+            prev = self.s.get("persona")
+            log.info("👥 %s передаёт вопрос: %s", self.personas.get(prev)["name"], self.personas.get(handoff)["name"])
+            self.switch_persona(handoff)
+        log.info("❓ %s", redact(text))
+        if not quiet:
+            self.emit("heard", text=shown or (("✉ " + text.split("\n\nВложения:")[0]) if via else text))
+        if handoff:
+            self.emit("handoff", **{"from": prev, "to": handoff, "name": self.personas.get(handoff)["name"],
+                                    "role": self.personas.get(handoff).get("role", "")})
+        with self._turn_lock:
+            self._cancel_locked()
+            self.turn_n += 1
+            turn = Turn(self.turn_n)
+            turn.via = via
+            turn.report = report
+            turn.back_to = prev if handoff and self.s.get("team", "back") is not False else None
+            turn.persona = self.s.get("persona")      # кто отвечает; по нему _cancel_locked решает, возвращать ли слово главному
+            self.turn = turn
+        threading.Thread(target=self._run_turn, args=(turn, text, images or []), name=f"turn-{turn.n}", daemon=True).start()
+
+    def _messages(self, text, images=(), prof=None):
+        """История (последние history_turns реплик) + вопрос -> сообщения для модели. Соседние сообщения user
+        склеиваются в одно: многие шаблоны чата требуют чередования ролей."""
+        if self.conv.expired(float(self.s.get("llm", "history_reset_seconds") or 28800)):
+            self.history = []                          # долгая тишина — новый разговор
+            self.conv.reset()
+        turns = int(self.s.get("llm", "history_turns") or 0)
+        me = self.s.get("persona")
+        out = []
+        for m in (self.conv.window(self.history, turns) if turns > 0 else []):
+            who = m.get("who")
+            if m["role"] == "assistant" and who and who != me:
+                # реплика другого персонажа: видна как часть разговора, но не как «свои» слова
+                name = self.personas.get(who)["name"]
+                m = {"role": "user", "content": f"[{name} ответил(а)]: {m['content']}"}
+            else:
+                m = {"role": m["role"], "content": m["content"]}
+            if out and out[-1]["role"] == m["role"] == "user" and isinstance(out[-1]["content"], str):
+                out[-1] = {"role": "user", "content": out[-1]["content"] + "\n\n" + m["content"]}
+            else:
+                out.append(m)
+        cur = user_message(prof or {}, text, images)
+        if out and out[-1]["role"] == "user" and isinstance(cur["content"], str) and isinstance(out[-1]["content"], str):
+            out[-1] = {"role": "user", "content": out[-1]["content"] + "\n\n" + cur["content"]}
+        else:
+            out.append(cur)
+        return out
+
+    def _conv_after(self):
+        """Реплика добавлена: записать пару «вопрос — ответ» в дневник дня, запомнить разговор (переживёт перезапуск)
+        и, если он длинный, свернуть начало в содержание (поток conv-fold)."""
+        try:
+            u, a = (self.history[-2:] + [{}, {}])[:2] if len(self.history) >= 2 else ({}, {})
+            if u.get("role") == "user" and a.get("role") == "assistant":
+                self.diary.log.add(str(u.get("content") or ""), str(a.get("content") or ""), self.persona_name())
+        except Exception:  # noqa: BLE001
+            log.debug("день: реплика не записалась", exc_info=True)
+        try:
+            self.conv.touch(self.history)
+            turns = int(self.s.get("llm", "history_turns") or 0)
+            if turns > 0 and self.conv.needs_fold(self.history, turns):
+                threading.Thread(target=self._conv_fold, args=(turns,), name="conv-fold", daemon=True).start()
+        except Exception:  # noqa: BLE001
+            log.exception("разговор: запомнить")
+
+    def _conv_fold(self, turns):
+        """Содержание начала длинного разговора пишет активная модель; история берётся свежей в момент сворачивания."""
+        prof = self.s.active_llm()
+        if not prof:
+            return
+
+        def ask(system, messages):
+            from llm import stream_chat
+            return "".join(stream_chat(dict(prof, max_tokens=1200), system, messages))
+        if self.conv.fold(lambda: self.history, turns, ask):
+            self.emit("conversation", **self.conv.public(self.history))
+
+    def new_conversation(self):
+        self.history = []
+        self.conv.reset()
+        self.emit("conversation", **self.conv.public(self.history))
+
+    def _system(self, with_tools=False):
+        """Системная подсказка: персонаж с датой и временем, память о пользователе, душа, содержание разговора,
+        выводы из дневника; with_tools — ещё навыки и правила действий (инструменты, музыка, компьютер, серверы)."""
+        now = datetime.now()
+        now_str = f"{WEEKDAYS[now.weekday()]}, {now.day} {MONTHS[now.month - 1]} {now.year} года, {now:%H:%M}"
+        base = self.personas.system_prompt(self.s.get("persona"), self.s.get("user_name") or "", now_str)
+        mem = self.workspace.memory_text()
+        if mem:
+            base += "\n\nЧто ты знаешь о пользователе (твоя память, файл «Память/Обо мне.md»):\n" + mem
+        try:
+            import quality as Q
+            base += Q.talk_lessons_block(self.workspace.root / Q.TALK_LESSONS_FILE)   # уроки из его поправок
+        except Exception:  # noqa: BLE001
+            log.debug("уроки: подсказка", exc_info=True)
+        try:
+            base += self.soul.prompt(self.persona_name())   # конституция и душа персонажа
+        except Exception:  # noqa: BLE001
+            log.debug("душа: подсказка", exc_info=True)
+        base += self.conv.prompt()                     # долгий разговор: что было раньше, был ли перерыв
+        base += self.diary.prompt()                    # выводы, которые ассистент записал ночью в дневник
+        from boundaries import RULE
+        base += "\n\n" + RULE                          # границы: достоинство без обидчивости (boundaries.py)
+        # сами фразы ловит _window_cmd без модели; это — чтобы ассистент мог подсказать их, если спросят
+        base += ("\n\nЕсли спросят, как тебя спрятать или выключить: «спрячься» — виджет уходит в трей, а ты слушаешь и "
+                 "появляешься на имя; «покажись» — вернуть виджет; «отключись» — выйти из Dewiar совсем (включить снова — "
+                 "Dewiar в меню приложений).")
+        if with_tools:
+            base += self.skills.prompt()
+            base += ("\n\nУ тебя есть инструменты: открыть сайт или программу, найти в интернете, прочитать страницу, "
+                     "включить музыку, громкость, напоминания и другие. Когда просят что-то сделать или узнать "
+                     "свежее — вызывай инструмент, а не рассказывай, как это сделать. Не выдумывай результаты поиска. "
+                     "Никогда не говори, что у тебя нет доступа к интернету или свежим данным: погода, новости, курсы, "
+                     "расписания — ищи (web_search) и отвечай по найденному. "
+                     "Перед долгим действием можно коротко сказать, что делаешь. После — одной фразой скажи итог. "
+                     "СЧЁТ: любые вычисления — проценты, суммы, итоги, скидки, курсы, даты, «сколько дней до…» — только "
+                     "инструментом calc, никогда в уме; потом назови результат. Просят объяснить, как посчитал, — покажи сам расчёт "
+                     "с числами (например «2 350 × 17 / 100 = 399,5»), а не «использовал калькулятор». Просьба с условием («если завтра дождь — "
+                     "напомни…») — сначала узнай нужное (погоду — web_search), потом сделай только подходящее действие. "
+                     "Таймер на N минут — set_reminder с «через N минут»."
+                     f"\n\nУ тебя есть своя папка «{self.workspace.root}» — пользователь видит её в студии. Просят записать, "
+                     "составить список или план — сохраняй заметку (save_note), а вслух скажи коротко, что записал. "
+                     "Узнал о пользователе что-то полезное надолго — запомни одной фразой (remember), без лишних "
+                     "вопросов; в том числе как он любит, чтобы ты работал: длина и стиль ответов, форматы файлов, "
+                     "оформление, любимые сервисы и что ему не нравится. У тебя есть свой дневник — твой опыт жизни рядом с пользователем. После содержательного или тёплого "
+                     "разговора, когда узнал о нём что-то новое или что-то понял, — запиши туда (write_diary) от первого "
+                     "лица пару живых фраз: что было, что ты заметил и подумал. Не каждый раз — когда правда есть что сказать. Траты и доходы пользователя "
+                     "(уже сделанные) записывай в учёт денег (money_add), итоги и вопросы о деньгах — money_report; бюджет, "
+                     "лимит или план на что-то («бюджет на мебель — 50 тысяч», «заложим 70») — не трата: запомни его (remember). Задачу, которую проще "
+                     "решить кодом, решай в лаборатории: lab_write, потом lab_run. Большую задачу (много шагов, исследование, "
+                     "работа с кодом проекта, отчёт) не делай в разговоре — запусти фоновую задачу (start_task) и "
+                     "коротко скажи, что взялся: ты продолжишь работать, а пользователь может заниматься своими делами."
+                     " Просят СДЕЛАТЬ результат-файл — презентацию, красивую страницу или дашборд (подборка фильмов, "
+                     "сравнение, отчёт), калькулятор или игру, таблицу, документ, расшифровку видео или аудио — тоже "
+                     "запусти задачу (start_task): у задачи есть мастерская (файлы, Python, показ результата в студии) "
+                     "и навыки slides, html-app, html-viz, data-report, media-transcribe и другие."
+                     " В заметках связывай мысли: ссылки на другие заметки — [[Название заметки]], темы — #тег. "
+                     "Так растёт твоя память, и пользователь видит её графом в студии («Память»)."
+                     " БЕЗОПАСНОСТЬ: удаляй файлы только инструментом delete_files (в корзину), никогда — командами "
+                     "терминала. Никогда не удаляй и не очищай системные папки, домашнюю папку целиком, главные папки "
+                     "(Документы, Загрузки, Рабочий стол), свою папку и память. На «удали всё», «сотри всё», «очисти "
+                     "компьютер» — не выполняй, а уточни, что именно убрать. Выключение и перезагрузка — инструмент power."
+                     " Пароли, пин-коды и ключи пользователя хранятся в его сейфе — ты их не видишь и не записываешь в "
+                     "заметки; спрашивают пароль — подскажи сказать: «какой пароль от …», запомнить — «запомни пароль от …: …».")
+            sv = self._music_service()
+            base += ("\n\nМУЗЫКА: " + {"yandex": "пользователь слушает Яндекс Музыку — музыку включай там (yandex_music), не открывай YouTube.",
+                                         "youtube": "музыку включай в YouTube Music (play_music).",
+                                         "radio": "жанры и настроение включай своим радио (play_radio) — оно играет сразу; "
+                                                  "Яндекс Музыка — yandex_music, если о ней просят."}[sv]
+                     + " Кнопки уже открытого плеера (играть, пауза, следующий трек) — только media_control: не нажимай по экрану "
+                       "и не используй команды терминала. Просят ПОДОБРАТЬ или посоветовать песни, плейлист — назови "
+                       "конкретные песни (исполнитель — название), сколько просили: только известные песни, в которых ты уверен — "
+                       "и в названии, и в исполнителе (не придумывай и не приписывай песню чужому исполнителю); включай, "
+                       "только если просят включить. "
+                       "Никогда не говори, что что-то открыл или включил, если инструмент этого не сделал.")
+            base += f"\n\nКомпьютер пользователя: {OS_NAME}."
+            base += (" Просят разобраться с компьютером (тормозит, не работает, настроить) — сначала посмотри "
+                     "командами, которые ничего не меняют (run_command), объясни, что нашёл, и предложи исправление; "
+                     "каждую команду пользователь подтверждает."
+                     # OS_NAME на Windows — «Windows 10»/«Windows 11», поэтому систему узнаём по os.name, не по строке
+                     + (" Нужны права администратора — пиши sudo как обычно: Dewiar сам покажет окно для пароля. Никогда "
+                        "не проси пароль в разговоре и не вставляй его в команды (echo … | sudo -S)." if os.name != "nt" else ""))
+            if self.servers.items:
+                base += ("\n\nСЕРВЕРЫ пользователя (команды — server_run, по SSH): " + self.servers.names() +
+                         ". Сначала диагностика (место, память, службы, логи), потом исправление; объясняй простыми "
+                         "словами, что нашёл и что сделал.")
+        return base
+
+    # ---------- для фоновых задач (TaskManager.host) ----------
+
+    def persona_name(self):
+        return self.personas.get(self.s.get("persona"))["name"]
+
+    def persona_gender(self):
+        return (self.personas.get(self.s.get("persona")) or {}).get("gender", "")
+
+    def memory(self):
+        return self.workspace.memory_text()
+
+    def skills_prompt(self):
+        return self.skills.prompt()
+
+    def llm_profile(self):
+        """Модель для фоновых задач: своя из настроек задач, иначе активная."""
+        pid = self.s.get("tasks", "llm") or ""
+        profs = self.s.get("llm", "profiles") or {}
+        return dict(profs[pid], id=pid) if pid in profs else self.s.active_llm()
+
+    def max_steps(self):
+        return int(self.s.get("tasks", "max_steps") or 80)
+
+    def code_auto_run(self):
+        return bool(self.s.get("tasks", "auto_run"))
+
+    def confirm(self, question, timeout=120):
+        """Спросить «да/нет» вне разговора (для фоновой задачи): голосом и кнопками в виджете.
+        Блокирует вызывающий поток до ответа или timeout секунд -> True только при «да»."""
+        for _ in range(240):                                   # один вопрос за раз: ждём до 2 мин, пока ответят на прежний
+            if self.pending_confirm is None:
+                break
+            time.sleep(0.5)
+        box = {"event": threading.Event(), "answer": False}
+        self.pending_confirm = box
+        self.emit("confirm", text=question)
+        self.announce(_spoken_question(question) + " Скажите «да» или «нет».")
+        box["event"].wait(timeout)
+        self.pending_confirm = None
+        self.emit("confirm_done", ok=box["answer"])
+        log.info("Подтверждение (задача): %s", "да" if box["answer"] else "нет")
+        return box["answer"]
+
+    def ask_user(self, task, question):
+        """Задача спрашивает: говорим вопрос; следующая фраза пользователя без имени в течение 2 минут — ответ
+        (см. handle_text в engine_audio.py)."""
+        self.task_answer_until = time.monotonic() + 120
+        self.tg_task_until = time.monotonic() + 6 * 3600     # из Telegram ответить можно и позже (вопрос пришёл туда)
+        self.announce(f"Вопрос по задаче «{task.title}»: {question}")
+
+    def find_persona(self, name):
+        """«Лиру», «Патрика», «эва» → id персонажа или None. Сравниваем имя, слова вызова, другие написания и id
+        без последней буквы (грубо отбрасываем падежное окончание); точное совпадение важнее."""
+        q = re.sub(r"[^\wё]", "", (name or "").lower().replace("ё", "е"))
+        if not q:
+            return None
+        best = None
+        for p in self.personas.all():
+            names = {p["name"].lower().replace("ё", "е")} | {w.lower().replace("ё", "е") for w in (p.get("wake") or [])} \
+                | {w.lower() for w in (p.get("aliases") or [])} | {p["id"].lower()}
+            for n in names:
+                n = re.sub(r"[^\wё]", "", n)
+                if not n:
+                    continue
+                if q == n:
+                    return p["id"]
+                stem = n[:-1] if len(n) > 3 else n
+                if (q.startswith(stem) or n.startswith(q[:-1] if len(q) > 3 else q)
+                        or (len(q) >= 3 and len(n) >= 3 and q[:-1] == n[:-1])):
+                    best = best or p["id"]
+        return best
+
+    @staticmethod
+    def _cloud_said(prof, e):
+        """Ошибка, которую облако Dewiar объяснило само («заряд закончился», «лимит на сегодня») -> True.
+        Такую ошибку говорим как есть и не повторяем запрос без инструментов. Тексты — от сервера облака (cloud.php)."""
+        from cloud import is_cloud
+        return is_cloud(prof) and bool(re.match(r"(Заряд|Ключ) Dewiar|На сегодня лимит|Слишком много", str(e)))
+
+    def _cloud_fallback(self, prof, e):
+        """Запасной мозг для облака: «Мозг» → карточка облака → «Если облако не отвечает» -> профиль или None
+        (не облако, запасного нет или он тоже облачный). Показывает заметку на 15 с; режим инструментов — свой у запасного."""
+        from cloud import is_cloud
+        if not is_cloud(prof):
+            return None
+        fid = self.s.get("llm", "fallback") or ""
+        fb = (self.s.get("llm", "profiles") or {}).get(fid)
+        if not fb or is_cloud(fb):
+            return None
+        log.warning("☁ Облако: %s — отвечает запасной мозг «%s»", e, fb.get("name") or fid)
+        self.note(f"Облако не ответило ({str(e)[:60]}) — ответил запасной мозг «{fb.get('name') or fid}»")
+        threading.Timer(15, lambda: self.note("")).start()
+        mode = (self.s.get("llm", "tools_modes") or {}).get(self._tools_key(fb))
+        return dict(fb, tools_mode=mode) if mode in ("native", "prompt") else dict(fb)
+
+    def self_check(self):
+        """«Проверить всё» (студия → «О программе»): по пунктам — работает ли, а если нет — что сделать и где.
+        -> список {name, ok, warn, detail, fix, page}; page — раздел студии для кнопки перехода. Делает сетевые
+        запросы (модель, облако, сайт) — вызывать не из потока интерфейса."""
+        import shutil as _sh
+        import httpx
+        out = []
+
+        def add(name, ok, detail, fix="", page="", warn=False):
+            out.append({"name": name, "ok": bool(ok), "warn": bool(warn) and not ok, "detail": detail, "fix": "" if ok else fix, "page": page})
+        st = self.status
+        dv = self.device_status()
+        add("Мощность компьютера", dv["level"] == "ok" or dv["stt_server"],
+            f"{dv['ram']} ГБ памяти, {dv['cores']} ядер" + ("" if dv["level"] == "ok" else f" — мало ({'лёгкий режим' if dv['light'] else 'может тормозить'})"),
+            dv["advice"], "dw", warn=True)
+        add("Микрофон", st.get("input"), st.get("input") or "не найден",
+            "Подключите микрофон и выберите его в «Звук и поведение».", "sound")
+        prof = self.s.active_llm()
+        if not prof:
+            add("Мозг", False, "модель не подключена", "Выберите в «Мозге», где будет думать ассистент.", "brain")
+        else:
+            try:
+                t0 = time.monotonic()
+                list_models(prof, timeout=8)
+                add("Мозг", True, f"{prof.get('name') or prof.get('base_url')} — отвечает за {int((time.monotonic() - t0) * 1000)} мс")
+            except LLMError as e:
+                add("Мозг", False, f"{prof.get('name') or ''}: {e}", "Проверьте адрес и ключ в «Мозге» (кнопка «Проверить» у модели).", "brain")
+        if self.cloud.key:
+            c = self.cloud.refresh()
+            if c.get("error") and c.get("percent") is None:
+                add("Заряд Dewiar Облака", False, c["error"], "Проверьте интернет или ключ в «Мозге».", "brain")
+            else:
+                add("Заряд Dewiar Облака", not c.get("low") and not c.get("empty") and not c.get("frozen"),
+                    f"{c.get('percent', 0)}% · хватит примерно на {c.get('turns', 0)} ответов", c.get("topup") or "Пополните заряд.", "brain",
+                    warn=not c.get("empty") and not c.get("frozen"))
+        add("Распознавание речи", st.get("stt_ready"), (st.get("stt") or "—") + ("" if st.get("stt_ready") else " — ещё загружается"),
+            "Подождите, пока скачается модель (видно в виджете), или выберите другое распознавание в «Слухе».", "ears", warn=True)
+        add("Голос", st.get("tts") and st.get("tts") != "Выключен", st.get("tts") or "—", "Включите голос в разделе «Голос».", "voice")
+        try:
+            t0 = time.monotonic()
+            r = httpx.get(self.updater.url, timeout=6)
+            add("Интернет и сайт Dewiar", r.status_code < 500, f"на связи, {int((time.monotonic() - t0) * 1000)} мс")
+        except Exception as e:  # noqa: BLE001
+            add("Интернет и сайт Dewiar", False, f"нет связи ({type(e).__name__})",
+                "Без интернета работают локальные модели; обновления и облако — нет.", "", warn=True)
+        try:
+            free = _sh.disk_usage(str(STATE_DIR)).free / 2 ** 30
+            add("Место на диске", free >= 1.5, f"свободно {free:.1f} ГБ", "Освободите место: моделям и голосам нужно около 1 ГБ.", "", warn=free >= 0.5)
+        except OSError:
+            pass
+        u = self.updater.public()
+        add("Версия", not u.get("available"), f"Dewiar {VERSION}" + (f" — есть {u['available']}" if u.get("available") else " — последняя"),
+            "Обновите: «О программе» → «Обновить».", "about", warn=True)
+        if st.get("meeting"):
+            add("Созвон", False, "идёт созвон: " + ", ".join(st["meeting"].get("apps") or []), "Пока идёт созвон, ассистент слушает тише — так задумано.",
+                "sound", warn=True)
+        return out
+
+    def build_report(self, note="", tail_lines=1500, fresh=False):
+        """Отчёт для разработчика: версия, система, состояние, настройки без ключей, звуковые устройства, следы задач и журнал.
+        fresh — только то, что случилось после прошлого отправленного отчёта (журнал, ошибки, задачи, ui.log): иначе
+        давно исправленная ошибка тянется из отчёта в отчёт и мешает увидеть новую. Отметка — report_mark.json."""
+        import platform
+        # в настройках скрываем всё, чьё имя похоже на секрет (ключи, заголовки и переменные окружения MCP-программ)
+        secret = re.compile(r"(api_key|token|password|key|secret|headers|auth|cookie|env)", re.I)
+
+        def clean(x):
+            if isinstance(x, dict):
+                return {k: ("***" if secret.search(k) and v else clean(v)) for k, v in x.items()}
+            if isinstance(x, list):
+                return [clean(v) for v in x]
+            return x
+        lines = [f"Dewiar {VERSION} — отчёт {datetime.now():%Y-%m-%d %H:%M}", f"Система: {OS_NAME}; Python {platform.python_version()}; "
+                 f"{platform.machine()}; ядер: {os.cpu_count()}", ""]
+        if note:
+            lines += ["== Со слов человека", note, ""]
+        lines += ["== Состояние", json.dumps(self.status, ensure_ascii=False, indent=1, default=str), ""]
+        lines += ["== Настройки (без ключей)", json.dumps(clean(self.s.snapshot()), ensure_ascii=False, indent=1), ""]
+        try:
+            lines += ["== Звуковые устройства", json.dumps(list_devices(), ensure_ascii=False, indent=1), ""]
+        except Exception as e:  # noqa: BLE001
+            lines += [f"== Звуковые устройства: {e}", ""]
+        mark = self._report_mark() if fresh else {}
+        since = float(mark.get("ts") or 0)
+        if since:
+            lines += [f"(всё ниже — после прошлого отчёта{(' №' + str(mark['id'])) if mark.get('id') else ''}, "
+                      f"{datetime.fromtimestamp(since):%Y-%m-%d %H:%M})", ""]
+        try:                                    # долгие задачи: чем закончились, ход последних (журнал), следы ошибок
+            ts = [f for f in sorted((STATE_DIR / "task_traces").glob("*.json"))[-15:] if f.stat().st_mtime >= since]
+            if ts:
+                lines += ["== Задачи: следы последних"] + [f.read_text(encoding="utf-8", errors="replace")[:1500] for f in ts] + [""]
+            recent = [x for x in self.tasks.tasks.values() if not since or (x.dir / "задача.json").exists()
+                      and (x.dir / "задача.json").stat().st_mtime >= since]
+            for t in sorted(recent, key=lambda x: str(x.data.get("created", "")))[-3:]:
+                j = (t.dir / "журнал.md").read_text(encoding="utf-8", errors="replace").splitlines() if (t.dir / "журнал.md").exists() else []
+                lines += [f"== Задача «{t.title}»: {t.status} {t.data.get('error', '')}", "-- План:",
+                          t.plan()[:2000], "-- Журнал (конец):"] + j[-120:] + [""]
+        except Exception as e:  # noqa: BLE001
+            lines += [f"== Задачи: {e}", ""]
+        tail = self._log_tail(mark if since else None)
+        errs = [ln for ln in tail if re.match(r"\d\d:\d\d:\d\d (ERROR|CRITICAL)", ln)]
+        if errs:
+            lines += ["== Ошибки (последние)"] + errs[-40:] + [""]
+        lines += ["== Журнал (последние строки)"] + tail[-tail_lines:]
+        try:                                    # интерфейс: замирания окон (сторож главного цикла) и ошибки окон
+            ui = (STATE_DIR / "logs" / "ui.log").read_text(encoding="utf-8", errors="replace").splitlines()
+            if since:
+                cut = f"{datetime.fromtimestamp(since):%Y-%m-%d %H:%M:%S}"
+                ui = [ln for ln in ui if ln[:19] >= cut]
+            if ui:
+                lines += ["", "== Интерфейс (ui.log)"] + ui[-300:]
+        except OSError:
+            pass
+        return self._redact("\n".join(lines))
+
+    @staticmethod
+    def _redact(text):
+        """Последняя страховка перед отправкой: секреты, которые могли попасть в журнал, — ключи Bearer и dw-,
+        токены Telegram, пароли в адресах."""
+        text = re.sub(r"(Bearer\s+)[\w.-]+", r"\1***", text)
+        text = re.sub(r"\bdw-[a-z0-9]{4,}(?:-[a-z0-9]{2,})+", "dw-***", text, flags=re.I)
+        text = re.sub(r"\bbot\d{5,}:[\w-]{20,}", "bot***", text)                     # токен Telegram в адресах API
+        text = re.sub(r"(://[^/\s:@]+:)[^@\s/]+@", r"\1***@", text)                    # пароль в адресе (прокси и т. п.)
+        return text
+
+    @staticmethod
+    def _log_tail(mark=None):
+        """Строки журнала ядра: прошлый файл после ротации (core.log.1), затем текущий. mark — отметка прошлого отчёта
+        ({"ino", "size"} файла core.log тогда): только строки после неё (файл с тех пор повернули — с того места в .1)."""
+        logf = STATE_DIR / "logs" / "core.log"
+        tail = []
+        for f in (logf.with_name("core.log.1"), logf):
+            try:
+                st = f.stat()
+                start = 0
+                if mark:
+                    if st.st_ino == mark.get("ino"):
+                        start = int(mark.get("size") or 0) if st.st_size >= int(mark.get("size") or 0) else 0
+                    elif f.name == "core.log.1" or mark.get("ino") is None:
+                        start = st.st_size                 # всё это было до прошлого отчёта
+                with open(f, "rb") as fh:
+                    fh.seek(start)
+                    tail += fh.read().decode("utf-8", errors="replace").splitlines()
+            except OSError:
+                pass
+        return tail
+
+    @staticmethod
+    def _report_mark():
+        try:
+            return json.loads((STATE_DIR / "report_mark.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    @staticmethod
+    def _report_mark_set(rid):
+        """Отчёт ушёл — следующий начнётся отсюда: где кончался core.log (inode и размер) и когда."""
+        import time as _t
+        logf = STATE_DIR / "logs" / "core.log"
+        try:
+            st = logf.stat()
+            m = {"ino": st.st_ino, "size": st.st_size}
+        except OSError:
+            m = {}
+        m.update(ts=_t.time(), id=rid)
+        try:
+            (STATE_DIR / "report_mark.json").write_text(json.dumps(m), encoding="utf-8")
+        except OSError:
+            pass
+
+    def save_report(self):
+        """Отчёт одним файлом на рабочем столе (если отправить не получается — его можно переслать) -> путь к файлу.
+        Рабочий стол: Windows — известная папка, Linux — xdg-user-dir (папка бывает названа по-русски), иначе домашняя."""
+        text = self.build_report()
+        if os.name == "nt":
+            import winsys
+            desk = winsys.known_folder("Desktop")
+        else:
+            desk = Path.home() / "Desktop"
+            try:
+                d = subprocess.run(["xdg-user-dir", "DESKTOP"], capture_output=True, text=True, timeout=3).stdout.strip()
+                if d:
+                    desk = Path(d)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        if not desk.is_dir():
+            desk = Path.home()
+        out = desk / f"Dewiar — отчёт {datetime.now():%Y-%m-%d %H-%M}.txt"
+        out.write_text(text, encoding="utf-8")
+        log.info("Отчёт сохранён: %s", out)
+        return str(out)
+
+    def _report_summary(self):
+        """Кратко для списка отчётов: последние разные ошибки из журнала, без времени и уровня."""
+        errs = [re.sub(r"^\d\d:\d\d:\d\d \w+\s+", "", ln) for ln in self._log_tail(self._report_mark() or None)[-3000:]
+                if re.match(r"\d\d:\d\d:\d\d (ERROR|CRITICAL)", ln)]
+        return "; ".join(dict.fromkeys(errs[-6:]))[:480]
+
+    def report_send(self, note="", auto=False, summary="", shot=None, who="", plain=False):
+        """«Отправить отчёт разработчику»: отчёт сразу появляется в управлении облаком (cloud.php → «Здоровье»).
+        Ключ Dewiar — если есть (по нему видно, чей отчёт); без него тоже принимается. shot — снимок экрана (JPEG) и
+        who — подпись автора: это жалоба (core/health.py). plain — только note и сведения о программе, без журнала
+        (ночной разбор, night.py: в журнале есть реплики человека). DEWIAR_REPORT_URL — адрес для тестов.
+        -> {"id", "secret"}; ошибка связи или отказ сервера — ValueError с понятным текстом."""
+        import platform
+        import httpx
+        from cloud import DEFAULT_URL, base_of, norm_key
+        note = (note or "").strip()[:2000]
+        text = (f"Dewiar {VERSION} — {OS_NAME} {platform.machine()}\n\n{note}" if plain
+                else self.build_report(note, tail_lines=600 if auto else 1500, fresh=not shot and not who))
+        url = os.environ.get("DEWIAR_REPORT_URL") or base_of(self.s.get("cloud", "url") or DEFAULT_URL)
+        key = (self.s.get("cloud", "key") or "").strip()
+        body = {"kind": "auto" if auto else "manual", "app": "desktop", "version": VERSION, "os": f"{OS_NAME} {platform.machine()}",
+                "device": platform.node()[:60], "summary": (summary or self._report_summary())[:500], "note": note, "text": text}
+        if shot:
+            import base64
+            body["shot"] = "data:image/jpeg;base64," + base64.b64encode(shot).decode()
+        if who:
+            body["who"] = who
+        h = {"Authorization": f"Bearer {norm_key(key)}"} if key else {}
+        try:
+            r = httpx.post(url.split("?", 1)[0] + "?p=/report", json=body, headers=h, timeout=60 if shot else 40)
+            d = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        except (httpx.HTTPError, ValueError) as e:
+            from net import blocked_hint
+            raise ValueError("не удалось отправить отчёт: нет связи с dewiar.pro." + blocked_hint()
+                             + " Можно «Сохранить в файл» и прислать его.") from e
+        if r.status_code >= 400 or not d.get("ok"):
+            msg = ((d.get("error") or {}).get("message") if isinstance(d.get("error"), dict) else "") or f"сервер ответил {r.status_code}"
+            raise ValueError("отчёт не принят: " + msg)
+        log.info("🧾 Отчёт №%s отправлен разработчику (%s)", d.get("id"), "сам, при сбое" if auto else "кнопкой")
+        self._report_mark_set(d.get("id"))
+        return {"id": d.get("id"), "secret": d.get("secret", "")}
+
+    # ---------- отчёты сами при сбое (с согласия) ----------
+    def report_problem(self, sig, summary):
+        """Сбой: если человек разрешил — отчёт уходит сам (одна и та же беда — не чаще раза в 12 ч, не больше 4 в сутки,
+        несколько сбоев подряд — одним отчётом через 20 с); не спрашивали — один раз за запуск предлагаем.
+        sig — подпись беды: цифры в ней заменяются на #, чтобы одна ошибка с разными числами считалась одной.
+        Учёт отправленного — report_sent.json в STATE_DIR (переживает перезапуск)."""
+        if self.wav_input and not os.environ.get("DEWIAR_REPORT_URL"):
+            return                                       # прогон тестов по wav-файлу — отчёты только на тестовый адрес
+        auto = self.s.get("report", "auto")             # True — согласие, False — отказ, None — ещё не спрашивали
+        if auto is False:
+            return
+        if auto is None:
+            if not getattr(self, "_report_offered", False):
+                self._report_offered = True
+                self.emit("report_offer", summary=summary[:200])
+            return
+        sig = re.sub(r"\d+", "#", sig)[:160]
+        with self._report_lock:
+            f = STATE_DIR / "report_sent.json"
+            try:
+                sent = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                sent = {}
+            now = time.time()
+            sent = {k: v for k, v in sent.items() if now - v < 86400}
+            if now - sent.get(sig, 0) < 12 * 3600 or len(sent) >= 4 or sig in self._report_pending:
+                return
+            sent[sig] = now
+            try:
+                f.write_text(json.dumps(sent), encoding="utf-8")
+            except OSError:
+                pass
+            self._report_pending[sig] = summary
+            if len(self._report_pending) > 1:
+                return                                   # уже ждём — уйдёт одним отчётом
+
+        def later():
+            time.sleep(float(os.environ.get("DEWIAR_REPORT_WAIT", "20")))   # дать журналу дописать, что было после сбоя
+            with self._report_lock:
+                items = dict(self._report_pending)
+                self._report_pending.clear()
+            try:
+                self.report_send(auto=True, summary=" | ".join(items.values())[:500])
+            except Exception as e:  # noqa: BLE001
+                log.info("🧾 Отчёт о сбое не отправлен: %s", e)
+        threading.Thread(target=later, daemon=True, name="report").start()
+
+    def _install_report_hook(self):
+        """Обработчик корневого журнала: каждая запись ERROR и выше → report_problem. Записи самой отправки
+        (логгер *report) и повторный вход из того же потока пропускаем — иначе сбой отправки порождал бы
+        новый отчёт без конца."""
+        eng = self
+
+        class Hook(logging.Handler):
+            def emit(self, rec):
+                if rec.name.endswith("report") or getattr(_report_tls, "busy", False):
+                    return
+                _report_tls.busy = True
+                try:
+                    exc = rec.exc_info[0].__name__ if rec.exc_info and rec.exc_info[0] else ""
+                    msg = rec.getMessage()
+                    if rec.exc_info and rec.exc_info[1]:
+                        msg += f" — {exc}: {rec.exc_info[1]}"
+                    eng.health_problem(f"{rec.name}: {msg}")                 # в пульс — всегда (без журнала и личного)
+                    eng.report_problem(f"{rec.name}|{rec.msg}|{exc}", f"{rec.name}: {msg}"[:300])
+                except Exception:  # noqa: BLE001
+                    pass
+                finally:
+                    _report_tls.busy = False
+        h = Hook(level=logging.ERROR)
+        logging.getLogger().addHandler(h)
+        return h
+
+    def _tools_key(self, prof):
+        """Ключ, под которым запоминается режим инструментов модели (llm.tools_modes): «адрес|модель»."""
+        return f"{(prof or {}).get('base_url', '').rstrip('/')}|{(prof or {}).get('model', '')}"
+
+    def probe_tools_bg(self, force=False):
+        """Узнать в фоне (поток probe-tools), умеет ли активная модель вызывать инструменты и как: native, prompt
+        или none. Один раз на «адрес|модель»; force — проверить заново."""
+        prof = self.s.active_llm()
+        if not prof:
+            return
+        key = self._tools_key(prof)
+        modes = self.s.get("llm", "tools_modes") or {}
+        # tools_probe_v 2: проверка первой версии ошибочно записывала «думающие» модели в «не умеет» (none) —
+        # такие записи один раз сбрасываем, чтобы проверить заново; найденные native/prompt остаются
+        if self.s.get("llm", "tools_probe_v") != 2:
+            stale = {k: v for k, v in modes.items() if v != "none"}
+            with self.s._lock:
+                self.s.data.setdefault("llm", {})["tools_modes"] = stale
+            self.s.update({"llm": {"tools_probe_v": 2}})
+            modes = stale
+        if key in self._probing or (not force and key in modes):
+            return
+        self._probing.add(key)
+
+        def run():
+            try:
+                mode = probe_tools(prof)
+                if mode is None:                      # сервер не ответил — не запоминаем, спросим в следующий раз
+                    return
+                self.s.update({"llm": {"tools_modes": {key: mode}}})
+                if mode == "none":
+                    self.note("Эта модель не умеет выполнять действия (музыка, скриншоты, программы) — только отвечать")
+            except Exception as e:  # noqa: BLE001
+                log.info("Проверка инструментов не удалась: %s", e)
+            finally:
+                self._probing.discard(key)
+        threading.Thread(target=run, name="probe-tools", daemon=True).start()
+
+    def _attach_files(self, text, files, images):
+        """Файлы к вопросу: сохраняем во «Входящие» папки ассистента, текст документов — в вопрос модели,
+        картинки — картинками (дописываются в images). -> текст вопроса с «\\n\\nВложения:». Не больше 10 файлов;
+        текста документов всего ~24 000 символов (каждому не меньше 2000), остальное модель дочитает read_file."""
+        import base64
+        from eyes import prepare
+        from knowledge import extract
+        inbox = self.workspace.ensure() / "Входящие"
+        inbox.mkdir(exist_ok=True)
+        parts, budget = [], 24000
+        for f in files[:10]:
+            name = Path(str(f.get("name") or "файл")).name or "файл"
+            raw = f.get("b64", "")
+            data = base64.b64decode(raw.split(",", 1)[1] if raw.startswith("data:") else raw)
+            dst, n = inbox / name, 2
+            while dst.exists():
+                dst, n = inbox / f"{Path(name).stem} ({n}){Path(name).suffix}", n + 1
+            dst.write_bytes(data)
+            rel = dst.relative_to(self.workspace.root).as_posix()
+            if Path(name).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"):
+                try:
+                    images.append(prepare(data)[0])
+                    parts.append(f"[Картинка «{name}» — приложена ниже, сохранена: {rel}]")
+                    continue
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                body = extract(dst) if dst.suffix.lower() in (".md", ".txt", ".csv", ".html", ".htm", ".pdf", ".docx", ".odt") \
+                    else (data.decode("utf-8") if len(data) < 400_000 else "")
+            except Exception as e:  # noqa: BLE001
+                body = ""
+                log.info("Вложение %s: текст не извлечён (%s)", name, e)
+            body = (body or "").strip()
+            if body:
+                cut = body[:max(2000, budget)]
+                budget -= len(cut)
+                parts.append(f"[Файл «{name}», сохранён в папке ассистента: {rel}]\n{cut}" +
+                             ("\n…(дальше файл обрезан — целиком его можно прочитать инструментом read_file)" if len(cut) < len(body) else ""))
+            else:
+                parts.append(f"[Файл «{name}» ({len(data) // 1024} КБ) сохранён в папке ассистента: {rel}; текста в нём нет]")
+            log.info("📎 %s → %s", name, rel)
+        q = text.strip() or "Посмотри вложения и коротко скажи, что в них."
+        return q + "\n\nВложения:\n" + "\n\n".join(parts)
+
+    def go_sleep(self, word="", media=True):
+        """Замолчать и уснуть до следующего имени: без «слушаю», без продолжения разговора. Звенит будильник —
+        выключить; media и слово-«стоп» — ещё и поставить музыку на паузу."""
+        if self.alarm:
+            self.alarm_finish("ack")
+        self.cancel_turn()
+        self.follow_up_until = 0.0
+        self.set_state("idle")
+        log.info("💤 «%s» — сплю до имени", word or "стоп")
+        self.emit("sleep", word=word)
+        self.play_tone("sleep")
+        w = re.sub(r"[^\w]", "", (word or "").lower())
+        if media and w in MEDIA_STOP | {"stop", "останови"}:
+            threading.Thread(target=self._media_stop_word, args=(w, False), daemon=True).start()
+
+    def _media_stop_word(self, word, force=False):
+        """«Пауза» / «стоп» без имени, пока играет музыка — ставим её на паузу -> True, если поставили. Если ничего
+        не играет — молчим (слово могли сказать не ассистенту). force — после имени: если узнать, играет ли что-то,
+        нельзя (media_playing() → None, Windows), всё равно жмём «играть/пауза»."""
+        from tools import media_playing, t_media
+        if self.radio.playing:                          # своё радио — сразу, без MPRIS
+            st = self.radio.pause()
+            log.info("⏸ «%s» — радио «%s» на паузе", word, (st or {}).get("name", ""))
+            self.emit("heard", text=word.capitalize())
+            self.emit("answer", text=f"Радио на паузе. Продолжить — «{self.persona_name()}, продолжи».", done=True)
+            return True
+        playing = media_playing()
+        if not (playing or (force and playing is None)):
+            return False
+        try:
+            t_media({"action": "pause" if playing else "play_pause"}, {})
+            log.info("⏸ «%s» — музыка на паузе", word)
+            self.emit("heard", text=word.capitalize())
+            self.emit("answer", text="Пауза.", done=True)
+            return True
+        except Exception as e:  # noqa: BLE001
+            log.info("Пауза не получилась: %s", e)
+            return False
+
+    def _media_word(self, word):
+        """Пока играет радио — одно слово без имени, как у колонки: «дальше», «громче», «тише»."""
+        if not self.radio.playing:
+            return
+        log.info("📻 «%s» без имени — радио", word)
+        if word in ("громче", "погромче", "тише", "потише"):
+            self._radio_step(word in ("громче", "погромче"), word.capitalize())
+        else:
+            self._music_cmd("дальше")
+
+    def _radio_step(self, up, said):
+        """Громче / тише своего радио (шаг 20%). Уже на максимуме или минимуме — False: дальше решит громкость системы."""
+        v = self.radio.volume
+        if (up and v >= 0.99) or (not up and v <= 0.11):
+            return False
+        nv = self.radio.set_volume(round(v + (0.2 if up else -0.2), 2))
+        self.s.update({"audio": {"radio_volume": nv}})
+        log.info("📻 Громкость радио: %d%% → %d%%", round(v * 100), round(nv * 100))
+        self.emit("heard", text=said)
+        self.emit("answer", text=f"Радио {'громче' if up else 'тише'}: {round(nv * 100)}%.", done=True)
+        self.emit("radio", **self.radio.status())
+        self.set_state("idle")
+        return True
+
+    def _direct_call(self, text):
+        """«Позови Лиру», «дай слово Эве», «переключись на Кодера, …» — сразу, без языковой модели."""
+        m = CALL_RX.match(text)
+        if not m:
+            return False
+        pid = self.find_persona(m.group(1))
+        if not pid or pid == self.s.get("persona"):
+            return False
+        prev = self.personas.get(self.s.get("persona"))["name"]
+        log.info("👥 %s → %s (без модели)", prev, self.personas.get(pid)["name"])
+        self.emit("heard", text=text)
+        with self._turn_lock:
+            self._cancel_locked()
+        self.switch_persona(pid)
+        rest = m.group(2).strip(" ,.!?:;—-")
+        if len(re.sub(r"\W", "", rest)) >= 2:
+            self.ask(rest)
+        else:
+            self.ask(f"({prev} позвал(а) тебя в разговор. Поздоровайся одной короткой фразой от себя и спроси, "
+                     f"чем помочь.)", quiet=True)
+        return True
+
+    def _tool_call_persona(self, name):
+        """Инструмент «позвать персонажа»: сама передача — после ответа (turn.switch_to, конец _run_turn).
+        -> текст для модели: что сказать сейчас."""
+        pid = self.find_persona(name)
+        if not pid:
+            names = ", ".join(p["name"] for p in self.personas.all())
+            raise ToolError(f"нет персонажа «{name}». Есть: {names}")
+        if pid == self.s.get("persona"):
+            return "Это ты сам(а). Просто продолжай разговор."
+        t = self.turn
+        if t is not None:
+            t.switch_to = pid
+        who = self.personas.get(pid)["name"]
+        return (f"Готово: как только ты договоришь, {who} откликнется сам(а) своим голосом. Скажи одну короткую фразу, "
+                f"что передаёшь слово, и не отвечай за {who}.")
+
+    def _maybe_learn(self, said, prof):
+        """Учиться на ошибках: человек поправил ассистента («нет, я же просил коротко», «опять не то») — в фоне модель выводит
+        общее правило из прошлого ответа и поправки, оно ложится в «Память/Уроки.md» и дальше идёт в подсказку разговоров и
+        задач (quality.learn_from_correction). Не поправка — модель отвечает НЕТ, ничего не пишется."""
+        import quality as Q
+        if not Q.looks_like_correction(said) or not prof:
+            return
+        prev = next((m.get("content") for m in reversed(self.history[:-1]) if m.get("role") == "assistant" and m.get("content")), "")
+        if not prev:
+            return
+
+        def run():
+            from llm import stream_chat
+            ask = lambda q: "".join(stream_chat(dict(prof, max_tokens=120, temperature=0.2), "Отвечай кратко.",   # noqa: E731
+                                                [{"role": "user", "content": q}]))
+            try:
+                rule = Q.learn_from_correction(ask, prev, said, self.workspace.root / Q.TALK_LESSONS_FILE)
+            except Exception as e:  # noqa: BLE001
+                log.info("📘 Урок из поправки не получился: %s", e)
+                return
+            if rule:
+                log.info("📘 Урок из поправки: %s", rule)
+                self.emit("lesson", text=rule)
+        threading.Thread(target=run, name="learn", daemon=True).start()
+
+    def _run_turn(self, turn, text, images=()):
+        """Поток turn-N: один ход разговора. Фразы ответа идут в очередь sentences — их озвучивает отдельный поток
+        (_speak_worker; для сообщений без голоса — _drain_worker), None в очереди — конец. До 6 шагов
+        «модель → инструменты → результаты → модель». Запасные пути: облако не ответило — запасной мозг;
+        модель не справилась с инструментами — без них; не приняла картинку — без неё (модель запоминается в _blind).
+        В конце: ответ в мессенджер (turn.via["done"]), история, «продолжение разговора», возврат к главному
+        персонажу после специалиста и передача слова, если её попросил инструмент. Отменённый ход в историю не идёт."""
+        prof = self.s.active_llm()
+        sentences = queue.Queue()
+        silent = bool(turn.via) and not turn.via.get("speak")
+        speaker = threading.Thread(target=self._drain_worker if silent else self._speak_worker, args=(turn, sentences),
+                                   daemon=True)
+        speaker.start()
+        self.set_state("thinking")
+        try:
+            if not prof and (self.account.logged_in() or self.s.get("cloud", "key")):
+                try:                                   # модели нет, а вход dewiar.pro (или ключ) есть — подключаем модели Dewiar сами
+                    self._cloud_use()
+                    prof = self.s.active_llm()
+                except Exception as e:  # noqa: BLE001
+                    log.info("🧠 Модели Dewiar сами не подключились: %s", e)
+            if not prof:
+                raise LLMError("я пока не подключён к языковой модели — откройте настройки, раздел «Мозг»"
+                               + (": войдите в аккаунт dewiar.pro — модели Dewiar подключатся сами" if not self.account.logged_in() else ""))
+            msgs = self._messages(text, images, prof)
+            specs = self.toolbox.specs() if self.s.get("tools", "enabled_all") is not False else []
+            mode = (self.s.get("llm", "tools_modes") or {}).get(self._tools_key(prof))
+            if mode in ("native", "prompt"):
+                prof = dict(prof, tools_mode=mode)
+            elif mode is None and specs:
+                self.probe_tools_bg()                  # ещё не проверяли — проверим в фоне, этот ответ — в режиме по умолчанию
+            system = self._system(bool(specs))
+            import boundaries
+            if boundaries.rude(text):                  # грубят самому помощнику — спокойная граница в этом ходе, счётчик в пульс
+                system += boundaries.NOTE
+                self.health_count("rude")
+                log.info("🛡 грубость в адрес помощника — отвечу спокойно, с границей")
+            recalled = ""
+            try:
+                recalled = self.recall.context(text.split("\n\nВложения:")[0])
+            except Exception as e:  # noqa: BLE001
+                log.info("Поиск по записям: %s", e)
+            if recalled:
+                log.info("📎 Вспомнил из записей: %s", ", ".join(re.findall(r"^\[([^\]]+)\]", recalled, re.M)))
+                system += ("\n\nИз записей пользователя в твоей папке (нашлось по словам вопроса). Если это отвечает на "
+                           "вопрос — ответь по ним и коротко скажи, откуда («в заметке …»). Если не относится — не "
+                           "упоминай:\n" + recalled)
+            if turn.via:
+                src = turn.via.get("from") or "Telegram"
+                system += (f"\n\nСейчас пользователь пишет тебе из {src} (не голосом): ответ уйдёт ему сообщением. Можно "
+                           "чуть подробнее и со списками; файлы из папки ассистента — инструментом send_telegram"
+                           + (" (to: max)." if src == "MAX" else "."))
+            if mode == "none" and specs:
+                specs = []
+                system = self._system(False) + ("\n\nЭта модель не умеет выполнять действия (музыка, скриншоты, "
+                                                "программы). Если просят действие — честно скажи одной фразой, что с этой "
+                                                "моделью действия недоступны, и предложи выбрать другую модель в «Мозге».")
+            kb = self._persona_knowledge(text, turn)
+            if kb:
+                system += kb
+            split, last, codef = SentenceSplitter(), 0.0, CodeFilter()
+            # вслух — не больше ~900 символов (около минуты): длинный ответ дальше только на экране («Открыть целиком»);
+            # сказки, истории и чтение вслух — целиком
+            voice_cap = 10 ** 9 if re.search(r"сказк|истори|расскаж|прочитай|прочти|читай|стих|подробно", text.lower()) else 900
+            spoken = [0, False]                         # сколько символов отдано в озвучку; предел уже достигнут
+
+            from gender import for_persona
+            gnd = self.persona_gender()
+            fem = lambda t: for_persona(t, gnd)        # noqa: E731 — героиня, а модель сбилась на «рад», «понял»: правим сами
+
+            def speak(s_):
+                s_ = fem(s_)
+                if spoken[1]:
+                    return
+                if spoken[0] + len(s_) > voice_cap and spoken[0] > 0:
+                    spoken[1] = True
+                    sentences.put("Дальше не читаю вслух — всё на экране.")
+                    log.info("🔇 Ответ длинный — вслух прочитано %d симв., остальное на экране", spoken[0])
+                    return
+                spoken[0] += len(s_)
+                sentences.put(s_)
+            blind_key = f"{prof.get('base_url')}|{prof.get('model')}"
+            t_start = time.monotonic()
+            from quality import DELIVERABLE, REFUSAL_NUDGE, looks_like_promise, looks_like_refusal, promise_nudge
+            called, nudged = set(), 0                    # какие действия уже были; сколько раз просили «сделай, а не обещай»
+            deliver = bool(DELIVERABLE.search(text)) and any(x.get("name") == "start_task" for x in specs or [])
+            # отговорку «нет доступа к интернету» на шаге 0 (когда есть поиск) просим переделать (ниже) — значит, первую
+            # фразу с отговоркой и всё после неё в озвучку не отдаём, пока шаг не кончится: иначе отказ прозвучит, а потом
+            # его заменит ответ по поиску. Обычная первая фраза идёт в голос сразу — задержки для неё нет
+            held, hold = [], [False]
+
+            def say(s_):
+                if hold[0] and (held or looks_like_refusal(s_)):
+                    held.append(s_)
+                    return
+                hold[0] = False
+                speak(s_)
+            seen_calls = {}                              # одинаковый вызов в одном ходе — не повторяем (результат уже есть)
+            for step in range(6):                       # модель → действия → результаты → модель…
+                calls, step_text = [], ""
+                if step == 5 and specs:                  # последний шаг — только слова: ответить тем, что уже узнал
+                    specs = []
+                    system += ("\n\nДействий больше не будет: прямо сейчас ответь пользователю словами по тому, что уже "
+                               "узнал и сделал. Не пиши «готово» без сути.")
+                hold[0] = step == 0 and any(x.get("name") == "web_search" for x in specs or [])
+                if blind_key in self._blind and _has_images(msgs):
+                    msgs = _drop_images(msgs)
+                try:
+                    # с картинкой ответ сначала собираем целиком: если модель её не примет — повторим без неё;
+                    # без картинки ждём только первое событие — ошибка сервера всплывёт здесь, до первого слова
+                    events = list(stream_events(prof, system, msgs, cancel=turn.cancel, tools=specs or None)) \
+                        if _has_images(msgs) else _first_then_stream(
+                            stream_events(prof, system, msgs, cancel=turn.cancel, tools=specs or None))
+                except LLMError as e:
+                    fb = self._cloud_fallback(prof, e) if step == 0 and not turn.full and not turn.cancel.is_set() else None
+                    if fb:                                  # облако не ответило / заряд кончился — отвечает запасной мозг
+                        prof = fb
+                        events = _first_then_stream(stream_events(prof, system, msgs, cancel=turn.cancel, tools=specs or None))
+                    elif not _has_images(msgs):
+                        if "без текста" in str(e) and specs and not turn.cancel.is_set() and not getattr(turn, "blank_nudged", False):
+                            # пустой ответ — сбой, а не «модель не умеет действия»: ещё раз с инструментами и подсказкой
+                            turn.blank_nudged = True
+                            log.warning("Модель ответила пустотой (%s) — повторяю с подсказкой", e)
+                            msgs = msgs + [{"role": "user", "content": "Ответь на мой вопрос: вызови нужный инструмент или ответь словами."}]
+                            events = _first_then_stream(stream_events(prof, system, msgs, cancel=turn.cancel, tools=specs or None))
+                        elif specs and step == 0 and not turn.full and not turn.cancel.is_set() and not self._cloud_said(prof, e) \
+                                and "без текста" not in str(e):
+                            # с инструментами модель не отвечает — ответим хотя бы без них
+                            log.warning("Модель не справилась с инструментами (%s) — отвечаю без действий", e)
+                            specs = []
+                            system = self._system(False) + ("\n\nСейчас действия (музыка, скриншоты, программы) "
+                                                            "недоступны: эта модель не умеет вызывать инструменты. Если "
+                                                            "просят действие — честно скажи это одной фразой.")
+                            events = stream_events(prof, system, msgs, cancel=turn.cancel, tools=None)
+                        else:
+                            raise
+                    else:
+                        log.info("Модель %s не приняла картинку (%s) — отвечаю без неё", prof.get("model"), e)
+                        self._blind.add(blind_key)
+                        msgs = _drop_images(msgs)
+                        events = stream_events(prof, system, msgs, cancel=turn.cancel, tools=specs or None)
+                for kind, val in events:
+                    if turn.cancel.is_set():
+                        break
+                    if kind == "tools":
+                        calls = val
+                        continue
+                    if not turn.full:
+                        log.info("⏱ первые слова модели через %.1f с", time.monotonic() - t_start)
+                    turn.full += val
+                    step_text += val
+                    if time.monotonic() - last > 0.08:     # текст в виджет — не чаще ~12 раз в секунду
+                        self.emit("answer", text=fem(turn.full), done=False, model=True)
+                        last = time.monotonic()
+                    for s_ in split.feed(codef.feed(val)):         # код и команды вслух не читаем
+                        say(s_)
+                for s_ in split.feed(codef.flush()) + split.flush():
+                    say(s_)
+                if not calls and step == 0 and not turn.cancel.is_set() and any(x.get("name") == "web_search" for x in specs or []):
+                    if looks_like_refusal(step_text):      # «нет доступа к интернету», а поиск есть — просим поискать (только на шаге 0)
+                        log.info("✋ Модель отказалась («нет доступа»), не попробовав поиск — прошу поискать")
+                        held.clear()                           # отговорка так и не прозвучала
+                        sentences.put("Секунду — посмотрю в интернете.")
+                        msgs = msgs + [{"role": "assistant", "content": step_text}, {"role": "user", "content": REFUSAL_NUDGE}]
+                        turn.full = ""
+                        self.set_state("thinking")
+                        continue
+                for s_ in held:                               # не отказ (длинный ответ с оговоркой или вызвала инструменты) — озвучить
+                    speak(s_)
+                held.clear()
+                called |= {c.get("name") for c in calls}
+                if not calls and not turn.cancel.is_set() and specs and step < 5:
+                    # «сейчас посмотрю и расскажу» — и ни одного действия; или просили презентацию, а задача не запущена
+                    want_task = deliver and "start_task" not in called and not step_text.strip().endswith("?") and nudged < 2
+                    if want_task or (nudged < 1 and looks_like_promise(step_text)):
+                        nudged += 1
+                        log.info("✋ Модель %s — прошу сделать, а не обещать", "не запустила задачу" if want_task else "только пообещала")
+                        msgs = msgs + [{"role": "assistant", "content": step_text or "…"}, {"role": "user", "content": promise_nudge(want_task)}]
+                        if turn.full.strip() and not turn.full.endswith(" "):
+                            turn.full += " "
+                        self.set_state("thinking")
+                        continue
+                if turn.cancel.is_set() or not calls:
+                    break
+                results = []
+                for c in calls:
+                    key = json.dumps([c.get("name"), c.get("args")], ensure_ascii=False, sort_keys=True)
+                    if key in seen_calls:
+                        log.info("↺ %s с теми же параметрами уже был в этом ходе — не повторяю", c.get("name"))
+                        results.append("Этот вызов с теми же параметрами уже был — его результат выше. Не повторяй: "
+                                       "используй его или попробуй иначе, а если сведений хватает — отвечай.")
+                        continue
+                    r_ = self._use_tool(turn, c, sentences)
+                    seen_calls[key] = True
+                    results.append(r_)
+                if turn.cancel.is_set():
+                    break
+                if any(c.get("name") == "start_task" and not str(r).startswith(("Ошибка", "Инструмент")) for c, r in zip(calls, results)):
+                    specs = []                          # задача запущена — делает она; в разговоре только сказать, что взялся
+                    log.info("🧵 Задача запущена — в разговоре дальше без действий")
+                msgs = msgs + tool_turn_messages(prof, step_text, calls, results)
+                if turn.full.strip() and not turn.full.endswith(" "):
+                    turn.full += " "
+                self.set_state("thinking")
+            if not turn.cancel.is_set():
+                if not turn.full.strip() and getattr(turn, "tools_ok", None) and not (set(turn.tools_ok) & INFO_TOOLS):
+                    turn.full = "Готово."                     # действие сделано, а слов модель не добавила
+                    sentences.put(turn.full)
+                if not turn.full.strip():
+                    raise LLMError("модель вернула пустой ответ")
+                log.info("⏱ ответ целиком за %.1f с (%s, %d симв.)", time.monotonic() - t_start, prof.get("model") or "?",
+                         len(turn.full))
+                fake = self._fake_reminder(text, turn)
+                if fake:
+                    turn.full = turn.full.rstrip() + " " + fake
+                    self.note(fake)
+                turn.full = fem(turn.full)
+                try:
+                    import boundaries
+                    if boundaries.refused(turn.full):
+                        self.health_count("refused")
+                except Exception:  # noqa: BLE001
+                    pass
+                self.emit("answer", text=turn.full, done=True, model=True)
+                self.health_count("turns")
+                self.health_count("net_ok")
+                self._maybe_learn(text, prof)
+        except LLMError as e:
+            log.warning("Модель: %s", e)
+            self.health_count("net_fail")
+            self.health_problem(f"Модель ({(prof or {}).get('kind') or 'openai'}): {e}")
+            msg = f"{e}." if self._cloud_said(prof, e) else f"Не получилось: {e}."   # облако объясняет само
+            from cloud import is_cloud, key_gone
+            if is_cloud(prof) and key_gone(e) and self._cloud_key_gone():
+                msg = "Ключ Dewiar удалён на сайте — теперь думаю по аккаунту dewiar.pro. Повторите, пожалуйста, вопрос."
+            turn.error = msg
+            self.emit("error", text=msg)
+            self.emit("answer", text=msg, done=True)
+            turn.full = ""
+            sentences.put(msg)
+        sentences.put(None)
+        speaker.join()
+        self.cloud.after_turn(prof)                    # облако по ключу — узнать новый заряд
+        if turn.via and turn.via.get("done"):
+            try:
+                turn.via["done"]("(ответ остановлен)" if turn.cancel.is_set() and not turn.full.strip()
+                                 else (turn.full.strip() or getattr(turn, "error", "") or "Не получилось ответить."))
+            except Exception:  # noqa: BLE001
+                log.exception("отправка ответа в Telegram")
+        if turn.report:
+            try:
+                turn.report(None if turn.cancel.is_set() else bool(turn.full.strip()) and not turn.error,
+                            turn.full.strip() or turn.error)
+            except Exception:  # noqa: BLE001
+                log.exception("итог хода")
+        if turn.cancel.is_set():
+            return
+        if turn.full.strip():
+            said = text + (" [к сообщению была приложена картинка]" if images else "")
+            self.history += [{"role": "user", "content": said},
+                             {"role": "assistant", "content": turn.full.strip(), "who": self.s.get("persona")}]
+            self.last_turn_time = time.monotonic()
+            self._conv_after()
+            if not turn.via:
+                self._pause_ok()                           # голосом и без обрыва — добавка к паузе понемногу тает
+        follow = 0.0 if turn.via or time.monotonic() < self._echo_until else float(self.s.get("audio", "follow_up_seconds") or 0)
+        self.follow_up_until = time.monotonic() + follow
+        with self._turn_lock:
+            if self.turn is turn:
+                self.turn = None
+                self.set_state("listening" if follow > 0 else "idle")
+        back = getattr(turn, "back_to", None)
+        if back and self.s.get("persona") != back:
+            self.switch_persona(back)                 # специалист ответил — снова главный
+        pid = getattr(turn, "switch_to", None)
+        if pid and not turn.cancel.is_set():
+            prev = self.personas.get(self.s.get("persona"))["name"]
+            self.switch_persona(pid)
+            # новый персонаж откликается сам — своим голосом, зная весь разговор
+            self.ask(f"({prev} позвал(а) тебя в разговор. Откликнись одной-двумя короткими фразами от себя и "
+                     f"продолжи то, о чём просил пользователь.)", quiet=True)

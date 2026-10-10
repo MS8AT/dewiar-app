@@ -1,0 +1,2043 @@
+"""«Руки» ассистента: инструменты, которые модель вызывает сама (обработчики t_*), реестр TOOLS, Toolbox и напоминания.
+TOOLS[имя] = (описание для модели, JSON-схема, риск, обработчик(args, ctx), название в студии). Риск "safe" — сразу,
+"confirm" — сначала «Выполнить?» голосом и кнопками в виджете; в студии любой инструмент можно выключить или потребовать
+подтверждение (настройки tools.enabled / tools.confirm). Команды и удаление дополнительно проверяет guard.py.
+ctx обработчика — настройки, напоминания, навыки и Toolbox.hooks (объекты ядра, кладёт engine.py).
+Описания и тексты результатов — подсказки модели: их правка меняет её поведение. Действия на рабочем столе записаны
+командами Linux (xdg-open, gio, gdbus); на Windows их переводят launch() и winsys.py.
+"""
+
+import html
+import json
+import logging
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import threading
+import time
+import urllib.parse
+import uuid
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import httpx
+
+from settings import STATE_DIR, WIN
+
+if WIN:
+    import winsys
+
+log = logging.getLogger("dewiar.tools")
+DRY = os.environ.get("DEWIAR_DRY_TOOLS")          # тесты: путь к файлу, куда пишутся команды вместо запуска программ
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Dewiar/0.12" if WIN else "Mozilla/5.0 (X11; Linux x86_64) Dewiar/0.8"}
+
+
+class ToolError(Exception):
+    """Ожидаемый отказ инструмента: текст уходит модели результатом («Ошибка: …»), и она пересказывает его человеку.
+    Поэтому тексты часто содержат и указание модели, что делать дальше."""
+    pass
+
+
+RADIO = []          # проигрыватель радио ядра (кладёт engine.py) — media_playing() учитывает и своё радио
+
+
+# ---------- окружение рабочего стола ----------
+
+def desktop_env():
+    """Окружение для запуска программ на рабочем столе. Linux: служба systemd --user может стартовать раньше
+    графического сеанса и не знать DISPLAY/WAYLAND_DISPLAY и шины D-Bus — берём их у systemctl --user show-environment."""
+    env = dict(os.environ)
+    if WIN:
+        return env
+    if not (env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")):
+        try:
+            out = subprocess.run(["systemctl", "--user", "show-environment"], capture_output=True, text=True,
+                                 timeout=3).stdout
+            for line in out.splitlines():
+                k, _, v = line.partition("=")
+                if k in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_CURRENT_DESKTOP", "DBUS_SESSION_BUS_ADDRESS"):
+                    env.setdefault(k, v)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return env
+
+
+def launch(cmd):
+    """Запустить программу отсоединённо (она переживёт ассистента). Команды — в терминах Linux (xdg-open, gio launch,
+    gtk-launch); на Windows из них берётся последний аргумент и открывается «как двойным щелчком», прочее — ToolError.
+    В тестах (DRY) команда только записывается в файл."""
+    if DRY:
+        with open(DRY, "a", encoding="utf-8") as f:
+            f.write(json.dumps(cmd, ensure_ascii=False) + "\n")
+        return
+    if WIN:
+        target = cmd[-1] if cmd[0] in ("xdg-open", "gio", "gtk-launch") else None
+        if target is None:
+            raise ToolError("это действие недоступно в Windows")
+        try:
+            winsys.startfile(target)
+        except OSError as e:
+            raise ToolError(f"не открылось: {e}") from e
+        return
+    subprocess.Popen(cmd, env=desktop_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+# ---------- инструменты ----------
+
+def t_open_url(a, ctx):
+    url = (a.get("url") or "").strip()
+    if not re.match(r"^https?://", url):
+        url = "https://" + url
+    if not re.match(r"^https?://[^\s/$.?#].[^\s]*$", url):
+        raise ToolError("это не похоже на адрес сайта")
+    launch(["xdg-open", url])
+    return f"Открыл в браузере: {url}"
+
+
+def parse_ddg(page):
+    """HTML-выдача html.duckduckgo.com -> [{title, url, snippet}]. Ссылки там — переходы с настоящим адресом в uddg=…"""
+    out = []
+    for m in re.finditer(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>(.*?)(?=class="result__a"|$)', page, re.S):
+        href, title, rest = m.group(1), m.group(2), m.group(3)
+        q = urllib.parse.urlparse(html.unescape(href))
+        url = urllib.parse.parse_qs(q.query).get("uddg", [html.unescape(href)])[0]
+        sn = re.search(r'class="result__snippet"[^>]*>(.*?)</a>', rest, re.S)
+        clean = lambda s: html.unescape(re.sub(r"<[^>]+>", "", s)).strip()  # noqa: E731
+        if "duckduckgo.com/y.js" in url:
+            continue                                                          # реклама
+        out.append({"title": clean(title), "url": url, "snippet": clean(sn.group(1)) if sn else ""})
+    return out
+
+
+def t_web_search(a, ctx):
+    q = (a.get("query") or "").strip()
+    if not q:
+        raise ToolError("пустой запрос")
+    searx = ctx["settings"].get("tools", "search_url") or ""
+    via = ctx.get("dewiar_web")                                     # запасной путь: поиск через сервер Dewiar
+    try:
+        if searx:                                                   # свой SearXNG (JSON)
+            r = httpx.get(searx.rstrip("/") + "/search", params={"q": q, "format": "json", "language": "ru"},
+                          headers=UA, timeout=12)
+            r.raise_for_status()
+            res = [{"title": x.get("title", ""), "url": x.get("url", ""), "snippet": x.get("content", "")}
+                   for x in r.json().get("results", [])]
+        else:
+            r = httpx.post("https://html.duckduckgo.com/html/", data={"q": q, "kl": "ru-ru"}, headers=UA, timeout=12,
+                           follow_redirects=True)
+            r.raise_for_status()
+            res = parse_ddg(r.text)
+            if not res and via and ("anomaly" in r.text or "captcha" in r.text.lower()):
+                raise httpx.HTTPError("поисковик просит капчу")
+    except httpx.HTTPError as e:
+        # поисковик бывает недоступен из сети пользователя (провайдер рвёт соединение, капча) — ищем через сервер Dewiar
+        res = None
+        if via:
+            try:
+                res = via("search", q)
+                log.info("Поиск через сервер Dewiar (напрямую: %s)", e)
+            except Exception as e2:  # noqa: BLE001
+                log.info("Поиск через сервер Dewiar не удался: %s", e2)
+        if res is None:
+            raise ToolError(f"поиск недоступен: {e}") from e
+    if not res:
+        return "Ничего не нашлось."
+    # 6 результатов хватает модели и не раздувает контекст
+    return "\n".join(f"{i + 1}. {x['title']} — {x['snippet']} ({x['url']})" for i, x in enumerate(res[:6]))
+
+
+def html_to_text(page):
+    """Грубо: HTML -> текст для модели (без скриптов, стилей, навигации, шапки и подвала)."""
+    page = re.sub(r"(?is)<(script|style|noscript|svg|nav|footer|header)[^>]*>.*?</\1>", " ", page)
+    page = re.sub(r"(?i)<br\s*/?>|</p>|</h\d>|</li>|</div>", "\n", page)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", page))
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    return re.sub(r"\n\s*\n+", "\n", text).strip()
+
+
+def t_read_webpage(a, ctx):
+    """Текст страницы, не больше 6000 символов — чтобы одна страница не съела контекст модели."""
+    url = (a.get("url") or "").strip()
+    if not re.match(r"^https?://", url):
+        raise ToolError("нужен полный адрес страницы")
+    try:
+        r = httpx.get(url, headers=UA, timeout=15, follow_redirects=True)
+        r.raise_for_status()
+    except httpx.HTTPError as e:
+        via = ctx.get("dewiar_web")
+        blocked = not isinstance(e, httpx.HTTPStatusError) or e.response.status_code in (403, 451)
+        if via and blocked:                                         # сайт не открывается из этой сети (или 403/451 по
+                                                                    # стране) — через сервер Dewiar
+            try:
+                text = via("fetch", url)
+                log.info("Страница через сервер Dewiar (напрямую: %s)", e)
+                return text[:6000] + ("…" if len(text) > 6000 else "")
+            except Exception as e2:  # noqa: BLE001
+                log.info("Страница через сервер Dewiar не открылась: %s", e2)
+        raise ToolError(f"страница не открылась: {e}") from e
+    text = html_to_text(r.text) if "html" in r.headers.get("content-type", "html") else r.text
+    return text[:6000] + ("…" if len(text) > 6000 else "")
+
+
+def desktop_apps():
+    """Все программы из меню -> [{name, ru, keywords, id, path}]. Linux — по файлам .desktop (системные, свои, snap,
+    flatpak), Windows — winsys.apps(). DEWIAR_APPS_DIR — тесты: только эта папка .desktop."""
+    if WIN and not os.environ.get("DEWIAR_APPS_DIR"):
+        return winsys.apps()
+    dirs = [Path("/usr/share/applications"), Path("/usr/local/share/applications"),
+            Path.home() / ".local/share/applications", Path("/var/lib/snapd/desktop/applications"),
+            Path("/var/lib/flatpak/exports/share/applications"),
+            Path.home() / ".local/share/flatpak/exports/share/applications"]
+    extra = os.environ.get("DEWIAR_APPS_DIR")
+    if extra:
+        dirs = [Path(extra)]
+    apps, seen = [], set()
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*.desktop")):
+            if f.name in seen:
+                continue
+            try:
+                txt = f.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            sec = txt.split("[Desktop Action")[0]
+            if re.search(r"(?m)^(NoDisplay|Hidden)=true", sec) or not re.search(r"(?m)^Type=Application", sec):
+                continue
+            name = re.search(r"(?m)^Name=(.+)$", sec)
+            ru = re.search(r"(?m)^Name\[ru\]=(.+)$", sec)
+            kw = re.search(r"(?m)^Keywords(?:\[ru\])?=(.+)$", sec)
+            if name:
+                seen.add(f.name)
+                apps.append({"name": name.group(1).strip(), "ru": ru.group(1).strip() if ru else "",
+                             "keywords": kw.group(1).strip() if kw else "", "id": f.stem, "path": str(f)})
+    return apps
+
+
+# как программы называют вслух -> слово из их английского названия
+APP_ALIASES = {"телеграм": "telegram", "телеграмм": "telegram", "хром": "chrome", "гугл хром": "chrome",
+               "фаерфокс": "firefox", "файрфокс": "firefox", "мозилла": "firefox", "терминал": "terminal",
+               "консоль": "terminal", "вскод": "code", "вс код": "code", "визуал студио": "code", "стим": "steam",
+               "дискорд": "discord", "спотифай": "spotify", "зум": "zoom", "обс": "obs", "вайбер": "viber",
+               "ватсап": "whatsapp", "либреофис": "libreoffice", "ворд": "writer", "эксель": "calc",
+               "настройки": "settings", "файлы": "files", "яндекс музыка": "yandex music", "яндекс музыку": "yandex music",
+               "яндекс.музыка": "yandex music", "проводник": "files", "гимп": "gimp", "блендер": "blender"}
+# транслитерация: «телеграм» -> «telegram», чтобы находить программы без русского названия
+_TR = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя", ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m",
+               "n", "o", "p", "r", "s", "t", "u", "f", "h", "ts", "ch", "sh", "sch", "", "y", "", "e", "yu", "ya"]))
+
+
+def find_app(query, apps):
+    """Программа по словам пользователя -> элемент apps | None. Сравниваем с названием, русским названием, id
+    и ключевыми словами (как есть, через APP_ALIASES и транслитерацию); ниже похожести 0.72 — не угадываем."""
+    import difflib
+    q = query.lower().strip()
+    variants = {q, APP_ALIASES.get(q, q), "".join(_TR.get(ch, ch) for ch in q)}
+    best, score = None, 0.0
+    for a in apps:
+        names = [a["name"], a["ru"], a["id"].split(".")[-1]] + [k for k in a["keywords"].split(";") if k]
+        for n in names:
+            n = n.lower().strip()
+            if not n:
+                continue
+            for v in variants:
+                s = 1.0 if n == v else 0.9 if (v in n or n in v) and len(v) >= 3 else difflib.SequenceMatcher(None, v, n).ratio()
+                if s > score:
+                    best, score = a, s
+    return best if score >= 0.72 else None
+
+
+def t_open_app(a, ctx):
+    q = (a.get("name") or "").strip()
+    apps = desktop_apps()
+    app = find_app(q, apps)
+    if not app:
+        sample = ", ".join(sorted({x["ru"] or x["name"] for x in apps})[:40])
+        raise ToolError(f"не нашёл программу «{q}». Установлены, например: {sample}")
+    launch(["gio", "launch", app["path"]] if shutil.which("gio") or DRY else ["gtk-launch", app["id"]])
+    if ctx.get("music_app") and re.search(r"yandex.?music|яндекс.?музык", f"{app.get('id', '')} {app['name']} {app['ru']}".lower()):
+        ctx["music_app"]("yandex")                  # запомнить: следующие «включи электронную», «играй» — в ней
+    return f"Запустил {app['ru'] or app['name']}"
+
+
+def t_open_path(a, ctx):
+    p = Path(os.path.expanduser((a.get("path") or "~").strip()))
+    aliases = {"загрузки": "Downloads", "документы": "Documents", "рабочий стол": "Desktop", "музыка": "Music",
+               "изображения": "Pictures", "видео": "Videos"}
+    low = str(a.get("path", "")).lower().strip()
+    if low in aliases and WIN:
+        cand = [winsys.known_folder(aliases[low])]
+    if low in aliases and not WIN:
+        cand = [Path.home() / aliases[low], Path.home() / low.capitalize()]
+    if low in aliases:
+        p = next((c for c in cand if c.exists()), cand[0])
+    if not p.exists() and not DRY:
+        raise ToolError(f"нет такого пути: {p}")
+    launch(["xdg-open", str(p)])
+    return f"Открыл {p}"
+
+
+def _mpris_status(env, player):
+    """PlaybackStatus плеера MPRIS: Playing / Paused / Stopped или ""."""
+    try:
+        out = subprocess.run(["gdbus", "call", "--session", "--dest", player, "--object-path", "/org/mpris/MediaPlayer2",
+                              "--method", "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player",
+                              "PlaybackStatus"], capture_output=True, text=True, env=env, timeout=3).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    m = re.search(r"(Playing|Paused|Stopped)", out)
+    return m.group(1) if m else ""
+
+
+def _mpris_players(env, prefer=""):
+    """Плееры MPRIS (браузер, Яндекс Музыка, Spotify…). prefer — «yandex»: такой плеер (по имени или подписи) первым."""
+    out = subprocess.run(["gdbus", "call", "--session", "--dest", "org.freedesktop.DBus", "--object-path",
+                          "/org/freedesktop/DBus", "--method", "org.freedesktop.DBus.ListNames"],
+                         capture_output=True, text=True, env=env, timeout=4).stdout
+    players = re.findall(r"'(org\.mpris\.MediaPlayer2\.[^']+)'", out)
+    if prefer and len(players) > 1:
+        def who(pl):
+            try:
+                r = subprocess.run(["gdbus", "call", "--session", "--dest", pl, "--object-path", "/org/mpris/MediaPlayer2",
+                                    "--method", "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2", "Identity"],
+                                   capture_output=True, text=True, env=env, timeout=3).stdout
+            except (OSError, subprocess.SubprocessError):
+                r = ""
+            return (pl + " " + r).lower()
+        players.sort(key=lambda pl: 0 if any(w in who(pl) for w in MUSIC_APPS.get(prefer, {}).get("words", (prefer,))) else 1)
+    return players
+
+
+# Музыкальные приложения, которыми ассистент умеет управлять: поиск по ссылке приложения и кнопки плеера (MPRIS).
+# words — как узнать плеер среди MPRIS по имени на шине или Identity
+MUSIC_APPS = {"yandex": {"name": "Яндекс Музыка", "words": ("yandex", "яндекс"), "scheme": "yandexmusic",
+                         "web": "https://music.yandex.ru"}}
+
+
+def yandex_music_installed():
+    """Стоит ли приложение Яндекс Музыки (оно открывает ссылки yandexmusic://)."""
+    if DRY:
+        return bool(os.environ.get("DEWIAR_FAKE_YANDEX_APP"))
+    if WIN:
+        try:
+            import winreg
+            winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "yandexmusic"))
+            return True
+        except OSError:
+            return False
+    try:
+        r = subprocess.run(["xdg-mime", "query", "default", "x-scheme-handler/yandexmusic"], capture_output=True, text=True,
+                           env=desktop_env(), timeout=4)
+        if r.stdout.strip():
+            return True
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return any("yandex" in (x.get("id") or "").lower() and "music" in (x.get("id") or "").lower() for x in desktop_apps())
+
+
+def t_yandex_music(a, ctx):
+    """Открыть в Яндекс Музыке поиск (жанр, исполнитель, песня) — в приложении, если оно стоит, иначе на сайте."""
+    q = (a.get("query") or "").strip()
+    path = "search?text=" + urllib.parse.quote(q) if q else ""
+    app = yandex_music_installed()
+    url = ("yandexmusic://" + path) if app else (MUSIC_APPS["yandex"]["web"] + "/" + path)
+    launch(["xdg-open", url])
+    hook = ctx.get("music_app")
+    if hook:
+        hook("yandex")
+    where = "в приложении Яндекс Музыки" if app else "на сайте Яндекс Музыки"
+    return (f"Открыл {where}" + (f" поиск «{q}»" if q else "") + ". Чтобы заиграло, нажмите на трек или плейлист — "
+            "или скажите «играй», и я нажму воспроизведение.")
+
+
+def t_play_radio(a, ctx):
+    from radio import RadioError, pick, search
+    r = ctx.get("radio")
+    if not r:
+        raise ToolError("радио недоступно")
+    q = (a.get("query") or "").strip()
+    mine = ctx.get("music").match(q or "*") if ctx.get("music") else []     # сначала свой список станций (с сайта Dewiar)
+    if mine:
+        found = mine[:6]
+        st = found[0]
+    else:
+        try:
+            found = search(q)
+        except RadioError as e:
+            raise ToolError(str(e)) from e
+        st = pick(found, q)
+    if not st:
+        raise ToolError(f"не нашёл радиостанцию «{q}»")
+    from radio import RadioError as RE
+    try:
+        r.play(st)
+    except RE as e:
+        raise ToolError(str(e)) from e
+    time.sleep(2.5)                                     # станция могла не ответить — проверим сразу и попробуем другую
+    if not r.playing:
+        alt = next((x for x in found if x is not st), None)
+        if alt:
+            r.play(alt)
+            time.sleep(2)
+            if r.playing:
+                st = alt
+        if not r.playing:
+            why = r.failed or "не отвечает"
+            fails = ctx.setdefault("radio_fails", [])
+            fails.append(time.time())
+            fails[:] = [x for x in fails if time.time() - x < 600]
+            if len(fails) >= 2:                          # вторая неудача за 10 минут — дело не в станции: ищем, где поломка
+                from radio import diagnose
+                from eyes import ffmpeg_path
+                where, fix = diagnose(ffmpeg_path(), st["url"])
+                log.warning("Радио: проверка — %s; %s", where, fix)
+                raise ToolError(f"радио не играет, и дело не в станции: {where}. Что сделать: {fix}. "
+                                "Перескажи это пользователю простыми словами и не пробуй другие станции.")
+            raise ToolError(f"станция «{st['name']}» не играет ({why}) — можно попробовать другую")
+    others = ", ".join(x["name"] for x in found if x is not st)[:200]
+    return (f"Играет радио «{st['name']}». Остановить — «стоп» или «пауза», продолжить — «продолжи»."
+            + (f" Другие станции по запросу: {others}." if others else "") + " Скажи коротко, что включил, одной фразой.")
+
+
+def t_play_youtube(a, ctx):
+    """Ролик на YouTube: найти первый через yt_dlp и открыть в браузере (сразу воспроизводится).
+    Нет yt_dlp или он не справился — открываем страницу поиска."""
+    q = (a.get("query") or "").strip()
+    if not q:
+        raise ToolError("что найти на YouTube?")
+    url = None
+    if not DRY:
+        try:
+            import yt_dlp
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as y:
+                info = y.extract_info(f"ytsearch1:{q}", download=False)
+            e = (info.get("entries") or [None])[0]
+            if e:
+                url = f"https://www.youtube.com/watch?v={e['id']}"
+                title = e.get("title") or q
+        except Exception as ex:  # noqa: BLE001
+            log.info("Поиск на YouTube: %s", ex)
+    if not url:
+        url, title = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(q), None
+    launch(["xdg-open", url])
+    return f"Открыл на YouTube: «{title}»." if title else f"Открыл поиск на YouTube: {q}."
+
+
+def media_players():
+    """Сколько открыто плееров (MPRIS); None — узнать нельзя (Windows)."""
+    if WIN:
+        return None
+    if DRY:
+        return 1 if os.environ.get("DEWIAR_FAKE_PLAYING") or os.environ.get("DEWIAR_FAKE_PLAYER") else 0
+    try:
+        return len(_mpris_players(desktop_env())) if shutil.which("gdbus") else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def media_playing():
+    """Играет ли сейчас музыка/видео (MPRIS: браузер, плеер). True/False; None — узнать нельзя (Windows)."""
+    r = RADIO[0] if RADIO else None
+    if r is not None and r.playing:
+        return True
+    if WIN or DRY:
+        return None if WIN else bool(os.environ.get("DEWIAR_FAKE_PLAYING"))
+    env = desktop_env()
+    try:
+        if shutil.which("playerctl"):
+            out = subprocess.run(["playerctl", "-a", "status"], capture_output=True, text=True, env=env, timeout=3).stdout
+            return "Playing" in out
+        for pl in _mpris_players(env) if shutil.which("gdbus") else []:
+            out = subprocess.run(["gdbus", "call", "--session", "--dest", pl, "--object-path", "/org/mpris/MediaPlayer2",
+                                  "--method", "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player",
+                                  "PlaybackStatus"], capture_output=True, text=True, env=env, timeout=3).stdout
+            if "Playing" in out:
+                return True
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return False
+
+
+def t_media(a, ctx):
+    action = a.get("action", "play_pause")
+    r = ctx.get("radio")
+    prefer = (ctx.get("music_pref") or (lambda: ""))()          # недавно открыта Яндекс Музыка — управляем ею
+    # своё радио ядра — не MPRIS-плеер: кнопки для него обрабатываем сами
+    if r and (r.playing or r.paused) and action in ("play", "pause", "play_pause", "stop", "next"):
+        if action in ("pause", "stop") or (action == "play_pause" and r.playing):
+            st = r.pause()
+            return f"Радио «{(st or {}).get('name', '')}» на паузе"
+        if action == "next" and r.station:
+            from radio import search
+            cur = r.station
+            alts = [x for x in search(" ".join((cur.get("tags") or "").split(",")[:1]) or "") if x["url"] != cur["url"]]
+            if alts:
+                r.play(alts[0])
+                return f"Следующая станция: «{alts[0]['name']}»"
+        st = r.resume()
+        if st:
+            return f"Снова играет «{st['name']}»"
+    methods = {"play": "Play", "pause": "Pause", "play_pause": "PlayPause", "next": "Next", "previous": "Previous",
+               "stop": "Stop"}
+    if action not in methods:
+        raise ToolError("неизвестное действие")
+    if DRY:
+        launch(["media", action, prefer])
+        return "Готово"
+    if WIN:
+        winsys.media(action)
+        return "Готово"
+    env = desktop_env()
+    done = {"play": "Включил воспроизведение", "pause": "Поставил на паузу", "play_pause": "Нажал «играть/пауза»",
+            "next": "Следующий трек", "previous": "Предыдущий трек", "stop": "Остановил"}[action]
+    app = MUSIC_APPS.get(prefer, {}).get("name", "")
+    players = _mpris_players(env, prefer) if shutil.which("gdbus") else []
+    if len(players) > 1 and not prefer:                    # «пауза» — тому, кто играет; «играй» — тому, кто на паузе
+        want = {"pause": "Playing", "stop": "Playing", "play": "Paused"}.get(action)
+        if want:
+            def status(pl):
+                try:
+                    return subprocess.run(["gdbus", "call", "--session", "--dest", pl, "--object-path", "/org/mpris/MediaPlayer2",
+                                           "--method", "org.freedesktop.DBus.Properties.Get", "org.mpris.MediaPlayer2.Player",
+                                           "PlaybackStatus"], capture_output=True, text=True, env=env, timeout=3).stdout
+                except (OSError, subprocess.SubprocessError):
+                    return ""
+            players.sort(key=lambda pl: 0 if want in status(pl) else 1)
+    if players:
+        r = subprocess.run(["gdbus", "call", "--session", "--dest", players[0], "--object-path", "/org/mpris/MediaPlayer2",
+                            "--method", f"org.mpris.MediaPlayer2.Player.{methods[action]}"], capture_output=True, env=env,
+                           timeout=5)
+        if r.returncode == 0:
+            hit = app and any(w in players[0].lower() for w in MUSIC_APPS[prefer]["words"])
+            want = {"play": "Playing", "pause": "Paused", "stop": "Stopped"}.get(action)
+            if want:                                       # проверим, что плеер правда послушался, а не просто принял команду
+                time.sleep(1.2)
+                st = _mpris_status(env, players[0])
+                if st and st != want and not (want == "Paused" and st == "Stopped"):
+                    log.info("MPRIS %s: после %s состояние %s", players[0], methods[action], st)
+                    return ("Нажал «играть», но плеер так и не заиграл — нажмите воспроизведение в самом приложении"
+                            if want == "Playing" else "Нажал «пауза», но плеер продолжает играть")
+            return done + (f" — {app}" if hit else "")
+    if shutil.which("playerctl"):
+        cmd = {"play_pause": "play-pause"}.get(action, action)
+        r = subprocess.run(["playerctl", cmd], capture_output=True, text=True, env=env, timeout=5)
+        if r.returncode == 0:
+            return done
+    raise ToolError("не вижу запущенного плеера — откройте музыку в браузере или в приложении (например, Яндекс Музыке)")
+
+
+def t_play_music(a, ctx):
+    q = (a.get("query") or "").strip()
+    url = "https://music.youtube.com/search?q=" + urllib.parse.quote(q) if q else "https://music.youtube.com/"
+    launch(["xdg-open", url])
+    return f"Открыл YouTube Music{': ' + q if q else ''}. Пользователь нажмёт воспроизведение."
+
+
+def desktop_notify(text, critical=False, env=None):
+    """Всплывающее уведомление: notify-send, а если его нет — напрямую через D-Bus (gdbus из GLib есть почти всегда).
+    -> показано ли."""
+    if WIN:
+        return winsys.notify(text)
+    env = env or desktop_env()
+    try:
+        if shutil.which("notify-send"):
+            subprocess.Popen(["notify-send", "-a", "Dewiar"] + (["-u", "critical"] if critical else []) + ["Dewiar", text],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+            return True
+        if shutil.which("gdbus"):
+            hints = "{'urgency': <byte 2>}" if critical else "{}"
+            subprocess.Popen(["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications",
+                              "--object-path", "/org/freedesktop/Notifications",
+                              "--method", "org.freedesktop.Notifications.Notify",
+                              "Dewiar", "0", "dewiar-assistant", "Dewiar", text, "[]", hints, "-1"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
+            return True
+    except OSError as e:
+        log.info("Уведомление не показано: %s", e)
+    return False
+
+
+def human_error(e):
+    """Техническая ошибка -> понятная человеку причина (сырые «No module named …», «[Errno 2]» — только в журнал)."""
+    t = str(e)
+    if isinstance(e, ImportError) or "No module named" in t or "cannot import" in t:
+        return "на этом устройстве нет нужной части программы"
+    if isinstance(e, PermissionError) or "Permission denied" in t:
+        return "нет прав"
+    if isinstance(e, FileNotFoundError) or "No such file" in t:
+        return "не нашёл нужный файл или программу"
+    if isinstance(e, TimeoutError) or "timed out" in t.lower():
+        return "не дождался ответа"
+    if re.search(r"[A-Za-z]{4,}", t) and not re.search(r"[А-Яа-яЁё]", t):
+        return "сбой в системе (подробности — в журнале)"
+    return re.sub(r"^(?:не получилось [^:]+:\s*)+", "", t, flags=re.I)
+
+
+def t_volume(a, ctx):
+    """Громкость: percent (0–150, выше 100 — усиление PulseAudio), change (±), mute."""
+    if DRY:
+        launch(["volume", a])
+        return "Готово"
+    if WIN:
+        if a.get("mute") is None and a.get("percent") is None and a.get("change") is None:
+            raise ToolError("укажите percent, change или mute")
+        v = winsys.volume(percent=a.get("percent"), change=a.get("change"), mute=a.get("mute"))
+        if a.get("mute") is not None and a.get("percent") is None and a.get("change") is None:
+            return "Звук выключен" if a["mute"] else "Звук включён"
+        return f"Громкость {v}%" if v is not None else "Готово"
+    if not shutil.which("pactl"):                          # нет pactl — через libpulse напрямую (pulse.py)
+        import pulse
+        try:
+            pulse.volume(percent=None if a.get("percent") is None else int(a["percent"]),
+                         change=None if a.get("change") is None else int(a["change"]), mute=a.get("mute"))
+        except Exception as e:  # noqa: BLE001
+            raise ToolError(human_error(e)) from e
+        if a.get("mute") is not None:
+            return "Звук выключен" if a["mute"] else "Звук включён"
+        if a.get("percent") is not None:
+            return f"Громкость {max(0, min(150, int(a['percent'])))}%"
+        if a.get("change") is not None:
+            return f"Громкость {'+' if int(a['change']) >= 0 else ''}{int(a['change'])}%"
+        raise ToolError("укажите percent, change или mute")
+    if a.get("mute") is not None:
+        subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "1" if a["mute"] else "0"], timeout=4)
+        return "Звук выключен" if a["mute"] else "Звук включён"
+    if a.get("percent") is not None:
+        v = max(0, min(150, int(a["percent"])))
+        subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{v}%"], timeout=4)
+        return f"Громкость {v}%"
+    if a.get("change") is not None:
+        d = int(a["change"])
+        subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{'+' if d >= 0 else '-'}{abs(d)}%"], timeout=4)
+        return f"Громкость {'+' if d >= 0 else ''}{d}%"
+    raise ToolError("укажите percent, change или mute")
+
+
+def t_system(a, ctx):
+    if WIN:
+        du = shutil.disk_usage(str(Path.home()))
+        return "; ".join(winsys.system_parts() + [f"диск: свободно {du.free / 1e9:.0f} из {du.total / 1e9:.0f} ГБ"])
+    parts = []
+    bats = list(Path("/sys/class/power_supply").glob("BAT*"))
+    for b in bats:
+        try:
+            cap = (b / "capacity").read_text().strip()
+            st = (b / "status").read_text().strip()
+            parts.append(f"батарея {cap}% ({ {'Charging': 'заряжается', 'Discharging': 'разряжается', 'Full': 'заряжена'}.get(st, st)})")
+        except OSError:
+            pass
+    try:
+        load = os.getloadavg()[0]
+        parts.append(f"нагрузка процессора {load:.1f} на {os.cpu_count()} ядер")
+    except OSError:
+        pass
+    try:
+        mem = dict(re.findall(r"(\w+):\s+(\d+)", Path("/proc/meminfo").read_text()))
+        tot, av = int(mem["MemTotal"]) / 1048576, int(mem["MemAvailable"]) / 1048576
+        parts.append(f"память: свободно {av:.1f} из {tot:.1f} ГБ")
+    except (OSError, KeyError):
+        pass
+    du = shutil.disk_usage(str(Path.home()))
+    parts.append(f"диск: свободно {du.free / 1e9:.0f} из {du.total / 1e9:.0f} ГБ")
+    return "; ".join(parts)
+
+
+def t_run_command(a, ctx):
+    """Команда терминала в домашней папке (30 с, с sudo — 180 с). Безопасность: guard.check_command отсекает опасное,
+    пароль sudo в команде запрещён — sudo переписывается в sudo -A, и пароль спрашивает системное окно (askpass),
+    мимо ассистента и журналов."""
+    cmd = (a.get("command") or "").strip()
+    if not cmd:
+        raise ToolError("пустая команда")
+    import guard
+    v = guard.check_command(cmd)
+    if v["level"] == "block":
+        raise ToolError(f"защита Dewiar не выполнит это: {v['reason']}. Объясни пользователю, что такое действие опасно "
+                        "для компьютера и ассистент его не делает; предложи безопасный вариант (например, удалить "
+                        "конкретные файлы в корзину)")
+    if PASS_IN_CMD.search(cmd):
+        raise ToolError("пароль в команду не вставляю — он остался бы в истории и журналах. Выполни ту же команду с обычным "
+                        "sudo (без -S и echo): Dewiar сам покажет пользователю окно для пароля. И не проси пароль в разговоре")
+    if DRY:
+        launch(["bash", "-lc", cmd])
+        return "выполнено (тест)"
+    if WIN:
+        r = winsys.shell(cmd, timeout=30, cwd=str(Path.home()))
+        out = (r.stdout + ("\n" + r.stderr if r.stderr else "")).strip()
+        return f"код выхода {r.returncode}\n{out[-3000:]}"
+    env, timeout = desktop_env(), 30
+    if SUDO_AT.search(cmd):                                # пароль — в окне системы, не через ассистента
+        cmd = SUDO_AT.sub(r"\1sudo -A ", cmd)
+        env = dict(env, SUDO_ASKPASS=askpass_path())
+        timeout = 180                                      # человеку нужно время ввести пароль
+    try:
+        r = subprocess.run(["bash", "-lc", cmd], capture_output=True, text=True, timeout=timeout, env=env,
+                           cwd=str(Path.home()))
+    except subprocess.TimeoutExpired:
+        return f"команда не закончилась за {timeout} с — остановил. Если она долгая, запусти её в фоне или раздели на части"
+    out = (r.stdout + ("\n" + r.stderr if r.stderr else "")).strip()
+    # «no askpass program» печатает наш ASKPASS, когда нет ни zenity, ни kdialog, ни ssh-askpass
+    if "no askpass program" in out or "askpass" in out and r.returncode != 0 and "incorrect password" not in out:
+        out += ("\n(Окно для пароля не открылось — нет программы zenity. Попроси пользователя выполнить эту команду в "
+                "терминале самому или установить zenity: sudo apt install zenity.)")
+    return f"код выхода {r.returncode}\n{out[-3000:]}"
+
+
+# sudo там, где начинается команда (не внутри аргументов); sudo -A/-S/-n уже со своим способом пароля — не трогаем
+SUDO_AT = re.compile(r"(^\s*|[;&|(]\s*|\b(?:then|do|else)\s+)sudo\s+(?!-[ASn]\b)")
+# безопасность: пароль в самой команде (echo … | sudo -S, sudo -S <<< …) остался бы в истории и журналах
+PASS_IN_CMD = re.compile(r"(echo|printf)\s+[^|;&]*\|\s*sudo\s+(-\w*\s+)*-S\b|sudo\s+(-\w*\s+)*-S\b[^|;&]*<<<", re.S)
+# скрипт для SUDO_ASKPASS: системное окно пароля; пароль идёт прямо в sudo, ассистент его не видит
+ASKPASS = """#!/bin/sh
+# Dewiar: окно пароля администратора для «sudo -A» (пароль идёт прямо в sudo, ассистент его не видит)
+T="Dewiar — пароль администратора"
+M="Ассистент выполняет команду с правами администратора. Введите пароль вашей учётной записи:"
+if command -v zenity >/dev/null 2>&1; then exec zenity --password --title="$T" 2>/dev/null; fi
+if command -v kdialog >/dev/null 2>&1; then exec kdialog --title "$T" --password "$M"; fi
+if command -v ssh-askpass >/dev/null 2>&1; then exec ssh-askpass "$M"; fi
+echo "no askpass program" >&2
+exit 1
+"""
+
+
+def askpass_path():
+    """Путь к скрипту окна пароля для sudo -A в STATE_DIR: перезаписывается, если отличается, и всегда исполняемый
+    (0o700 — только владельцу)."""
+    from settings import STATE_DIR
+    p = STATE_DIR / "askpass.sh"
+    try:
+        if not p.exists() or p.read_text() != ASKPASS:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(ASKPASS)
+        os.chmod(p, 0o700)
+    except OSError as e:
+        log.warning("Окно пароля sudo: %s", e)
+    return str(p)
+
+
+def t_server_run(a, ctx):
+    from servers import ServerError
+    sv = ctx.get("servers")
+    if not (sv and sv.items):
+        raise ToolError("серверов нет — добавьте в студии: «Подключение» → «Серверы»")
+    try:
+        r = sv.run(a.get("server", ""), a.get("command", ""), a.get("timeout") or 60)
+    except ServerError as e:
+        raise ToolError(str(e)) from e
+    return f"Сервер «{r['server']}», код выхода {r['code']}\n{r['output'] or '(вывода нет)'}"
+
+
+def _mail(ctx):
+    """Подключённая почта из ctx, иначе ToolError с подсказкой, где подключить."""
+    m = ctx.get("mail")
+    if not m or not m.configured():
+        raise ToolError("почта не подключена — студия → «Подключение» → «Почта»")
+    return m
+
+
+def t_send_email(a, ctx):
+    from mail import MailError
+    files = a.get("attachments") or []
+    if isinstance(files, str):
+        files = [x.strip() for x in files.split(",") if x.strip()]
+    try:
+        r = _mail(ctx).send(a.get("to", ""), a.get("subject", ""), a.get("body", ""), files)
+    except MailError as e:
+        raise ToolError(str(e)) from e
+    return f"Письмо «{r['subject']}» отправлено: {', '.join(r['to'])}" + (f"; вложения: {', '.join(r['attachments'])}" if r["attachments"] else "")
+
+
+def t_send_telegram(a, ctx):
+    from telegram import TelegramError
+    tg = ctx.get("telegram")
+    if not (tg and tg.paired()):
+        raise ToolError("Telegram и MAX не подключены — студия → «Подключение»")
+    to = str(a.get("to") or "").lower()
+    if to and hasattr(tg, "bots"):                       # назвали мессенджер — туда, если он подключён; иначе — куда есть
+        tg = next((b for b in tg.bots if b.TITLE.lower() == to and b.paired()), tg)
+    files = a.get("files") or []
+    if isinstance(files, str):
+        files = [x.strip() for x in files.split(",") if x.strip()]
+    ws = ctx.get("workspace")
+    sent = []
+    text = (a.get("text") or "").strip()
+    if text and not tg.send(text):
+        raise ToolError(tg.problem or "сообщение не отправилось")
+    for f in files[:10]:
+        try:                                             # безопасность: отправлять можно только файлы папки ассистента
+            p = ws.safe(f) if ws else Path(f)
+        except Exception as e:  # noqa: BLE001
+            raise ToolError(f"{f}: {e}") from e
+        if not p.is_file():
+            raise ToolError(f"нет файла {f} в папке ассистента")
+        try:
+            sent.append(tg.send_file(p))
+        except TelegramError as e:
+            raise ToolError(str(e)) from e
+    if not text and not sent:
+        raise ToolError("нечего отправлять: нужен text или files")
+    where = getattr(tg, "title", None) or getattr(tg, "TITLE", "Telegram")
+    return f"Отправлено в {where}" + (f": {', '.join(sent)}" if sent else "") + "."
+
+
+def t_read_emails(a, ctx):
+    from mail import MailError
+    try:
+        items = _mail(ctx).inbox(limit=max(1, min(20, int(a.get("limit") or 8))), unread=bool(a.get("unread_only")),
+                                 query=a.get("query", ""))
+    except MailError as e:
+        raise ToolError(str(e)) from e
+    if not items:
+        return "Писем не нашлось."
+    return "\n".join(f"[{x['uid']}] {'● ' if x['unread'] else ''}{x['date'][:22]} · {x['from']} · «{x['subject']}» — {x['snippet'][:160]}"
+                     + (f" (вложения: {', '.join(x['files'])})" if x["files"] else "") for x in items) + \
+        "\n\nЦеликом письмо — read_email с номером в скобках."
+
+
+def t_read_email(a, ctx):
+    from mail import MailError
+    try:
+        m = _mail(ctx).read(a.get("uid", ""))
+    except MailError as e:
+        raise ToolError(str(e)) from e
+    return (f"От: {m['from']}\nКому: {m['to']}\nТема: {m['subject']}\nДата: {m['date']}\n"
+            + (f"Вложения: {', '.join(m['files'])}\n" if m["files"] else "") + "\n" + m["text"][:8000])
+
+
+def t_search_documents(a, ctx):
+    kn = ctx.get("knowledge")
+    if not kn:
+        raise ToolError("папка «Знания» недоступна")
+    res = kn.search(a.get("query", ""), limit=5)
+    if not res:
+        return "В документах папки «Знания» ничего подходящего не нашлось."
+    return "\n\n".join(f"[{r['path']}]\n{r['text']}" for r in res) + \
+        "\n\nОтвечай по этим отрывкам и назови файл, откуда взято. Если ответа в них нет — так и скажи."
+
+
+def t_ask_knowledge(a, ctx):
+    """Вопрос к Знаниям на сайте Dewiar (account.py); base — база или раздел библиотеки по названию."""
+    acc = ctx.get("account")
+    if not acc:
+        raise ToolError("аккаунт недоступен")
+    from account import AccountError
+    base = None
+    want = str(a.get("base") or "").strip().lower().replace("ё", "е")
+    if want:                                           # «в разделе „История РФ“» — база по названию: точное, потом часть
+        try:
+            bases = acc.scope()["bases"]
+        except AccountError:
+            bases = []
+        base = next((b for b in bases if b["label"].lower().replace("ё", "е") == want), None) or \
+            next((b for b in bases if want in b["label"].lower().replace("ё", "е")), None)
+        if not base:
+            names = ", ".join(f"«{b['label']}»" for b in bases[:15])
+            raise ToolError(f"нет базы «{a.get('base')}». Есть: {names or 'ни одной'}")
+    try:
+        r = acc.ask(a.get("question", ""), base=base)
+    except AccountError as e:
+        raise ToolError(str(e)) from e
+    src = ("\nИсточники: " + "; ".join(r["sources"])) if r["sources"] else ""
+    return (r["answer"] or "В Знаниях ничего не нашлось.") + src
+
+
+def pictures_dir():
+    """Папка «Изображения» пользователя (на Linux — по xdg-user-dir, она может называться по-русски)."""
+    if WIN:
+        return winsys.known_folder("Pictures")
+    try:
+        d = subprocess.run(["xdg-user-dir", "PICTURES"], capture_output=True, text=True, timeout=3).stdout.strip()
+        if d and Path(d) != Path.home():
+            return Path(d)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return Path.home() / "Pictures"
+
+
+def t_save_screenshot(a, ctx):
+    from eyes import EyesError, capture_screen
+    try:
+        data = capture_screen(desktop_env())
+    except EyesError as e:
+        raise ToolError(str(e)) from e
+    d = pictures_dir() / "Снимки экрана"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f"Снимок экрана {datetime.now():%Y-%m-%d %H-%M-%S}.png"
+    if data[:8] != b"\x89PNG\r\n\x1a\n":                   # снимок мог прийти в JPEG (портал, Windows) — сохраним как PNG
+        import io
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.open(io.BytesIO(data)).save(buf, "PNG")
+        data = buf.getvalue()
+    f.write_bytes(data)
+    return f"Снимок экрана сохранён: {f}. Скажи пользователю коротко, что сохранил в «Изображения/Снимки экрана»."
+
+
+def t_look_screen(a, ctx):
+    """-> {"text", "image"}: картинка уходит модели вложением (нужна модель со зрением)."""
+    from eyes import EyesError, capture_screen, prepare
+    try:
+        b64, w, h = prepare(capture_screen(desktop_env()))
+    except EyesError as e:
+        raise ToolError(str(e)) from e
+    return {"text": f"Снимок экрана {w}×{h} приложен. Виджет ассистента на нём не учитывай.", "image": b64}
+
+
+def t_look_camera(a, ctx):
+    from eyes import EyesError, capture_camera, prepare
+    try:
+        b64, w, h = prepare(capture_camera(ctx["settings"].get("eyes", "camera") or ("" if WIN else "/dev/video0")))
+    except EyesError as e:
+        raise ToolError(str(e)) from e
+    return {"text": f"Кадр с камеры {w}×{h} приложен.", "image": b64}
+
+
+def t_create_skill(a, ctx):
+    sk = ctx.get("skills")
+    if sk is None:
+        raise ToolError("навыки недоступны")
+    name = sk.save(a.get("name", ""), a.get("description", ""), a.get("instructions", ""))
+    return f"Навык «{name}» создан и уже работает. Его можно поправить в студии → «Навыки и MCP»."
+
+
+# ---------- напоминания ----------
+
+class Reminders:
+    """Напоминания, будильники, таймеры и дела по расписанию (kind="job", см. jobs.py): разовые и с повтором
+    (when.next_time). Файл reminders.json в STATE_DIR; поток _loop раз в секунду вызывает on_fire для наступивших.
+    on_change — после каждой записи (синхронизация с телефоном и сервером, sync.py). Изменения — под _lock: зовут из разных потоков."""
+
+    def __init__(self, on_fire):
+        self.path = STATE_DIR / "reminders.json"
+        self.on_change = None
+        self.on_fire = on_fire
+        self.skip_late = None          # ("id@время") -> True, если опоздавшее напоминание уже пришло в Telegram с сервера
+        self._lock = threading.Lock()
+        try:
+            self.items = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.items = []
+        fixed = 0
+        # исправление старых записей: «В будни - Обед» с повтором «каждый день» -> только будни (как _fix_days при создании)
+        for it in self.items:
+            rep = it.get("repeat")
+            if isinstance(rep, dict) and rep.get("kind") == "daily":
+                rep2, text = _fix_days({}, rep, it.get("text") or "")
+                if rep2 is not rep:
+                    it["repeat"], it["text"] = rep2, text
+                    try:
+                        from when import next_time
+                        if datetime.fromisoformat(it["at"]).weekday() not in rep2["days"]:
+                            it["at"] = next_time(rep2, datetime.now()).replace(microsecond=0).isoformat(timespec="seconds")
+                    except (ValueError, KeyError, TypeError):
+                        pass
+                    fixed += 1
+        if fixed:
+            log.info("Напоминания: %d повторов «в будни/выходные» исправлено", fixed)
+            try:
+                self._save()
+            except OSError:
+                pass
+        threading.Thread(target=self._loop, name="reminders", daemon=True).start()
+
+    def _save(self):
+        """Записать атомарно (через .tmp) и сообщить on_change. Вызывать под _lock."""
+        self.items.sort(key=lambda x: x["at"])
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.items, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(self.path)
+        if self.on_change:
+            try:
+                self.on_change(list(self.items))
+            except Exception as e:  # noqa: BLE001
+                log.warning("Напоминания: %s", e)
+
+    def add(self, when: datetime, text, repeat=None, kind="reminder", extra=None):
+        """-> копия записи. kind: reminder | alarm | timer | job; extra — поля дела по расписанию (deliver, brief, preset)."""
+        with self._lock:
+            item = {"id": uuid.uuid4().hex[:6], "at": when.replace(microsecond=0).isoformat(timespec="seconds"),
+                    "text": (text or "Напоминание").strip(), "repeat": repeat or None, "kind": kind,
+                    "created": datetime.now().isoformat(timespec="seconds")}
+            item.update({k: v for k, v in (extra or {}).items() if k in ("deliver", "brief", "preset") and v not in (None, "")})
+            self.items.append(item)
+            self._save()
+            return dict(item)
+
+    def get(self, rid):
+        return next((dict(x) for x in self.items if x["id"] == rid), None)
+
+    def upsert(self, item):
+        """Синхронизация (sync.py): напоминание с другого устройства — с тем же id (создать или заменить поля).
+        Переносятся только at, text, repeat, kind, paused."""
+        with self._lock:
+            cur = next((x for x in self.items if x["id"] == item["id"]), None)
+            if cur is not None and cur.get("kind") == "job":
+                return dict(cur)                      # дела по расписанию не синхронизируются — их поля (deliver, brief…) не трогаем
+            if cur is None:
+                cur = {"id": item["id"], "created": datetime.now().isoformat(timespec="seconds")}
+                self.items.append(cur)
+            for k in ("at", "text", "repeat", "kind", "paused"):
+                if k in item:
+                    cur[k] = item[k]
+            if not cur.get("paused"):
+                cur.pop("paused", None)
+            self._save()
+            return dict(cur)
+
+    def remove(self, rid):
+        """Удалить ровно этот id (без поиска по тексту, как у cancel)."""
+        with self._lock:
+            n = len(self.items)
+            self.items = [x for x in self.items if x["id"] != rid]
+            if len(self.items) != n:
+                self._save()
+                return True
+            return False
+
+    def update(self, rid, patch):
+        with self._lock:
+            for x in self.items:
+                if x["id"] == rid:
+                    for k in ("text", "at", "repeat", "paused", "kind", "deliver", "last_run", "last_ok", "last_error"):
+                        if k in patch:
+                            x[k] = patch[k]
+                    self._save()
+                    return dict(x)
+        return None
+
+    def find(self, query):
+        """Записи по id или по тексту: запрос входит в текст или текст — в запрос («отмени напоминание про обед»)."""
+        q = re.sub(r"\s+", " ", str(query or "").lower().replace("ё", "е")).strip()
+        if not q:
+            return []
+        exact = [x for x in self.items if x["id"] == q]
+        if exact:
+            return exact
+        texts = ((x, re.sub(r"\s+", " ", str(x.get("text") or "").lower().replace("ё", "е")).strip()) for x in self.items)
+        return [x for x, t in texts if q in t or (t and t in q)]     # пустой текст записи совпал бы с любым запросом
+
+    def cancel(self, rid):
+        """Удалить все записи, найденные find (по id или тексту) -> найдено ли."""
+        with self._lock:
+            hit = {x["id"] for x in self.find(rid)}
+            if not hit:
+                return False
+            self.items = [x for x in self.items if x["id"] not in hit]
+            self._save()
+            return True
+
+    def _loop(self):
+        """Раз в секунду: наступившие — разовые удалить, повторяющиеся перенести; on_fire вызывается уже вне _lock."""
+        from when import next_time
+        while True:
+            time.sleep(1)
+            now = datetime.now().replace(microsecond=0)
+            due = []
+            with self._lock:
+                for x in list(self.items):
+                    if x.get("paused"):
+                        continue
+                    at = datetime.fromisoformat(x["at"])
+                    if at <= now:
+                        fired = dict(x, late=(now - at).total_seconds() > 300)   # опоздало (компьютер спал или был выключен)
+                        due.append(fired)
+                        if x.get("repeat"):
+                            nxt = next_time(x["repeat"], at)
+                            while nxt <= now:                       # компьютер спал — пропущенные повторы не копим
+                                nxt = next_time(x["repeat"], nxt)
+                            x["at"] = nxt.isoformat(timespec="seconds")
+                        else:
+                            self.items.remove(x)
+                if due:
+                    self._save()
+            for x in due:
+                if x.get("late") and self.skip_late:
+                    try:
+                        if self.skip_late(f"{x['id']}@{x['at']}"):
+                            log.info("Напоминание «%s» уже пришло в Telegram, пока компьютер был выключен", x.get("text"))
+                            continue
+                    except Exception:  # noqa: BLE001
+                        log.debug("проверка напоминания с сервера", exc_info=True)
+                try:
+                    self.on_fire(x)
+                except Exception:  # noqa: BLE001
+                    log.exception("напоминание")
+
+    def occurrences(self, days=14, limit=400):
+        """Будущие срабатывания на days дней вперёд (с повторами) -> [{"id": "id@время", "at": unix, "text"}] — для сервера,
+        который пришлёт их в Telegram, если компьютер выключен. Дела (job) не отдаём: их выполняет только компьютер.
+        Не больше 60 повторов одной записи."""
+        from when import next_time
+        now, end = datetime.now(), datetime.now() + timedelta(days=days)
+        out = []
+        with self._lock:
+            items = [dict(x) for x in self.items]
+        for x in items:
+            if x.get("paused") or x.get("kind") == "job":
+                continue
+            try:
+                at = datetime.fromisoformat(x["at"])
+            except (ValueError, KeyError, TypeError):
+                continue
+            for _ in range(60):
+                if at > end:
+                    break
+                if at >= now - timedelta(minutes=1):
+                    out.append({"id": f"{x['id']}@{at.isoformat(timespec='seconds')}", "at": int(at.timestamp()),
+                                "text": x.get("text") or ("Будильник" if x.get("kind") == "alarm" else "Напоминание")})
+                if not x.get("repeat"):
+                    break
+                at = next_time(x["repeat"], at)
+        out.sort(key=lambda r: r["at"])
+        return out[:limit]
+
+    def done_elsewhere(self, occ):
+        """Срабатывание «id@время» уже случилось на сервере: разовое — убрать, с повтором — перейти к следующему."""
+        from when import next_time
+        rid, _, when = str(occ).partition("@")
+        with self._lock:
+            for x in list(self.items):
+                if x["id"] == rid and x["at"] == when:
+                    if x.get("repeat"):
+                        nxt = next_time(x["repeat"], datetime.fromisoformat(when))
+                        while nxt <= datetime.now():
+                            nxt = next_time(x["repeat"], nxt)
+                        x["at"] = nxt.isoformat(timespec="seconds")
+                    else:
+                        self.items.remove(x)
+                    self._save()
+                    return True
+        return False
+
+
+# значения repeat из схемы set_reminder -> повтор в формате when.py
+REPEAT_WORDS = {"daily": {"kind": "daily"}, "weekdays": {"kind": "weekly", "days": [0, 1, 2, 3, 4]},
+                "weekends": {"kind": "weekly", "days": [5, 6]}, "weekly": {"kind": "weekly"},
+                "monthly": {"kind": "monthly"}, "hourly": {"kind": "interval", "minutes": 60}}
+
+
+def _when(a):
+    """Аргументы set_reminder -> (когда, повтор, текст, вид). Главное — when по-русски («завтра в 9», «каждый день в 8»):
+    разбираем сами (when.parse), не полагаясь на модель; запасные пути — in_minutes, at, repeat. Не поняли — ToolError."""
+    from when import next_time, parse
+    text = (a.get("text") or "").strip()
+    phrase = str(a.get("when") or "").strip()
+    if phrase:
+        r = parse("напомни " + phrase + " " + text)
+        if r:
+            return r["at"], r["repeat"], text or r["text"], r["kind"]
+    rep = a.get("repeat")
+    if isinstance(rep, str):
+        rep = dict(REPEAT_WORDS.get(rep.strip().lower(), {})) or None
+    if isinstance(rep, dict) and rep.get("kind") == "interval" and a.get("every_minutes"):
+        rep["minutes"] = int(float(a["every_minutes"]))
+    if a.get("in_minutes") is not None:
+        when = datetime.now() + timedelta(minutes=float(a["in_minutes"]))
+        return when, rep, text, "reminder"
+    at = str(a.get("at") or "").strip()
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S", "%H:%M", "%d.%m.%Y %H:%M"):
+        try:
+            t = datetime.strptime(at, fmt)
+            if fmt == "%H:%M":                           # только время — ближайшее: сегодня или завтра
+                t = datetime.combine(datetime.now().date(), t.time())
+                if t <= datetime.now():
+                    t += timedelta(days=1)
+            if rep and rep.get("kind") != "interval":
+                rep.setdefault("time", f"{t:%H:%M}")
+                if rep["kind"] == "weekly" and not rep.get("days"):
+                    rep["days"] = [t.weekday()]
+                if rep["kind"] == "monthly" and not rep.get("day"):
+                    rep["day"] = t.day
+            return t, rep, text, "reminder"
+        except ValueError:
+            continue
+    if rep and rep.get("kind") == "interval":
+        return next_time(rep, datetime.now()), rep, text, "reminder"
+    raise ToolError("скажи, когда напомнить: when («через 10 минут», «завтра в 9», «каждый день в 8») "
+                    "или in_minutes, или at (ГГГГ-ММ-ДД ЧЧ:ММ)")
+
+
+# «в будни» / «по выходным» в тексте или в when
+_WEEKDAYS_RX = re.compile(r"(?:^|\s)(?:по\s+будням|в\s+будни|будни|будний\s+день|в\s+рабочие\s+дни|по\s+рабочим\s+дням|рабочие\s+дни)"
+                          r"(?=\s|$|[,.:;—-])", re.I)
+_WEEKENDS_RX = re.compile(r"(?:^|\s)(?:по\s+выходным|в\s+выходные|выходные(?:\s+дни)?)(?=\s|$|[,.:;—-])", re.I)
+
+
+def _fix_days(a, rep, text):
+    """Модель написала «в будни» в тексте или в when, а повтор поставила «каждый день» — исправляем: только будни
+    (или только выходные), а «В будни -» из текста убираем. -> (повтор, текст)."""
+    said = f"{a.get('when') or ''} {text}"
+    days = [0, 1, 2, 3, 4] if _WEEKDAYS_RX.search(said) else [5, 6] if _WEEKENDS_RX.search(said) else None
+    if days and rep and rep.get("kind") in ("daily", "weekly") and rep.get("days") != days:
+        rep = dict(rep, kind="weekly", days=days)
+    if days:
+        text = _WEEKENDS_RX.sub(" ", _WEEKDAYS_RX.sub(" ", text)).strip(" -—–:,.") or text
+        text = text[:1].upper() + text[1:]
+    return rep, text
+
+
+def t_reminder(a, ctx):
+    from when import describe_repeat, human
+    when, rep, text, kind = _when(a)
+    rep, text = _fix_days(a, rep, text)
+    if rep and rep.get("kind") == "weekly" and rep.get("days") and when.weekday() not in rep["days"]:
+        from when import next_time
+        when = next_time(rep, datetime.now())              # первый раз — в ближайший подходящий день
+    item = ctx["reminders"].add(when, text or "Напоминание", rep, kind)
+    return (f"Напоминание «{item['text']}» поставлено: {human(when)}" + (f", {describe_repeat(rep)}" if rep else "") +
+            f" (id {item['id']}). Подтверди коротко одной фразой.")
+
+
+def calc_eval(expr, today=None):
+    """Безопасный счёт: числа, + - * / // % **, скобки, проценты («17% * 2350», «2350 * 17%»), round abs min max sqrt,
+    даты: days_until("2027-01-01") — дней до даты, days_between("2026-10-01", "2026-12-31"), weekday("2026-10-14"),
+    date_add("2026-10-10", 30). today — для проверок. -> число или строка. Ошибка — ToolError."""
+    import ast
+    import datetime as _dt
+    import math
+    import operator as op
+    today = today or _dt.date.today()
+
+    def d(x):
+        try:
+            return _dt.date.fromisoformat(str(x))
+        except ValueError:
+            raise ToolError(f"дата «{x}» — нужна в виде ГГГГ-ММ-ДД")
+    WDN = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+    fns = {"round": round, "abs": abs, "min": min, "max": max, "sqrt": math.sqrt, "floor": math.floor, "ceil": math.ceil,
+           "days_until": lambda x: (d(x) - today).days, "days_between": lambda a, b: (d(b) - d(a)).days,
+           "weekday": lambda x: WDN[d(x).weekday()], "date_add": lambda x, n: (d(x) + _dt.timedelta(days=int(n))).isoformat(),
+           "today": lambda: today.isoformat()}
+    ops = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv, ast.FloorDiv: op.floordiv,
+           ast.Mod: op.mod, ast.Pow: op.pow, ast.USub: op.neg, ast.UAdd: op.pos}
+    src = str(expr or "").strip().replace("×", "*").replace("÷", "/").replace("^", "**")
+    src = re.sub(r"(\d)\s+(?=\d{3}\b)", r"\1", src)                  # «1 437» — одно число
+    src = re.sub(r"(?<=\d),(?=\d)", ".", src)                           # 399,5 → 399.5
+    src = re.sub(r"(\d+(?:\.\d+)?)\s*%", r"(\1/100)", src)              # 17% → (17/100)
+    if not src or len(src) > 300:
+        raise ToolError("пустое или слишком длинное выражение")
+
+    def ev(n):
+        if isinstance(n, ast.Expression):
+            return ev(n.body)
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float, str)):
+            return n.value
+        if isinstance(n, ast.BinOp) and type(n.op) in ops:
+            a, b = ev(n.left), ev(n.right)
+            if isinstance(n.op, ast.Pow) and abs(b) > 100:
+                raise ToolError("слишком большая степень")
+            return ops[type(n.op)](a, b)
+        if isinstance(n, ast.UnaryOp) and type(n.op) in ops:
+            return ops[type(n.op)](ev(n.operand))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in fns and not n.keywords:
+            return fns[n.func.id](*[ev(x) for x in n.args])
+        raise ToolError("в выражении можно только числа, + - * / % ( ) и функции: " + ", ".join(fns))
+    try:
+        r = ev(ast.parse(src, mode="eval"))
+    except ToolError:
+        raise
+    except ZeroDivisionError:
+        raise ToolError("деление на ноль")
+    except (SyntaxError, TypeError, ValueError) as e:
+        raise ToolError(f"не понял выражение: {e}")
+    if isinstance(r, float):
+        r = round(r, 10)
+        if r.is_integer():
+            r = int(r)
+    return r
+
+
+def t_calc(a, ctx):
+    r = calc_eval(a.get("expression", ""))
+    shown = str(r).replace(".", ",") if isinstance(r, float) else str(r)
+    return f"{a.get('expression', '').strip()} = {shown}"
+
+
+def t_list_reminders(a, ctx):
+    from when import describe_repeat, human
+    items = [x for x in ctx["reminders"].items if not x.get("paused")]
+    if not items:
+        return "Напоминаний нет."
+    return "\n".join(f"{x['id']}: {human(datetime.fromisoformat(x['at']))} — {x['text']}" +
+                     (f" ({describe_repeat(x['repeat'])})" if x.get("repeat") else "") for x in items)
+
+
+def t_cancel_reminder(a, ctx):
+    return "Отменил." if ctx["reminders"].cancel(a.get("id") or a.get("text") or "") else "Не нашёл такого напоминания."
+
+
+# ---------- папка ассистента ----------
+
+def _ws(ctx):
+    """Папка ассистента (workspace.py) из ctx. Все пути инструментов к ней проходят через её проверки (ws.safe)."""
+    ws = ctx.get("workspace")
+    if ws is None:
+        raise ToolError("папка ассистента недоступна")
+    return ws
+
+
+def _ws_call(fn):
+    """Выполнить fn, превратив WorkspaceError в ToolError."""
+    from workspace import WorkspaceError
+    try:
+        return fn()
+    except WorkspaceError as e:
+        raise ToolError(str(e)) from e
+
+
+def t_save_note(a, ctx):
+    rel = _ws_call(lambda: _ws(ctx).save_note(a.get("title", ""), a.get("text", ""), a.get("folder", ""),
+                                              bool(a.get("append"))))
+    return f"Записал в папку Dewiar: {rel}"
+
+
+# Бюджет, лимит, «заложим 70 тысяч» — план, а не трата: в расходы не пишем (иначе «потрачено 70 000» в отчёте)
+PLAN_RX = re.compile(r"\b(?:бюджет|лимит)\w*\s+(?:на|для)\b|^\s*(?:бюджет|лимит|план)\w*\b|заложи\w*|запланир\w*|планиру\w*|"
+                     r"(?:увелич|уменьш|повыш|сниж)\w*\s+(?:с|до)\s+\d", re.I)
+SPENT_RX = re.compile(r"из бюджета|потрат|купил|оплат|заплат|получил|пришл|зарплат", re.I)
+
+
+def is_plan(note):
+    return bool(PLAN_RX.search(note or "")) and not SPENT_RX.search(note or "")
+
+
+def t_money_add(a, ctx):
+    m = ctx.get("money")
+    if m is None:
+        raise ToolError("учёт денег недоступен")
+    if is_plan(f"{a.get('category') or ''} {a.get('note') or ''}".strip()) or is_plan(a.get("note") or ""):
+        return ("Не записано: это план (бюджет, лимит), а не трата или доход — в расходы не пишу. Запомни его как факт "
+                "(remember, например «Бюджет на мебель — 65 тысяч рублей»): новое значение заменит старое и сохранит историю.")
+    from money import fmt
+    try:
+        it = m.add(a.get("kind") or "expense", a.get("amount") or 0, a.get("currency") or None, a.get("category") or "",
+                   a.get("note") or "", a.get("date") or None)
+    except (TypeError, ValueError) as e:
+        raise ToolError(str(e)) from e
+    return f"Записано: {'доход' if it['kind'] == 'income' else 'расход'} {fmt(it['amount'], it['currency'])}, {it['category']}, {it['date']}."
+
+
+def t_money_report(a, ctx):
+    m = ctx.get("money")
+    if m is None:
+        raise ToolError("учёт денег недоступен")
+    import datetime as _dt
+    from money import fmt
+    end = a.get("to") or _dt.date.today().isoformat()
+    start = a.get("from") or _dt.date.today().replace(day=1).isoformat()
+    sm = m.summary(start, end)
+    if not sm["count"]:
+        return f"С {start} по {end} записей о деньгах нет."
+    out = [f"С {start} по {end}, записей: {sm['count']}."]
+    for c in sm["by_currency"]:
+        out.append(f"{c['currency']}: доходы {fmt(c['income'], c['currency'])}, расходы {fmt(c['expense'], c['currency'])}, "
+                   f"остаток {fmt(c['balance'], c['currency'])}. Расходы по категориям: "
+                   + ", ".join(f"{x['name']} {fmt(x['sum'], c['currency'])}" for x in c["expense_cats"]) + ".")
+    last = m.list(start, end)[:15]
+    out.append("Последние: " + "; ".join(f"{x['date']} {'+' if x['kind'] == 'income' else '−'}{x['amount']} "
+                                         f"{x['currency']} {x['note'] or x['category']}" for x in last))
+    return "\n".join(out)
+
+
+def t_calendar_list(a, ctx):
+    """Календарь по дням (engine.calendar_month: события, напоминания, заметки, задачи, деньги); не больше 300 строк."""
+    eng = ctx.get("engine")
+    if eng is None:
+        raise ToolError("календарь недоступен")
+    import datetime as _dt
+    end = _dt.date.fromisoformat(a.get("to") or _dt.date.today().isoformat())
+    start = _dt.date.fromisoformat(a.get("from") or (end - _dt.timedelta(days=6)).isoformat())
+    out, y, m = [], start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        days = eng.calendar_month(y, m)["days"]
+        for d in sorted(days):
+            if start.isoformat() <= d <= end.isoformat():
+                for it in days[d]:
+                    if it["type"] == "money":
+                        out.append(f"{d} деньги: {'+' if it['kind'] == 'income' else '−'}{it['amount']} {it['currency']} {it['title']}")
+                    else:
+                        kind = {"reminder": "сделано" if it.get("done") else "напоминание", "note": "заметка",
+                                "diary": "дневник", "task": "задача", "event": f"событие ({it.get('cal', 'календарь')})"}.get(it["type"], it["type"])
+                        tm = (it.get("time") or "") + (f"–{it['end']}" if it.get("end") else "")
+                        out.append(f"{d} {tm} {kind}: {it.get('title', '')}".replace("  ", " ") + (f", {it['place']}" if it.get("place") else ""))
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return "\n".join(out[-300:]) or "За этот период в календаре ничего нет."
+
+
+def t_find_notes(a, ctx):
+    """Сначала поиск recall.py (ранжированный, с Obsidian), ничего — простой поиск по папке ассистента."""
+    rc = ctx.get("recall")
+    if rc is not None:
+        res = rc.search(a.get("query", ""), limit=8)
+        if res:
+            return "\n".join(f"{r['path']}: {r['snippet'][:300]}" for r in res) + \
+                "\n\nЦеликом — read_file с путём."
+    res = _ws_call(lambda: _ws(ctx).find(a.get("query", "")))
+    if not res:
+        return "В папке Dewiar ничего подходящего не нашёл."
+    return "\n".join(f"{r['path']}: {r['snippet']}" for r in res)
+
+
+def t_read_file(a, ctx):
+    r = _ws_call(lambda: _ws(ctx).read(a.get("path", ""), limit=12000))
+    if r.get("binary"):
+        return f"{r['path']} — не текстовый файл ({r['size']} байт)."
+    return r["text"] + ("\n…(дальше обрезано)" if r.get("truncated") else "")
+
+
+def t_remember(a, ctx):
+    return _ws_call(lambda: _ws(ctx).remember(a.get("fact", "")))
+
+
+def t_write_diary(a, ctx):
+    who = ctx["persona_name"]() if ctx.get("persona_name") else ""
+    rel = _ws_call(lambda: _ws(ctx).diary(a.get("entry", ""), who))
+    return f"Записал в дневник ({rel})."
+
+
+def t_lab_write(a, ctx):
+    rel = _ws_call(lambda: _ws(ctx).lab_write(a.get("name", ""), a.get("content", "")))
+    return f"Файл сохранён: {rel}"
+
+
+def t_lab_run(a, ctx):
+    if DRY:                                              # тесты: записываем и всё равно запускаем (скрипт — в лаборатории)
+        launch(["lab_run", a.get("name", "")])
+    r = _ws_call(lambda: _ws(ctx).lab_run(a.get("name", ""), a.get("args", "")))
+    return f"Код завершения {r['code']}. Вывод (полностью — {r['log']}):\n{r['output'] or '(пусто)'}"
+
+
+def t_delete_files(a, ctx):
+    """Удаление только в корзину и только того, что разрешил guard.plan_delete (системное и главные папки — нельзя)."""
+    import guard
+    try:
+        plan = guard.plan_delete([str(x) for x in (a.get("paths") or []) if str(x).strip()])
+        if DRY:
+            launch(["trash"] + [x["path"] for x in plan])
+            return "В корзине (тест)"
+        done = guard.trash(plan)
+    except guard.Blocked as e:
+        raise ToolError(f"защита Dewiar: {e}. Это удалять нельзя — объясни пользователю почему") from e
+    except OSError as e:
+        raise ToolError(f"не получилось удалить: {e}") from e
+    return "Перемещено в корзину: " + ", ".join(done) + ". Восстановить можно из корзины."
+
+
+def t_smart_home(a, ctx):
+    h = ctx.get("home")
+    if h is None or not h.connected():
+        raise ToolError("умный дом Яндекса не подключён — студия → «Подключение» → «Умный дом»")
+    from smarthome import HomeError
+    act, target = a.get("action") or "list", (a.get("target") or "").strip()
+    try:
+        if act == "list":
+            return h.summary()
+        if act == "scenario":
+            sc = h.scenario(target)
+            if not sc:
+                raise ToolError(f"нет сценария «{target}». " + h.summary())
+            return f"Запущен сценарий «{h.run_scenario(sc)}»"
+        devs = h.match(target)
+        if not devs:
+            raise ToolError(f"не нашёл «{target}». " + h.summary())
+        n = h.act(devs, act, a.get("value"))
+        return f"Готово: {', '.join(d['name'] for d in devs)} ({n} из {len(devs)} ответили)"
+    except HomeError as e:
+        raise ToolError(str(e)) from e
+
+
+def t_power(a, ctx):
+    pw = ctx.get("power")
+    if pw is None:
+        raise ToolError("управление питанием недоступно")
+    act = a.get("action") or ""
+    if act == "cancel":
+        was = pw.cancel()
+        if ctx.get("engine"):
+            ctx["engine"].emit("power", cancelled=True)
+        return "Выключение отменено." if was else "Ничего не было запланировано."
+    try:
+        msg = pw.schedule(act)
+    except ValueError as e:
+        raise ToolError(str(e)) from e
+    if ctx.get("engine"):
+        # виджету: показать отсчёт с кнопкой «Отменить»
+        ctx["engine"].emit("power", action=act, seconds=60 if act in ("shutdown", "reboot", "logout") else 0)
+    return msg
+
+
+def t_widget(a, ctx):
+    """Виджет — в трей или обратно. Обычно «спрячься» ловит _window_cmd без модели; это — когда фраза расслышана
+    неточно и её поняла модель (иначе она обещала «ухожу в трей» и оставалась на экране)."""
+    eng = ctx.get("engine")
+    if eng is None or not getattr(getattr(eng, "bridge", None), "clients", None):
+        raise ToolError("виджета на экране нет")
+    act = "show" if a.get("action") == "show" else "tray"
+    if act == "tray":
+        eng._tray_at = __import__("time").monotonic()    # спрятали — не заговаривать первой (Engine._welcome_back)
+    eng.emit("window", do=act)
+    return "Виджет спрятан в трей: позовут по имени — появлюсь." if act == "tray" else "Виджет снова на экране."
+
+
+# ---------- телевизор (Chromecast / Google TV / Android TV) ----------
+
+def _catt(args, timeout=40, device=""):
+    """Запустить catt (трансляция на Chromecast) -> (код выхода, вывод). Берём catt рядом с нашим Python (venv)."""
+    import sys as _sys
+    from pathlib import Path as _P
+    exe = _P(_sys.executable).with_name("catt")
+    cmd = [str(exe) if exe.exists() else "catt"] + (["-d", device] if device else []) + args
+    if DRY:
+        launch(cmd)
+        return 0, "ok"
+    if WIN:                                 # в Windows нет отдельной команды catt — запускаем модуль
+        py = _sys.executable
+        if py.lower().endswith("pythonw.exe"):          # pythonw не даёт вывода — нужен консольный python.exe
+            py = py[:-len("pythonw.exe")] + "python.exe"
+        cmd = [py, "-X", "utf8", "-c", "from catt.cli import main; main()"] + cmd[1:]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace",
+                           creationflags=0x08000000 if WIN else 0)
+    except FileNotFoundError as e:
+        raise ToolError("не установлен модуль трансляции (catt) — переустановите Dewiar") from e
+    except subprocess.TimeoutExpired as e:
+        raise ToolError("телевизор не ответил вовремя") from e
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def _tv_device(a, ctx):
+    """Имя телевизора: из аргумента, иначе из настроек tools.tv_device, иначе "" (catt выберет сам)."""
+    return (a.get("device") or (ctx["settings"].get("tools", "tv_device") or "") if ctx.get("settings") else a.get("device") or "").strip()
+
+
+def t_tv(a, ctx):
+    action = a.get("action", "play")
+    dev = _tv_device(a, ctx)
+    if action == "devices":
+        code, out = _catt(["scan"], timeout=25)
+        if code or "No devices" in out:
+            return ("Телевизоров с Chromecast в сети не нашёл. Подходят Chromecast, Google TV, Android TV и телевизоры "
+                    "со встроенным Chromecast (Sony, Philips, Xiaomi, TCL…), в той же сети Wi-Fi, что и компьютер.")
+        return out
+    if action == "play":
+        what = (a.get("url") or a.get("query") or "").strip()
+        if not what:
+            raise ToolError("что показать? нужна ссылка или что найти на YouTube")
+        if not re.match(r"^https?://", what):               # «включи на телевизоре клип …» — ищем на YouTube
+            try:
+                import yt_dlp
+                with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as y:
+                    info = y.extract_info(f"ytsearch1:{what}", download=False)
+                e = (info.get("entries") or [None])[0]
+                if not e:
+                    raise ToolError(f"на YouTube не нашлось «{what}»")
+                what = e.get("url") or f"https://www.youtube.com/watch?v={e['id']}"
+            except ToolError:
+                raise
+            except Exception as ex:  # noqa: BLE001
+                raise ToolError(f"не получилось найти на YouTube: {ex}") from ex
+        code, out = _catt(["cast", what], timeout=60, device=dev)
+        if code:
+            raise ToolError(out[-300:] or "не получилось включить на телевизоре")
+        return f"Включил на телевизоре: {what}"
+    if action == "site":
+        url = (a.get("url") or "").strip()
+        if not re.match(r"^https?://", url):
+            raise ToolError("нужен адрес сайта")
+        code, out = _catt(["cast_site", url], device=dev)
+        if code:
+            raise ToolError(out[-300:] or "не получилось показать сайт на телевизоре")
+        return f"Сайт {url} открыт на телевизоре."
+    cmds = {"pause": ["pause"], "resume": ["play"], "stop": ["stop"], "status": ["status"]}
+    if action == "volume":
+        v = max(0, min(100, int(a.get("level", 30))))
+        cmds["volume"] = ["volume", str(v)]
+    if action not in cmds:
+        raise ToolError("неизвестное действие")
+    code, out = _catt(cmds[action], device=dev)
+    if code:
+        raise ToolError(out[-300:] or "телевизор не ответил")
+    return out or "Готово"
+
+
+# ---------- фоновые задачи ----------
+
+def _tm(ctx):
+    """TaskManager (tasks.py) из ctx, иначе ToolError."""
+    tm = ctx.get("tasks")
+    if tm is None:
+        raise ToolError("фоновые задачи недоступны")
+    return tm
+
+
+def t_start_task(a, ctx):
+    goal = (a.get("goal") or "").strip()
+    if not goal:
+        raise ToolError("опиши цель задачи")
+    try:
+        t = _tm(ctx).create(a.get("title") or goal[:50], goal, a.get("project") or "")
+    except ValueError as e:
+        raise ToolError(str(e)) from e
+    return (f"Задача «{t.title}» запущена в фоне. План и журнал — в папке «Задачи» и в студии. "
+            "Скажи пользователю одной фразой, что взялся и сообщишь, когда будет готово.")
+
+
+def t_task_status(a, ctx):
+    tm = _tm(ctx)
+    items = tm.list()
+    if not items:
+        return "Задач пока нет."
+    lines = []
+    for x in items[:6]:
+        prog = x.get("progress") or [0, 0]
+        extra = f", план {prog[0]} из {prog[1]}" if prog[1] else ""
+        q = f", вопрос: {x['question']}" if x.get("question") else ""
+        w = f", ждёт: {x['wait_reason']}" if x.get("status") == "sleeping" and x.get("wait_reason") else ""
+        lines.append(f"«{x['title']}» — {x['status_ru']}, шагов {x.get('steps', 0)}{extra}{q}{w}"
+                     + (f". Итог: {x['result'][:300]}" if x.get("result") else ""))
+    try:                                                    # главное из блокнота текущей задачи — что уже известно
+        cur = tm.get("")
+        nb = cur.notebook() if cur.status != "done" else ""
+        facts = [ln.strip() for ln in nb.splitlines() if ln.strip().startswith("- ")][:8]
+        if facts:
+            lines.append(f"Блокнот «{cur.title}»:\n" + "\n".join(facts))
+    except (KeyError, AttributeError, OSError):
+        pass
+    return "\n".join(lines)
+
+
+def t_stop_task(a, ctx):
+    try:
+        t = _tm(ctx).stop(a.get("name") or "")
+    except KeyError as e:
+        raise ToolError(str(e)) from e
+    return f"Задача «{t.title}» остановлена."
+
+
+def t_resume_task(a, ctx):
+    try:
+        t = _tm(ctx).start(a.get("name") or "")
+    except KeyError as e:
+        raise ToolError(str(e)) from e
+    return f"Продолжаю задачу «{t.title}»."
+
+
+def t_tell_task(a, ctx):
+    text = (a.get("text") or "").strip()
+    if not text:
+        raise ToolError("что передать задаче?")
+    try:
+        t = _tm(ctx).tell(a.get("name") or "", text)
+    except (KeyError, ValueError) as e:
+        raise ToolError(str(e)) from e
+    return f"Передал задаче «{t.title}» — она учтёт и продолжит работу."
+
+
+def t_call_persona(a, ctx):
+    fn = ctx.get("call_persona")
+    if fn is None:
+        raise ToolError("переключение персонажей недоступно")
+    return fn(str(a.get("name", "")))
+
+
+# ---------- реестр ----------
+
+# На сервере (main.py --server) нет экрана, звука, камеры и окна — эти инструменты там выключены.
+SERVER_OFF = {"open_url", "open_app", "open_path", "play_music", "play_radio", "play_youtube", "yandex_music", "media_control",
+              "set_volume", "look_at_screen", "save_screenshot", "look_through_camera", "widget", "power"}
+
+
+def S(props, req=()):
+    """JSON-схема параметров инструмента."""
+    return {"type": "object", "properties": props, "required": list(req)}
+
+
+# имя: (описание для модели, схема, риск, обработчик, название в студии)
+TOOLS = {
+    "open_url": ("Открыть сайт в браузере по умолчанию.", S({"url": {"type": "string", "description": "адрес сайта"}}, ["url"]), "safe", t_open_url, "Браузер: открыть сайт"),
+    "web_search": ("Найти в интернете свежую информацию (новости, погода, курсы, факты). Возвращает список результатов со ссылками.", S({"query": {"type": "string"}}, ["query"]), "safe", t_web_search, "Поиск в интернете"),
+    "read_webpage": ("Прочитать текст веб-страницы по адресу (например, из результатов поиска).", S({"url": {"type": "string"}}, ["url"]), "safe", t_read_webpage, "Чтение веб-страниц"),
+    "open_app": ("Запустить установленную программу по названию (Firefox, Терминал, Telegram, Калькулятор…).", S({"name": {"type": "string"}}, ["name"]), "safe", t_open_app, "Запуск программ"),
+    "open_path": ("Открыть файл или папку (можно «загрузки», «документы», «рабочий стол» или путь).", S({"path": {"type": "string"}}, ["path"]), "safe", t_open_path, "Открытие файлов и папок"),
+    "play_music": ("Включить музыку: открывает поиск в YouTube Music.", S({"query": {"type": "string", "description": "исполнитель, песня или настроение"}}), "safe", t_play_music, "Музыка в YouTube Music"),
+    "play_radio": ("Включить радио онлайн внутри ассистента: по названию станции («Европа Плюс», «Радио Маяк»), жанру "
+                   "(«джаз», «рок», «классика», «релакс») или пусто — популярное русское. Останавливается голосом: «стоп», «пауза».",
+                   S({"query": {"type": "string"}}), "safe", t_play_radio, "Радио"),
+    "play_youtube": ("Найти и показать ролик на YouTube (откроется в браузере и сразу заиграет): клип, видео, лекция, "
+                     "обзор. query — что искать.", S({"query": {"type": "string"}}, ["query"]), "safe", t_play_youtube,
+                     "Ролик YouTube"),
+    "yandex_music": ("Яндекс Музыка: открыть поиск (жанр, настроение, исполнитель, песня) в приложении Яндекс Музыки, если оно "
+                     "установлено, иначе на сайте. Когда просят музыку в Яндекс Музыке или пользователь только что открыл её. "
+                     "Запустить/остановить воспроизведение потом — media_control.",
+                     S({"query": {"type": "string"}}), "safe", t_yandex_music, "Яндекс Музыка"),
+    "media_control": ("Нажать кнопку плеера, который уже открыт (Яндекс Музыка, браузер, Spotify…): play — играть, pause — "
+                      "пауза, next/previous — трек вперёд/назад. Всегда этим, а не кликами по экрану и не командами терминала.", S({"action": {"type": "string", "enum": ["play", "pause", "play_pause", "next", "previous", "stop"]}}, ["action"]), "safe", t_media, "Управление плеером"),
+    "set_volume": ("Громкость системы: percent (0–150), или change (+/-), или mute (true/false).", S({"percent": {"type": "integer"}, "change": {"type": "integer"}, "mute": {"type": "boolean"}}), "safe", t_volume, "Громкость"),
+    "system_status": ("Состояние компьютера: батарея, память, диск, нагрузка.", S({}), "safe", t_system, "Состояние компьютера"),
+    "set_reminder": ("Поставить напоминание, будильник или таймер, в том числе повторяющееся. when — когда, обычными "
+                     "словами по-русски: «через 10 минут», «завтра в 9», «в пятницу в 18:30», «каждый день в 8», «по "
+                     "будням в 9:15», «каждые 2 часа». Будни, выходные, дни недели — только в when, не в text. text — о чём напомнить, коротко.",
+                     S({"text": {"type": "string"}, "when": {"type": "string"}, "in_minutes": {"type": "number"},
+                        "at": {"type": "string"}, "repeat": {"type": "string", "enum": list(REPEAT_WORDS)}}, ["text"]),
+                     "safe", t_reminder, "Напоминания и таймеры"),
+    "list_reminders": ("Список активных напоминаний.", S({}), "safe", t_list_reminders, "Напоминания: список"),
+    "calc": ("Посчитать точно: любые вычисления (проценты, суммы, скидки, деление, курсы) и даты. Считай ВСЕГДА этим "
+             "инструментом, не в уме. Выражение как в Python: 2350 * 17 / 100, (1200 - 15%) * 3; даты в виде ГГГГ-ММ-ДД: "
+             "days_until(\"2027-01-01\") — сколько дней осталось до даты, days_between(\"2026-10-01\", \"2026-12-31\"), "
+             "weekday(\"2026-10-14\") — день недели, date_add(\"2026-10-10\", 30) — дата через 30 дней.",
+             S({"expression": {"type": "string", "description": "выражение"}}, ["expression"]), "safe", t_calc, "Калькулятор"),
+    "cancel_reminder": ("Отменить напоминание по id или тексту.", S({"id": {"type": "string"}}, ["id"]), "safe", t_cancel_reminder, "Напоминания: отмена"),
+    "look_at_screen": ("Посмотреть на экран пользователя (снимок придёт картинкой; нужна модель со зрением). Когда спрашивают, что на "
+                       "экране, просят посмотреть на ошибку, окно, текст, график.", S({"question": {"type": "string"}}),
+                       "safe", t_look_screen, "Смотрю на экран"),
+    "send_email": ("Отправить письмо со своей почты пользователя. Кому (to) — адреса через запятую; пусто — самому "
+                   "пользователю («пришли мне на почту»). Тема, текст письма целиком и вложения — пути файлов из папки "
+                   "ассистента (заметки, отчёты задач, «Входящие»). Пиши письмо полностью, вежливо, по-русски.",
+                   S({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"},
+                      "attachments": {"type": "array", "items": {"type": "string"}}}, ["subject", "body"]),
+                   "confirm", t_send_email, "Отправить письмо"),
+    "send_telegram": ("Прислать пользователю в мессенджер (Telegram или MAX — куда подключён) сообщение (text) и/или файлы "
+                      "из папки ассистента (files — пути: заметки, отчёты задач, «Входящие», снимки). «Пришли мне в "
+                      "телеграм…», «скинь в макс…», «скинь на телефон…». to — telegram или max, если назван мессенджер.",
+                      S({"text": {"type": "string"}, "files": {"type": "array", "items": {"type": "string"}},
+                         "to": {"type": "string", "enum": ["telegram", "max"]}}),
+                      "safe", t_send_telegram, "Прислать в Telegram или MAX"),
+    "read_emails": ("Посмотреть почту пользователя: последние письма (кто, тема, начало). unread_only — только "
+                    "непрочитанные, query — слово для поиска (отправитель, тема, текст). Письма не помечаются прочитанными.",
+                    S({"limit": {"type": "integer"}, "unread_only": {"type": "boolean"}, "query": {"type": "string"}}),
+                    "safe", t_read_emails, "Проверить почту"),
+    "read_email": ("Прочитать одно письмо целиком по номеру из read_emails.", S({"uid": {"type": "string"}}, ["uid"]),
+                   "safe", t_read_email, "Прочитать письмо"),
+    "search_documents": ("Найти в документах пользователя на этом компьютере (папка «Знания»: инструкции, договоры, "
+                         "регламенты, книги, конспекты). Вызывай, когда вопрос про его документы или «что написано в…». "
+                         "Запрос — ключевые слова по-русски, без лишних слов.",
+                         S({"query": {"type": "string"}}, ["query"]), "safe", t_search_documents, "Мои документы"),
+    "ask_knowledge": ("Спросить Знания пользователя на сайте Dewiar — его загруженные документы, регламенты, базы "
+                      "знаний компании. Вызывай, когда вопрос про его документы, работу, компанию или «что у меня в "
+                      "Знаниях». Вопрос пиши полностью, без «это» и «там». Ответ приходит с источниками — назови их.",
+                      S({"question": {"type": "string"}, "base": {"type": "string", "description": "необязательно: название "
+                         "папки или раздела публичной библиотеки, если пользователь его назвал («в Библии», «в истории РФ»)"}},
+                        ["question"]), "safe", t_ask_knowledge, "Знания с сайта"),
+    "save_screenshot": ("Сделать снимок экрана и сохранить его файлом в «Изображения/Снимки экрана». Вызывай, когда "
+                        "просят «сделай скриншот», «сфотографируй экран», «сохрани экран». Смотреть на снимок не нужно.",
+                        S({}, []), "safe", t_save_screenshot, "Скриншот"),
+    "look_through_camera": ("Сделать кадр с веб-камеры (придёт картинкой). Когда просят посмотреть на что-то в руках "
+                            "или в комнате.", S({"question": {"type": "string"}}), "confirm", t_look_camera, "Камера"),
+    "create_skill": ("Создать новый навык (инструкцию для особой задачи), когда пользователь просит научиться чему-то "
+                     "или запомнить порядок действий. name — латиницей через дефис; description — когда применять; "
+                     "instructions — пошаговые инструкции для тебя самого.",
+                     S({"name": {"type": "string"}, "description": {"type": "string"}, "instructions": {"type": "string"}},
+                       ["name", "description", "instructions"]), "confirm", t_create_skill, "Создание навыка"),
+    "save_note": ("Сохранить заметку в папку ассистента (Markdown): когда просят записать, запомнить текст, составить "
+                  "список, план, конспект. title — короткое название; text — содержимое в Markdown; folder — подпапка "
+                  "(необязательно); append=true — дописать в существующую заметку.",
+                  S({"title": {"type": "string"}, "text": {"type": "string"}, "folder": {"type": "string"},
+                     "append": {"type": "boolean"}}, ["title", "text"]), "safe", t_save_note, "Заметки"),
+    "calendar_list": ("Календарь пользователя за период: встречи и события из его календарей (Google, Яндекс), "
+                      "напоминания (и что уже прозвенело), заметки, дневник, задачи, деньги — по дням. Для «что у меня "
+                      "завтра?», «какие встречи на неделе?», «что я сделал за неделю». from/to — ГГГГ-ММ-ДД "
+                      "(пусто — последние 7 дней; про будущее — укажи даты вперёд).", S({"from": {"type": "string"}, "to": {"type": "string"}}), "safe",
+                      t_calendar_list, "Календарь"),
+    "money_add": ("Записать уже сделанный расход или полученный доход: «купил продукты на 40», «получил зарплату». "
+                  "Бюджет, лимит, план («бюджет на мебель — 50 тысяч», «заложим 70») — НЕ расход и не доход: это remember. "
+                  "kind — expense|income; amount — число; currency — код (BYN, RUB, USD, EUR), пусто — основная; "
+                  "category — категория по-русски («Продукты», «Транспорт», «Зарплата»…); note — что именно; "
+                  "date — ГГГГ-ММ-ДД, пусто — сегодня. Несколько покупок — несколько вызовов.",
+                  S({"kind": {"type": "string", "enum": ["expense", "income"]}, "amount": {"type": "number"},
+                     "currency": {"type": "string"}, "category": {"type": "string"}, "note": {"type": "string"},
+                     "date": {"type": "string"}}, ["kind", "amount"]), "safe", t_money_add, "Деньги: записать"),
+    "money_report": ("Итоги личного бюджета за период: доходы, расходы по категориям, остаток, последние операции. "
+                     "from/to — ГГГГ-ММ-ДД (пусто — текущий месяц).",
+                     S({"from": {"type": "string"}, "to": {"type": "string"}}), "safe", t_money_report, "Деньги: отчёт"),
+    "find_notes": ("Найти в папке ассистента заметки, дневник, память по словам (что записывали раньше); если подключён "
+                   "Obsidian — и в заметках пользователя там (пути «obsidian:…»).",
+                   S({"query": {"type": "string"}}, ["query"]), "safe", t_find_notes, "Поиск по заметкам"),
+    "read_file": ("Прочитать файл из папки ассистента (путь из find_notes или из списка).",
+                  S({"path": {"type": "string"}}, ["path"]), "safe", t_read_file, "Чтение заметок"),
+    "remember": ("Запомнить надолго факт о пользователе: имя, близкие, работа, предпочтения, привычки, важные даты. "
+                 "Одна короткая фраза в третьем лице («Любит крепкий чай», «Дочь зовут Аня»).",
+                 S({"fact": {"type": "string"}}, ["fact"]), "safe", t_remember, "Память о вас"),
+    "write_diary": ("Записать в свой дневник короткое наблюдение после содержательного разговора: что обсуждали, что "
+                    "пользователю важно, что в следующий раз сделать лучше. Не чаще раза за разговор.",
+                    S({"entry": {"type": "string"}}, ["entry"]), "safe", t_write_diary, "Дневник"),
+    "lab_write": ("Записать файл в свою лабораторию (скрипт .py или .sh, данные, черновик) — когда задачу удобнее "
+                  "решить кодом: расчёты, обработка файлов, анализ. name — имя файла, можно с подпапкой.",
+                  S({"name": {"type": "string"}, "content": {"type": "string"}}, ["name", "content"]), "safe",
+                  t_lab_write, "Лаборатория: запись"),
+    "lab_run": ("Запустить скрипт из лаборатории (" + (".py — Python, .ps1 — PowerShell, .bat — cmd" if WIN else ".py — Python, .sh — bash") + ") и получить вывод. Работает 2 минуты максимум.",
+                S({"name": {"type": "string"}, "args": {"type": "string"}}, ["name"]), "confirm", t_lab_run,
+                "Лаборатория: запуск"),
+    "start_task": ("Запустить большую задачу в фоне: исследование с отчётом, работа с кодом проекта, подготовка "
+                   "документа, разбор файлов, дело на несколько дней с ожиданием ответов (вернуть билет, добиться "
+                   "ответа, проследить статус) — всё, что требует многих шагов. Ассистент работает сам по плану, "
+                   "ведёт блокнот фактов, ждёт и возвращается к делу, сообщает новости и скажет, когда готово. project — путь к папке проекта для работы с "
+                   "кодом (необязательно).",
+                   S({"title": {"type": "string"}, "goal": {"type": "string", "description": "подробная цель"},
+                      "project": {"type": "string"}}, ["goal"]), "safe", t_start_task, "Фоновая задача"),
+    "task_status": ("Как идут фоновые задачи: статус, прогресс, вопросы, итог.", S({}), "safe", t_task_status,
+                    "Задачи: статус"),
+    "stop_task": ("Остановить фоновую задачу (name — часть названия; пусто — текущую).",
+                  S({"name": {"type": "string"}}), "safe", t_stop_task, "Задачи: стоп"),
+    "resume_task": ("Продолжить остановленную или приостановленную задачу (или ждущую — прямо сейчас).",
+                    S({"name": {"type": "string"}}), "safe", t_resume_task, "Задачи: продолжить"),
+    "tell_task": ("Передать фоновой задаче новые сведения, уточнение или просьбу пользователя (например: «по багажу "
+                  "ответили, номер такой-то», «бюджет до 500 евро»). Ждущая задача сразу проснётся и учтёт. "
+                  "name — часть названия (пусто — текущая).",
+                  S({"name": {"type": "string"}, "text": {"type": "string"}}, ["text"]), "safe", t_tell_task,
+                  "Задачи: сообщить"),
+    "tv": ("Телевизор с Chromecast / Google TV / Android TV в домашней сети. action: play — включить видео по ссылке "
+           "или найти на YouTube (query); site — показать сайт; pause, resume, stop, volume (level 0–100), status; "
+           "devices — какие телевизоры видны. Используй, когда просят включить что-то на телевизоре или "
+           "«транслировать на ТВ».",
+           S({"action": {"type": "string", "enum": ["play", "site", "pause", "resume", "stop", "volume", "status", "devices"]},
+              "url": {"type": "string"}, "query": {"type": "string"}, "level": {"type": "integer"},
+              "device": {"type": "string", "description": "имя телевизора, если их несколько"}}, ["action"]),
+           "safe", t_tv, "Телевизор"),
+    "call_persona": ("Позвать другого персонажа команды (Агент, Лира, Патрик, Джарвис, Эва, Кодер или созданного "
+                     "пользователем), когда пользователь просит позвать, передать слово или поговорить с ним. После "
+                     "твоего ответа персонаж сам откликнется своим голосом и обликом и продолжит разговор.",
+                     S({"name": {"type": "string", "description": "имя персонажа"}}, ["name"]), "safe", t_call_persona,
+                     "Позвать персонажа"),
+    "delete_files": ("Удалить файлы или папки пользователя — В КОРЗИНУ (можно восстановить). paths — полные пути "
+                     "(~ — домашняя папка). Системные папки, домашнюю папку целиком и главные папки (Документы, "
+                     "Загрузки, Рабочий стол…) удалить нельзя — защита откажет. Для удаления используй только это, не "
+                     "команды терминала. Если просят «удали всё» — сначала уточни, что именно.",
+                     S({"paths": {"type": "array", "items": {"type": "string"}}}, ["paths"]), "confirm", t_delete_files,
+                     "Удаление в корзину"),
+    "smart_home": ("Умный дом Яндекса (устройства, что у Алисы): action — list (какие есть устройства и сценарии), on, off, "
+                   "brightness (value 1–100), brighter, dimmer, temperature (value, °C), warm (value −1 теплее, 1 холоднее), "
+                   "scenario (target — название сценария). target — устройство и/или комната словами: «свет в спальне», "
+                   "«весь свет», «кондиционер», «розетка на кухне».",
+                   S({"action": {"type": "string", "enum": ["list", "on", "off", "brightness", "brighter", "dimmer", "temperature", "warm", "scenario"]},
+                      "target": {"type": "string"}, "value": {"type": "number"}}, ["action"]), "safe", t_smart_home, "Умный дом"),
+    "widget": ("Спрятать свой виджет в трей (tray) или вернуть на экран (show) — когда просят «спрячься», «уйди в трей», "
+               "«покажись». Скажи после этого одной короткой фразой.",
+               S({"action": {"type": "string", "enum": ["tray", "show"]}}, ["action"]), "safe", t_widget, "Окно ассистента"),
+    "power": ("Питание компьютера: shutdown — выключить, reboot — перезагрузить (оба через минуту, можно отменить), "
+              "sleep — спящий режим, lock — заблокировать экран, logout — выйти из системы, cancel — отменить "
+              "выключение. Только когда пользователь явно просит.",
+              S({"action": {"type": "string", "enum": ["shutdown", "reboot", "sleep", "lock", "logout", "cancel"]}},
+                ["action"]), "confirm", t_power, "Питание компьютера"),
+    "server_run": ("Выполнить команду на сервере пользователя по SSH (Linux, bash) и вернуть вывод: проверить место, "
+                   "нагрузку, логи, службы, сайт; исправить проблему. server — имя сервера из списка, command — команда. "
+                   "Сначала смотри (df -h, free -m, systemctl status, journalctl -n 50, tail логов), потом предлагай "
+                   "исправление одной понятной командой. Интерактивное (top без -b, nano, less) не работает — бери "
+                   "top -bn1, cat, tail. Каждую команду пользователь подтверждает.",
+                   S({"server": {"type": "string"}, "command": {"type": "string"}, "timeout": {"type": "integer"}}, ["server", "command"]),
+                   "confirm", t_server_run, "Команды на сервере"),
+    "run_command": (("Выполнить команду в PowerShell (Windows)" if WIN else "Выполнить команду в терминале Linux (bash)") + " и вернуть вывод. Только если пользователь явно просит.", S({"command": {"type": "string"}}, ["command"]), "confirm", t_run_command, "Команды терминала"),
+}
+DEFAULT_OFF = set()          # команды терминала включены, но каждая — только после «Выполнить?»
+
+
+# инструменты навыков (skills.py): есть, только когда навыки включены; выполняет Toolbox.run
+SKILL_TOOLS = {
+    "use_skill": ("Загрузить инструкции навыка по имени (из списка навыков) и следовать им.",
+                  S({"name": {"type": "string"}}, ["name"])),
+    "read_skill_file": ("Прочитать дополнительный файл навыка (путь из списка файлов навыка).",
+                        S({"name": {"type": "string"}, "path": {"type": "string"}}, ["name", "path"])),
+}
+
+
+class Toolbox:
+    """Что модели доступно и как это выполнить: TOOLS + инструменты навыков + MCP. Пользуются чат (engine_tools.py)
+    и задачи (tasks.py)."""
+    def __init__(self, settings, reminders, skills=None, mcp=None):
+        self.s, self.reminders, self.skills, self.mcp = settings, reminders, skills, mcp
+        self.hooks = {}          # объекты и действия ядра (почта, задачи, Telegram, позвать персонажа…) — кладёт engine.py,
+                                 # уходят в ctx обработчиков; по ним же policy решает, подключена ли служба
+
+    def policy(self, name):
+        """-> (включён, нужно подтверждение). Инструменты неподключённых служб выключены — модель о них и не узнает."""
+        if name in SKILL_TOOLS:
+            return bool(self.skills and self.skills.enabled()), False
+        if self.mcp and self.mcp.has(name):
+            conf = (self.s.get("tools", "confirm") or {}).get(name)
+            return True, self.mcp.needs_confirm(name) if conf is None else bool(conf)
+        if name not in TOOLS:
+            return False, False
+        if name in ("send_email", "read_emails", "read_email"):     # только когда почта подключена
+            m = self.hooks.get("mail")
+            if not (m and m.configured()):
+                return False, False
+        if name in SERVER_OFF and self.hooks.get("server"):   # сервер без экрана и звука: «открыла сайт» было бы неправдой
+            return False, False
+        if name == "smart_home":                # только когда подключён умный дом Яндекса
+            h = self.hooks.get("home")
+            if not (h and h.connected()):
+                return False, False
+        if name == "send_telegram":             # только когда бот подключён к владельцу
+            tg = self.hooks.get("telegram")
+            if not (tg and tg.paired()):
+                return False, False
+        if name == "server_run":                # только когда добавлен хотя бы один сервер
+            sv = self.hooks.get("servers")
+            if not (sv and sv.items):
+                return False, False
+        if name == "search_documents":          # только когда в «Знаниях» есть документы
+            kn = self.hooks.get("knowledge")
+            if not (kn and kn.has_files()):
+                return False, False
+        if name == "ask_knowledge":             # только после входа в аккаунт сайта
+            acc = self.hooks.get("account")
+            if not (acc and acc.logged_in()):
+                return False, False
+        t = self.s.get("tools") or {}
+        on = t.get("enabled", {}).get(name, name not in DEFAULT_OFF)
+        conf = t.get("confirm", {}).get(name, TOOLS[name][2] == "confirm")
+        return bool(on), bool(conf)
+
+    def specs(self):
+        """Описания включённых инструментов для модели: [{name, description, parameters}]."""
+        out = [{"name": n, "description": d, "parameters": p} for n, (d, p, *_rest) in TOOLS.items()
+               if self.policy(n)[0]]
+        if self.skills and self.skills.enabled():
+            out += [{"name": n, "description": d, "parameters": p} for n, (d, p) in SKILL_TOOLS.items()]
+        if self.mcp:
+            out += self.mcp.specs()
+        return out
+
+    def title(self, name):
+        if name in TOOLS:
+            return TOOLS[name][4]
+        if name in SKILL_TOOLS:
+            return "Навык"
+        if self.mcp and self.mcp.has(name):
+            return self.mcp.title(name)
+        return name
+
+    def catalog(self):
+        """Список инструментов для студии (включён, нужно ли подтверждение)."""
+        return [{"name": n, "title": v[4], "description": v[0], "risk": v[2], "enabled": self.policy(n)[0],
+                 "confirm": self.policy(n)[1]} for n, v in TOOLS.items()]
+
+    def guard(self, name, args):
+        """Защита до вопроса «Выполнить?»: -> (причина запрета | None, подтверждение обязательно, текст вопроса | None).
+        Опасное подтверждается, даже если в настройках подтверждение для инструмента выключено."""
+        import guard
+        if name == "run_command":
+            v = guard.check_command(str((args or {}).get("command") or ""))
+            if v["level"] == "block":
+                return v["reason"], False, None
+            if v["level"] == "warn":
+                return None, True, f"{guard.describe_warn(v)} Выполнить: {args.get('command', '')}?"
+        if name == "server_run":
+            from servers import check as remote_check
+            v = remote_check(str((args or {}).get("command") or ""))
+            if v["level"] == "block":
+                return v["reason"] + " (на сервере)", False, None
+            if v["level"] == "warn":
+                return None, True, f"Осторожно: {v['reason']}. На сервере «{args.get('server', '')}» выполнить: {args.get('command', '')}?"
+        if name == "delete_files":
+            try:
+                plan = guard.plan_delete([str(x) for x in ((args or {}).get("paths") or []) if str(x).strip()])
+            except guard.Blocked as e:
+                return str(e), False, None
+            return None, True, guard.describe_delete(plan)
+        if name == "lab_run" and self.hooks.get("workspace"):
+            try:
+                p = self.hooks["workspace"].safe(str(Path("Лаборатория") / str((args or {}).get("name") or "").lstrip("/")))
+                if p.is_file() and p.suffix.lower() in (".sh", ".ps1", ".bat", ".cmd"):
+                    v = guard.check_command(p.read_text(encoding="utf-8", errors="replace"), cwd=str(p.parent))
+                    if v["level"] == "block":
+                        return v["reason"], False, None
+                    if v["level"] == "warn":
+                        return None, True, f"{guard.describe_warn(v)} Запустить {p.name}?"
+            except Exception:  # noqa: BLE001 — не прочитали скрипт: остаётся обычное подтверждение lab_run
+                pass
+        return None, False, None
+
+    def auto_ok(self, name, args):
+        """Можно без вопроса: для сервера выбрано «спрашивать только изменения» (ask="changes"), а команда только читает."""
+        if name != "server_run":
+            return False
+        sv = self.hooks.get("servers")
+        s = sv.find(str((args or {}).get("server") or "")) if sv else None
+        if not s or s.get("ask") != "changes":
+            return False
+        from servers import check as remote_check
+        v = remote_check(str((args or {}).get("command") or ""))
+        return v["level"] == "ok" and v["readonly"]
+
+    def describe(self, name, args):
+        """Как спросить подтверждение по-человечески."""
+        if name == "power":
+            return {"shutdown": "Выключить компьютер", "reboot": "Перезагрузить компьютер", "sleep": "Перевести компьютер в сон",
+                    "lock": "Заблокировать экран", "logout": "Выйти из системы", "cancel": "Отменить выключение"}.get(
+                args.get("action"), "Питание компьютера") + "?"
+        if name == "run_command":
+            return f"Выполнить команду: {args.get('command', '')}?"
+        if name == "server_run":
+            return f"На сервере «{args.get('server', '')}» выполнить: {args.get('command', '')}?"
+        if name == "look_through_camera":
+            return "Включить камеру и сделать кадр?"
+        if name == "create_skill":
+            return f"Создать навык «{args.get('name', '')}»: {args.get('description', '')}?"
+        if name == "lab_run":
+            return f"Запустить в лаборатории {args.get('name', '')}?"
+        if name == "send_email":
+            to = args.get("to") or "вам самим"
+            att = args.get("attachments") or []
+            return f"Отправить письмо «{args.get('subject', '')}» → {to}" + (f" с вложениями ({len(att)})" if att else "") + "?"
+        return f"Выполнить действие «{self.title(name)}»?"
+
+    def run(self, name, args):
+        """Выполнить инструмент -> текст или {"text", "image"}. Ошибки (ToolError и др.) ловит вызывающий."""
+        if not self.policy(name)[0]:
+            raise ToolError(f"инструмент {name} выключен или неизвестен")
+        if name == "use_skill":
+            return self.skills.use(str(args.get("name", "")))
+        if name == "read_skill_file":
+            return self.skills.read_file(str(args.get("name", "")), str(args.get("path", "")))
+        if self.mcp and self.mcp.has(name):
+            return self.mcp.call(name, args or {})
+        # _truncated — служебная пометка llm.py об оборванном ответе, обработчикам не нужна
+        args = {k: v for k, v in coerce_args(TOOLS[name][1], args).items() if not k.startswith("_trunc")}
+        return TOOLS[name][3](args or {}, {"settings": self.s, "reminders": self.reminders, "skills": self.skills, **self.hooks})
+
+
+def coerce_args(schema, args):
+    """Модели нередко присылают вместо строки список или объект, вместо числа — строку («5»), вместо true — «да».
+    Приводим к схеме инструмента, а не падаем с «'list' object has no attribute 'strip'»."""
+    if not isinstance(args, dict):
+        return {"text": str(args)} if args else {}
+    props = (schema or {}).get("properties") or {}
+    out = dict(args)
+    # нужное поле названо иначе ({"q": …} вместо {"query": …}) — единственный чужой ключ отдаём недостающему полю
+    missing = [k for k in (schema or {}).get("required") or [] if k not in out]
+    unknown = [k for k in out if k not in props and not k.startswith("_")]
+    if props and len(missing) == 1 and len(unknown) == 1:
+        out[missing[0]] = out.pop(unknown[0])
+    args = dict(out)
+    for k, v in args.items():
+        want = (props.get(k) or {}).get("type")
+        if want == "string" or (want is None and isinstance(v, list) and k in ("plan", "summary", "content", "text", "fact", "question", "reason", "query")):
+            if isinstance(v, list):
+                items = [x if isinstance(x, str) else json.dumps(x, ensure_ascii=False) for x in v]
+                if k == "plan":
+                    items = [x if re.match(r"^\s*([-*]\s*\[|#)", x) else f"- [ ] {x.lstrip('-* ').strip()}" for x in items]
+                out[k] = "\n".join(items) if k in ("plan", "content", "text", "summary") else " ".join(items)
+            elif isinstance(v, dict):
+                out[k] = json.dumps(v, ensure_ascii=False, indent=1)
+            elif v is None:
+                out[k] = ""
+            elif not isinstance(v, str):
+                out[k] = str(v).lower() if isinstance(v, bool) else str(v)
+        elif want in ("integer", "number") and isinstance(v, str):
+            try:
+                out[k] = int(float(v.replace(",", "."))) if want == "integer" else float(v.replace(",", "."))
+            except ValueError:
+                out.pop(k)
+        elif want == "boolean" and isinstance(v, str):
+            out[k] = v.strip().lower() in ("true", "1", "да", "yes")
+    return out
+
+
+def say_command(cmd):
+    """Команда списком -> строка для показа человеку (с кавычками shell)."""
+    return " ".join(shlex.quote(c) for c in cmd)

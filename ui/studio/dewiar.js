@@ -1,0 +1,453 @@
+/* Студия Dewiar: раздел «Dewiar.pro» (сводка по сервису карточками), Dewiar Облако по ключу (карточка в «Мозге», заряд,
+   пополнение, расход), подключение своего сервера моделей — и запуск студии: обработчик события hello.
+   Файлы студии подключаются по порядку из ui/settings.html и делят одну глобальную область; этот файл последний, поэтому
+   всё, что нужно всем разделам при старте, — здесь: core.on("hello") раздаёт снимок состояния ядра (S, personas,
+   пресеты, голоса) функциям всех файлов, а bindFields() в конце вешает обработчики на поля data-k.
+   hello приходит при каждом переподключении к ядру — обработчик должен выдерживать повторный запуск.
+   Команды ядра: device, sync_*, cloud_*, account_*, net*, av_*, update_*, rag_scope, probe_server, phone_config. */
+/* ---------- Dewiar.pro: всё о сервисе на одной странице ----------
+   DW — последние ответы ядра по каждой карточке; dwRender() рисует всё из DW, dwLoad(full) обновляет DW
+   (full — «Проверить всё»: заново спросить сайт, сеть и антивирус). dwSet — значок состояния карточки. */
+const DW = { acc: null, cloud: null, dev: null, av: null, tg: null, mx: null, upd: null, kb: null, checked: {} };
+const dwSet = (id, cls, text) => { const e = $("#dws-" + id); if (!e) return; e.className = "dws " + (cls || ""); e.textContent = text; };
+function dwSyncRender() {
+  const s = DW.sync; if (!s) return;
+  const t = s.at ? new Date(s.at * 1000) : null, devs = (s.devices || []).map(d => d.name).filter(Boolean);
+  $("#dw-sync-on").checked = !!s.on; $("#dw-sync-on").disabled = !s.available;
+  $("#dw-sync-via").textContent = s.available ? "по " + s.via : "нужен вход аккаунтом или ключ Dewiar (карточки выше)";
+  $("#dw-sync-now").disabled = !s.available || !s.on;
+  $("#dw-sync-st").textContent = !s.available ? "" : !s.on ? "выключено" : s.ok === false ? s.error
+    : t ? `в ${t.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` + (devs.length ? ` · ещё: ${devs.join(", ")}` : " · других устройств пока нет") : "первая — в течение минуты";
+  dwSet("sync", !s.available || !s.on ? "" : s.ok === false ? "bad" : s.ok ? "ok" : "", !s.available ? "нет входа" : !s.on ? "выключена" : s.ok === false ? "ошибка" : s.ok ? "работает" : "—");
+}
+$("#dw-sync-on").onchange = async (e) => { DW.sync = await core.call("sync_set", { on: e.target.checked }).catch(x => (toast(x.message), DW.sync)); dwSyncRender(); };
+$("#dw-sync-now").onclick = async (e) => { e.target.disabled = true; $("#dw-sync-st").textContent = "синхронизирую…";
+  DW.sync = await core.call("sync_now").catch(x => (toast(x.message), DW.sync)); dwSyncRender(); };
+function dwRender() {
+  dwSyncRender();
+  const a = DW.acc || {}, c = DW.cloud || {}, d = DW.dev, st = (S && S.stt) || {}, tt = (S && S.tts) || {};
+  // аккаунт
+  $("#dw-acc-out").style.display = a.logged_in ? "none" : ""; $("#dw-acc-in").style.display = a.logged_in ? "" : "none";
+  $("#dw-who").textContent = a.logged_in ? (a.user && a.user.login || a.login) : "";
+  $("#dw-host").textContent = (a.server || "https://dewiar.pro").replace(/^https?:\/\//, "");
+  if (!a.logged_in && a.login && !$("#dw-login").value) $("#dw-login").value = a.login;
+  if (a.problem && !a.logged_in) { $("#dw-acc-res").className = "res bad"; $("#dw-acc-res").textContent = a.problem; }
+  dwSet("acc", a.logged_in ? "ok" : a.problem ? "bad" : "", a.logged_in ? "вход выполнен" : a.problem ? "вход устарел" : "не выполнен");
+  // модели
+  const on = !!c.connected;
+  $("#dw-cloud-on").style.display = on ? "" : "none"; $("#dw-cloud-off").style.display = on ? "none" : "";
+  if (on) {
+    // ключ облака показывает заряд в %, а вход аккаунтом (c.site) — общий счёт сайта в ИИ-талерах
+    const err = c.error && c.percent === undefined, pct = Math.max(0, Math.min(100, c.percent ?? 0));
+    const bal = c.balance_text || (c.balance != null ? String(c.balance).replace(".", ",") + " тал." : "");
+    $("#dw-pct").textContent = err ? "—" : c.site ? bal : pct + "%"; $("#dw-fill").style.width = (err ? 0 : Math.max(pct, c.empty ? 0 : 2)) + "%";
+    $("#dw-turns").textContent = err ? c.error : c.empty ? (c.site ? "на счёте закончились ИИ-талеры" : "заряд закончился")
+      : c.site ? "общий счёт с сайтом" + (c.turns ? ` · примерно на ${c.turns.toLocaleString("ru-RU")} ${turnsWord(c.turns)}` : "") : `хватит примерно на ${(c.turns || 0).toLocaleString("ru-RU")} ${turnsWord(c.turns || 0)}`;
+    $("#dw-cloud-who").textContent = (c.site ? "Счёт dewiar.pro" : c.account ? "По аккаунту dewiar.pro" : "Ключ …" + (c.tail || "")) + (c.active ? " · сейчас отвечают модели Dewiar" : " · сейчас отвечает ваша модель");
+    $("#dw-cloud-use").style.display = c.active ? "none" : "";
+    dwSet("cloud", err || c.frozen || c.empty ? "bad" : c.low ? "warn" : "ok", err ? "нет связи" : c.frozen ? "приостановлен" : c.empty ? "заряд 0" : c.low ? "мало заряда" : c.active ? "отвечают" : "в запасе");
+  } else dwSet("cloud", a.logged_in ? "warn" : "", "не подключены");
+  $("#dw-cloud-acc").style.display = !on && a.logged_in ? "" : "none";
+  // речь на сервере
+  const sttSrv = st.engine === "remote" && st.remote && (st.remote.cloud || st.remote.from_account);
+  const canStt = !!(d && (d.cloud_stt || d.account_stt)), ttsSrv = tt.engine === "remote" && tt.remote && tt.remote.from_account;
+  $("#dw-stt").checked = !!sttSrv; $("#dw-stt").disabled = !canStt && !sttSrv;
+  $("#dw-stt-why").textContent = canStt || sttSrv ? "Быстро и точно даже на слабом компьютере; немного расходует заряд."
+    : a.logged_in || (DW.cloud && DW.cloud.connected) ? "На сервере Dewiar распознавание речи сейчас не включено — компьютер распознаёт сам. Появится — переключатель станет доступен."
+    : "Станет доступно после входа в аккаунт (или с ключом Dewiar).";
+  const canTts = !!(a.logged_in && a.services && a.services.tts);
+  $("#dw-tts-row").style.display = canTts || ttsSrv ? "" : "none"; $("#dw-tts").checked = !!ttsSrv;
+  dwSet("speech", sttSrv ? "ok" : canStt ? "" : "", sttSrv ? (ttsSrv ? "слух и голос" : "слух на сервере") : canStt ? "выключено"
+    : a.logged_in || (DW.cloud && DW.cloud.connected) ? "нет на сервере" : "нужен вход");
+  // знания
+  const kbN = (personas || []).filter(p => (p.knowledge || []).length).length;
+  if (!a.logged_in) { dwSet("kb", "", "нужен вход"); $("#dw-kb-text").textContent = "Ваши документы на dewiar.pro и публичная библиотека. Загружают их на сайте, ассистент ищет в них ответы. Нужен вход в аккаунт."; }
+  else if (DW.kb && DW.kb.error) { dwSet("kb", "bad", "не отвечают"); $("#dw-kb-text").textContent = "Сайт Знаний не ответил: " + DW.kb.error + ". Нажмите «Проверить всё» ещё раз — если не поможет, проверьте «Сеть»."; }
+  else {
+    const n = DW.kb ? DW.kb.bases.length : null;
+    dwSet("kb", n ? "ok" : n === 0 ? "warn" : "", n ? `баз: ${n}` : n === 0 ? "баз нет" : "подключены");
+    $("#dw-kb-text").textContent = (n != null ? (n ? `Доступно баз: ${n} — ваши папки и разделы библиотеки.` : "На сайте пока нет ваших папок — загрузите документы на dewiar.pro.") : "Ваши документы и публичная библиотека.")
+      + (kbN ? ` Базы подключены у персонажей: ${kbN}.` : " Подключите базу персонажу — он будет отвечать по ней, с цитатами.");
+  }
+  // мессенджеры
+  const tg = DW.tg || {}, mx = DW.mx || {};
+  $("#dw-tg").textContent = tg.paired ? `подключён: @${tg.bot}` : tg.connected ? "ждёт «Запустить» в Telegram" : "не подключён";
+  $("#dw-mx").textContent = mx.paired ? "подключён" + (mx.bot ? ": " + mx.bot : "") : mx.connected ? "ждёт «Начать» в MAX" : "не подключён";
+  $("#dw-tg-go").textContent = tg.paired ? "Настроить" : "Подключить"; $("#dw-mx-go").textContent = mx.paired ? "Настроить" : "Подключить";
+  dwSet("chat", tg.paired || mx.paired ? "ok" : tg.connected || mx.connected ? "warn" : "", [tg.paired && "Telegram", mx.paired && "MAX"].filter(Boolean).join(" и ") || (tg.connected || mx.connected ? "ждут подтверждения" : "не подключены"));
+  // компьютер
+  if (d) {
+    $("#dw-pc-kv").innerHTML = `<span>Память</span><div>${d.ram} ГБ${d.free ? ` (свободно ${d.free})` : ""}</div><span>Процессор</span><div>${d.cores} ${plural(d.cores, "ядро", "ядра", "ядер")}</div>`
+      + `<span>Распознавание</span><div>${{ gigaam: "GigaAM (точное, тяжёлое)", vosk: "Vosk (лёгкое)", remote: "сервер" }[d.stt] || d.stt}</div><span>Голос</span><div>${{ vosk: "Vosk TTS", piper: "Piper (лёгкий)", remote: "сервер", espeak: "системный", off: "выключен" }[d.tts] || d.tts}</div>`;
+    $("#dw-light").checked = !!d.light;
+    $("#dw-pc-adv").textContent = d.advice || (d.level === "ok" ? "Мощности хватает — всё работает на этом компьютере." : "");
+    dwSet("pc", d.level === "ok" ? "ok" : d.stt_server ? "ok" : "warn", d.level === "ok" ? "мощности хватает" : d.stt_server ? "слабый — помогает сервер" : d.level === "very_weak" ? "очень слабый" : "слабый");
+    const weak = d.level !== "ok" && !d.stt_server, tight = !!(d.mem && d.mem.tight);
+    $("#dw-weak").style.display = weak || tight ? "" : "none";
+    if (tight && !weak) $("#dw-weak").innerHTML = `<b>Сейчас не хватает памяти</b><p>${escH(d.mem.text || "Открыто много других программ — окна и голос могут тормозить. Закройте лишнее.")}</p>`;
+    if (tight) dwSet("pc", "warn", "мало свободной памяти");
+    if (weak) $("#dw-weak").innerHTML = `<b>На этом компьютере мало мощности (${escH(d.why)})</b><p>${d.light ? "Включён лёгкий режим — ассистент работает, но распознаёт речь попроще." : "Ассистент может тормозить."}
+      Чтобы стало быстро и точно, пусть думает и слушает сервер Dewiar:</p>
+      <ol>${a.logged_in || d.cloud ? `<li>Включите ниже «Распознавать речь на сервере» — и всё.</li>` : `<li>Зарегистрируйтесь на <a href="https://dewiar.pro" target="_blank">dewiar.pro</a> (если ещё нет аккаунта).</li><li>Введите логин и пароль в карточке «Аккаунт dewiar.pro» ниже и нажмите «Войти».</li><li>Готово: модели и распознавание речи включатся на сервере сами.</li>`}</ol>`;
+    $("#dw-dot").classList.toggle("on", weak || tight);
+  }
+  // антивирус
+  const av = DW.av;
+  $("#dwc-av").style.display = av && av.supported ? "" : "none";
+  if (av && av.supported) {
+    const m = av.main || {}, adv = av.advice || {};
+    $("#dw-av-text").textContent = (av.products || []).length ? `Установлен: ${(av.products || []).map(p => p.name + (p.on ? "" : " (выключен)")).join(", ")}.` + (av.missing.length ? " Часть файлов Dewiar пропала — похоже, антивирус убрал их в карантин." : " Если он мешает Dewiar (ложная тревога), добавьте папку в исключения:")
+      : "Если антивирус мешает Dewiar (ложная тревога), добавьте папку в исключения:";
+    $("#dw-av-path").textContent = (av.paths || [])[0] || "";
+    $("#dw-av-steps").innerHTML = (adv.steps || []).slice(0, 3).map(x => `<li>${escH(x)}</li>`).join("");
+    $("#dw-av-ex").style.display = adv.auto ? "" : "none";
+    dwSet("av", av.missing.length ? "bad" : "ok", av.missing.length ? "убрал файлы" : (m.name || "в порядке"));
+  }
+  // сеть: если dewiar.pro не открывается напрямую — свой прокси или прокси Dewiar; px.dataset.dirty — поле правят, не перетираем
+  const n = DW.net;
+  if (n) {
+    const px = $("#dw-px");
+    if (document.activeElement !== px && !px.dataset.dirty) px.value = n.proxy || "";
+    $("#dw-px-dw").checked = !!n.dewiar;
+    const ck = n.check, viaOk = ck && ck.proxy && ck.proxy[0], dirOk = ck && ck.direct[0];
+    if (ck) { $("#dw-net-res").className = "res " + (dirOk || viaOk ? "ok" : "bad"); $("#dw-net-res").textContent = ck.advice; }
+    if (ck) dwSet("net", ck.proxy ? (viaOk ? "ok" : "bad") : (dirOk ? "ok" : "bad"), ck.proxy ? (viaOk ? "через прокси" : "прокси не работает") : (dirOk ? "напрямую" : "сайт не открывается"));
+    else dwSet("net", n.on ? "ok" : "", n.on ? (n.via === "dewiar" ? "прокси Dewiar" : "через прокси") : "напрямую");
+    if (n.dewiar_error) { $("#dw-net-res").className = "res bad"; $("#dw-net-res").textContent = "Прокси Dewiar: " + n.dewiar_error; }
+  }
+  // обновления
+  const u = DW.upd;
+  if (u) {
+    $("#dw-upd-text").textContent = u.available ? `Доступна версия ${u.available.version} — уже скачана.` : `Dewiar ${u.current}` + (u.error ? ` · не проверилось: ${u.error}` : u.checked ? " — последняя версия." : "");
+    $("#dw-upd-open").style.display = u.available ? "" : "none";
+    dwSet("upd", u.available ? "warn" : u.error ? "bad" : "ok", u.available ? "есть новая" : u.error ? "ошибка" : "последняя");
+  }
+  const cards = ["acc", "cloud", "speech", "kb", "chat", "pc", "net", "upd"].concat(av && av.supported ? ["av"] : []);
+  const okN = cards.filter(k => ($("#dws-" + k).className || "").includes(" ok")).length, badN = cards.filter(k => ($("#dws-" + k).className || "").includes(" bad")).length;
+  $("#dw-sum").textContent = DW.checked.at ? `Работает ${okN} из ${cards.length}` + (badN ? ` · требует внимания: ${badN}` : "") + ` · проверено в ${new Date(DW.checked.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` : "";
+}
+async function dwLoad(full) {
+  const tasks = [core.call("device").then(x => DW.dev = x), core.call("sync_status").then(x => DW.sync = x), core.call("cloud_status", { refresh: !!full }).then(x => DW.cloud = x), core.call("update_status").then(x => DW.upd = x)];
+  if (!DW.av || full) tasks.push(core.call("av_status").then(x => DW.av = x));
+  if (full) tasks.push(core.call("account_check").then(x => DW.acc = x));
+  // net_check — медленная проверка соединения; без full оставляем её прошлый результат
+  tasks.push(core.call(full ? "net_check" : "net").then(x => DW.net = full || !DW.net || !DW.net.check ? x : Object.assign(x, { check: DW.net.check })));
+  await Promise.all(tasks.map(t => t.catch(() => {})));
+  if (DW.acc && DW.acc.logged_in && (full || !DW.kb)) DW.kb = await core.call("rag_scope", { force: !!full }).catch(e => ({ error: e.message, bases: [] }));
+  if (full) DW.checked.at = Date.now();
+  dwRender();
+}
+$("#dw-px").oninput = () => { $("#dw-px").dataset.dirty = "1"; };
+$("#dw-px").onkeydown = (e) => { if (e.key === "Enter") $("#dw-px-save").click(); };
+$("#dw-px-save").onclick = async (ev) => {
+  const b = ev.target, res = $("#dw-net-res"), v = $("#dw-px").value.trim();
+  b.disabled = true; res.className = "res"; res.textContent = v ? "проверяю, открывается ли dewiar.pro через этот прокси…" : "выключаю прокси…";
+  try { DW.net = await core.call("net_proxy", { proxy: v }); $("#dw-px").dataset.dirty = ""; dwRender(); }
+  catch (e) { res.className = "res bad"; res.textContent = e.message; dwSet("net", "bad", "не сохранён"); }
+  b.disabled = false;
+};
+$("#dw-px-dw").onchange = async (ev) => {
+  const on = ev.target.checked, res = $("#dw-net-res");
+  ev.target.disabled = true; res.className = "res"; res.textContent = on ? "получаю прокси с dewiar.pro и проверяю…" : "выключаю…";
+  try { DW.net = await core.call("net_dewiar", { on }); dwRender(); }
+  catch (e) { res.className = "res bad"; res.textContent = e.message; }
+  ev.target.disabled = false;
+};
+core.on("account", e => { DW.acc = e.account; DW.kb = null; if ($("#p-dw").classList.contains("cur")) dwLoad(); });
+core.on("cloud", e => { DW.cloud = e; if ($("#p-dw").classList.contains("cur")) dwRender(); });
+core.on("telegram", e => { DW.tg = e; dwRender(); });
+core.on("max", e => { DW.mx = e; dwRender(); });
+core.on("device", e => { DW.dev = e; dwRender(); });
+core.on("update", e => { DW.upd = e.update; });
+$("#dw-check").onclick = async (ev) => {
+  ev.target.disabled = true; $("#dw-sum").textContent = "проверяю…";
+  ["acc", "cloud", "speech", "kb", "chat", "pc", "net", "upd", "av"].forEach(k => dwSet(k, "run", "проверяю…"));
+  try {
+    await core.call("update_check").then(x => DW.upd = x).catch(() => {});
+    await dwLoad(true);
+    const c = DW.cloud || {};
+    if (c.connected && c.active) {                      // модели Dewiar действительно отвечают? (профиль облака ядро ведёт под id "dewiar-cloud")
+      dwSet("cloud", "run", "спрашиваю модель…");
+      const r = await core.call("llm_test", { profile: S.llm.profiles["dewiar-cloud"] }).catch(e => ({ error: e.message }));
+      if (!r || r.error || r.ok === false) { dwSet("cloud", "bad", "не отвечают"); $("#dw-cloud-res").className = "res bad"; $("#dw-cloud-res").textContent = (r && r.error) || "модель не ответила"; }
+      else { $("#dw-cloud-res").className = "res ok"; $("#dw-cloud-res").textContent = "Модель ответила — всё работает."; }
+    }
+  } finally { ev.target.disabled = false; dwRender(); }
+};
+$("#dw-go").onclick = async () => {
+  const login = $("#dw-login").value.trim(), password = $("#dw-pass").value, r = $("#dw-acc-res");
+  if (!login || !password) { r.className = "res bad"; r.textContent = "Введите логин и пароль"; return; }
+  $("#dw-go").disabled = true; r.className = "res"; r.textContent = "Вхожу…";
+  // после входа ядро само подключает модели и Знания аккаунта — карточки перечитываем чуть позже
+  try { const a = await core.call("account_login", { server: (DW.acc && DW.acc.server) || "", login, password }); $("#dw-pass").value = ""; renderAccount(a); DW.acc = a; r.className = "res ok"; r.textContent = "Вход выполнен — модели и Знания подключаются…"; setTimeout(() => dwLoad().then(() => { r.textContent = "Вход выполнен."; }), 2500); }
+  catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { $("#dw-go").disabled = false; }
+};
+$("#dw-pass").onkeydown = (e) => { if (e.key === "Enter") $("#dw-go").click(); };
+$("#dw-out").onclick = () => { if (confirm("Выйти из аккаунта dewiar.pro? Модели и Знания по аккаунту отключатся.")) core.call("account_logout").then(a => { renderAccount(a); DW.acc = a; DW.kb = null; $("#dw-acc-res").textContent = ""; dwLoad(); }).catch(e => toast(e.message)); };
+$("#dw-cloud-use").onclick = () => $("#cc-use").click();
+$("#dw-cloud-go").onclick = async (ev) => { const r = $("#dw-cloud-res"); ev.target.disabled = true; r.className = "res"; r.textContent = "подключаю по аккаунту…";
+  try { await cloudUse(); r.className = "res ok"; r.textContent = "Модели Dewiar подключены — отвечают они."; dwLoad(); } catch (e) { r.className = "res bad"; r.textContent = e.message; } ev.target.disabled = false; };
+$("#dw-topup").onclick = () => { $('nav button[data-p="brain"]').click(); setTimeout(() => { $("#cc-top").click(); $("#cloud-card").scrollIntoView({ behavior: "smooth" }); }, 200); };
+$("#dw-key-go").onclick = async () => { const r = $("#dw-cloud-res"), key = $("#dw-key").value.trim(); if (!key) return; r.className = "res"; r.textContent = "проверяю ключ…";
+  try { const c = await core.call("cloud_connect", { key }); DW.cloud = c; cloudFill(c); renderProfiles(); $("#dw-key").value = ""; r.className = "res ok"; r.textContent = "Ключ подключён."; dwLoad(); } catch (e) { r.className = "res bad"; r.textContent = e.message; } };
+$("#dw-stt").onchange = async (e) => {
+  const on = e.target.checked, d = DW.dev || {}, r = $("#dw-speech-res");
+  try {
+    if (on) await core.call(d.cloud_stt ? "cloud_stt" : "account_stt", { on: true });
+    else await core.call((S.stt.remote || {}).cloud ? "cloud_stt" : "account_stt", { on: false });
+    r.className = "res ok"; r.textContent = on ? "Речь распознаёт сервер Dewiar." : "Речь распознаёт этот компьютер.";
+  } catch (x) { e.target.checked = !on; r.className = "res bad"; r.textContent = x.message; }
+  dwLoad();
+};
+$("#dw-tts").onchange = async (e) => { const on = e.target.checked;
+  try { await core.call("account_tts", { on }); $("#dw-speech-res").className = "res ok"; $("#dw-speech-res").textContent = on ? "Голос — с сервера Dewiar." : "Голос — этого компьютера."; }
+  catch (x) { e.target.checked = !on; toast(x.message); } dwLoad(); };
+$("#dw-light").onchange = async (e) => { const on = e.target.checked;
+  try { const r = await core.call("device_light", { on }); DW.dev = r; toast(on ? "Лёгкий режим включён" : "Лёгкий режим выключен" + (r.done && r.done.length ? ": " + r.done.join(", ") : "")); }
+  catch (x) { e.target.checked = !on; toast(x.message); } dwRender(); };
+$("#dw-ask").onclick = async () => { const q = $("#dw-q").value.trim(); if (!q) return; $("#dw-ask").disabled = true; $("#dw-ans").textContent = "Ищу в Знаниях…";
+  try { const r = await core.call("account_ask", { question: q }); $("#dw-ans").textContent = r.answer + (r.sources.length ? "\n\nИсточники: " + r.sources.join("; ") : ""); }
+  catch (e) { $("#dw-ans").textContent = e.message; } finally { $("#dw-ask").disabled = false; } };
+$("#dw-q").onkeydown = (e) => { if (e.key === "Enter") $("#dw-ask").click(); };
+$("#dw-kb-persona").onclick = () => $('nav button[data-p="personas"]').click();
+const dwGoCard = (id) => { $('nav button[data-p="connect"]').click(); setTimeout(() => $(id).scrollIntoView({ behavior: "smooth", block: "start" }), 150); };
+$("#dw-tg-go").onclick = () => dwGoCard("#tg-box");
+$("#dw-mx-go").onclick = () => dwGoCard("#mx-box");
+$("#dw-av-copy").onclick = async () => { const p = (DW.av && DW.av.paths || [])[0] || ""; let okc = false;
+  // в окне pywebview буфер обмена страницы бывает недоступен — тогда копирует ядро (av_copy)
+  try { await navigator.clipboard.writeText(p); okc = true; } catch (e) { okc = !!(await core.call("av_copy").catch(() => null) || {}).ok; }
+  $("#dw-av-res").className = okc ? "res ok" : "res"; $("#dw-av-res").textContent = okc ? "Путь скопирован — вставьте его в антивирусе (Ctrl+V)." : "Выделите путь выше и скопируйте (Ctrl+C)."; };
+$("#dw-av-ex").onclick = async () => { const r = $("#dw-av-res");
+  const x = await core.call("av_exclude").catch(e => ({ error: e.message }));
+  r.className = x && x.ok ? "res ok" : "res bad"; r.textContent = x && x.ok ? "Windows спросит разрешение — нажмите «Да». После этого Защитник не будет трогать Dewiar." : (x && x.error) || "Не получилось открыть запрос Windows."; };
+$("#dw-upd-go").onclick = () => { dwSet("upd", "run", "проверяю…"); core.call("update_check").then(u => { DW.upd = u; dwRender(); }).catch(e => toast(e.message)); };
+$("#dw-upd-open").onclick = () => $('nav button[data-p="about"]').click();
+async function dwQr() {
+  try { const c = await core.call("phone_config"); $("#dw-qr").innerHTML = qrSvg(c.apk); } catch (e) { $("#dwc-phone").style.display = "none"; }
+}
+
+/* ---------- Dewiar Облако по ключу ----------
+   Карточка в «Мозге» и значок заряда в меню (#nav-cloud); данные — cloud_status и событие cloud. */
+const turnsWord = (n) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? "ответ" : a >= 2 && a <= 4 && (b < 12 || b > 14) ? "ответа" : "ответов"; };
+function cloudFill(c) {
+  const card = $("#cloud-card"), chip = $("#nav-cloud");
+  if (!c || !c.connected) { card.style.display = "none"; chip.style.display = "none"; DW.cloud = c || null; dkAccFill(); return; }
+  const pct = Math.max(0, Math.min(100, c.percent ?? 0)), err = c.error && c.percent === undefined;
+  card.style.display = ""; chip.style.display = "";
+  card.className = "cloudc" + (c.empty ? " empty" : c.low ? " low" : ""); chip.className = "cchip" + (c.empty ? " empty" : c.low ? " low" : "");
+  const bal = c.balance_text || (c.balance != null ? String(c.balance).replace(".", ",") + " тал." : "");
+  $("#cc-sub").textContent = (c.label ? c.label + " · " : "") + (c.site ? "счёт dewiar.pro" : c.account ? "по аккаунту dewiar.pro" : "ключ …" + (c.tail || "")) + (c.active ? " · отвечает облако" : "");
+  $("#cc-pct").textContent = err ? "—" : c.site ? bal : pct + "%";
+  $("#cc-fill").style.width = (err ? 0 : Math.max(pct, c.empty ? 0 : 2)) + "%";
+  $("#cc-turns").textContent = err ? c.error
+    : c.site ? (c.frozen ? "Доступ к ИИ на сайте приостановлен — напишите администратору." : c.empty ? "На счёте dewiar.pro закончились ИИ-талеры — пополните в личном кабинете."
+      : `Общий счёт с сайтом dewiar.pro: на нём ${bal}` + (c.turns ? ` — примерно на ${c.turns.toLocaleString("ru-RU")} ${turnsWord(c.turns)}` : ""))
+    : c.frozen ? "Ключ приостановлен — напишите администратору." : c.empty ? "Заряд закончился — пополните, и ассистент снова будет отвечать."
+    : `Хватит примерно на ${c.turns.toLocaleString("ru-RU")} ${turnsWord(c.turns)}` + (c.low ? " — скоро понадобится пополнить" : "");
+  $("#cc-topup").textContent = c.topup || "";
+  $("#cc-use").style.display = c.active ? "none" : "";
+  // по аккаунту ключа нет — «Убрать ключ» только у своего ключа dw-
+  $("#cc-off").style.display = c.account || c.site ? "none" : "";
+  DW.cloud = Object.assign({}, DW.cloud, c); dkAccFill();
+  $("i b", chip).style.width = (err ? 0 : pct) + "%"; $("em", chip).textContent = err ? "?" : c.site ? bal : pct + "%";
+  chip.title = c.site ? `ИИ-баланс — ваш счёт на dewiar.pro: ${bal}. Нажмите — подробности и пополнение`
+    : `ИИ-баланс: заряд моделей Dewiar ${pct}%` + (c.turns ? `, примерно на ${c.turns} ${turnsWord(c.turns)}` : "") + ". Нажмите — подробности и пополнение";
+  $("#cc-top").textContent = c.pending ? `Пополнить · заявка на проверке` : "Пополнить";
+  // расход и список моделей — отдельные запросы к сайту: при открытом «Мозге» не чаще раза в 15 с
+  if ($("#p-brain").classList.contains("cur") && Date.now() - (cloudFill._t || 0) > 15000) { cloudFill._t = Date.now(); ccUsage(); ccOpts(); }
+}
+core.on("cloud", cloudFill);
+$("#nav-cloud").onclick = () => $('nav button[data-p="brain"]').click();
+$("#cc-top").onclick = () => { const t = $("#cc-pay"), open = t.style.display === "none"; t.style.display = open ? "" : "none"; if (open) cpLoad(); };
+/* пополнение: сумма, комментарий, снимок оплаты → заявка администратору; снимок — data-URL, не больше 6 МБ */
+let cpImage = "";
+const RQ = { new: "на проверке", done: "зачислено", rejected: "отклонено" };
+function cpList(reqs) {
+  $("#cp-list").innerHTML = (reqs || []).map(r => `<div class="rqi ${r.status}"><span>${new Date(r.ts * 1000).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+    ${r.amount ? " · " + r.amount + " тал." : ""}${r.reply ? " · «" + escH(r.reply) + "»" : ""}</span><b>${RQ[r.status] || r.status}${r.status === "done" ? " +" + r.credited : ""}</b></div>`).join("");
+}
+async function cpLoad() { try { const r = await core.call("cloud_topup"); $("#cc-topup").textContent = r.text || ""; cpList(r.requests); } catch (e) { $("#cc-topup").textContent = e.message; } }
+function cpSet(file) {
+  if (!file || !/^image\//.test(file.type)) return;
+  if (file.size > 6 * 1024 * 1024) { toast("Снимок больше 6 МБ — сохраните его поменьше"); return; }
+  const fr = new FileReader(); fr.onload = () => { cpImage = fr.result; $("#cp-img").src = cpImage; $("#cp-shot").classList.add("has"); $("#cp-shot-t").textContent = "Снимок приложен — нажмите, чтобы заменить"; };
+  fr.readAsDataURL(file);
+}
+$("#cp-shot").onclick = () => $("#cp-file").click();
+$("#cp-file").onchange = (e) => { cpSet(e.target.files[0]); e.target.value = ""; };
+$("#cp-shot").ondragover = (e) => e.preventDefault();
+$("#cp-shot").ondrop = (e) => { e.preventDefault(); cpSet(e.dataTransfer.files[0]); };
+document.addEventListener("paste", (e) => {
+  if ($("#cc-pay").style.display === "none") return;
+  const it = [...(e.clipboardData || {}).items || []].find(x => x.type && x.type.startsWith("image/")); if (it) { cpSet(it.getAsFile()); e.preventDefault(); }
+});
+$("#cp-send").onclick = async (ev) => {
+  const r = $("#cp-res"), amount = $("#cp-amount").value.trim().replace(",", "."), note = $("#cp-note").value.trim();
+  if (!cpImage && !amount) { r.className = "res bad"; r.textContent = "Укажите сумму или приложите снимок оплаты"; return; }
+  ev.target.disabled = true; r.className = "res"; r.textContent = "отправляю…";
+  try {
+    const x = await core.call("cloud_topup_send", { amount: +amount || 0, note, image: cpImage });
+    r.className = "res ok"; r.textContent = "Заявка отправлена — после проверки заряд пополнится сам."; cpList(x.requests);
+    cpImage = ""; $("#cp-img").removeAttribute("src"); $("#cp-shot").classList.remove("has"); $("#cp-shot-t").textContent = "Приложите снимок оплаты — нажмите сюда или вставьте Ctrl+V";
+    $("#cp-amount").value = ""; $("#cp-note").value = "";
+  } catch (e) { r.className = "res bad"; r.textContent = e.message; }
+  ev.target.disabled = false;
+};
+/* расход за 2 недели — столбики (ответов в день), без денег */
+async function ccUsage() {
+  try {
+    const u = await core.call("cloud_usage"), days = u.days || [], mx = Math.max(1, ...days.map(d => d.answers));
+    if (!days.length) { $("#cc-usage").innerHTML = ""; return; }
+    const wd = (d) => ["вс", "пн", "вт", "ср", "чт", "пт", "сб"][new Date(d + "T12:00").getDay()];
+    $("#cc-usage").innerHTML = `<div class="uh"><span>Расход за две недели</span><span>${u.answers} ${turnsWord(u.answers)}</span></div>
+      <div class="ub">${days.map(d => `<i class="${d.answers ? "on" : ""}" style="height:${Math.max(6, d.answers / mx * 100)}%" title="${d.date}: ${d.answers} ${turnsWord(d.answers)}${d.minutes ? ", " + d.minutes + " мин речи" : ""}, ${d.percent}% заряда"></i>`).join("")}</div>
+      <div class="ud">${days.map(d => `<span>${wd(d.date)}</span>`).join("")}</div>`;
+  } catch (e) { $("#cc-usage").innerHTML = ""; }
+}
+/* модель облака, запасной мозг, распознавание в облаке */
+async function ccOpts() {
+  const profs = S.llm.profiles || {};
+  $("#cc-fb").innerHTML = `<option value="">Никто — скажет, что облако недоступно</option>` +
+    Object.entries(profs).filter(([k, p]) => !p.cloud).map(([k, p]) => `<option value="${k}">${escH(p.name || k)}</option>`).join("");
+  $("#cc-fb").value = S.llm.fallback || "";
+  $("#cc-stt").checked = S.stt.engine === "remote" && !!(S.stt.remote || {}).cloud;
+  try {
+    const m = await core.call("cloud_models"), list = m.data || [];
+    $("#cc-stt-w").style.display = m.stt ? "" : "none";
+    $("#cc-model-w").style.display = list.length > 1 ? "" : "none";
+    const cur = (profs["dewiar-cloud"] || {}).model;
+    $("#cc-model").innerHTML = list.map(x => `<option value="${escH(x.id)}">${escH(x.title || x.id)}${x.note ? " — " + escH(x.note) : ""}${x.factor > 1 ? ` (расход ×${x.factor})` : ""}${x.vision ? " · видит картинки" : ""}</option>`).join("");
+    if (cur) $("#cc-model").value = cur;
+  } catch (e) { }
+}
+$("#cc-model").onchange = () => core.call("cloud_model", { id: $("#cc-model").value }).then(() => toast("Модель облака: " + $("#cc-model").selectedOptions[0].textContent)).catch(e => toast(e.message));
+$("#cc-fb").onchange = () => core.call("cloud_fallback", { id: $("#cc-fb").value }).then(() => toast($("#cc-fb").value ? "Запасной мозг выбран" : "Без запасного мозга")).catch(e => toast(e.message));
+$("#cc-stt").onchange = (e) => core.call("cloud_stt", { on: e.target.checked }).then(() => toast(e.target.checked ? "Речь распознаёт облако" : "Речь распознаёт этот компьютер")).catch(x => { toast(x.message); e.target.checked = !e.target.checked; });
+$("#cc-ref").onclick = () => core.call("cloud_status", { refresh: true }).then(cloudFill).catch(e => toast(e.message));
+$("#cc-off").onclick = () => { if (confirm("Убрать ключ Dewiar Облака с этого компьютера? Баланс на сервере сохранится — ключ можно вставить снова.")) core.call("cloud_forget").then(c => { cloudFill(c); renderProfiles(); }).catch(e => toast(e.message)); };
+// «Пусть отвечает облако»: переподключение сохранённым ключом снова делает профиль облака активным
+// своим ключом dw-… или входом аккаунтом — ядро знает, чем (cloud_connect use); профиль облака снова активный
+async function cloudUse() { const r = await core.call("cloud_connect", { use: true }); DW.cloud = r; cloudFill(r); renderProfiles(); if ($("#p-dw").classList.contains("cur")) dwRender(); return r; }
+$("#cc-use").onclick = async () => { try { await cloudUse(); toast("Отвечают модели Dewiar"); } catch (e) { toast(e.message); } };
+/* «Добавить устройство»: код из 6 цифр на 10 минут — тот же ключ на другом компьютере или телефоне */
+$("#cc-pair").onclick = async (ev) => { const r = $("#cc-pair-res"); ev.target.disabled = true; r.className = "res"; r.textContent = "получаю код…";
+  try { const d = await core.call("pair_new");
+    if (!d.code) { r.textContent = d.text || "Код не выдан."; return; }
+    r.className = "res ok"; r.innerHTML = `Код: <b style="font-size:20px;letter-spacing:3px">${escH(d.code.slice(0, 3) + " " + d.code.slice(3))}</b> — на другом устройстве: «Мозг» → «Модели Dewiar» (на телефоне — «Ключ или код Dewiar») → введите код. Действует 10 минут.`; }
+  catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { ev.target.disabled = false; } };
+/* «Попробовать без регистрации»: заявка — ключ придёт сам (ядро спрашивает раз в минуту, _join_loop) */
+function joinFill() {
+  const j = (S && S.cloud && S.cloud.join) || {}, a = DW.acc || {}, box = $("#dk-join"); if (!box) return;
+  box.style.display = a.logged_in || (DW.cloud && DW.cloud.connected) ? "none" : "";
+  if (j.id) $("#jn-res").innerHTML = `Заявка №${escH(String(j.id))} ждёт проверки — ключ придёт сюда сам. <a href="#" id="jn-check">Проверить</a> · <a href="#" id="jn-forget">забыть</a>`, $("#jn-res").className = "res ok";
+  const ck = $("#jn-check"), fg = $("#jn-forget");
+  if (ck) ck.onclick = async (e) => { e.preventDefault(); try { const d = await core.call("join_check"); toast(d.text || "Пока ждёт проверки"); } catch (x) { toast(x.message); } };
+  if (fg) fg.onclick = async (e) => { e.preventDefault(); await core.call("join_forget"); S.cloud.join = {}; $("#jn-res").textContent = ""; };
+}
+$("#jn-go").onclick = async (ev) => {
+  const r = $("#jn-res"); ev.target.disabled = true; r.className = "res"; r.textContent = "отправляю…";
+  try { const d = await core.call("join_send", { name: $("#jn-name").value, contact: $("#jn-contact").value, note: $("#jn-note").value });
+    r.className = "res ok"; r.textContent = d.text || "Заявка отправлена — ключ придёт сам.";
+    if (d.status === "ok") toast("Dewiar подключён"); }
+  catch (e) { r.className = "res bad"; r.textContent = e.message; ev.target.disabled = false; }
+};
+/* «Мозг» → «Модели Dewiar»: вошли аккаунтом — одна кнопка, ключ не нужен; не вошли — войти (раздел Dewiar.pro) */
+function dkAccFill() {
+  const a = DW.acc || {}, c = DW.cloud || {}, box = $("#dk-acc"); if (!box) return;
+  joinFill();
+  const on = c.connected && c.active && (c.account || c.site);
+  box.className = "dk-acc" + (on ? " ok" : "");
+  if (a.logged_in) {
+    box.innerHTML = `<div>Вы вошли в аккаунт dewiar.pro как <b>${escH(a.user && a.user.login || a.login || "")}</b> — ключ не нужен.<br>`
+      + (on ? "Сейчас отвечают модели Dewiar по вашему аккаунту." : "Модели Dewiar подключаются по этому входу одной кнопкой.") + `<span class="res" id="dk-acc-res"></span></div>`
+      + (on ? "" : `<button class="btn primary" id="dk-acc-go">Думать моделями Dewiar</button>`);
+    if (!on) $("#dk-acc-go").onclick = async (ev) => {
+      const r = $("#dk-acc-res"); ev.target.disabled = true; r.className = "res"; r.textContent = "подключаю…";
+      try { const c2 = await cloudUse(); r.className = "res ok"; r.textContent = "Готово."; await wizardCheck(c2.profile); dkAccFill(); }
+      catch (e) { r.className = "res bad"; r.textContent = "Не получилось: " + e.message; ev.target.disabled = false; }
+    };
+  } else {
+    box.innerHTML = `<div>Есть аккаунт на <b>dewiar.pro</b>? Войдите — модели подключатся сами, ключ не нужен.</div><button class="btn primary" id="dk-acc-in">Войти в аккаунт</button>`;
+    $("#dk-acc-in").onclick = () => { $('nav button[data-p="dw"]').click(); setTimeout(() => { const f = $("#dw-login"); if (f) { f.scrollIntoView({ behavior: "smooth", block: "center" }); f.focus(); } }, 200); };
+  }
+  $("#dk-or").innerHTML = a.logged_in ? "Ключ от администратора (строка, которая начинается с <b>dw-</b>) нужен, только если вам выдали отдельный заряд:"
+    : "Или ключ от администратора — строка, которая начинается с <b>dw-</b>:";
+}
+$("#dk-go").onclick = async (ev) => {
+  const key = $("#dk-key").value.trim(), r = $("#dk-res");
+  if (!key) { r.className = "res bad"; r.textContent = "Вставьте ключ (начинается с dw-) или код из 6 цифр с другого устройства"; return; }
+  ev.target.disabled = true; r.className = "res"; r.textContent = "проверяю ключ…";
+  try {
+    const c = await core.call("cloud_connect", { key, url: $("#dk-url").value.trim() });
+    $("#dk-key").value = ""; r.className = "res ok"; r.textContent = `Ключ подключён${c.label ? ": " + c.label : ""}. Заряд ${c.percent}%.`;
+    cloudFill(c); renderProfiles(); await wizardCheck(c.profile);
+  } catch (e) { r.className = "res bad"; r.textContent = "Не получилось: " + e.message; }
+  ev.target.disabled = false;
+};
+$("#dk-key").onkeydown = (e) => { if (e.key === "Enter") $("#dk-go").click(); };
+
+/* ---------- свой сервер: адрес и порт ----------
+   probe_server сам определяет, что отвечает по адресу (протокол, base_url, список моделей); профиль создаётся
+   с disable_thinking, как пресет vLLM: модели с «размышлениями» (Qwen3 и подобные) иначе долго молчат перед ответом. */
+let svFound = null;
+$("#sv-go").onclick = async (ev) => {
+  const r = $("#sv-res"); $("#sv-found").style.display = "none"; r.className = "res"; r.textContent = "ищу сервер…"; ev.target.disabled = true;
+  try {
+    svFound = await core.call("probe_server", { address: $("#sv-host").value, port: $("#sv-port").value });
+    $("#sv-what").textContent = `Нашёл: ${svFound.server}`; r.textContent = "";
+    $("#sv-model").innerHTML = ""; svFound.models.forEach(m => { const o = document.createElement("option"); o.value = o.textContent = m; $("#sv-model").appendChild(o); });
+    $("#sv-model").value = svFound.model; $("#sv-found").style.display = "";
+  } catch (e) { r.className = "res bad"; r.textContent = e.message; }
+  ev.target.disabled = false;
+};
+$("#sv-host").onkeydown = $("#sv-port").onkeydown = (e) => { if (e.key === "Enter") $("#sv-go").click(); };
+$("#sv-use").onclick = async () => {
+  const id = uid(), host = $("#sv-host").value.trim().replace(/^https?:\/\//, "").replace(/[:/].*$/, "");
+  S.llm.profiles[id] = { name: `Сервер ${host} — ${$("#sv-model").value}`, kind: svFound.kind, base_url: svFound.base_url,
+                         api_key: "", model: $("#sv-model").value, disable_thinking: true };
+  await save({ llm: { profiles: S.llm.profiles, active: id } });
+  renderProfiles(); $("#sv-found").style.display = "none";
+  $("#sv-res").textContent = "";
+  await wizardCheck(id);
+};
+
+let S_presets = {}, S_voices = {}, S_fx = [];
+core.on("hello", d => {
+  S = d.settings; personas = d.personas; active = d.persona; S_presets = d.presets; S_voices = d.piper_voices; S_fx = d.voice_fx || [];
+  $("#conn").classList.add("ok"); $("#conn span").textContent = "ядро на связи";
+  $("#presets").innerHTML = ""; Object.entries(S_presets).forEach(([k, p]) => { const b = document.createElement("button"); b.className = "chip"; b.textContent = "+ " + p.name; b.onclick = () => addProfile(k); $("#presets").appendChild(b); });
+  renderPersonas(); renderProfiles(); refreshStatic(); renderStatus(d.status); fillNamePick();
+  renderCurrent();
+  // раздел, открытый до связи с ядром (по #адресу или кликом), получает свои данные только теперь — кликаем снова
+  const curNav = $("nav button.cur");
+  if (curNav && ["skills", "hands", "sound", "about", "folder", "voice", "tasks", "me", "memory", "reminders", "calendar", "safety"].includes(curNav.dataset.p)) curNav.click();
+  renderUpdate(d.update);
+  renderAccount(d.account);
+  mlFill(d.mail);
+  tgFill(d.telegram); mxFill(d.max);
+  DW.acc = d.account; DW.tg = d.telegram; DW.mx = d.max; DW.upd = d.update;
+  core.call("device").then(x => { DW.dev = x; dwRender(); }).catch(() => {});
+  obFill(d.obsidian);
+  core.call("cal_list").then(csFill).catch(() => {});
+  core.call("home_get").then(shFill).catch(() => {});
+  phFill();
+  core.call("cloud_status").then(cloudFill).catch(() => {});
+  if (d.account && d.account.logged_in) core.call("account_check").then(renderAccount).catch(() => {});
+  loadVosk();
+  const q = new URLSearchParams(location.search);
+  // перенос настроек: ждущий в ядре импорт, файл (?import=) или адрес (?address=) из ссылки; нет ни модели, ни
+  // #раздела — сразу в «Мозг», без модели ассистент не отвечает
+  if (d.pending_import) showPreview(d.pending_import);
+  else if (q.get("import")) preview({ path: q.get("import") });
+  else if (q.get("address")) { $("#c-addr").value = q.get("address"); preview({ address: q.get("address") }); }
+  else if (!S.llm.active && !location.hash) $('nav button[data-p="brain"]').click();
+  wlcBoot(d);
+})
+.on("offline", () => { $("#conn").classList.remove("ok"); $("#conn span").textContent = "нет связи с ядром"; })
+.on("voices", () => loadVosk())
+.on("persona", e => { active = e.persona; renderPersonas(); })
+.on("personas", e => { personas = e.personas; renderPersonas(); fillNamePick(); })
+.on("settings", e => { S = e.settings; refreshStatic(); renderCurrent(); })
+.on("mcp", e => { if ($("#p-skills").classList.contains("cur")) renderMcp(e.status); })
+.on("status", e => renderStatus(e.status));
+bindFields();

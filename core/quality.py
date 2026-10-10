@@ -1,0 +1,548 @@
+"""Качество долгих задач (tasks.py): проверка кодом, а не на слово. Модуль без состояния, кроме LoopGuard и файлов уроков.
+- check_file / verify_outputs / quick_check — машинная проверка готовых файлов (пустые, оборванный HTML, битые
+  JSON/CSV/Office/PDF/картинки, синтаксис Python, не UTF-8); найденное отдаётся модели на точечную починку;
+- error_hint — подсказка по тексту ошибки скрипта; LoopGuard — тупик «то же действие — тот же результат»;
+- looks_like_refusal — ложный отказ «нет доступа к интернету»; critic — независимая проверка итога моделью;
+- уроки: следы задач -> раз в REFLECT_EVERY модель выводит обобщённые правила в «Память/Уроки задач.md» (правится
+  в студии) -> они идут в подсказку следующих задач. Тексты для модели (LOOP_*, CRITIC, REFLECT…) — часть поведения.
+"""
+import hashlib
+import json
+import logging
+import re
+import time
+import zipfile
+from pathlib import Path
+
+log = logging.getLogger("dewiar.quality")
+
+LESSONS_FILE = "Память/Уроки задач.md"
+TALK_LESSONS_FILE = "Память/Уроки.md"   # чему ассистент научился на поправках пользователя в разговоре (learn_from_correction)
+TALK_LESSONS_PROMPT_MAX = 1500
+LESSONS_MAX = 30                 # правил в файле — самые старые уходят
+LESSONS_PROMPT_MAX = 2500        # символов уроков в подсказку задачи
+REFLECT_MIN = 3                  # новых следов задач, чтобы было из чего делать выводы
+REFLECT_EVERY = 6 * 3600         # не чаще (секунд); проверяет tasks.py, можно переопределить DEWIAR_REFLECT_EVERY
+# служебные файлы и папки верхнего уровня папки задачи (tasks.py): готовыми результатами не считаются
+SERVICE = ("_run", "_out", "задача.json", "история.json", "журнал.md", "план.md", "блокнот.md", "итог.md")
+
+# ---------------- проверка файлов ----------------
+
+
+def _html_problems(rel, txt, final=True):
+    """final=False — файл ещё может дописываться частями: оборванный конец не считаем браком."""
+    out = []
+    low = txt.lower()
+    esc = len(re.findall(r"&lt;(?:html|body|div|script|canvas|h1|p)\b", low))
+    real = len(re.findall(r"<(?:html|body|div|script|canvas|h1|p)\b", low))
+    if esc >= 3 and esc > real:
+        out.append(f"{rel}: разметка ЭКРАНИРОВАНА (&lt;div&gt; вместо <div>) — страница покажется текстом. Перезапиши обычными тегами.")
+    if final and "<html" in low and "</html>" not in low:
+        out.append(f"{rel}: HTML ОБОРВАН — нет закрывающего </html>. Допиши конец файла (append=true), не переписывая целиком.")
+    if low.count("<script") > low.count("</script>"):
+        out.append(f"{rel}: незакрытый <script> — скрипт не выполнится. Закрой тег.")
+    if low.count("<style") > low.count("</style>"):
+        out.append(f"{rel}: незакрытый <style> — страница сломается. Закрой тег.")
+    fm = re.search(r"""fetch\(\s*['"]([^'"]+\.(?:json|csv))['"]""", txt)
+    if fm and not fm.group(1).startswith(("http://", "https://")):
+        out.append(f"{rel}: fetch() локального .json/.csv не работает, когда файл открыт с диска — вшей данные прямо в страницу.")
+    return out
+
+
+def check_file(path, rel=None, final=True):
+    """Дефекты одного файла -> [строки «что не так и что сделать»] — тексты для модели.
+    Ошибка самой проверки — не дефект (иначе модель чинит то, что не сломано)."""
+    p = Path(path)
+    rel = rel or p.name
+    try:
+        if not p.exists():
+            return [f"{rel}: файл обещан, но НЕ существует — создай его."]
+        if p.is_dir():
+            return []
+        size = p.stat().st_size
+        if size == 0:
+            return [f"{rel}: файл ПУСТОЙ (0 байт) — перезапиши с содержимым."]
+        ext = p.suffix.lower()
+        head = p.read_bytes()[:8192] if size < 50 << 20 else open(p, "rb").read(8192)
+        if ext in (".html", ".htm"):
+            return _html_problems(rel, p.read_text(encoding="utf-8", errors="replace"), final)
+        if ext == ".json":
+            try:
+                json.loads(p.read_text(encoding="utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                return [f"{rel}: НЕВАЛИДНЫЙ JSON ({str(e)[:120]}) — исправь синтаксис."]
+        elif ext in (".csv", ".tsv"):
+            import csv
+            sep = "\t" if ext == ".tsv" else None
+            text = p.read_text(encoding="utf-8-sig", errors="replace")
+            lines = text.splitlines()[:500]
+            if not [x for x in lines if x.strip()]:
+                return [f"{rel}: таблица пустая — запиши данные."]
+            if sep is None:
+                try:
+                    sep = csv.Sniffer().sniff(text[:4096], delimiters=",;\t").delimiter
+                except csv.Error:
+                    sep = ","
+            rows = [r for r in csv.reader(lines, delimiter=sep) if r]
+            # брак — только если не совпадает заметная доля строк: одиночные кривые строки бывают и в нормальных таблицах
+            cols = len(rows[0])
+            bad = sum(len(r) != cols for r in rows[1:])
+            if bad > max(2, len(rows) // 10):
+                return [f"{rel}: у {bad} строк из {len(rows)} число колонок не совпадает с заголовком ({cols}) — файл битый, "
+                        "пересохрани через csv.writer или pandas."]
+        elif ext in (".docx", ".xlsx", ".pptx", ".zip", ".odt", ".ods", ".odp", ".epub"):
+            if not head.startswith(b"PK"):
+                return [f"{rel}: это не настоящий {ext[1:]} (внутри не архив Office/ZIP) — собери файл библиотекой (python-docx, openpyxl, python-pptx)."]
+            try:
+                with zipfile.ZipFile(p) as z:
+                    if z.testzip() is not None:
+                        return [f"{rel}: архив повреждён — пересобери файл."]
+            except zipfile.BadZipFile:
+                return [f"{rel}: файл повреждён (архив не открывается) — пересобери."]
+        elif ext == ".pdf":
+            if not head.startswith(b"%PDF-"):
+                return [f"{rel}: это не PDF (нет заголовка %PDF-) — собери настоящий PDF."]
+            with open(p, "rb") as f:
+                f.seek(max(0, size - 2048))
+                if b"%%EOF" not in f.read():
+                    return [f"{rel}: PDF оборван (нет %%EOF в конце) — пересобери."]
+        elif ext in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+            ok = (head.startswith(b"\x89PNG") if ext == ".png" else head.startswith(b"\xff\xd8") if ext in (".jpg", ".jpeg")
+                  else head.startswith(b"GIF8") if ext == ".gif" else head[8:12] == b"WEBP")
+            if not ok:
+                return [f"{rel}: внутри не картинка {ext[1:]} — сохрани изображение заново (Pillow / matplotlib savefig)."]
+        elif ext == ".py":
+            try:
+                compile(p.read_text(encoding="utf-8"), str(p), "exec")
+            except SyntaxError as e:
+                return [f"{rel}: СИНТАКСИЧЕСКАЯ ошибка Python в строке {e.lineno}: {e.msg} — почини."]
+            except UnicodeDecodeError:
+                return [f"{rel}: файл не в UTF-8 — пересохрани в UTF-8."]
+        elif ext in (".md", ".txt", ".srt", ".css", ".js", ".svg", ".xml"):
+            try:
+                (p.read_bytes()[:32768]).decode("utf-8")
+            except UnicodeDecodeError as e:
+                if e.start < 32760:                 # ошибка у самого края — это обрезанная на 32 КБ буква, не брак
+                    return [f"{rel}: текст не в UTF-8 — пересохрани в UTF-8 (encoding='utf-8')."]
+    except Exception as e:  # noqa: BLE001
+        log.debug("проверка %s: %s", rel, e)
+    return []
+
+
+def verify_outputs(task_dir, shown=()):
+    """Готовые файлы задачи: outputs/ (не больше 200) и показанные пользователю (shown, пути от папки задачи).
+    -> список дефектов; файл, показанный, но не созданный, — тоже дефект."""
+    d = Path(task_dir)
+    rels = []
+    out = d / "outputs"
+    if out.is_dir():
+        rels += [p.relative_to(d).as_posix() for p in sorted(out.rglob("*")) if p.is_file()][:200]
+    for r in shown:
+        if r and r not in rels:
+            rels.append(r)
+    problems = []
+    for r in rels:
+        problems += check_file(d / r, r)
+    return problems
+
+
+def summarize(problems, limit=8):
+    """Дефекты -> сообщение модели, после которого она должна починить файлы и снова вызвать finish."""
+    lines = problems[:limit] + ([f"…и ещё {len(problems) - limit}"] if len(problems) > limit else [])
+    return ("МАШИННАЯ ПРОВЕРКА ФАЙЛОВ НАШЛА БРАК:\n- " + "\n- ".join(lines) +
+            "\nЭто ОБЪЕКТИВНЫЕ дефекты (найдены кодом, не мнением). Почини КАЖДЫЙ пункт точечно, проверь и только потом снова вызови finish.")
+
+
+def quick_check(path, rel=None):
+    """Сразу после записи файла: только .py/.json/.html, чтобы не запускать сломанное. -> предупреждение или ""."""
+    p = Path(path)
+    ext = p.suffix.lower()
+    if ext not in (".py", ".json", ".html", ".htm"):
+        return ""
+    if ext in (".html", ".htm"):
+        txt = p.read_text(encoding="utf-8", errors="replace")
+        if "</html>" not in txt.lower():
+            return ""                                         # пишется частями — проверим, когда допишет
+    probs = check_file(p, rel)
+    return ("⚠ ПРОВЕРКА: " + " ".join(probs)) if probs else ""
+
+
+# ---------------- подсказки по ошибкам ----------------
+
+# имя модуля в import -> имя пакета для pip, когда они различаются
+PIP_NAMES = {"cv2": "opencv-python-headless", "PIL": "Pillow", "docx": "python-docx", "pptx": "python-pptx", "yaml": "pyyaml",
+             "sklearn": "scikit-learn", "bs4": "beautifulsoup4", "fitz": "pymupdf", "dateutil": "python-dateutil"}
+# (шаблон в выводе скрипта, подсказка); срабатывает первый подошедший — порядок важен
+HINTS = [
+    (r"ModuleNotFoundError: No module named '([\w.]+)'", lambda m: (
+        f"Модуля {m.group(1)} нет. Обойдись стандартной библиотекой или тем, что есть (numpy, Pillow, httpx, pypdf), либо "
+        f"скажи пользователю, что нужен пакет {PIP_NAMES.get(m.group(1).split('.')[0], m.group(1).split('.')[0])}.")),
+    (r"FileNotFoundError|No such file or directory", lambda m: (
+        "Файла нет: сначала посмотри list_files; папки создавай os.makedirs(..., exist_ok=True); пути — относительно папки задачи.")),
+    (r"\b40[13]\b.*(?:Forbidden|Unauthorized)|status(?:_code)?\W+40[13]", lambda m: (
+        "Сайт не пускает (401/403): добавь заголовок User-Agent браузера; не помогло — другой источник (web_search).")),
+    (r"Остановлено по времени|TimeoutExpired|timed out", lambda m: (
+        "Долго: делай работу порциями — прогресс в файл после каждой порции, повторный запуск продолжает с места.")),
+    (r"UnicodeDecodeError", lambda m: "Кодировка: открывай файлы с encoding='utf-8' (errors='replace'), для Windows-файлов — cp1251."),
+    (r"JSONDecodeError", lambda m: "Пришёл не JSON: сначала напечатай начало ответа (print(r.text[:500])) и посмотри, что там."),
+    (r"SyntaxError|IndentationError", lambda m: (
+        "Синтаксис: перепиши код проще; HTML/JS не клади в f-строки — пиши файл через write_file или вставляй данные через .replace().")),
+    (r"MemoryError|Killed|exit(?:ed)? (?:code )?137", lambda m: "Не хватило памяти: обрабатывай данными частями (chunks), не читай всё сразу."),
+    (r"SSLError|CERTIFICATE_VERIFY_FAILED", lambda m: "Ошибка сертификата сайта: попробуй другой адрес (https/http) или источник."),
+    (r"PermissionError", lambda m: "Нет прав на запись: пиши только в папку задачи (outputs/)."),
+]
+
+
+def error_hint(output):
+    for rx, fn in HINTS:
+        m = re.search(rx, output or "")
+        if m:
+            return "Подсказка: " + fn(m)
+    return ""
+
+
+# ---------------- зацикливание ----------------
+
+class LoopGuard:
+    """Одно и то же действие с тем же результатом — тупик. Повтор с разными результатами (порции большой работы) — не тупик.
+    Считает по последним 8 действиям; ожидание, вопросы и finish не учитываются."""
+    SKIP = {"wait", "ask_user", "notify", "finish"}
+
+    def __init__(self):
+        self.recent = []
+        self.obs = {}
+
+    def observe(self, name, args, result):
+        """Учесть вызов инструмента -> None | "warn" (3-й повтор) | "finish" (5-й и 6-й) | "stop" (7-й и дальше).
+        Действие — имя + аргументы; результат сравнивается по первым 4000 символам."""
+        if name in self.SKIP:
+            return None
+        sig = hashlib.md5((name + "|" + json.dumps(args, sort_keys=True, ensure_ascii=False)).encode()).hexdigest()
+        self.recent = (self.recent + [sig])[-8:]
+        res = self.obs.setdefault(sig, [])
+        res.append(hashlib.md5(str(result)[:4000].encode()).hexdigest())
+        del res[:-8]
+        if len(self.obs) > 40:                               # память ограничена: забываем самое старое действие
+            self.obs.pop(next(iter(self.obs)))
+        n = self.recent.count(sig)
+        productive = len(res) >= 2 and len(set(res[-n:])) == len(res[-n:])
+        if productive:
+            return None
+        return "stop" if n >= 7 else "finish" if n >= 5 else "warn" if n == 3 else None
+
+
+LOOP_WARN = ("СТОП: ты уже несколько раз выполнил это же действие с тем же результатом — это тупик. НЕ повторяй его. "
+             "Либо принципиально смени подход, либо заверши (finish) с тем, что уже есть.")
+LOOP_FINISH = "Пора завершать: ты повторяешь одно и то же. Немедленно вызови finish с лучшим итогом по уже собранному."
+
+# ---------------- ложный отказ ----------------
+
+REFUSAL = ("нет доступа к интернет", "не имею доступа", "отсутствует доступ", "нет прямого доступа", "в реальном времени",
+           "в режиме реального времени", "как языковая модель", "я языковая модель", "будучи языковой моделью",
+           "не могу проверить погод", "не могу получить актуальн", "не могу получить доступ", "не могу искать в интернет",
+           "нет возможности выйти в интернет", "моя база знаний ограничена", "мои данные устарели", "не имею выхода в интернет",
+           "у меня нет доступа", "не могу зайти на сайт", "не могу открыть ссылк", "cannot access", "no access to",
+           "don't have access", "as an ai", "i can't browse")
+
+
+# общие слова «нет доступа», «не могу получить доступ» — отговорка про интернет, только если рядом слова про сеть и данные:
+# «у меня нет доступа к твоей телефонной книге» — честное «не умею», а не повод напоминать про web_search
+_GENERIC = ("не имею доступа", "отсутствует доступ", "нет прямого доступа", "не могу получить доступ", "у меня нет доступа",
+            "no access to", "don't have access", "cannot access")
+_NET = re.compile(r"интернет|сайт|сет[ьи]\b|онлайн|в сети|данн|информац|погод|новост|курс|поиск|актуальн|свеж|реальн|web|internet|online|browse")
+
+
+def looks_like_refusal(text):
+    """Короткий ответ с отговоркой «нет доступа / как языковая модель». Длинный ответ — скорее работа с оговоркой."""
+    t = (text or "").lower()
+    if len(t) > 1200:
+        return False
+    if any(k in t for k in REFUSAL if k not in _GENERIC):
+        return True
+    return any(k in t for k in _GENERIC) and bool(_NET.search(t))
+
+
+REFUSAL_NUDGE = ("СТОП. Ты отказался, сославшись на отсутствие доступа к интернету или свежим данным, — но это НЕВЕРНО: у тебя "
+                 "ЕСТЬ рабочие инструменты web_search и read_page, и ты ими не воспользовался. Не отказывайся и не пиши «как "
+                 "языковая модель». Сначала выполни web_search по сути вопроса (при необходимости несколько раз и read_page по "
+                 "нужным ссылкам), затем ответь по найденным фактам с источниками.")
+
+# ---------------- обещал, но не сделал ----------------
+
+# «Я сейчас посмотрю, какая будет погода, а затем расскажу» — и ход кончился без единого действия: модель (чаще — с действиями
+# текстом, prompt-режим) пообещала вместо того, чтобы сделать. Такой ответ просим доделать (engine_answer._run_turn).
+_DO = (r"(?:по)?смотрю|сделаю|подготовлю|соберу|создам|найду|узнаю|проверю|напишу|поищу|составлю|запущу|займусь|"
+       r"возьмусь|приступлю|начну|расскажу")
+PROMISE = re.compile(rf"\b(?:сейчас|секунд\w*|минутк\w*|минуточк\w*|мгновение)\b[\s,—-]*(?:я\s+)?(?:{_DO})\b"
+                     rf"|\bя\s+(?:сейчас\s+|быстро\s+|тогда\s+)?(?:{_DO})\b|\bдавай(?:те)?\s+я\s+(?:{_DO})\b"
+                     r"|\b(?:займусь|возьмусь|приступаю|начинаю)\b", re.I)
+# просьба о готовой вещи — делается фоновой задачей (start_task): презентация, отчёт, документ, сайт…
+DELIVERABLE = re.compile(r"(?:сделай|создай|подготовь|собери|сверстай|напиши|составь|нарисуй|оформи|сгенерируй)\w*\s+(?:мне\s+|нам\s+)?"
+                         r"(?:\w+\s+){0,2}(?:презентаци|слайд|отч[её]т|документ|таблиц|сайт|лендинг|страниц|инфографик|диаграмм|"
+                         r"буклет|резюме|pdf|пдф|docx|xlsx|pptx|html)", re.I)
+
+
+def looks_like_promise(text):
+    """Короткий ответ-обещание без результата («сейчас посмотрю… и расскажу»)."""
+    t = (text or "").strip()
+    return 0 < len(t) <= 400 and not t.endswith("?") and bool(PROMISE.search(t))
+
+
+def promise_nudge(deliverable):
+    """Что сказать модели, когда она пообещала (или не запустила задачу на просьбу о готовой вещи)."""
+    return ("СТОП. Ты только пообещал(а), но ничего не сделал(а): ход закончится, и человек не получит результат. Сделай это "
+            "прямо сейчас, вызвав инструменты, а не описывая намерения. " +
+            ("Это просьба о готовой вещи (презентация, отчёт, документ, сайт) — запусти фоновую задачу start_task: в goal "
+             "перенеси просьбу целиком и всё, что уже узнал(а) (найденные данные, даты, город), — и коротко скажи, что взялся(лась)."
+             if deliverable else "Если нужны данные — вызови поиск или другой инструмент и ответь по результату."))
+
+
+# ---------------- независимая проверка итога ----------------
+
+CRITIC = (
+    "Ты — строгий, но справедливый контролёр качества ИИ-ассистента, который выполнял задачу в фоне. Тебе дают задачу, итог "
+    "ассистента, ФАКТЫ от системы и список готовых файлов. Верни {\"verdict\":\"ok\"}, если задача по существу выполнена. Верни "
+    "{\"verdict\":\"revise\",\"problems\":\"что не так и что конкретно сделать\"} ТОЛЬКО при явном провале: обещанный или "
+    "требуемый файл отсутствует или пустой, итог не отвечает на цель задачи, в итоге очевидная ошибка или отписка-заглушка "
+    "(«не удалось», «нет доступа», хотя ничего не пробовали). Стиль, длина, оформление — НЕ повод для revise. Не требуй файлов, "
+    "которых задача не просила. Задача, которая честно ждёт внешнего события или честно объясняет, почему цель недостижима, — "
+    "ok. Сомневаешься — ok. Суди по ФАКТАМ и списку файлов. ЗАДАЧА ПО КОДУ: тебе дают изменения (diff) — пройди по "
+    "КАЖДОМУ требованию цели и проверь его по коду; требование нарушено (например, функция теряет цифры, хотя по цели должна "
+    "их сохранять; не обработан пустой ввод, о котором просили) — revise с конкретным примером: вход → что получится → что "
+    "должно быть. Ответь строго одним JSON-объектом.")
+
+
+def critic(ask, goal, summary, files, facts="", diff=""):
+    """Независимая проверка итога моделью. ask(system, messages) -> текст модели. diff — изменения задачи по коду.
+    -> None (ок, или проверка не удалась — сбой проверки не должен валить задачу) | текст замечаний (до 600 символов)."""
+    msg = (f"ЗАДАЧА:\n{goal[:1500]}\n\nИТОГ АССИСТЕНТА:\n{summary[:2000]}\n\nГОТОВЫЕ ФАЙЛЫ:\n" +
+           ("\n".join(files[:40]) or "(нет)") + (f"\n\nФАКТЫ ОТ СИСТЕМЫ (проверено кодом, это истина):\n{facts}" if facts else "")
+           + (f"\n\nИЗМЕНЕНИЯ В КОДЕ (diff):\n{diff[:12000]}" + ("\n…(дальше обрезано)" if len(diff) > 12000 else "") if diff else ""))
+    try:
+        raw = ask(CRITIC, [{"role": "user", "content": msg}]) or ""
+    except Exception as e:  # noqa: BLE001
+        log.info("Самопроверка не удалась: %s", e)
+        return None
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.S)         # рассуждающие модели пишут размышления в <think>
+    m = re.search(r"\{.*\}", raw, re.S)
+    if not m:
+        return None
+    try:
+        d = json.loads(m.group(0))
+    except ValueError:
+        return None
+    if str(d.get("verdict", "")).lower() != "revise":
+        return None
+    p = str(d.get("problems") or "").strip()
+    return p[:600] or None
+
+
+def critic_note(problems):
+    return f"САМОПРОВЕРКА отклонила итог: {problems}\nИсправь это минимально необходимыми шагами и затем снова вызови finish."
+
+
+# ---------------- следы задач и уроки ----------------
+
+def norm_error(text):
+    """Подпись ошибки для группировки: без чисел, путей, хешей."""
+    t = re.sub(r"(?:[A-Za-z]:)?[\\/][^\s'\"]+", "*", text or "")
+    t = re.sub(r"\b[0-9a-f]{8,}\b|\d+", "*", t)
+    return re.sub(r"\s+", " ", t).strip()[:120]
+
+
+def save_trace(traces_dir, trace):
+    """Сохранить след задачи (что вызывала, какие ошибки, чем кончилось) для reflect; хранятся последние 300."""
+    d = Path(traces_dir)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        name = time.strftime("%Y%m%d_%H%M%S") + "_" + re.sub(r"\W+", "_", str(trace.get("id", "")))[:20] + ".json"
+        (d / name).write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
+        files = sorted(d.glob("*.json"))
+        for f in files[:-300]:
+            f.unlink(missing_ok=True)
+    except OSError as e:
+        log.info("след задачи не сохранился: %s", e)
+
+
+def read_lessons(path):
+    """Уроки — строки «- …» файла; остальное (заголовок, пояснения пользователя) пропускается."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return [ln[2:].strip() for ln in text.splitlines() if ln.startswith("- ") and ln[2:].strip()]
+
+
+def lessons_block(path):
+    """Блок уроков для подсказки задачи; длинный — обрезается до LESSONS_PROMPT_MAX с начала (свежие уроки в конце)."""
+    ls = read_lessons(path)
+    if not ls:
+        return ""
+    text = "\n".join("- " + x for x in ls)
+    if len(text) > LESSONS_PROMPT_MAX:
+        text = text[-LESSONS_PROMPT_MAX:].split("\n", 1)[-1]
+    return "\n\nВЫУЧЕННЫЕ УРОКИ (выводы из твоих прошлых задач — соблюдай их):\n" + text
+
+
+REFLECT = (
+    "Ты — аналитик качества голосового ассистента, который выполняет долгие задачи инструментами (поиск в интернете, чтение "
+    "страниц, Python, файлы, письма, ожидание ответа). Тебе дают дайджест его недавних задач: статистику, повторяющиеся ошибки, "
+    "примеры.\n\nИзвлеки ОБОБЩЁННЫЕ выводы, которые предотвратят будущие ошибки:\n«lessons»: 0–6 коротких правил. Каждое: одна "
+    "строка до 140 символов, по-русски, повелительное наклонение; ОБОБЩЕНИЕ, а не пересказ случая (плохо: «не качай файл X с "
+    "сайта Y», хорошо: «при 403 от сайта добавляй User-Agent»); практичное действие, не банальность («работай аккуратнее» — "
+    "мусор); не повторяй уже существующие уроки и не противоречь им. Выводов нет — пустой список: лучше 0 уроков, чем слабые.\n\n"
+    "Ответь строго JSON: {\"lessons\": [\"...\"]}")
+
+
+def digest(traces):
+    """Следы задач -> текстовая сводка для REFLECT: статистика, частые ошибки, до 10 примеров (сначала неудачи)."""
+    ok = sum(1 for t in traces if t.get("ok"))
+    reasons = {}
+    errs = {}
+    refusals = loops = critic_n = verify_n = 0
+    for t in traces:
+        reasons[t.get("reason", "?")] = reasons.get(t.get("reason", "?"), 0) + 1
+        for e in t.get("errors") or []:
+            k = norm_error(e.get("text", ""))
+            if k:
+                errs[k] = errs.get(k, 0) + 1
+        refusals += 1 if t.get("refusal") else 0
+        loops += int(t.get("loop_warns") or 0)
+        critic_n += 1 if t.get("critic") else 0
+        verify_n += 1 if t.get("verify_fail") else 0
+    lines = [f"Задач: {len(traces)}, успешно: {ok}, не получилось: {len(traces) - ok}.",
+             "Чем закончились: " + ", ".join(f"{k} — {v}" for k, v in sorted(reasons.items(), key=lambda x: -x[1]))]
+    if refusals:
+        lines.append(f"ЛОЖНЫХ ОТКАЗОВ («нет доступа», хотя поиск был): {refusals}.")
+    if loops:
+        lines.append(f"Предупреждений о зацикливании: {loops}.")
+    if verify_n:
+        lines.append(f"Машинная проверка файлов находила брак в {verify_n} задачах.")
+    if critic_n:
+        lines.append(f"Самопроверка возвращала итог на доработку в {critic_n} задачах.")
+    if errs:
+        lines.append("Частые ошибки:\n" + "\n".join(f"- ({n}×) {k}" for k, n in sorted(errs.items(), key=lambda x: -x[1])[:12]))
+    ex = [t for t in traces if not t.get("ok")][:6] + [t for t in traces if t.get("ok")][:4]
+    for t in ex:
+        lines.append(f"\nПример ({'успех' if t.get('ok') else 'неудача'}, {t.get('reason')}, шагов {t.get('steps')}): "
+                     f"{str(t.get('goal', ''))[:160]}\n  инструменты: {json.dumps(t.get('tools') or {}, ensure_ascii=False)[:200]}"
+                     + "".join(f"\n  ошибка: {str(e.get('text', ''))[:140]}" for e in (t.get("errors") or [])[:3]))
+    return "\n".join(lines)
+
+
+def _words(s):
+    return {w for w in re.findall(r"\w+", s.lower()) if len(w) > 3}
+
+
+def merge_lessons(old, new):
+    """Добавить новые уроки к старым: отбрасываются банальности, слишком короткие/длинные и почти повторы
+    (больше 60% общих слов). Остаются последние LESSONS_MAX."""
+    out = list(old)
+    for x in new:
+        x = re.sub(r"\s+", " ", str(x)).strip().lstrip("-•* ").strip()
+        if not 15 <= len(x) <= 160 or re.match(r"^(работай|будь|старай|думай) ", x.lower()):
+            continue
+        w = _words(x)
+        if any(w and _words(y) and len(w & _words(y)) / min(len(w), len(_words(y))) > 0.6 for y in out):
+            continue
+        out.append(x)
+    return out[-LESSONS_MAX:]
+
+
+TALK_HEAD = ("# Уроки\n\nЧему ассистент научился на ваших поправках («нет, я же просил…», «не так», «короче»). Он соблюдает "
+             "это в разговорах и в задачах. Можно править и удалять строки — ассистент учтёт. Не больше 30, старые уходят.\n\n")
+
+# «нет, не так», «я же просил», «опять», «неправильно», «сколько раз говорить», «в следующий раз…», «не делай так»
+_CORRECTION = re.compile(
+    r"(^|[\s,.!?])(нет[,.!]?\s+(не\s+так|не\s+то|я\s+же|я\s+просил|я\s+говорил|неправильно)|не\s+так[,.!]|я\s+же\s+(просил|говорил|сказал)|"
+    r"(ты\s+)?(опять|снова)\s+(не|забыл|ошиб|перепутал)|неправильно|неверно|ошиб(ся|лась|ка)|сколько\s+(раз\s+)?(можно\s+)?(говорить|повторять)|"
+    r"в\s+следующий\s+раз|не\s+делай\s+так|больше\s+так\s+не\s+делай|я\s+(не\s+)?просил|не\s+надо\s+было|зачем\s+ты)", re.I)
+
+LEARN = (
+    "Ты помогаешь голосовому ассистенту учиться на ошибках. Пользователь его поправил. Предыдущий ответ ассистента:\n«{prev}»\n"
+    "Слова пользователя:\n«{said}»\n\nЕсли это поправка или недовольство тем, КАК ассистент ответил или сделал, — сформулируй ОДНО "
+    "короткое общее правило на будущее (до 20 слов, в повелительном наклонении, без имён и дат, полезное и в других разговорах), "
+    "например: «Отвечай короче — одной-двумя фразами, если не просят подробно». Если это не поправка (просто ответ, новая "
+    "просьба, уточнение факта) или правило было бы бессмысленным — ответь одним словом: НЕТ.\nОтвет — только правило или НЕТ.")
+
+
+def looks_like_correction(text):
+    """Похоже на поправку ассистента («нет, я же просил коротко», «опять не то»)? Только кандидат: решает модель (LEARN)."""
+    return bool(_CORRECTION.search(text or "")) and len(text or "") < 600
+
+
+def learn_from_correction(ask, prev, said, path):
+    """Поправка -> правило модели -> строка в «Память/Уроки.md». ask(prompt) -> ответ модели. -> правило или "".
+    Такое же правило уже есть (совпадает без учёта регистра и знаков) — не дублируем."""
+    rule = (ask(LEARN.format(prev=(prev or "")[-800:], said=(said or "")[:600])) or "").strip().strip("«»\"' ")
+    rule = re.sub(r"^(правило|урок)\s*:\s*", "", rule, flags=re.I).strip()
+    if not rule or re.fullmatch(r"нет\.?", rule, re.I) or len(rule) > 220 or "\n" in rule:
+        return ""
+    have = read_lessons(path)
+    norm = lambda x: re.sub(r"[\W_]+", " ", x.lower()).strip()   # noqa: E731
+    if norm(rule) in {norm(x) for x in have}:
+        return ""
+    write_lessons(path, (have + [rule])[-LESSONS_MAX:], head=TALK_HEAD)
+    return rule
+
+
+def talk_lessons_block(path):
+    """Блок уроков из поправок для подсказки разговора и задач; длинный — свежие важнее."""
+    ls = read_lessons(path)
+    if not ls:
+        return ""
+    text = "\n".join("- " + x for x in ls)
+    if len(text) > TALK_LESSONS_PROMPT_MAX:
+        text = text[-TALK_LESSONS_PROMPT_MAX:].split("\n", 1)[-1]
+    return "\n\nЧЕМУ ТЫ НАУЧИЛСЯ У ПОЛЬЗОВАТЕЛЯ (выводы из его поправок, «Память/Уроки.md» — соблюдай всегда):\n" + text
+
+
+def write_lessons(path, lessons, head=None):
+    """Перезаписать файл уроков через временный файл, чтобы сбой посреди записи не стёр уроки."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    head = head or ("# Уроки задач\n\nЭти правила ассистент вывел сам из своих прошлых задач и соблюдает в новых. Можно править и "
+                    "удалять строки — ассистент учтёт. Не больше 30, старые уходят.\n\n")
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(head + "".join(f"- {x}\n" for x in lessons), encoding="utf-8")
+    tmp.replace(p)
+
+
+def reflect(ask, traces_dir, lessons_path, min_traces=REFLECT_MIN):
+    """Новые следы -> выводы модели -> «Уроки задач.md». -> сколько уроков добавлено (None — новых следов меньше min_traces).
+    Разобранные следы помечаются в .reflected и повторно не используются. Ошибки ask не перехватываются.
+    Как часто вызывать (REFLECT_EVERY), решает tasks.py."""
+    d = Path(traces_dir)
+    done_f = d / ".reflected"
+    try:
+        done = set(done_f.read_text(encoding="utf-8").split()) if done_f.exists() else set()
+    except OSError:
+        done = set()
+    files = [f for f in sorted(d.glob("*.json")) if f.name not in done][-40:]
+    if len(files) < min_traces:
+        return None
+    traces = []
+    for f in files:
+        try:
+            traces.append(json.loads(f.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            pass
+    old = read_lessons(lessons_path)
+    msg = "ТЕКУЩИЕ УРОКИ (не дублируй их):\n" + ("\n".join("- " + x for x in old) or "(пока нет)") + "\n\n" + digest(traces)
+    raw = ask(REFLECT, [{"role": "user", "content": msg}]) or ""
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.S)
+    m = re.search(r"\{.*\}", raw, re.S)
+    new = []
+    if m:
+        try:
+            new = [str(x) for x in (json.loads(m.group(0)).get("lessons") or []) if isinstance(x, str)][:6]
+        except ValueError:
+            new = []
+    merged = merge_lessons(old, new)
+    if merged != old:
+        write_lessons(lessons_path, merged)
+    with open(done_f, "a", encoding="utf-8") as f:
+        f.write("".join(x.name + "\n" for x in files))
+    added = len([x for x in merged if x not in old])
+    log.info("🎓 Уроки задач: из %d задач — новых правил %d (всего %d)", len(traces), added, len(merged))
+    return added

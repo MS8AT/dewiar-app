@@ -1,0 +1,133 @@
+<div align="center">
+
+<img src="brand/dewiar-icon-512.png" width="112" alt="Dewiar">
+
+# Dewiar
+
+**Голосовой ИИ-ассистент с командой персонажей — на компьютере, телефоне и вашем сервере.**
+
+Зовёте по имени и разговариваете голосом. Перебиваете на полуслове, передаёте слово другому персонажу,
+поручаете большую задачу — и она делается в фоне, пока вы заняты своим. Думает любой моделью: вашей
+(vLLM, Ollama, llama.cpp, LM Studio) или облачной (Dewiar, OpenRouter, OpenAI, Claude).
+
+![версия](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-0.36.9-7c5cff)
+![телефон](https://img.shields.io/badge/Android-0.4.31-3ddc84)
+![платформы](https://img.shields.io/badge/Ubuntu%20%C2%B7%20Windows%20%C2%B7%20Android-%D0%B3%D0%BE%D1%82%D0%BE%D0%B2%D0%BE-2b2f3a)
+[![Проверки](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml/badge.svg)](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml)
+
+[Сайт](https://dewiar.pro) · [Руководство](docs/guide.md) · [Свой сервер](docs/self-hosting.md) ·
+[История версий](CHANGELOG.md) · [Для разработчика](CONTRIBUTING.md)
+
+<br>
+
+<img src="docs/img/widget.webp" height="420" alt="Виджет на рабочем столе">&nbsp;&nbsp;
+<img src="docs/img/phone.webp" height="420" alt="Приложение для Android">&nbsp;&nbsp;
+<img src="docs/img/phone-day.webp" height="420" alt="«Мой день» на телефоне">
+
+</div>
+
+## Что умеет
+
+**Разговор, а не команды.** Слышит имя офлайн и мгновенно — даже то, которое вы придумали сами. Начали говорить
+поверх ответа — он затихает и слушает; «стоп», «хватит» — замолкает. Лира с живым лицом ведёт ваш день, Патрик
+помогает обдумать решения; ещё десяток персонажей — Кодер, Джарвис, Эва, профессор, юрист, врач — добавляются одной
+кнопкой, и главный сам передаёт им вопрос по их части. Свой персонаж — с любым именем, голосом и вашим фото.
+
+**Руки и глаза.** Открывает сайты и программы, ищет в интернете, ставит напоминания и будильники, управляет
+музыкой, телевизором и умным домом, пишет заметки и ведёт деньги, читает почту и календарь, видит экран и камеру.
+На телефоне — работает в других приложениях: «напиши маме в Telegram, что задержусь».
+
+**Большие задачи в фоне.** «Возьми задачу: разберись, почему падают тесты, и почини» — план, журнал каждого шага,
+вопросы голосом, итог. Независимые куски делают помощники одновременно; код правится в отдельной рабочей копии,
+работа не сдаётся, пока тесты падают, а вы принимаете изменения по diff. До 1200 шагов без «продолжи».
+
+**Память и знания.** Помнит, что вы рассказали о себе, — и как это менялось («бюджет 65 тысяч, раньше 50 → 70»);
+«в среду в 15:00 встреча» попадёт в календарь с точной датой. Считает калькулятором, а не в уме. Ведёт дневник,
+отвечает по вашим документам (PDF, Word, Markdown) и заметкам Obsidian — офлайн, с поиском по формам слов.
+
+**Везде одно.** Компьютер, телефон и сервер синхронизируются через аккаунт dewiar.pro; Telegram и MAX — ещё один
+способ поговорить. Компьютер выключен — отвечает телефон, а большие задачи делает облако Dewiar.
+
+**Ваше остаётся вашим.** Работает с моделью на вашем сервере без облака. Опасные действия — только после «да»,
+пароли — в сейфе, отчёт разработчику — без ключей и паролей.
+
+<div align="center">
+<img src="docs/img/studio.webp" width="860" alt="Студия: персонажи">
+</div>
+
+## Скачать — всегда последняя версия
+
+Все файлы последнего выпуска — на странице [Releases → latest](https://github.com/dwr-git/dewiar-app/releases/latest). Прямые
+ссылки ниже не меняются и всегда ведут на самое свежее:
+
+| Где | Файл |
+|---|---|
+| **Windows 10 / 11** | [Dewiar-Setup-online.exe](https://github.com/dwr-git/dewiar-app/releases/latest/download/Dewiar-Setup-online.exe) |
+| **Ubuntu 22.04 / 24.04** | [dewiar-assistant_all.deb](https://github.com/dwr-git/dewiar-app/releases/latest/download/dewiar-assistant_all.deb) |
+| **Android** | [Dewiar.apk](https://dewiar.pro/dwrapp/Dewiar.apk) · с управлением приложениями — [Dewiar-hands.apk](https://dewiar.pro/dwrapp/Dewiar-hands.apk) — с сайта, подписаны ключом выпуска |
+
+## Установка
+
+| Где | Как |
+|---|---|
+| **Ubuntu 22.04 / 24.04** | `sudo apt install ./dewiar-assistant_X.Y.Z_all.deb` — дальше обновляется сам |
+| **Windows 10 / 11** | `Dewiar-Setup-X.Y.Z-online.exe` (< 30 МБ) или полный `Dewiar-Setup-X.Y.Z.exe`; права администратора не нужны |
+| **Android** | [`Dewiar.apk`](https://dewiar.pro/dwrapp/Dewiar.apk) или QR-код в студии → «Подключение» → «Dewiar на телефоне» |
+| **Сервер, круглосуточно** | тот же `.deb`, затем `sudo dewiar-server setup` — [подробнее](docs/self-hosting.md#ассистент-круглосуточно-dewiar-server) |
+
+Первый запуск откроет студию на разделе «Мозг»: выберите, где думать ассистенту, — мастер найдёт сервер в сети,
+модель на этом компьютере или подключит облако по ключу. Дальше — [первые пять минут](docs/guide.md#первые-пять-минут).
+
+## Как устроено
+
+```mermaid
+flowchart LR
+  subgraph PC["Компьютер · Linux / Windows"]
+    UI["Виджет и студия<br/>ui/ · pywebview"] <-->|WebSocket| Core["Ядро<br/>core/ · Python"]
+    Core --- Ears["Слух<br/>Vosk · GigaAM · VAD · AEC"]
+    Core --- Voice["Голос<br/>Vosk TTS · Piper"]
+    Core --- Tasks["Задачи · руки · навыки · MCP"]
+  end
+  Phone["Телефон<br/>android/ · WebView + Java"]
+  Server["Ядро на сервере<br/>dewiar-server"]
+  Site["dewiar.pro<br/>аккаунт, синхронизация, модели"]
+  LLM["Модели<br/>vLLM · Ollama · облако"]
+  Core <--> LLM
+  Phone <--> LLM
+  Core <-->|синхронизация| Site
+  Phone <-->|синхронизация| Site
+  Server <-->|синхронизация| Site
+  Site --- Bots["Telegram · MAX"]
+```
+
+| Папка | Что внутри |
+|---|---|
+| `core/` | Ядро: слух, голос, разговор и персонажи, модели, руки, задачи, память, синхронизация, сейф, обновления |
+| `ui/` | Окна компьютера: виджет `hud.html`, студия `settings.html` + `studio/*.js`, обёртка `app.py` |
+| `android/` | Приложение Android: интерфейс `assets/www/app.js`, мост и службы на Java; сборка без Gradle |
+| `server/` | Серверы речи и синтеза для своей машины с видеокартой (`install-server.sh`) |
+| `packaging/`, `tools/` | Пакет `.deb`, установщики Windows, выпуск версии одной командой |
+| `data/` | Облики персонажей, встроенные навыки, модель VAD, радио |
+| `tests/` | 110 наборов проверок: настоящее ядро, окна в Chromium, телефон на подменённом мосте |
+
+## Разработка
+
+```bash
+pip install -r requirements.txt -r requirements-extra.txt
+python3 core/main.py            # ядро (слух, голос, разговор);  окна — python3 ui/app.py
+tests/run_quick.sh              # быстрые проверки, ~2 минуты — их же гоняет GitHub
+tests/run_all.sh                # все: нужны Playwright с Chromium, espeak-ng, ffmpeg
+tools/build_deb.sh dist         # пакет Linux;  tools/build_win.sh — Windows;  android/tools/build_apk.sh — телефон
+```
+
+Как сообщить об ошибке, предложить правку и правила кода — в [CONTRIBUTING.md](CONTRIBUTING.md). Нашли уязвимость — [SECURITY.md](SECURITY.md).
+
+## Авторы
+
+Dewiar придумал и ведёт [dewiar.pro](https://dewiar.pro). Код пишется вместе с Claude (Anthropic) — соавтором
+проекта: его записи в истории помечены строкой `Co-Authored-By: Claude`.
+
+## Лицензия
+
+© 2026 Dewiar. Все права защищены — см. [LICENSE](LICENSE). Сторонние библиотеки, модели и шрифты —
+на условиях своих лицензий.

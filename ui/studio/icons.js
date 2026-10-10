@@ -1,0 +1,61 @@
+/* Студия Dewiar: значки разделов и справка «?» у заголовков.
+   ICONS — свой набор контуров SVG 24×24 (в духе Lucide), встроен в код: студия работает без интернета. Ключ — data-p
+   кнопки меню и id раздела без «p-»; при загрузке значки вставляются в меню и заголовки разделов.
+   Справка берётся из window.DEWIAR_HELP (assets/help.js); «▶» у примера шлёт фразу ассистенту командой say.
+   Файлы студии подключаются по порядку из ui/settings.html и делят одну глобальную область: при загрузке здесь нужны
+   только $/$$ (core.js); escH (folder.js) и SVG (welcome.js) — при открытии справки. */
+/* ---------- иконки ---------- */
+const ICONS = {
+  personas: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.4 2.7-5.4 6-5.4s6 2 6 5.4"/><circle cx="17.2" cy="9" r="2.4"/><path d="M16 14.7c3 .2 5 1.8 5 5.3"/>',
+  memory: '<circle cx="12" cy="12" r="2.6"/><circle cx="5" cy="6" r="1.8"/><circle cx="19" cy="6.5" r="1.8"/><circle cx="6" cy="18.5" r="1.8"/><circle cx="18.5" cy="18" r="1.8"/><path d="m6.5 7.2 3.6 3.2M17.5 7.6l-3.5 2.9M7.4 17.4l2.9-3.3M17 16.8l-2.9-3"/>',
+  reminders: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/>',
+  prompter: '<rect x="3" y="4.5" width="18" height="12.5" rx="3"/><path d="M7.5 9h9M7.5 12.5h5.5"/><path d="M9.5 20.5h5"/>',
+  tasks: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="m3.5 6 1.5 1.5L8 4.5M3.5 12l1.5 1.5L8 10.5M3.5 18l1.5 1.5L8 16.5"/>',
+  me: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.2 3.6-6.6 8-6.6s8 2.4 8 6.6"/>',
+  diary: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/><path d="M15.5 7.2a2.6 2.6 0 1 1-3.1 3.6 2.1 2.1 0 0 0 3.1-3.6z"/>',
+  soul: '<path d="M12 20.5s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10.2-7.5 10.2z"/><path d="M18.5 2.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/>',
+  const: '<path d="M6 3.5h9.5L19 7v13.5H6z"/><path d="M15 3.5V7h4"/><path d="M9 11h7M9 14h7M9 17h4.5"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  dw: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v5M12 15.5v5M3.5 12h5M15.5 12h5"/>',
+  connect: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.4 1.4"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.4-1.4"/>',
+  brain: '<path d="M12 3.5 13.9 8l4.6 1.9-4.6 1.9L12 16.4l-1.9-4.6-4.6-1.9L10.1 8z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
+  ears: '<path d="M4 12v0M8 8.5v7M12 5v14M16 8v8M20 11v2"/>',
+  voice: '<path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5M18 7a7 7 0 0 1 0 10"/>',
+  hands: '<path d="M14.5 6.5a4 4 0 0 0-5.3 5.3L3.5 17.5l3 3 5.7-5.7a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.3-.7-.7-2.3z"/>',
+  skills: '<path d="m12 3 9 4.6-9 4.6-9-4.6z"/><path d="m3 12.2 9 4.6 9-4.6M3 16.6l9 4.6 9-4.6"/>',
+  sound: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  about: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.01"/>',
+  servers: '<rect x="3.5" y="4" width="17" height="6.5" rx="2"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="2"/><path d="M7.5 7.3h.01M7.5 16.8h.01M11 7.3h5.5M11 16.8h5.5"/>',
+  safety: '<path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.3 7.5 9.5 4.3-1.2 7.5-4.9 7.5-9.5V6z"/><path d="m8.8 12 2.3 2.3 4.3-4.6"/>',
+};
+$$("nav button[data-p]").forEach(b => { const i = b.dataset.p === "diary" ? ICONS.soul : ICONS[b.dataset.p]; if (i) b.insertAdjacentHTML("afterbegin", `<svg class="ni" viewBox="0 0 24 24">${i}</svg>`); });
+// заголовок с id переписывается кодом целиком (textContent) — значок в нём не выжил бы, такие пропускаем
+$$("main section[id^='p-']").forEach(s => { const i = ICONS[s.id.slice(2)], h = s.querySelector("h1"); if (i && h && !h.id) h.insertAdjacentHTML("afterbegin", `<svg class="hi" viewBox="0 0 24 24">${i}</svg>`); });
+/* «?» у заголовка каждого раздела — как он работает, как настроить, что сказать голосом */
+function showHelp(k) {
+  const H = (window.DEWIAR_HELP || {})[k]; if (!H) return;
+  const li = (a) => (a || []).map(x => `<li>${escH(x)}</li>`).join("");
+  const tries = (H.try || []).map((x, i) => `<div class="try"><div><b>«${escH(x.say)}»</b><span>→ ${escH(x.get)}</span></div>${x.noplay ? "" :
+    `<button class="tplay" data-i="${i}" title="Отправить ассистенту">${SVG('<path d="M8 5.5v13l10.5-6.5z"/>')}</button>`}</div>`).join("");
+  $("#help-body").innerHTML = `<h2>${escH(H.title)}</h2><h4>Что это</h4><p>${escH(H.what)}</p>` +
+    (H.how && H.how.length ? `<h4>Как пользоваться</h4><ul>${li(H.how)}</ul>` : "") +
+    (tries ? `<h4>Попробуйте</h4><p class="hint" style="margin:-2px 0 8px">Скажите голосом или нажмите ▶ — фраза уйдёт ассистенту.</p>${tries}` : "") +
+    (H.say && H.say.length ? `<h4>Скажите голосом</h4><ul class="say">${li(H.say)}</ul>` : "") +
+    (H.tips && H.tips.length ? `<h4>Советы</h4><ul>${li(H.tips)}</ul>` : "");
+  $$("#help-body .tplay").forEach(b => b.onclick = async () => {
+    const x = H.try[+b.dataset.i]; b.disabled = true;
+    try { await core.call("say", { text: x.say }); toast("Отправил ассистенту — смотрите виджет"); } catch (e) { toast(e.message); }
+    setTimeout(() => b.disabled = false, 1500);
+  });
+  $("#help").classList.add("open");
+}
+$$("main section[id^='p-']").forEach(s => {
+  const k = s.id.slice(2), h = s.querySelector("h1"); if (!h || !(window.DEWIAR_HELP || {})[k]) return;
+  if (h.id) { const sp = document.createElement("span"); sp.id = h.id; h.removeAttribute("id"); sp.append(...h.childNodes); h.appendChild(sp); }   // id переезжает на вложенный span: код меняет текст в нём и не затирает кнопку «?»
+  const b = document.createElement("button"); b.className = "hbtn"; b.textContent = "?"; b.title = "Как работает этот раздел";
+  b.onclick = (e) => { e.stopPropagation(); showHelp(k); }; h.appendChild(b);
+});
+$("#help-x").onclick = () => $("#help").classList.remove("open");
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#help").classList.remove("open"); });
+document.querySelectorAll("nav button[data-p]").forEach(b => b.addEventListener("click", () => $("#help").classList.remove("open")));   // другой раздел — справка прошлого закрывается
