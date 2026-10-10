@@ -630,7 +630,8 @@ function note(st) {
   const base = st.note ? st.note + (dl !== undefined && !ld ? ` ${Math.round(dl * 100)}%` : "") :
     st.meeting ? (st.meeting.mode === "pause" ? "🎧 Созвон — слушаю только по кнопке" : "🎧 Созвон — откликаюсь только на главное имя") : "";
   $("note").textContent = [ld && st.note && /^(Загружаю|Скачиваю)/.test(st.note) ? "" : base, ldText].filter(Boolean).join("\n");
-  if (typeof entity !== "undefined") entity.calm = !!(st.meeting && st.meeting.mode === "pause");
+  // созвон или компьютеру не хватает памяти (status.tight) — облик почти неподвижен, кадры редкие
+  if (typeof entity !== "undefined") entity.calm = !!(st.meeting && st.meeting.mode === "pause") || !!st.tight;
 }
 
 /* когда в карточке есть текст, поле ввода или вопрос «Да/Нет» — сфера становится меньше */

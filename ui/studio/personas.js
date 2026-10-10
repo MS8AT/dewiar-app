@@ -18,11 +18,11 @@ function renderPersonas() {
     c.innerHTML = `${p.id === active ? '<span class="tag">активен</span>' : ""}<button class="btn small edit">Изменить</button><div class="disc"><canvas></canvas></div><h3></h3>${p.role ? '<span class="role"></span>' : ""}<p></p><ul class="sk"></ul>`;
     $("h3", c).textContent = p.name; $("p", c).textContent = p.tagline || ""; if (p.role) $(".role", c).textContent = p.role;
     (p.skills || []).slice(0, 4).forEach(t => { const li = document.createElement("li"); li.textContent = t; $("ul.sk", c).appendChild(li); });
-    const e = new DewiarEntity($("canvas", c), { style: p.avatar_url && p.style !== "aura" ? "photo" : p.style, color: p.color, image: p.avatar_url || null, live: p.live || "" });
-    e.set({ state: p.id === active ? "listening" : "idle", level: 0 }); entities.push(e);
+    const e = new DewiarEntity($("canvas", c), { style: p.avatar_url && p.style !== "aura" ? "photo" : p.style, color: p.color, image: p.avatar_url || null, live: p.live || "", still: true });
+    e.calm = !!stTight; e.set({ state: "idle", level: 0 }); entities.push(e);   // оживает при наведении — иначе десяток анимаций грузит компьютер
     c.onclick = (ev) => { if (ev.target.closest(".edit")) return openEditor(p); core.call("persona_set", { id: p.id }).catch(err => toast(err.message)); };
     c.onkeydown = (ev) => { if (ev.key === "Enter") c.click(); };
-    c.onmouseenter = () => e.set({ state: "speaking", level: 0.35 }); c.onmouseleave = () => e.set({ state: p.id === active ? "listening" : "idle", level: 0 });
+    c.onmouseenter = () => e.set({ state: "speaking", level: 0.35 }); c.onmouseleave = () => e.set({ state: "idle", level: 0 });
     g.appendChild(c);
   });
   const n = document.createElement("div"); n.className = "card new"; n.tabIndex = 0;
@@ -31,6 +31,13 @@ function renderPersonas() {
   loadGallery();
   const cur = personas.find(p => p.id === active);
   if (cur) { accent(cur.color); brand.configure({ style: cur.avatar_url && cur.style !== "aura" ? "photo" : cur.style, color: cur.color, image: cur.avatar_url || null }); $("#bsub").textContent = `сейчас говорит ${cur.name}`; }
+}
+
+/* Компьютеру не хватает памяти (status.tight от ядра) — все облики студии почти неподвижны */
+let stTight = false;
+function studioTight(on) {
+  stTight = !!on;
+  [brand, pv, ...entities, ...galEnts, ...styleEnts].forEach(e => { if (e) e.calm = stTight; });
 }
 
 /* готовые персонажи: шаблоны (Агент, Джарвис, Эва, Кодер) и специалисты */
@@ -47,7 +54,7 @@ async function loadGallery() {
     const b = $(".gbtn", c); b.textContent = p.installed ? "В команде ✓" : "+ Добавить"; b.className = "btn gbtn" + (p.installed ? "" : " primary");
     b.onclick = async () => { if (p.installed) { core.call("persona_set", { id: p.id }).catch(e => toast(e.message)); return; }
       b.disabled = true; try { await core.call("gallery_add", { id: p.id }); toast(`${p.name} в команде — позовите: «${p.name}, …»`); } catch (e) { toast(e.message); b.disabled = false; } };
-    const e = new DewiarEntity($("canvas", c), { style: p.avatar_url ? "photo" : p.style, color: p.color, image: p.avatar_url || null, live: p.live || "" }); e.set({ state: "idle", level: 0 }); galEnts.push(e);
+    const e = new DewiarEntity($("canvas", c), { style: p.avatar_url ? "photo" : p.style, color: p.color, image: p.avatar_url || null, live: p.live || "", still: true }); e.calm = !!stTight; e.set({ state: "idle", level: 0 }); galEnts.push(e);
     c.onmouseenter = () => e.set({ state: "speaking", level: 0.35 }); c.onmouseleave = () => e.set({ state: "idle", level: 0 });
     g.appendChild(c);
   });
@@ -85,7 +92,7 @@ function renderStyles() {
   Object.entries(STYLE_NAMES).forEach(([k, name]) => {
     const b = document.createElement("button"); b.className = ed.style === k && !ed.avatar_data ? "on" : "";
     b.innerHTML = "<canvas></canvas>" + name; $("#e-styles").appendChild(b);
-    const e = new DewiarEntity($("canvas", b), { style: k, color: ed.color, ring: false }); styleEnts.push(e);
+    const e = new DewiarEntity($("canvas", b), { style: k, color: ed.color, ring: false, still: true }); styleEnts.push(e);
     b.onclick = () => { ed.style = k; ed.avatar_data = null; ed.avatar_url = ""; ed.avatar = ""; renderStyles(); updatePreview(); };
   });
 }

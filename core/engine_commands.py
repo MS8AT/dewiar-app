@@ -772,6 +772,8 @@ class CommandsMixin:
                 return {"ok": winav.copy_text(winav.install_paths(root)[0])}
             return {"ok": winav.defender_exclude(winav.install_paths(root))}
         if cmd == "device_light":
+            if not a.get("on"):                        # выключили сами — сам больше не включаю (тесно — только совет)
+                self.s.update({"device": {"auto_light": False}})
             done = self.set_light(bool(a.get("on")))
             return dict(self.device_status(), done=done)
         if cmd == "probe_server":

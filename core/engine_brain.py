@@ -184,18 +184,37 @@ class BrainMixin:
         from device import pressure, pressure_text, top_memory
         if self.stopping.wait(float(os.environ.get("DEWIAR_MEM_WAIT") or 120)):
             return
-        streak, told = 0, 0.0
+        streak, told, calm = 0, 0.0, 0
         while not self.stopping.is_set():
             try:
                 p = pressure()
                 streak = streak + 1 if p["tight"] else 0
                 prev = getattr(self, "mem", None) or {}
                 self.mem = dict(p, streak=streak, text=prev.get("text", "") if p["tight"] else "")   # совет живёт, пока тесно
+                tight = streak >= 2
+                if bool(self.status.get("tight")) != tight:   # окна берегут ресурсы: облик почти неподвижен, лишнее не рисуется
+                    self.status["tight"] = tight
+                    log.info("🧠 Память %s — анимации окон %s", "на пределе" if tight else "снова есть", "на минимуме" if tight else "как обычно")
+                    self.emit("status", status=self.status)
+                calm = 0 if p["tight"] else calm + 1
+                if self.s.get("device", "light_auto") and calm >= 30:
+                    # лёгкий режим включался сам из-за памяти, а полчаса уже свободно — возвращаем точное распознавание
+                    self.s.update({"device": {"light_auto": False}})
+                    log.info("🧠 Памяти снова хватает полчаса — выключаю лёгкий режим, который включала сама")
+                    self.set_light(False)
                 if streak >= 2 and self.s.get("device", "mem_warn") is not False and (not told or time.monotonic() - told > 6 * 3600):
                     told = time.monotonic()
                     top = top_memory(3, skip=())
                     st = self.device_status()
-                    text = pressure_text(p, top, light=st["light"], advice=st.get("advice", ""))
+                    auto = ""
+                    if not st["light"] and self.s.get("device", "auto_light") is not False:
+                        # компьютер уже ждёт память — не только советуем, а сами разгружаемся (это обратимо)
+                        self.s.update({"device": {"light_auto": True}})
+                        done = self.set_light(True)
+                        st = self.device_status()
+                        auto = ("Перехожу в лёгкий режим" + (": " + ", ".join(done) if done else "") + " — освободится "
+                                "память. Когда станет свободнее, верну как было; вернуть сразу — студия → «Dewiar.pro» → «Лёгкий режим». ")
+                    text = auto + pressure_text(p, top, light=st["light"], advice=st.get("advice", ""))
                     self.mem["text"] = text
                     log.warning("🧠 Памяти мало: свободно %.2f ГБ из %.1f, подкачка %s%%, PSI %s; больше всех: %s", p["free"], p["total"],
                                 p["swap"], p["psi"], ", ".join(f"{k} {v} ГБ" for k, v in top) or "—")

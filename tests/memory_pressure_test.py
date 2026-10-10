@@ -52,21 +52,36 @@ import engine as E  # noqa: E402
 
 
 class S:
-    def __init__(self, warn=True):
-        self.warn = warn
+    def __init__(self, warn=True, auto=None):
+        self.warn, self.dev = warn, {} if auto is None else {"auto_light": auto}
 
     def get(self, sec, key=None):
-        return self.warn if (sec, key) == ("device", "mem_warn") else None
+        if (sec, key) == ("device", "mem_warn"):
+            return self.warn
+        return self.dev.get(key) if sec == "device" else None
+
+    def update(self, d):
+        self.dev.update(d.get("device", {}))
 
 
-def run(warn=True, fake="0.4,10,92", seconds=1.2):
-    os.environ.update(DEWIAR_FAKE_PRESSURE=fake, DEWIAR_MEM_WAIT="0.05", DEWIAR_MEM_EVERY="0.1")
+def run(warn=True, fake="0.4,10,92", seconds=1.2, auto=None, then=None):
+    os.environ.update(DEWIAR_FAKE_PRESSURE=fake, DEWIAR_MEM_WAIT="0.05", DEWIAR_MEM_EVERY="0.03" if then else "0.1")
     eng = E.Engine.__new__(E.Engine)
-    eng.s = S(warn)
+    eng.s = S(warn, auto)
     eng.stopping = threading.Event()
-    eng.pushed = []
+    eng.pushed, eng.lights, eng.statuses, eng.status = [], [], [], {}
     eng._push_quiet = lambda title, text: eng.pushed.append((title, text))
-    eng.device_status = lambda: {"light": False, "advice": ""}
+    eng.light = False
+    eng.device_status = lambda: {"light": eng.light, "advice": ""}
+
+    def set_light(on):
+        eng.lights.append(on)
+        eng.light = on
+        return ["голос — лёгкий Piper"] if on else []
+    eng.set_light = set_light
+    eng.emit = lambda kind, **k: eng.statuses.append(dict(k.get("status") or {})) if kind == "status" else None
+    if then:
+        threading.Timer(seconds * 0.4, lambda: os.environ.update(DEWIAR_FAKE_PRESSURE=then)).start()
     th = threading.Thread(target=eng._memory_watch, daemon=True)
     th.start()
     time.sleep(seconds)
@@ -79,6 +94,15 @@ e = run()
 ok(len(e.pushed) == 1 and e.pushed[0][0] == "Компьютеру не хватает памяти" and "Свободно 0,4 ГБ" in e.pushed[0][1],
    f"тесно — одно уведомление, не каждую минуту: {len(e.pushed)}")
 ok(e.mem["tight"] and e.mem["streak"] >= 2 and e.mem.get("text"), "состояние для студии")
+ok(e.lights == [True] and e.pushed[0][1].startswith("Перехожу в лёгкий режим: голос — лёгкий Piper")
+   and e.s.dev.get("light_auto"), f"тесно — сама перешла в лёгкий режим и так и сказала: {e.lights} «{e.pushed[0][1][:70]}…»")
+ok(any(x.get("tight") for x in e.statuses), "окнам сказано «мало памяти» — облики почти неподвижны")
+e2 = run(auto=False)
+ok(e2.lights == [] and len(e2.pushed) == 1 and "включите лёгкий режим" in e2.pushed[0][1],
+   "лёгкий режим выключали сами — сам не включаю, только советую")
+e3 = run(seconds=3.0, then="6,16,10")
+ok(e3.lights == [True, False] and not e3.s.dev.get("light_auto") and e3.statuses and e3.statuses[-1].get("tight") is False,
+   f"память освободилась надолго — лёгкий режим, включённый самой, выключаю: {e3.lights}")
 ok(not run(warn=False).pushed, "предупреждение выключено — молчит")
 ok(not run(fake="6,16,10").pushed, "памяти хватает — молчит")
 for k in ("DEWIAR_FAKE_PRESSURE", "DEWIAR_MEM_WAIT", "DEWIAR_MEM_EVERY"):

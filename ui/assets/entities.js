@@ -2,7 +2,8 @@
    (idle/listening/thinking/speaking/muted/offline) и громкость 0…1 (микрофон или собственный голос).
    new DewiarEntity(canvas, {style, color, image, ring, plate}) → .set({state, level}), .configure(...), .destroy();
    снаружи можно выставить .paused (не рисовать), .vinyl = название станции (в покое — пластинка),
-   .calm (реже кадры), .bold/.thick (плотнее линии — для иконки приложения).
+   .calm (реже кадры: созвон, мало памяти), .still (в покое — неподвижный кадр, для страниц со многими обликами),
+   .bold/.thick (плотнее линии — для иконки приложения).
    Стили — STYLES ниже; имена совпадают со style персонажей в core/personas.py и STYLE_NAMES в ui/studio/core.js.
    Используют виджет (ui/hud.html), студия и телефон: android/tools/build_apk.sh копирует этот файл в приложение.
    Только Canvas 2D; на слабом компьютере draw() сама рисует реже, чтобы окно не тормозило. */
@@ -1071,12 +1072,14 @@
       this.ring = opts.ring !== false;
       this.live = opts.live || "";
       this.plate = opts.plate !== false;
+      this.still = !!opts.still;          // в покое — один кадр, без анимации (много обликов на одной странице студии)
       this.configure(opts);
       this._last = performance.now(); this._frame = 0;
       const loop = (now) => { if (!this.dead) { this.draw(now); requestAnimationFrame(loop); } };
       requestAnimationFrame(loop);
     }
     configure({ style, color, image, live } = {}) {
+      this._stillAt = performance.now() + 1500;             // после смены облика — дорисовать (фото и лица грузятся не сразу)
       if (live !== undefined) { this.live = live || ""; this._live = null; }   // живое лицо (слои из папки live)
       if (style) this.style = STYLES[style] ? style : "nexus";
       if (color) this.color = rgb(color);
@@ -1086,12 +1089,14 @@
       }
     }
     set({ state, level, voice } = {}) {
+      if (state && state !== this.state) this._stillAt = performance.now() + 1200;   // плавно вернуться в покой и замереть
       if (state) this.state = state;
       if (level !== undefined) this.target = level;
       if (voice && level !== undefined) { this._voiceAt = performance.now(); if (level > 0.02) this._voiceSeen = true; }
     }
     draw(now) {
       if (this.paused) return;                               // окно спрятано — не рисуем
+      if (this.still && this.state === "idle" && now > this._stillAt) return;   // неподвижный кадр уже нарисован
       const cv = this.canvas, dpr = window.devicePixelRatio || 1;
       const w = cv.clientWidth, h = cv.clientHeight;
       if (!w || !h) return;
@@ -1101,7 +1106,7 @@
         this.state === "muted" || this.state === "offline" ? 120 : this.state === "idle" ? 40 : 14;
       // слабый компьютер (или WebKit без ускорения): кадр рисуется долго — рисуем реже, чтобы кнопки не «залипали»
       if (this._cost > 6) minDt = Math.max(minDt, Math.min(120, this._cost * 6));
-      if (this.calm && this.state === "idle") minDt = Math.max(minDt, 100);   // созвон: облик почти неподвижен, не мешаем
+      if (this.calm) minDt = Math.max(minDt, this.state === "idle" ? 160 : 60);   // созвон: облик почти неподвижен, не мешаем
       if (now - this._last < minDt) return;
       const t0 = performance.now();
       const dt = Math.min(0.1, (now - this._last) / 1000); this._last = now;

@@ -366,7 +366,7 @@ class AudioMixin:
                         log.info("«%s» тише моего голоса — похоже на эхо, не останавливаюсь", w)
                     else:
                         log.info("✋ «%s» — замолкаю (без эхоподавления)", w)
-                        self.stop_utt, self.stop_time = True, now
+                        self.stop_utt, self.stop_time, self._stop_sleep = True, now, True
                         self.interrupt(w, follow=False)
                 continue
             if was_speaking and not speaking:
@@ -401,6 +401,8 @@ class AudioMixin:
                         self.interrupt("имя")
                     elif self.state == "idle":
                         self.set_state("listening")
+                        self._wake_tone_at = now                  # звук «слушаю» — сразу на имя, а не после распознавания фразы
+                        self.play_tone("wake")
                 elif kind == "stop" and self.alarm:
                     log.info("✋ «%s» — выключаю будильник", phrase)
                     self.stop_utt, self.stop_time = True, now
@@ -412,7 +414,7 @@ class AudioMixin:
                 elif kind == "stop" and self.state in ("speaking", "thinking") and barge != "off":
                     log.info("✋ «%s» — замолкаю", phrase)
                     self.stop_utt = now - self.wake_time > 3     # одно «стоп» — не вопрос; «стоп, лучше …» — вопрос
-                    self.stop_time = now
+                    self.stop_time, self._stop_sleep = now, self.stop_utt
                     self.interrupt(phrase, follow=False)
                     self.follow_up_until = now + 3.0             # «стоп, лучше расскажи…» — договорить успеете
                 elif kind == "stop" and self.state == "listening":
@@ -499,6 +501,7 @@ class AudioMixin:
                              "обычный голос — от 500 и 0.6). Если вы говорили — микрофон слишком тихий или не тот",
                              self._listen_peak, self._listen_vad)
                 self.set_state("idle")
+                self.play_tone("sleep")                    # «больше не слушаю» — ниже, чем «слушаю»: понятно без взгляда на экран
 
     def _on_utterance(self, pcm, t0, now):
         """Фраза закончилась (pcm — 16 бит моно, t0/now — её начало и конец по monotonic). Решаем, куда её:
@@ -507,8 +510,12 @@ class AudioMixin:
         dur = len(pcm) / 2 / RATE
         if self.stop_utt:
             self.stop_utt = False
-            if dur < 1.6:                                  # было только «стоп»/«хватит» — просто замолчали
+            if dur < 1.6:                                  # было только «стоп»/«хватит» — замолчали и спим до имени
+                if getattr(self, "_stop_sleep", False):    # (иначе разговор рядом, начатый в те 3 с, ушёл бы в вопрос)
+                    self._stop_sleep = False
+                    self.go_sleep("стоп", media=False)
                 return
+            self._stop_sleep = False
             self.barge_hit = self.utt_id                   # «стоп, расскажи лучше…» — это новый вопрос
         if dur < 0.35:                                     # щелчок, кашель — не речь
             return
@@ -962,7 +969,10 @@ class AudioMixin:
             if by_wake:
                 log.info("Ложное срабатывание: имени во фразе нет (%d слов)", len(text.split()))
                 log.debug("Ложное срабатывание — фраза: «%s»", text)
-            self.set_state("listening" if time.monotonic() < self.follow_up_until else "idle")
+            back = "listening" if time.monotonic() < self.follow_up_until else "idle"
+            self.set_state(back)
+            if back == "idle" and time.monotonic() - getattr(self, "_wake_tone_at", 0.0) < 15:
+                self.play_tone("sleep")                    # звучало «слушаю», а вопроса не было — так же ясно «не слушаю»
 
     def listen_for_command(self, seconds=8):
         """Имя услышали без вопроса: ждём вопрос seconds секунд (без имени) и даём короткий сигнал."""
@@ -971,16 +981,15 @@ class AudioMixin:
         self.follow_up_until = time.monotonic() + seconds
         self.set_state("listening")
         self.emit("heard", text="")
-        self.play_tone("wake")
+        if time.monotonic() - getattr(self, "_wake_tone_at", 0.0) > 4:   # уже прозвучал на само имя — второй раз не нужен
+            self.play_tone("wake")
 
     def play_tone(self, kind):
+        """Короткий сигнал состояния. Вывод для сигналов держится открытым (ToneOut): открывать звук каждый раз —
+        это заметная задержка, и «слушаю» звучало бы позже, чем человек договорил имя."""
         if not self.s.get("audio", "sounds") or self.player is None or self.state == "speaking":
             return
-        pl = Player(device=self.player.device, null=self.null_player)     # свой проигрыватель: сигнал не мешает основному
-        pcm = tone(kind)
-
-        def run():
-            pl.start(22050)
-            pl.write(pcm)
-            pl.finish()
-        threading.Thread(target=run, daemon=True).start()
+        out = getattr(self, "_tone_out", None)
+        if out is None or out.device != self.player.device:
+            out = self._tone_out = ToneOut(self.player.device, null=self.null_player)
+        out.play(tone(kind))

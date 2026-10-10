@@ -781,7 +781,24 @@ function miniOrb(p) {          // значок персонажа без фот�
 /* ---------- состояние разговора ---------- */
 let state = "idle";
 const STATE_RU = { idle: "Нажмите и говорите", listening: "Слушаю", thinking: "Думаю", speaking: "Говорю" };
+/* Звук «больше не слушаю»: ожидание кончилось без вопроса (или его отменили) — колокольчик вниз, как на компьютере
+   (core/audio_io.py tone("sleep")). Начало слушания звучит у распознавателя телефона и вибрацией. */
+let earCtx = null;
+function earcon(kind) {
+  try {
+    earCtx = earCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (earCtx.state === "suspended") earCtx.resume();
+    const notes = kind === "sleep" ? [[784, 0], [523.3, 0.08]] : [[1046.5, 0], [1568, 0.07]], t0 = earCtx.currentTime + 0.01;
+    notes.forEach(([f, at]) => [[1, 0.17], [2, 0.05], [3.01, 0.014]].forEach(([k, amp]) => {
+      const o = earCtx.createOscillator(), g = earCtx.createGain();
+      o.frequency.value = f * k; o.connect(g); g.connect(earCtx.destination);
+      g.gain.setValueAtTime(0, t0 + at); g.gain.linearRampToValueAtTime(amp, t0 + at + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.3); o.start(t0 + at); o.stop(t0 + at + 0.32);
+    }));
+  } catch (e) { }
+}
 function setState(s) {
+  if (state === "listening" && s === "idle" && S.sounds !== false) earcon("sleep");
   state = s;
   if (orb) orb.set({ state: s, level: s === "speaking" ? 0.3 : 0 });
   $("#state").textContent = STATE_RU[s] || "";

@@ -158,6 +158,7 @@ async function loadDevices() {
 let lastStatus = {};
 function renderStatus(st) {
   lastStatus = st || lastStatus; st = lastStatus;
+  if (typeof studioTight === "function" && st) studioTight(!!st.tight);   // мало памяти — облики студии почти неподвижны
   const rows = [["Связь с ядром", core.connected ? "есть" : "нет"], ["Эхоподавление", st.headphones ? "не нужно — наушники" : st.aec ? "работает" : "выключено — полудуплекс"], ["Микрофон", st.input || "—"],
     ["Распознавание", `${st.stt || "—"}${st.stt_ready === false ? " (загружается, пока Vosk)" : ""}`], ["Голос", st.tts || "—"], ["Модель", st.llm || "не выбрана"], ["Сейчас", [st.note, ...Object.values(st.loading || {}).map(x => "готовлю: " + x.t.toLowerCase()
       + (x.f != null && x.f < 1 ? ` ${Math.round(x.f * 100)}%` : "…"))].filter(Boolean).join(" · ") || "всё спокойно"]];

@@ -34,6 +34,8 @@ def stub():
     e.go_sleep = lambda *a, **k: e.calls.append(("sleep",))
     e.set_state = lambda st: e.calls.append(("state", st))
     e.emit = lambda *a, **k: None
+    e.tones = []
+    e.play_tone = lambda k: e.tones.append(k)
     return e
 
 
@@ -95,6 +97,25 @@ e.wav_input = None                 # не запись из файла — об�
 E.Engine._listen(e)
 ok(len(got) == 1 and got[0] < 3.0, f"имя под музыку: фраза начинается с имени, а не тянется 20 с ({got[0] if got else '—':.1f} с)")
 ok(e._wake_phrase == "лира" and e.state == "listening", "имя запомнено, ассистент слушает")
+ok(e.tones == ["wake"], f"звук «слушаю» — сразу на имя, а не после распознавания фразы: {e.tones}")
+
+# --- «стоп» поверх ответа: одно слово — замолчать и уснуть со звуком (а не 3 с «продолжения» для разговора рядом) ---
+e4 = stub(); e4.stop_utt, e4._stop_sleep = True, True
+E.Engine._on_utterance(e4, b"\0\0" * int(16000 * 0.8), 0.0, 1.0)
+ok(e4.calls == [("sleep",)], f"короткое «стоп» поверх ответа — сон до имени: {e4.calls}")
+e5 = stub(); e5.stop_utt, e5._stop_sleep = True, True
+e5.prompter, e5.calib, e5.vosk_wake_check, e5.barge_sent, e5.barge_hit, e5.barge_speech, e5.utt_id = None, None, -1, -1, -1, -1, 1
+e5.wake_time, e5.last_speak_end, e5.meeting, e5.status = 0.0, 0.0, [], {"aec": True}
+try:
+    E.Engine._on_utterance(e5, b"\0\0" * int(16000 * 2.5), 0.0, 1.0)
+except Exception:  # noqa: BLE001 — дальше фраза идёт в распознавание; заглушке его не хватает — нам важно, что не уснули
+    pass
+ok(("sleep",) not in e5.calls and e5._stop_sleep is False, "«стоп, лучше расскажи…» (длинная фраза) — не сон, а вопрос")
+
+# --- имя прозвучало, вопроса нет — звук «не слушаю» ---
+e6 = stub(); e6._wake_tone_at = time.monotonic()
+E.Engine.handle_text(e6, "Так что вот, в принципе, всё, что будем делать дальше, позвонили", True, False, None, dur=6.0)
+ok(e6.tones == ["sleep"], f"звучало «слушаю», а вопроса не было — звук «не слушаю»: {e6.tones}")
 
 # --- радио: молчит, пока слушаем и думаем; тихо под голосом; тише 10% не бывает ---
 r = Radio(lambda: None, lambda: None)

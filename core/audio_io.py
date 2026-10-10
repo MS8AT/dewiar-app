@@ -12,6 +12,7 @@ import math
 import os
 import shutil
 import subprocess
+import queue
 import threading
 import time
 import wave
@@ -547,16 +548,59 @@ def alarm_tone(style="bells", rate=22050) -> bytes:
 
 
 def tone(kind: str, rate=22050) -> bytes:
-    """Короткие сигналы состояний («слушаю», «готово», «сплю», «ошибка») — синтезируются, без звуковых файлов."""
-    seq = {"wake": [(880, 0.06), (1320, 0.09)],
-           "done": [(1175, 0.05), (1568, 0.07)],
-           "sleep": [(990, 0.06), (660, 0.1)],            # «сплю»: вниз — зеркало «слушаю»
-           "error": [(440, 0.12), (330, 0.16)]}.get(kind, [(1000, 0.05)])
-    out = []
-    for f, d in seq:
-        n = int(rate * d)
-        t = np.arange(n) / rate
-        env = np.minimum(1, np.minimum(t / 0.008, (d - t) / 0.03))
-        out.append(0.22 * np.sin(2 * math.pi * f * t) * env)
-    a = np.concatenate(out)
-    return (a * 32767).astype(np.int16).tobytes()
+    """Короткие сигналы состояний — синтезируются, без звуковых файлов. Колокольчиком: основной тон и мягкие обертоны,
+    быстрая атака и затухание, ноты слегка наслаиваются. «Слушаю» — вверх и звонко, «не слушаю» / «сплю» — вниз и ниже,
+    чтобы отличать на слух, не глядя на экран."""
+    seq = {"wake": [(1046.5, 0.0), (1568.0, 0.07)],          # до → соль, вверх
+           "done": [(1318.5, 0.0), (1760.0, 0.06)],
+           "sleep": [(784.0, 0.0), (523.3, 0.08)],           # соль → до октавой ниже: «перестала слушать»
+           "error": [(440.0, 0.0), (349.2, 0.12)]}.get(kind, [(1000.0, 0.0)])
+    total = max(t for _, t in seq) + 0.26
+    n = int(rate * total)
+    a = np.zeros(n, dtype=np.float32)
+    for f, start in seq:
+        i0 = int(rate * start)
+        t = np.arange(n - i0) / rate
+        env = np.minimum(1.0, t / 0.004) * np.exp(-t / 0.075)            # щелчка нет, хвост — короткий
+        wave = np.sin(2 * math.pi * f * t) + 0.28 * np.sin(2 * math.pi * 2 * f * t) + 0.08 * np.sin(2 * math.pi * 3.01 * f * t)
+        a[i0:] += (0.17 * env * wave).astype(np.float32)
+    fade = min(n, int(rate * 0.01))
+    a[-fade:] *= np.linspace(1, 0, fade)
+    return (np.clip(a, -1, 1) * 32767).astype(np.int16).tobytes()
+
+
+class ToneOut:
+    """Вывод для сигналов: открывается на первый сигнал и держится открытым ещё IDLE секунд — следующий звучит сразу
+    (открытие звука занимает десятки–сотни миллисекунд). Свой Player — сигнал не мешает голосу ассистента."""
+
+    IDLE = 30.0
+
+    def __init__(self, device="", null=False):
+        self.device, self.null = device, null
+        self.pl, self.last, self._lock = None, 0.0, threading.Lock()
+        self.q = queue.Queue()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def play(self, pcm: bytes):
+        self.q.put(pcm)
+
+    def _run(self):
+        while True:
+            try:
+                pcm = self.q.get(timeout=5)
+            except queue.Empty:
+                if self.pl is not None and time.monotonic() - self.last > self.IDLE:
+                    self.pl.stop()
+                    self.pl = None
+                continue
+            try:
+                if self.pl is None:
+                    self.pl = Player(device=self.device, null=self.null)
+                    self.pl.start(22050)
+                if not self.pl.write(pcm):                  # вывод упал (устройство пропало) — откроем заново
+                    self.pl.stop()
+                    self.pl = None
+                self.last = time.monotonic()
+            except Exception as e:  # noqa: BLE001 — сигнал не важнее работы: не вышло — тихо
+                log.debug("сигнал не прозвучал: %s", e)
+                self.pl = None
