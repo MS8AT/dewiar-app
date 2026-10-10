@@ -46,7 +46,11 @@ const D = window.Dewiar || (() => {
     files: (n) => (n in files ? files[n] : (localStorage.getItem("f_" + n) || "")),
     saveFile: (n, t) => { files[n] = t; try { localStorage.setItem("f_" + n, t); } catch (e) {} return true; },
     saveDownload: (n, m, t) => { (window._downloads = window._downloads || []).push([n, t]); return "Загрузки/Dewiar/" + n; },
-    copy: (t) => { window._copied = t; return true; },
+    copy: (t) => { window._copied = t; return true; }, bars: (c, l) => { window._bars = [c, l]; },
+    alarmSound: () => JSON.stringify({ id: store.alarm_sound || "chime", custom: store.alarm_custom_name || "" }),
+    alarmSoundSet: (id) => { if (id === "custom" && !store.alarm_custom_name) return false; store.alarm_sound = id; return true; },
+    alarmSoundTry: (id) => { const on = window._trying !== id; window._trying = on ? id : ""; return on; },
+    alarmSoundCustom: (b64, name) => { if (!b64) return "пустой файл"; store.alarm_custom_name = name; store.alarm_sound = "custom"; return ""; },
     saveDownloadB64: (n, m, b) => { (window._downloads = window._downloads || []).push([n, new TextDecoder().decode(Uint8Array.from(atob(b), c => c.charCodeAt(0)))]); return "Загрузки/Dewiar/" + n; },
     shareTo: (pkg, t) => { window._shared = { pkg, text: t }; return true; },
     _radio: { state: "stopped", name: "", error: "", log: [] },
@@ -162,6 +166,7 @@ const radio = (() => {
     }
     throw new Error("каталог радиостанций недоступен" + (last ? ": " + last : ""));
   }
+  N.on("sound_end", () => $$(".snd.play").forEach(x => x.classList.remove("play")));     // проба звука напоминаний доиграла
   N.on("radio", e => {
     st = { state: e.state, name: e.name || "", error: e.error || "", by: e.by || "" };
     if (st.state === "paused" && st.by === "focus") focusAt = Date.now();
@@ -783,13 +788,24 @@ function miniOrb(p) {          // значок персонажа без фот�
 /* Оформление (как на компьютере, студия → «Оформление»): тема фона и облика (S.skin) и чем голос отзывается вокруг
    портрета (S.voice_fx). calm — по умолчанию: фон в фирменных цветах, белый край портрета; graphite — почти чёрный;
    neon — как раньше: свечение и цвет персонажа. */
-// skins.js — общий с виджетом; светлые темы (light) — пока только на компьютере: экран телефона рассчитан на светлый текст
-const PHONE_SKINS = (window.DEWIAR_SKINS || []).filter(x => !x.light);
+// skins.js — общий с виджетом: все темы, и светлые (body.light — тёмный текст), и неоморфизм (body.neu — app.css)
+const PHONE_SKINS = (window.DEWIAR_SKINS || []).slice();
 const SKINS = PHONE_SKINS.length ? PHONE_SKINS.map(x => x.id) : ["brand"];
 const lookSkin = () => (SKINS.includes(S.skin) ? S.skin : SKINS[0]);
+const ALARM_SOUNDS = [["chime", "Колокольчики", "Стеклянные, вверх и обратно"], ["marimba", "Маримба", "Тёплое дерево, напев"],
+  ["harp", "Арфа", "Перебор струн"], ["dawn", "Рассвет", "Аккорд нарастает, сверху — искры"], ["system", "Системный", "Звук будильника телефона"]];
+const PLAY_SVG = '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor" stroke="none"/></svg>';
+const LOOK_BAR = { glass: "#FCD6E3", snow: "#F8F9FB" };      // верх фона светлых тем без сплошного цвета
+let lookBar = "";
 const lookFx = () => (["bars", "pulse", "wave"].includes(S.voice_fx) ? S.voice_fx : "bars");
 function applyLook(fromPersona) {
   SKINS.forEach(k => document.body.classList.toggle("skin-" + k, k === lookSkin()));
+  const sk = window.dewiarSkin ? dewiarSkin(lookSkin()) : {};
+  document.body.classList.toggle("light", !!sk.light);
+  document.body.classList.toggle("neu", !!sk.neu);
+  // строка состояния и панель жестов — в цвет темы: светлым темам — светлые полосы и тёмные значки
+  const bar = sk.neu ? getComputedStyle(document.body).getPropertyValue("--glass").trim() : (LOOK_BAR[sk.id] || "#0B0B10");
+  try { if (D.bars && bar !== lookBar) { D.bars(/^#[0-9a-f]{6}$/i.test(bar) ? bar : "#0B0B10", !!sk.light); lookBar = bar; } } catch (e) { }
   if (orb) { orb.tone = (window.dewiarSkin && dewiarSkin(lookSkin()).tone) || "mono"; orb.fx = lookFx(); }
   if (!fromPersona) try { applyPersona(); } catch (e) { }       // свечение персонажа зависит от темы
 }
@@ -1169,7 +1185,7 @@ async function resolveModel() {
   throw new Error("не знаю, какую модель взять — укажите её в настройках (Мозг)");
 }
 
-const REASON_START = /^\s*(okay|ok,|alright|so,|hmm|well,|let me|let's|let us|i need|i should|i'll|i will|i must|first,|we need|we have|we should|the user|user (asks|wants|is|said)|looking at|analy[sz]|thinking|reasoning|хорошо, пользовател|итак, пользовател|пользователь (спрашивает|просит|хочет|сказал|написал|пишет)|мне нужно (понять|разобраться|ответить|вызвать|сначала)|так, пользовател)/i;
+const REASON_START = /^\s*(okay|ok,|alright|so,|hmm|well,|let me|let's|let us|i need|i should|i'll|i will|i must|first,|we need|we have|we should|the user|user (asks|wants|is|said)|looking at|analy[sz]|thinking|reasoning|хорошо, пользовател[ьяю](?![а-яё])|итак, пользовател[ьяю](?![а-яё])|пользователь (спрашивает|просит|хочет|сказал|написал|пишет)|мне нужно (понять|разобраться|ответить|вызвать|сначала)|так, пользовател[ьяю](?![а-яё]))/i;   // «Итак, пользовательские данные…» — ответ, а не рассуждение
 const FINAL_MARK = /<\/think>|<\|channel\|>final<\|message\|>|assistantfinal/i;
 /* вызов JSON-объектом: модели пишут имя и аргументы кто как ({"tool_name": …, "arguments": …} — Ollama с «chat») — как _call_parts в llm.py */
 const callName = (o) => (o.function && typeof o.function === "object" ? o.function.name : null) ||
@@ -1275,7 +1291,7 @@ async function llmStream(messages, tools, onText, signal, opt = {}) {
   const gateEnd = () => {
     if (!gate) return; gate = false;
     const letters = gbuf.slice(0, 1500).match(/[A-Za-zА-Яа-яЁё]/g) || [], latin = letters.filter(c => c < "\u0080").length / Math.max(1, letters.length);
-    if (REASON_START.test(gbuf) && gbuf.length > 400 && (latin > 0.5 || /пользовател/i.test(gbuf.slice(0, 300)))) return;   // одно рассуждение без ответа
+    if (REASON_START.test(gbuf) && gbuf.length > 400 && (latin > 0.5 || /пользовател[ьяю](?![а-яё])/i.test(gbuf.slice(0, 300)))) return;   // одно рассуждение без ответа
     feedInner(gbuf);
   };
   let thBuf = "";
@@ -1394,8 +1410,9 @@ async function llmStream(messages, tools, onText, signal, opt = {}) {
     else if (held) onText && onText(held);
   }
   // модель ушла в размышления и упёрлась в лимит, так ничего и не сказав — повторяем без размышлений, с запасом
-  if (!text.trim() && !found.length && (finish === "length" || sawReason) && !opt.retried && !(signal && signal.aborted)) {
-    console.warn(`модель ушла в размышления (${finish || "без ответа"}) — повторяю без них`);
+  // и просто пустой ответ (бывает у облачных моделей) — тоже ещё раз, а не сразу «переспросите» (отзыв 11.10: «защита данных»)
+  if (!text.trim() && !found.length && !opt.retried && !(signal && signal.aborted)) {
+    console.warn(`пустой ответ модели (${finish || "без ответа"}${sawReason ? ", размышляла" : ""}) — повторяю без размышлений`);
     return llmStream(messages, tools, onText, signal, Object.assign({}, opt, { think: false, retried: true, max: 4096 }));
   }
   return { text, calls: found, finish };
@@ -2499,7 +2516,10 @@ async function homeTool(a) {
 
 /* ---------- листы снизу (.sheet): открыть, закрыть, смахнуть вниз; за ними — содержимое каждого листа ---------- */
 function openSheet(id) { closeSheets(true); $(id).classList.add("on"); $("#dim").classList.add("on"); }
-function closeSheets(keepDim) { $$(".sheet.on").forEach(s => s.classList.remove("on")); if (!keepDim) $("#dim").classList.remove("on"); }
+function closeSheets(keepDim) {
+  $$(".sheet.on").forEach(s => s.classList.remove("on")); if (!keepDim) $("#dim").classList.remove("on");
+  if ($(".snd.play") && D.alarmSoundTry) { D.alarmSoundTry(""); $$(".snd.play").forEach(x => x.classList.remove("play")); }   // проба звука — смолкает с листом
+}
 $("#dim").onclick = () => closeSheets();
 let touchY = null;
 document.addEventListener("touchstart", e => { const s = e.target.closest(".sheet"); touchY = s && s.scrollTop <= 0 ? e.touches[0].clientY : null; }, { passive: true });
@@ -2868,10 +2888,16 @@ function renderSettings() {
       <label class="tg"><input type="checkbox" id="wl-on" ${(S.welcome || {}).on !== false ? "checked" : ""}><i></i></label></div></div>`);
   } else {
     const opt = (list, cur) => list.map(([v, n]) => `<option value="${v}" ${v === cur ? "selected" : ""}>${n}</option>`).join("");
-    h.push(`<h3>Оформление</h3><div class="card"><div class="row2">
-      <label class="f" style="flex:1"><span>Фон</span><select id="ap-skin">${[...new Set(PHONE_SKINS.map(x => x.group))].map(gr =>
-        `<optgroup label="${esc(gr)}">${opt(PHONE_SKINS.filter(x => x.group === gr).map(x => [x.id, x.name]), lookSkin())}</optgroup>`).join("") || opt([["brand", "Фирменная"]], "brand")}</select></label>
-      <label class="f" style="flex:1"><span>Когда говорит</span><select id="ap-fx">${opt([["bars", "Лучи"], ["pulse", "Пульс"], ["wave", "Волна"]], lookFx())}</select></label></div></div>`);
+    // фон — плитками с живым образцом (тот же класс темы, что у экрана; кружок — материал её карточек), по группам
+    h.push(`<h3>Оформление</h3><div class="card">${[...new Set(PHONE_SKINS.map(x => x.group))].map(gr => `<div class="skg">${esc(gr)}</div><div class="skins">` +
+        PHONE_SKINS.filter(x => x.group === gr).map(x => `<button class="skm ${x.id === lookSkin() ? "on" : ""}" data-skin="${x.id}"><i class="lk-prev skin-${x.id}"><b></b></i><span>${esc(x.name)}</span></button>`).join("") + `</div>`).join("")}
+      <label class="f" style="margin-top:6px"><span>Когда говорит</span><select id="ap-fx">${opt([["bars", "Лучи"], ["pulse", "Пульс"], ["wave", "Волна"]], lookFx())}</select></label></div>`);
+    // звук напоминаний: свои мягкие мелодии (Sounds.java, res/raw), системный или свой файл; ▶ — послушать
+    const snd = (() => { try { return JSON.parse(D.alarmSound ? D.alarmSound() : "{}"); } catch (e) { return {}; } })();
+    h.push(`<h3>Звук напоминаний</h3><div class="card"><p class="hint" style="margin-top:0">Мягко и сначала тихо — громкость прибавляется за 20 секунд.</p>
+      <div class="snds">${ALARM_SOUNDS.map(([id, n, sub]) => `<button class="snd ${id === (snd.id || "chime") ? "on" : ""}" data-snd="${id}"><i>${PLAY_SVG}</i><span><b>${n}</b><small>${sub}</small></span></button>`).join("")}
+        <button class="snd ${snd.id === "custom" ? "on" : ""} ${snd.custom ? "" : "nofile"}" data-snd="custom"><i>${PLAY_SVG}</i><span><b>Свой звук</b><small id="snd-name">${snd.custom ? esc(snd.custom) : "Любая мелодия с телефона"}</small></span></button></div>
+      <label class="btn w" id="snd-pick"><input type="file" id="snd-file" accept="audio/*" hidden>${snd.custom ? "Выбрать другой файл" : "Выбрать файл…"}</label><div class="res" id="snd-res"></div></div>`);
     h.push(`<h3>Этот телефон в кабинете</h3><div class="card"><p class="hint" style="margin-top:0">В кабинете облака (экзамен, здоровье) этот телефон —
       <b>${esc((info.device || "Телефон") + " · " + (info.version || "") + " · №" + devId().slice(-4))}</b>. Нет в списке — нажмите «Отметиться в кабинете»: появится через минуту.</p>
       <button class="btn w" id="dev-ping">Отметиться в кабинете</button><div class="res" id="dev-res"></div></div>`);
@@ -2917,8 +2943,31 @@ function wireSettings(info) {
   if (g("dev-ping")) g("dev-ping").onclick = async () => { const r = g("dev-res"); r.className = "res"; r.textContent = "отправляю…";
     const ok = await pulseSend(); r.className = ok ? "res ok" : "res bad";
     r.textContent = ok ? "Готово — обновите список «Где» в кабинете." : (S.pulse === false ? "«Анонимный пульс» выключен — включите его ниже, и телефон появится." : "Не получилось — проверьте интернет."); };
-  if (g("ap-skin")) g("ap-skin").onchange = () => { S.skin = g("ap-skin").value; saveS(); applyLook(); };
+  $$(".skm").forEach(b => b.onclick = () => { S.skin = b.dataset.skin; saveS(); applyLook(); $$(".skm").forEach(x => x.classList.toggle("on", x === b)); });
   if (g("ap-fx")) g("ap-fx").onchange = () => { S.voice_fx = g("ap-fx").value; saveS(); applyLook(); };
+  // звук напоминаний: нажатие — выбрать и послушать (ещё раз — стоп); «Свой звук» без файла — сразу выбор файла
+  const sndPlaying = (id) => $$(".snd").forEach(x => x.classList.toggle("play", x.dataset.snd === id));
+  $$(".snd").forEach(b => b.onclick = () => {
+    const id = b.dataset.snd;
+    if (id === "custom" && b.classList.contains("nofile")) return g("snd-file").click();
+    if (D.alarmSoundSet && D.alarmSoundSet(id)) $$(".snd").forEach(x => x.classList.toggle("on", x === b));
+    sndPlaying(D.alarmSoundTry && D.alarmSoundTry(id) ? id : "");
+  });
+  if (g("snd-file")) g("snd-file").onchange = () => {
+    const f = g("snd-file").files[0]; if (!f) return;
+    if (f.size > 12 * 1024 * 1024) { g("snd-res").className = "res bad"; g("snd-res").textContent = "Файл больше 12 МБ — выберите покороче."; return; }
+    g("snd-res").className = "res"; g("snd-res").textContent = "Сохраняю…";
+    const fr = new FileReader();
+    fr.onload = () => {
+      const err = D.alarmSoundCustom ? D.alarmSoundCustom(String(fr.result).split(",")[1] || "", f.name.replace(/\.[a-z0-9]+$/i, "")) : "нет на этом телефоне";
+      if (err) { g("snd-res").className = "res bad"; g("snd-res").textContent = "Не подошёл: " + err + "."; return; }
+      g("snd-res").className = "res ok"; g("snd-res").textContent = "Свой звук выбран.";
+      const c = $('.snd[data-snd="custom"]'); c.classList.remove("nofile"); g("snd-name").textContent = f.name.replace(/\.[a-z0-9]+$/i, "");
+      $$(".snd").forEach(x => x.classList.toggle("on", x === c));
+      sndPlaying(D.alarmSoundTry && D.alarmSoundTry("custom") ? "custom" : "");
+    };
+    fr.readAsDataURL(f);
+  };
   if (g("br-think")) g("br-think").addEventListener("change", () => { if (g("br-think").checked) delete S.llm.think; else S.llm.think = "off"; saveS(); });
   if (setTab === "brain") {
     if (g("br-test")) g("br-test").onclick = async () => { const b = g("br-test"), r = g("br-res"); b.disabled = true; r.className = "res"; r.textContent = "спрашиваю модель…";

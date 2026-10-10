@@ -1,6 +1,6 @@
 """Оформление: темы виджета (calm — по умолчанию, graphite, neon — как раньше) и чем голос отзывается вокруг портрета
 (лучи, пульс, волна). Виджет перекрашивается по настройкам ui.skin / ui.voice_fx, студия → «Оформление» — живые образцы
-и выбор, телефон → «Ещё» → «Оформление». Облики рисуются в Chromium, ядро не нужно."""
+и выбор (и сама студия перекрашивается), телефон → «Ещё» → «Оформление». Облики рисуются в Chromium, ядро не нужно."""
 import os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -86,6 +86,20 @@ for (const fx of ["bars", "pulse", "wave"]) for (const tone of ["mono", "color"]
     pg.click('.lk[data-fx="wave"]'); pg.wait_for_timeout(300)
     ok(pg.evaluate("saved") == [{"ui": {"skin": "graphite"}}, {"ui": {"voice_fx": "wave"}}] and pg.evaluate("$('#lk-skins .lk.on').dataset.skin") == "graphite",
        f"выбор сохраняется сразу: {pg.evaluate('saved')}")
+    # студия сама — в выбранном стиле: фон темы, светлые — тёмный текст, неоморфизм — двойные тени
+    th = lambda: pg.evaluate("() => [document.documentElement.className, getComputedStyle(document.body).color, getComputedStyle(document.body).backgroundImage.slice(0, 60), getComputedStyle($('.lk.on')).boxShadow]")
+    g = th()
+    ok("st-skin" in g[0] and "st-light" not in g[0] and g[1] == "rgb(244, 244, 246)", f"«Графит»: студия в тёмной теме графита: {g[:3]}")
+    pg.click('.lk[data-skin="snow"]'); pg.wait_for_timeout(300)
+    w = th()
+    ok("st-light" in w[0] and w[1] != "rgb(244, 244, 246)" and w[2] != g[2], f"«Белоснежная»: светлый фон и тёмный текст: {w[:3]}")
+    pg.click('.lk[data-skin="neu"]'); pg.wait_for_timeout(300)
+    n = th()
+    ok("st-neu" in n[0] and "inset" in n[3], f"неоморфизм: выбранная карточка вдавлена в материал: {n[0]} / {n[3][:60]}")
+    pg.click('.lk[data-skin="brand"]'); pg.wait_for_timeout(300)
+    b0 = th()
+    ok("st-skin" not in b0[0] and "120, 119, 198" in pg.evaluate("getComputedStyle(document.body).backgroundImage"), "«Фирменная» — студия как раньше")
+    ok(pg.evaluate("localStorage.getItem('studio_skin')") == "brand", "тема запомнена — студия открывается сразу в ней")
     pg.close()
 
     # телефон → «Ещё» → «Оформление»
@@ -108,11 +122,19 @@ for (const fx of ["bars", "pulse", "wave"]) for (const tone of ["mono", "color"]
     pg.evaluate("openSettings('more')"); pg.wait_for_timeout(400)
     card = pg.evaluate("() => [document.querySelector('#set-body').textContent.includes('№' + devId().slice(-4)), !!document.querySelector('#dev-ping')]")
     ok(card == [True, True], "«Этот телефон в кабинете»: №… как в списке экзамена и кнопка «Отметиться в кабинете»")
-    ok(pg.evaluate("$$('#ap-skin option').length") >= 10 and pg.evaluate("$$('#ap-skin optgroup').length") == 5 and not pg.evaluate("$$('#ap-skin option[value=snow]').length"),
-       "телефон: те же тёмные фоны по группам (светлые — пока только на компьютере)")
-    pg.select_option("#ap-skin", "neon"); pg.select_option("#ap-fx", "pulse"); pg.wait_for_timeout(300)
+    ok(pg.evaluate("$$('.skm').length") >= 20 and pg.evaluate("$$('.skg').length") == 6 and pg.evaluate("$$('.skm[data-skin=snow]').length") == 1
+       and pg.evaluate("$('.skm.on').dataset.skin") == "brand", "телефон: все темы плитками по группам, и светлые тоже; выбранная отмечена")
+    pg.click('.skm[data-skin="neon"]'); pg.select_option("#ap-fx", "pulse"); pg.wait_for_timeout(300)
     ph1 = pg.evaluate("() => [document.body.className, orb.tone, orb.fx, S.skin, S.voice_fx]")
     ok("skin-neon" in ph1[0] and ph1[1:] == ["color", "pulse", "neon", "pulse"], f"телефон: тема и анимация меняются и запоминаются: {ph1}")
+    pg.click('.skm[data-skin="snow"]'); pg.wait_for_timeout(300)
+    sn = pg.evaluate("() => [document.body.className, orb.tone, getComputedStyle(document.getElementById('bot')).color, window._bars, $('.skm.on').dataset.skin]")
+    ok("light" in sn[0] and sn[1] == "ink" and sn[2] != "rgb(244, 244, 246)" and sn[3] == ["#F8F9FB", True] and sn[4] == "snow",
+       f"телефон: «Белоснежная» — тёмный текст, тёмные лучи, светлая строка состояния: {sn}")
+    pg.click('.skm[data-skin="neudark"]'); pg.wait_for_timeout(300)
+    nd = pg.evaluate("() => [document.body.className, getComputedStyle(document.getElementById('orbwrap'), '::before').boxShadow, window._bars]")
+    ok("neu" in nd[0] and "light" not in nd[0] and nd[1].count("rgb") == 2 and nd[2] == ["#262a31", False],
+       f"телефон: тёмный неоморфизм — выпуклый круг под обликом, полосы в цвет материала: {nd}")
     pg.close()
     b.close()
 ok(not errs, f"без ошибок на страницах: {errs[:3]}")

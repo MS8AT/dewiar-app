@@ -1,7 +1,7 @@
 /* Студия → «Оформление»: тема виджета (ui.skin) и чем голос отзывается вокруг портрета (ui.voice_fx).
    Карточки — живые образцы: тема — фон, портрет и строка состояния в её цветах; анимация — настоящий облик
    (DewiarEntity) главного персонажа, который «говорит» в выбранной манере. Выбор сохраняется сразу (save), виджет
-   получает событие settings и перекрашивается (hud.html applyLook). */
+   получает событие settings и перекрашивается (hud.html applyLook); студия перекрашивается сама (studio/theme.js). */
 const LOOK_FX = [
   ["bars", "Лучи", "Полоски вокруг портрета отзываются на голос"],
   ["pulse", "Пульс", "От портрета мягко расходятся круги"],
@@ -32,6 +32,6 @@ function loadLook() {
     e.set({ state: "speaking", level: 0.45 });
     lookEnts.push(e);
   });
-  $$("#lk-skins .lk").forEach(b => b.onclick = () => save({ ui: { skin: b.dataset.skin } }).then(loadLook));
+  $$("#lk-skins .lk").forEach(b => b.onclick = () => save({ ui: { skin: b.dataset.skin } }).then(() => { if (window.studioSkin) studioSkin(b.dataset.skin); loadLook(); }));
   $$("#lk-fx .lk").forEach(b => b.onclick = () => save({ ui: { voice_fx: b.dataset.fx } }).then(loadLook));
 }

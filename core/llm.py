@@ -59,8 +59,8 @@ def _humanize(e, base_url):
 _REASON_START = re.compile(
     r"^\s*(okay|ok,|alright|so,|hmm|well,|let me|let's|let us|i need|i should|i'll|i will|i must|first,|we need|we have|we should|"
     r"the user|user (asks|wants|is|said)|looking at|analy[sz]|thinking|reasoning|"
-    r"хорошо, пользовател|итак, пользовател|пользователь (спрашивает|просит|хочет|сказал|написал|пишет)|"
-    r"мне нужно (понять|разобраться|ответить|вызвать|сначала)|так, пользовател)", re.I)
+    r"хорошо, пользовател[ьяю](?![а-яё])|итак, пользовател[ьяю](?![а-яё])|пользователь (спрашивает|просит|хочет|сказал|написал|пишет)|"
+    r"мне нужно (понять|разобраться|ответить|вызвать|сначала)|так, пользовател[ьяю](?![а-яё]))", re.I)   # «Итак, пользовательские данные…» — это ответ, не рассуждение
 _REASON_WORDS = {"okay", "ok", "alright", "so", "hmm", "well", "let", "i", "first", "we", "the", "user", "looking",
                  "analysis", "analyzing", "analysing", "analyze", "thinking", "reasoning", "хорошо", "итак", "пользователь",
                  "мне", "так"}
@@ -156,7 +156,7 @@ class ThinkStripper:
                 return self._clean(b[m.end():].strip())
             letters = re.findall(r"[A-Za-zА-Яа-яЁё]", b[:1500])
             latin = sum(c.isascii() for c in letters) / max(1, len(letters))
-            if _REASON_START.match(b.lstrip()) and len(b) > 400 and (latin > 0.5 or re.search(r"пользовател", b[:300], re.I)):
+            if _REASON_START.match(b.lstrip()) and len(b) > 400 and (latin > 0.5 or re.search(r"пользовател[ьяю](?![а-яё])", b[:300], re.I)):
                 self.dropped += len(b)                    # длинное рассуждение без ответа (по-английски или «пользователь …»)
                 return ""
         return self._clean(b)

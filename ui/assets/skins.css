@@ -1,7 +1,8 @@
 /* Темы оформления Dewiar — общие для виджета (ui/hud.html), студии (образцы в «Оформлении») и телефона.
    Класс .skin-<id> задаёт переменные: --skin-bg — фон (значение для свойства background), --glass и --glass-shadow —
    стеклянные блоки, --muted — второстепенный текст (на светлых темах — плотнее). Список, названия и группы —
-   assets/skins.js. Текстура — зерно матового стекла (skins/grain.webp; url() — прямыми правилами: относительный url в var() считается от страницы, а не от этого файла) — картинки skins/*.webp из tools/skin_textures.py. */
+   assets/skins.js. Текстура — зерно матового стекла (skins/grain.webp; url() — прямыми правилами: относительный url в var() считается от страницы, а не от этого файла; #card — карточка виджета
+   (прямо в body; у телефона #card — другой блок внутри сцены), #scene — фон телефона) — картинки skins/*.webp из tools/skin_textures.py. */
 
 .skin-calm {
   --skin-bg: radial-gradient(130% 90% at 15% 95%, rgba(120,119,198,.26) 0%, transparent 60%),
@@ -54,7 +55,7 @@
 }
 
 /* стекло: окно непрозрачное, поэтому «запотевшее стекло» — размытые цветные поля, светлая дымка и мелкое зерно */
-html .skin-frost #card, html .skin-frost #scene, .lk-prev.skin-frost {
+html body.skin-frost > #card, html body.skin-frost #scene, .lk-prev.skin-frost {
   background: url("skins/grain.webp") 0 0 / 160px 160px repeat,
               linear-gradient(rgba(255,255,255,.12), rgba(255,255,255,.07)),
               radial-gradient(65% 48% at 18% 20%, rgba(130,175,255,.75) 0%, transparent 72%),
@@ -63,7 +64,7 @@ html .skin-frost #card, html .skin-frost #scene, .lk-prev.skin-frost {
               linear-gradient(165deg, #2b3448 0%, #252b3d 55%, #1d2232 100%);
 }
 .skin-frost, .skin-fog { --glass: rgb(255 255 255 / 11%); --glass-shadow: 0 0 20px rgba(0,0,0,.2); --muted: rgba(255,255,255,.78); }
-html .skin-fog #card, html .skin-fog #scene, .lk-prev.skin-fog {
+html body.skin-fog > #card, html body.skin-fog #scene, .lk-prev.skin-fog {
   background: url("skins/grain.webp") 0 0 / 160px 160px repeat,
               radial-gradient(120% 30% at 50% 92%, rgba(255,255,255,.2) 0%, transparent 70%),
               radial-gradient(110% 26% at 25% 62%, rgba(255,255,255,.1) 0%, transparent 70%),
@@ -118,7 +119,7 @@ html .skin-fog #card, html .skin-fog #scene, .lk-prev.skin-fog {
 
 /* «Вижн»: панель из тёплого серого стекла, сквозь которое угадывается комната — свет окна, дерево, голубая стена;
    блоки внутри — светлее, с бликом по верхней кромке */
-html .skin-vision #card, html .skin-vision #scene, .lk-prev.skin-vision {
+html body.skin-vision > #card, html body.skin-vision #scene, .lk-prev.skin-vision {
   background: url("skins/grain.webp") 0 0 / 160px 160px repeat,
               linear-gradient(rgba(118,116,114,.42), rgba(96,94,92,.48)),
               radial-gradient(55% 40% at 18% 12%, rgba(255,244,226,.85) 0%, transparent 70%),

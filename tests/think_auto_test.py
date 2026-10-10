@@ -53,5 +53,13 @@ ok('wants_think(text)' in src and 'think="on"' in src and '"think_auto"' in src,
 from settings import DEFAULTS  # noqa: E402
 ok(DEFAULTS["llm"]["think_auto"] is True and 'data-k="llm.think_auto"' in (ROOT / "ui/settings.html").read_text(encoding="utf-8"),
    "включено по умолчанию, переключатель в студии («Мозг»)")
+# ответ «Итак, пользовательские данные…» — это ответ, а не рассуждение вслух (отзыв 11.10: «защита персональных
+# данных» → «Не получилось ответить»); «Итак, пользователь спрашивает…» — по-прежнему рассуждение
+from llm import _REASON_START  # noqa: E402
+ok(not _REASON_START.match("Итак, пользовательские данные хранятся у вас на устройстве.") and _REASON_START.match("Итак, пользователь спрашивает о данных"),
+   "«Итак, пользовательские данные…» — ответ, «Итак, пользователь спрашивает…» — рассуждение")
+app = (ROOT / "android/assets/www/app.js").read_text(encoding="utf-8")
+ok("итак, пользовател[ьяю](?![а-яё])" in app and "if (!text.trim() && !found.length && !opt.retried" in app,
+   "телефон: то же различие, и пустой ответ модели — ещё одна попытка, а не сразу «переспросите»")
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)

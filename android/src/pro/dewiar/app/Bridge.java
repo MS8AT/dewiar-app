@@ -68,6 +68,81 @@ public final class Bridge {
         a.startActivity(Intent.createChooser(i, "Отправить").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
     }
 
+    /** Цвет строки состояния и панели жестов под тему оформления (светлые темы — тёмные значки). color — "#rrggbb". */
+    @JavascriptInterface public void bars(final String color, final boolean light) {
+        a.runOnUiThread(new Runnable() { @Override public void run() {
+            try {
+                int c = android.graphics.Color.parseColor(color);
+                android.view.Window w = a.getWindow();
+                w.setStatusBarColor(c);
+                w.setNavigationBarColor(c);
+                a.web.setBackgroundColor(c);
+                android.view.View v = w.getDecorView();
+                int f = v.getSystemUiVisibility() & ~(0x2000 | 0x10);   // LIGHT_STATUS_BAR (API 23), LIGHT_NAVIGATION_BAR (API 26)
+                if (light) f |= 0x2000 | (Build.VERSION.SDK_INT >= 26 ? 0x10 : 0);
+                v.setSystemUiVisibility(f);
+            } catch (Throwable e) { }
+        } });
+    }
+
+    // ---------- звук напоминаний (Sounds) ----------
+    private android.media.MediaPlayer trying;
+    private String tryingId = "";
+
+    /** Выбранный звук и название своего файла: {"id": "chime", "custom": "моя мелодия.mp3"}. */
+    @JavascriptInterface public String alarmSound() {
+        try {
+            return new JSONObject().put("id", Sounds.current(a)).put("custom", Sounds.customFile(a).isFile() ? prefs.getString("alarm_custom_name", "Свой звук") : "").toString();
+        } catch (Exception e) { return "{}"; }
+    }
+
+    @JavascriptInterface public boolean alarmSoundSet(String id) {
+        if (Sounds.res(id) == 0 && !"system".equals(id) && !("custom".equals(id) && Sounds.customFile(a).isFile())) return false;
+        Sounds.set(a, id);
+        return true;
+    }
+
+    /** Послушать: играет один раз; тот же звук ещё раз — стоп. -> играет ли сейчас. */
+    @JavascriptInterface public synchronized boolean alarmSoundTry(String id) {
+        boolean same = id.equals(tryingId) && trying != null;
+        try { if (trying != null) { trying.stop(); trying.release(); } } catch (Throwable ignored) { }
+        trying = null; tryingId = "";
+        if (same || id.isEmpty()) return false;
+        trying = Sounds.play(a, id, false, 0.8f);
+        if (trying == null) return false;
+        tryingId = id;
+        final android.media.MediaPlayer p = trying;
+        p.setOnCompletionListener(new android.media.MediaPlayer.OnCompletionListener() { @Override public void onCompletion(android.media.MediaPlayer m) {
+            synchronized (Bridge.this) { if (trying == p) { trying = null; tryingId = ""; } }
+            try { m.release(); } catch (Throwable ignored) { }
+            a.event("sound_end", new JSONObject());
+        } });
+        return true;
+    }
+
+    /** Свой звук: файл из выбора (base64) → files/alarm_custom, сразу выбран. Не звучит (не аудио) — ошибка текстом, "" — ок. */
+    @JavascriptInterface public String alarmSoundCustom(String b64, String name) {
+        try {
+            byte[] data = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+            if (data.length > 12 * 1024 * 1024) return "файл больше 12 МБ";
+            java.io.File tmp = new java.io.File(a.getFilesDir(), "alarm_custom.new");
+            java.io.FileOutputStream o = new java.io.FileOutputStream(tmp);
+            o.write(data); o.close();
+            android.media.MediaPlayer test = new android.media.MediaPlayer();
+            try { test.setDataSource(tmp.getAbsolutePath()); test.prepare(); }
+            catch (Throwable e) { //noinspection ResultOfMethodCallIgnored
+                tmp.delete(); return "этот файл телефон не может проиграть"; }
+            finally { try { test.release(); } catch (Throwable ignored) { } }
+            java.io.File dst = Sounds.customFile(a);
+            //noinspection ResultOfMethodCallIgnored
+            dst.delete();
+            if (!tmp.renameTo(dst)) return "не удалось сохранить файл";
+            prefs.edit().putString("alarm_custom_name", name == null || name.isEmpty() ? "Свой звук" : name).apply();
+            Sounds.set(a, "custom");
+            return "";
+        } catch (Throwable e) { return "не удалось сохранить файл"; }
+    }
+
     /** Скопировать текст в буфер обмена (кнопка «Копировать» под ответом). -> удалось ли. */
     @JavascriptInterface public boolean copy(final String text) {
         final boolean[] ok = {false};

@@ -13,8 +13,9 @@ import java.lang.reflect.Method;
  *  надо на любых. Здесь каналы уведомлений, Notification.Builder с каналом и проверка права на точные будильники.
  *  Ошибка отражения не роняет приложение — откатываемся к старому поведению. */
 public final class Compat {
-    // каналы: alarms — будильники и напоминания (важный, звук будильника), info — сообщения ассистента (обычный).
-    // Настройки канала Android запоминает при первом создании: поменять звук или важность можно только новым id
+    // каналы: будильники и напоминания — alarm_<звук> (важный, звук — выбранный, см. Sounds; прежний общий «alarms»
+    // удаляется), info — сообщения ассистента (обычный). Звук и важность канала Android запоминает при создании:
+    // поменять их можно только новым id
     public static final String CH_ALARM = "alarms", CH_INFO = "info";
     private Compat() { }
 
@@ -25,13 +26,7 @@ public final class Compat {
             Class<?> chc = Class.forName("android.app.NotificationChannel");
             Constructor<?> k = chc.getConstructor(String.class, CharSequence.class, int.class);
             Method create = NotificationManager.class.getMethod("createNotificationChannel", chc);
-            Object a = k.newInstance(CH_ALARM, "Будильники и напоминания", 4 /* IMPORTANCE_HIGH */);
-            Uri snd = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM);
-            AudioAttributes aa = new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build();
-            chc.getMethod("setSound", Uri.class, AudioAttributes.class).invoke(a, snd, aa);
-            chc.getMethod("enableVibration", boolean.class).invoke(a, true);
-            create.invoke(nm, a);
+            Sounds.channel(c);                              // будильники — канал под выбранный звук (Sounds)
             Object b = k.newInstance(CH_INFO, "Сообщения ассистента", 3 /* IMPORTANCE_DEFAULT */);
             create.invoke(nm, b);
         } catch (Throwable ignored) { }

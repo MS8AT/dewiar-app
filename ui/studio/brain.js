@@ -90,6 +90,7 @@ function bindFields() {
   $("#ttsextra").onchange = () => { try { save({ tts: { remote: { extra: JSON.parse($("#ttsextra").value || "{}") } } }); } catch (e) { toast("Это не JSON"); } };
 }
 function refreshStatic() {
+  if (window.studioSkin) studioSkin(get("ui.skin"));     // студия — в стиле виджета (studio/theme.js)
   const wf = $("#wf-box"); if (wf) wf.style.display = (+get("ui.widget_fail2") || 0) >= 2 ? "" : "none";
   $$("[data-k]").forEach(inp => {
     if (document.activeElement === inp) return;           // не перетираем поле, которое сейчас правят

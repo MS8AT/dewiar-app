@@ -7,9 +7,9 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioAttributes;
+import android.media.MediaPlayer;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -23,10 +23,14 @@ import android.widget.TextView;
 import org.json.JSONObject;
 
 /** Окно будильника поверх блокировки (открывает AlarmReceiver): текст крупно, звонок и вибрация, «Понял» и «Отложить
- *  на 10 минут». Звонит 2 минуты, потом смолкает, окно остаётся. Разметка — кодом, без XML-ресурсов.
+ *  на 10 минут». Звук — выбранный в настройках (Sounds): по кругу, сначала тихо, за 20 секунд — до полной громкости;
+ *  уведомление при этом переходит в тихий канал, чтобы не звучать вторым голосом. Звонит 2 минуты, потом смолкает,
+ *  окно остаётся. Разметка — кодом, без XML-ресурсов.
  *  «Отложить» ставит новое разовое напоминание через Alarms.put с id вида «<id>-s<секунды>», исходное не трогает. */
 public class AlarmActivity extends Activity {
-    private Ringtone ring;
+    private Ringtone ring;                          // запасной путь: свой файл не открылся — системная мелодия
+    private MediaPlayer player;
+    private float vol = 0.25f;
     private Vibrator vib;
     private final Handler h = new Handler();
     private String id, title, kind;
@@ -109,9 +113,18 @@ public class AlarmActivity extends Activity {
 
     @SuppressWarnings("deprecation")
     private void start() {
-        try {
-            Uri u = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-            if (u == null) u = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+        AlarmReceiver.quiet(this, id, title == null ? "" : title, kind == null ? "reminder" : kind,
+                getIntent().getStringExtra("who") == null ? "" : getIntent().getStringExtra("who"));
+        player = Sounds.play(this, Sounds.current(this), true, vol);
+        if (player != null) {
+            h.postDelayed(new Runnable() { @Override public void run() {       // мягко нарастает: не вскакивать от звонка
+                if (player == null) return;
+                vol = Math.min(1f, vol + 0.0375f);
+                try { player.setVolume(vol, vol); } catch (Throwable ignored) { }
+                if (vol < 1f) h.postDelayed(this, 1000);
+            } }, 1000);
+        } else try {
+            android.net.Uri u = Sounds.uri(this, "system");
             ring = RingtoneManager.getRingtone(this, u);
             if (ring != null) {
                 ring.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
@@ -124,12 +137,14 @@ public class AlarmActivity extends Activity {
         } catch (Throwable ignored) { }
         try {
             vib = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-            if (vib != null) vib.vibrate(new long[]{0, 600, 500, 600, 1200}, 0);   // два толчка и пауза, по кругу
+            if (vib != null) vib.vibrate(new long[]{0, 400, 900, 400, 2400}, 0);   // два мягких толчка и пауза, по кругу
         } catch (Throwable ignored) { }
     }
 
     private void stopSound() {
         try { if (ring != null) ring.stop(); } catch (Throwable ignored) { }
+        try { if (player != null) { player.stop(); player.release(); } } catch (Throwable ignored) { }
+        player = null;
         try { if (vib != null) vib.cancel(); } catch (Throwable ignored) { }
     }
 
