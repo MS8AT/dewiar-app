@@ -333,7 +333,7 @@ $("#cc-use").onclick = async () => { try { await cloudUse(); toast("Отвеча
 $("#cc-pair").onclick = async (ev) => { const r = $("#cc-pair-res"); ev.target.disabled = true; r.className = "res"; r.textContent = "получаю код…";
   try { const d = await core.call("pair_new");
     if (!d.code) { r.textContent = d.text || "Код не выдан."; return; }
-    r.className = "res ok"; r.innerHTML = `Код: <b style="font-size:20px;letter-spacing:3px">${escH(d.code.slice(0, 3) + " " + d.code.slice(3))}</b> — на другом устройстве: «Мозг» → «Модели Dewiar» (на телефоне — «Ключ или код Dewiar») → введите код. Действует 10 минут.`; }
+    r.className = "res ok"; r.innerHTML = `Код: <b style="font-size:20px;letter-spacing:3px">${escH(d.code.slice(0, 3) + " " + d.code.slice(3))}</b> — на другом устройстве: «Мозг» → «Подключить бесплатно» (на телефоне — «Код или ключ Dewiar») → введите код. Действует 10 минут.`; }
   catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { ev.target.disabled = false; } };
 /* «Попробовать без регистрации»: заявка — ключ придёт сам (ядро спрашивает раз в минуту, _join_loop) */
 function joinFill() {

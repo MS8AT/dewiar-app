@@ -69,10 +69,17 @@ public class MainActivity extends Activity implements Net.Sink {
                 if (fileCb != null) fileCb.onReceiveValue(null);       // прежний выбор не закрыт: без ответа WebView больше не откроет выбор
                 fileCb = cb;
                 try {
+                    // что просит страница (accept): снимок оплаты — только картинки, вложение для Лиры — фото и текстовые файлы
+                    java.util.ArrayList<String> types = new java.util.ArrayList<>();
+                    for (String t : p.getAcceptTypes()) for (String x : (t == null ? "" : t).split(","))
+                        if (x.trim().contains("/")) types.add(x.trim());
                     Intent i = new Intent(Intent.ACTION_GET_CONTENT);
                     i.addCategory(Intent.CATEGORY_OPENABLE);
-                    i.setType("image/*");
-                    startActivityForResult(Intent.createChooser(i, "Снимок оплаты"), PICK_FILE);
+                    boolean onlyImages = types.isEmpty() || (types.size() == 1 && types.get(0).startsWith("image/"));
+                    i.setType(types.size() == 1 ? types.get(0) : types.isEmpty() ? "image/*" : "*/*");
+                    if (types.size() > 1) i.putExtra(Intent.EXTRA_MIME_TYPES, types.toArray(new String[0]));
+                    if (p.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    startActivityForResult(Intent.createChooser(i, onlyImages ? "Выберите фото" : "Фото или файл"), PICK_FILE);
                     return true;
                 } catch (Throwable e) {
                     fileCb = null;
@@ -105,8 +112,15 @@ public class MainActivity extends Activity implements Net.Sink {
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
         if (req == PICK_FILE && fileCb != null) {
-            Uri u = res == RESULT_OK && data != null ? data.getData() : null;
-            fileCb.onReceiveValue(u == null ? null : new Uri[]{u});
+            Uri[] out = null;
+            if (res == RESULT_OK && data != null) {
+                if (data.getClipData() != null && data.getClipData().getItemCount() > 0) {     // выбрали несколько
+                    int n = Math.min(4, data.getClipData().getItemCount());
+                    out = new Uri[n];
+                    for (int k = 0; k < n; k++) out[k] = data.getClipData().getItemAt(k).getUri();
+                } else if (data.getData() != null) out = new Uri[]{data.getData()};
+            }
+            fileCb.onReceiveValue(out);
             fileCb = null;
         }
     }

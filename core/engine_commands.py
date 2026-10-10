@@ -92,8 +92,11 @@ class CommandsMixin:
             return False
         launcher = root / "dewiar"
         cmd = ["/bin/sh", str(launcher)] if launcher.is_file() else [sys.executable, str(root / "ui" / "app.py")]
+        env.pop("DEWIAR_BOX", None)                  # окна сами уйдут в свою коробку с потолком памяти (ui/app.py)
         try:
-            subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            import memcap                           # и не в коробке ядра: перезапуск ядра не должен закрывать окна
+            subprocess.Popen(memcap.scope_cmd(cmd), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
             log.info("Открываю виджет: окна не было")
             return True
         except OSError as e:

@@ -143,7 +143,9 @@ class VoskProc:
 
     def _start(self):
         import sys
-        kw = {"creationflags": 0x08000000} if os.name == "nt" else {}        # CREATE_NO_WINDOW: без чёрного окна
+        # CREATE_NO_WINDOW: без чёрного окна; Linux/macOS — голоса уступают процессор другим программам (nice +5):
+        # загрузка и синтез тяжёлые, а курсор и окна у человека не должны дёргаться
+        kw = {"creationflags": 0x08000000} if os.name == "nt" else {"preexec_fn": lambda: os.nice(5)}
         self.p = subprocess.Popen([sys.executable, str(Path(__file__).with_name("tts_worker.py")), self.path],
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **kw)
         r = self._read_json()

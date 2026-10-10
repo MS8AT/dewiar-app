@@ -30,6 +30,15 @@
   #bubble { flex: none; margin-top: 2px; background: rgba(255,255,255,.08); color: #fff; border-radius: 999px;
             padding: 6px 20px 7px; min-width: 132px; text-align: center; font-size: 14px; letter-spacing: .01em; transition: background .3s; }
   #bubble.live { background: var(--brand); }
+  /* «Ваша очередь»: ответ закончен, можно говорить без имени. Светлая полоса внутри надписи тает слева направо —
+     столько осталось ждать; кончилась — снова покой и сигнал «не слушаю» */
+  #bubble { position: relative; overflow: hidden; }
+  #bubble > span { position: relative; z-index: 1; }
+  #bubble::after { content: ""; position: absolute; inset: 0; background: rgba(255,255,255,.3); transform-origin: right center;
+                   transform: scaleX(0); pointer-events: none; }
+  #bubble.turn::after { animation: turn-left var(--turn, 8s) linear forwards; }
+  @keyframes turn-left { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+  @media (prefers-reduced-motion: reduce) { #bubble.turn::after { animation: none; transform: scaleX(.5); } }
   #bubble b { font-family: "Unbounded", "Ubuntu", sans-serif; font-weight: 600; font-size: 14px; letter-spacing: .03em; }
 
   /* по центру, но не выше имени: при нехватке места «распорки» сжимаются до нуля, а лишнее уходит вниз (не наезжает на имя) */
@@ -276,6 +285,7 @@
         <textarea id="askin" rows="1" placeholder="Спросите что-нибудь…" title="Enter — отправить, Shift+Enter — новая строка" autocomplete="off" spellcheck="true"></textarea>
         <div class="askrow">
           <button class="ab" id="a-att" title="Приложить файл или картинку"><svg viewBox="0 0 24 24"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg></button>
+          <button class="ab" id="a-clip" title="Вставить картинку из буфера обмена (Ctrl+V)"><svg viewBox="0 0 24 24"><rect x="6" y="4.5" width="12" height="16" rx="2.2"/><path d="M9.5 4.5V3.6c0-.6.4-1 1-1h3c.6 0 1 .4 1 1v.9M9.5 11h5M9.5 14.5h5"/></svg></button>
           <button class="ab" id="a-shot" title="Приложить снимок экрана"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
           <div id="askn">Shift+Enter — новая строка</div>
           <button class="ab send" id="a-send" title="Отправить (Enter)"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
@@ -336,12 +346,22 @@ function renderDots() {                       // список команды —
 }
 let radioNow = "";                           // играет радио — в покое вместо персонажа крутится пластинка
 let stateSince = Date.now();
+let turnUntil = 0;                           // до какого времени ждём ответа без имени (событие turn от ядра)
 function setState(s) {
   if (s !== state) stateSince = Date.now();
+  if (s !== "listening") turnUntil = 0;
   state = s; entity.set({ state: s });
-  const say = $("say");
-  $("bubble").classList.toggle("live", s === "listening" || s === "speaking" || s === "thinking");
-  if (LABEL[s]) { say.textContent = LABEL[s]; }
+  const say = $("say"), bub = $("bubble");
+  bub.classList.toggle("live", s === "listening" || s === "speaking" || s === "thinking");
+  const left = turnUntil - Date.now();
+  if (s === "listening" && left > 300) {
+    say.textContent = "Ваша очередь — говорите";
+    say.title = "Ответ закончен: можно говорить сразу, без имени";
+    if (!bub.classList.contains("turn")) { bub.style.setProperty("--turn", (left / 1000).toFixed(1) + "s"); bub.classList.add("turn"); }
+    return;
+  }
+  bub.classList.remove("turn");
+  if (LABEL[s]) { say.textContent = LABEL[s]; say.title = ""; }
   else if (radioNow && (s === "idle" || s === "muted")) { say.innerHTML = ""; const b = document.createElement("b"); b.textContent = "♪ " + radioNow; say.appendChild(b); say.title = "Играет радио. «Пауза», «дальше», «выключи музыку»"; }
   else { say.innerHTML = ""; say.title = ""; const b = document.createElement("b"); b.textContent = current ? current.name : "Dewiar"; say.appendChild(b); }
 }
@@ -472,7 +492,7 @@ $("b-voice").onclick = guard($("b-voice"), () => core.call("settings_save", { pa
 core.on("hello", d => {
   personas = d.personas; muted = d.muted; $("b-mic").classList.toggle("on", muted); setTextOnly(d.settings.tts && d.settings.tts.text_only);
   applyPersona(d.persona); setRadio(d.radio); setState(d.state); note(d.status);
-  if (!d.settings.llm.active && (d.settings.ui || {}).intro !== "") { showCap("", "Мозг ещё не подключён. Откройте студию — раздел «Мозг».", true); }
+  if (!d.settings.llm.active && (d.settings.ui || {}).intro !== "") { showCap("", "Чтобы я могла отвечать, меня нужно один раз подключить — бесплатно: студия → «Мозг» → «Подключить бесплатно».", true); }
 })
 .on("offline", () => { setState("offline"); })
 .on("state", e => {
@@ -480,6 +500,11 @@ core.on("hello", d => {
   // ответа так и не будет (фразу отбросили, имя почудилось, перебили) — убираем ожидание
   if ((e.state === "idle" || e.state === "listening") && ($("bot").classList.contains("wait") || $("bot").textContent === "Слушаю…"))
     hideCapLater(e.state === "idle" ? 400 : 7000);
+})
+.on("turn", e => {                         // ответ закончен — ход у человека: «Ваша очередь» с тающей полосой
+  turnUntil = Date.now() + (e.seconds || 0) * 1000;
+  const bub = $("bubble"); bub.classList.remove("turn"); void bub.offsetWidth;    // новая очередь — полоса заново
+  setState("listening");
 })
 .on("persona", e => applyPersona(e.persona))
 .on("personas", e => { personas = e.personas; applyPersona(current ? current.id : personas[0].id); })
@@ -834,10 +859,25 @@ $("a-shot").onclick = guard($("a-shot"), () => core.call("screenshot_attach").th
 document.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("drop"); });
 document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("drop"); });
 document.addEventListener("drop", (e) => { e.preventDefault(); document.body.classList.remove("drop"); addFiles([...(e.dataTransfer.files || [])]); });
+/* Картинка из буфера: страница получает её не везде (WebKitGTK часто отдаёт при вставке только текст) — тогда спрашиваем
+   окно (Api.clipboard_image: буфер GTK / Pillow на Windows). Ctrl+V работает и когда поле вопроса закрыто. */
+async function pasteImage(quiet) {
+  const a = window.api && window.api();
+  const url = a && a.clipboard_image ? await a.clipboard_image() : "";
+  if (url) { atts.push({ kind: "image", name: "Из буфера обмена", url }); renderAtts(); openAsk(); return true; }
+  if (!quiet) { showCap(null, "В буфере обмена нет картинки — скопируйте снимок или фото и нажмите ещё раз."); hideCapLater(5000); }
+  return false;
+}
+$("a-clip").onclick = (e) => { e.stopPropagation(); pasteImage(false); };
 $("askin").addEventListener("paste", (e) => {
-  const files = [...(e.clipboardData.items || [])].filter(x => x.kind === "file").map(x => x.getAsFile()).filter(Boolean);
-  if (!files.length) return;
-  e.preventDefault(); addFiles(files);
+  const items = [...(e.clipboardData.items || [])];
+  const files = items.filter(x => x.kind === "file").map(x => x.getAsFile()).filter(Boolean);
+  if (files.length) { e.preventDefault(); addFiles(files); return; }
+  if (!e.clipboardData.getData("text")) { e.preventDefault(); pasteImage(true); }      // текста нет — значит, картинка
+});
+document.addEventListener("keydown", (e) => {          // Ctrl+V мимо поля вопроса — открыть поле с картинкой из буфера
+  if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "м") && document.activeElement !== $("askin")
+      && !/^(INPUT|TEXTAREA)$/.test((document.activeElement || {}).tagName || "")) { e.preventDefault(); pasteImage(true); }
 });
 function sendAsk() {
   const q = $("askin").value.trim();

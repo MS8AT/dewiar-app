@@ -46,6 +46,7 @@ const D = window.Dewiar || (() => {
     files: (n) => (n in files ? files[n] : (localStorage.getItem("f_" + n) || "")),
     saveFile: (n, t) => { files[n] = t; try { localStorage.setItem("f_" + n, t); } catch (e) {} return true; },
     saveDownload: (n, m, t) => { (window._downloads = window._downloads || []).push([n, t]); return "Загрузки/Dewiar/" + n; },
+    copy: (t) => { window._copied = t; return true; },
     saveDownloadB64: (n, m, b) => { (window._downloads = window._downloads || []).push([n, new TextDecoder().decode(Uint8Array.from(atob(b), c => c.charCodeAt(0)))]); return "Загрузки/Dewiar/" + n; },
     shareTo: (pkg, t) => { window._shared = { pkg, text: t }; return true; },
     _radio: { state: "stopped", name: "", error: "", log: [] },
@@ -266,9 +267,9 @@ const radio = (() => {
   function stop() { opSeq++; startSeq++; D.radioStop(); }
   function recent() { return !!(cur || st.name) && Date.now() - usedAt < 60 * 60e3; }     // радио включали недавно — «другую» понимаем и после ошибки
   function render() {
-    const el = document.getElementById("rchip"); if (!el) return;
-    el.hidden = !on();
-    document.body.classList.toggle("radio-on", on());           // имя персонажа прячем — название станции видно целиком
+    const el = document.getElementById("rchip"), box = document.getElementById("radiobox"); if (!el) return;
+    if (box) box.hidden = !on();
+    document.body.classList.toggle("radio-on", on());
     try { if (orb) orb.vinyl = playing() ? (st.name || "Радио") : null; } catch (e) { }   // как на компьютере: в покое крутится пластинка
     el.classList.toggle("paused", st.state === "paused"); el.classList.toggle("wait", st.state === "preparing");
     const n = el.querySelector("b"); if (n) n.textContent = st.name || "Радио";
@@ -801,7 +802,8 @@ function setState(s) {
   if (state === "listening" && s === "idle" && S.sounds !== false) earcon("sleep");
   state = s;
   if (orb) orb.set({ state: s, level: s === "speaking" ? 0.3 : 0 });
-  $("#state").textContent = STATE_RU[s] || "";
+  $("#state").textContent = STATE_RU[s] || ""; $("#state").classList.toggle("idle", s === "idle");
+  const rb = $("#radiobox"); if (rb) rb.classList.toggle("talking", s !== "idle");   // подсказка про голос — только в покое
   const m = $("#mic"); m.classList.toggle("on", s === "listening"); m.classList.toggle("busy", s === "thinking" || s === "speaking");
   D.keepScreen(s !== "idle");
   const duck = radio.on() && s !== "idle";        // пока слушаю и отвечаю — радио тише
@@ -811,7 +813,64 @@ function setState(s) {
 let radioDucked = false;
 function toast(t, ms = 2200) { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("on"), ms); }
 function showYou(t) { $("#you").textContent = t ? "«" + t + "»" : ""; quietCheck(); }
-function showBot(t, cls) { const b = $("#bot"); b.className = cls || ""; b.textContent = t || ""; $("#talk").scrollTop = 1e6; quietCheck(); }
+/* Длинный ответ (список, таблица, план) — в рамке: облик уменьшается, текст слева и мельче; когда ответ готов
+   (frameAnswer) — разметка и кнопки «Копировать», «В заметки», «Скачать». Отзыв: длинный ответ налезал на облик и поле
+   ввода, а сохранить его было нечем. */
+const LONG_ANSWER = 160;
+const isLongAnswer = (t) => String(t || "").length >= LONG_ANSWER || /\n\s*(?:[-*•]|\d+[.)])\s|\n\s*\|/.test(String(t || ""));
+function showBot(t, cls) {
+  const b = $("#bot"), long = !cls && isLongAnswer(t);
+  b.className = cls || (long ? "framed" : ""); b.textContent = t || "";
+  $("#stage").classList.toggle("long", long);
+  if (!long) $("#talk").scrollTop = 1e6;
+  quietCheck();
+}
+function mdAnswer(t) {         // ответ модели → HTML: экранируем, затем заголовки, жирный, пункты, таблицы
+  const lines = esc(String(t || "").trim()).split("\n"), out = [];
+  let list = "", table = [];
+  const inl = (x) => x.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  const flushList = () => { if (list) { out.push(`</${list}>`); list = ""; } };
+  const flushTable = () => {
+    if (!table.length) return;
+    const rows = table.filter(r => !/^\|?\s*:?-{2,}/.test(r)).map(r => r.replace(/^\||\|$/g, "").split("|").map(c => inl(c.trim())));
+    out.push(`<div class="tbl"><table>${rows.map((r, i) => `<tr>${r.map(c => i ? `<td>${c}</td>` : `<th>${c}</th>`).join("")}</tr>`).join("")}</table></div>`);
+    table = [];
+  };
+  for (const raw of lines) {
+    const l = raw.trim(); let m;
+    if (/^\|.*\|$/.test(l)) { flushList(); table.push(l); continue; }
+    flushTable();
+    if ((m = l.match(/^#{1,4}\s+(.*)$/))) { flushList(); out.push(`<h4>${inl(m[1])}</h4>`); }
+    else if ((m = l.match(/^(?:[-*•])\s+(.*)$/))) { if (list !== "ul") { flushList(); out.push("<ul>"); list = "ul"; } out.push(`<li>${inl(m[1])}</li>`); }
+    else if ((m = l.match(/^\d+[.)]\s+(.*)$/))) { if (list !== "ol") { flushList(); out.push("<ol>"); list = "ol"; } out.push(`<li>${inl(m[1])}</li>`); }
+    else if (!l) flushList();
+    else { flushList(); out.push(`<p>${inl(l)}</p>`); }
+  }
+  flushList(); flushTable();
+  return out.join("");
+}
+function copyText(t) {
+  if (D.copy && D.copy(t)) return Promise.resolve(true);
+  return navigator.clipboard ? navigator.clipboard.writeText(t).then(() => true, () => false) : Promise.resolve(false);
+}
+function frameAnswer(t) {      // ответ готов: длинный — с разметкой и кнопками
+  t = String(t || "").trim(); const b = $("#bot");
+  if (!t || !isLongAnswer(t) || b.className && b.className !== "framed") return;
+  b.className = "framed"; $("#stage").classList.add("long");
+  b.innerHTML = `<div class="ans">${mdAnswer(t)}</div><div class="acts"><button data-a="copy">${ICON_COPY}Копировать</button><button data-a="note">${ICON_NOTE}В заметки</button><button data-a="save">${ICON_SAVE}Скачать</button></div>`;
+  const title = t.replace(/[#*_`|]/g, "").split(/[.!?\n]/)[0].trim().slice(0, 60) || "Ответ";
+  b.querySelector('[data-a="copy"]').onclick = () => copyText(t).then(ok => toast(ok ? "Скопировано" : "Не получилось скопировать"));
+  b.querySelector('[data-a="note"]').onclick = () => { const n = notes(); n.push({ id: "n" + Date.now(), title, text: t, time: Date.now() }); saveNotes(n); toast(`В заметках: «${title}»`, 2800); };
+  b.querySelector('[data-a="save"]').onclick = () => {
+    const name = title.replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 40) + ".md";
+    const where = D.saveDownload ? D.saveDownload(name, "text/markdown", t) : "";
+    toast(where ? `Сохранено: ${where}` : "Не получилось сохранить", 3500);
+  };
+  $("#talk").scrollTop = 0;
+}
+const ICON_COPY = `<svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>`;
+const ICON_NOTE = `<svg viewBox="0 0 24 24"><path d="M6 3.5h9l4 4V20a.5.5 0 0 1-.5.5h-12A.5.5 0 0 1 6 20z"/><path d="M14.5 3.5V8H19M9 12.5h7M9 16h5"/></svg>`;
+const ICON_SAVE = `<svg viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/></svg>`;
 function showCard(html) { $("#card").innerHTML = html || ""; cardSticky = 0; quietCheck(); }
 /* Снимок с камеры держится на экране 3 минуты: «покажи это фото мне» сразу после снимка не должно его стирать
    (раньше новая фраза очищала карточку, и человек слышал «вот», а видел пустой экран). Новая карточка — сменяет. */
@@ -1052,6 +1111,9 @@ function systemPrompt() {
     "СЧЁТ: любые вычисления — проценты, суммы, скидки, даты, «сколько дней до…» — только инструментом calc, никогда в уме. Просят объяснить расчёт — покажи его с числами («2 350 × 17 / 100 = 399,5»), а не «использовал калькулятор». "
     + "Просьба с условием («если завтра дождь — напомни…») — сначала узнай нужное (погоду — weather или web_search), потом сделай только подходящее. "
     + "Просят подобрать песни или плейлист — назови конкретные песни (исполнитель — название): только известные, в которых уверен и в названии, и в исполнителе — не придумывай; не говори, что что-то открыл или включил, если не вызвал инструмент.",
+    "СПИСКИ И ТЕКСТЫ: просят список, таблицу, план, подборку или текст — пиши его прямо в ответе (пунктами или таблицей Markdown): "
+    + "он появится на экране в рамке с кнопками «Копировать», «В заметки» и «Скачать». В заметки сохраняй, только если об этом просят, и только вызовом save_note; "
+    + "не говори «сохранила», «записала», «теперь она в заметках», если в этом ходе не вызвала save_note. Не нашла заметку — так и скажи и покажи содержимое в ответе.",
     BOUNDARY_RULE,
     "Никогда не говори, что у тебя нет доступа к интернету или свежим данным: погода, новости, курсы — ищи (web_search) и отвечай по найденному. "
     + "У тебя есть камера телефона (take_photo): «сфотографируй меня», «посмотри, что это», «прочитай надпись» — снимай и описывай. "
@@ -1387,7 +1449,9 @@ async function ask(text, opts = {}) {
   clearCard(); setState("thinking"); showBot("", "wait");
   photoTurn = false;
   convCheck();
-  const fast = opts.hidden ? null : await quick(text);
+  const att = opts.attach || [], pics = att.filter(a => a.kind === "image"), docs = att.filter(a => a.kind === "text");
+  if (pics.length) { showCard(`<div class="attshow">${pics.map(a => `<img src="${a.url}" alt="">`).join("")}</div>`); cardSticky = Date.now() + 60000; }
+  const fast = opts.hidden || att.length ? null : await quick(text);
   if (fast && fast.switchTo) { setState("idle"); showYou(text); switchPersona(fast.switchTo, fast.question); return; }
   if (fast) { fast.say = gfix(fast.say); history.push({ role: "user", content: text }, { role: "assistant", content: fast.say, who: persona().id }); saveH(); convAfter(); dayTurn(text, fast.say); answerLocal(fast); return; }
   if (!S.llm.base_url && loggedIn()) showBot("Подключаюсь к мозгу — секунду…", "wait");
@@ -1407,6 +1471,13 @@ async function ask(text, opts = {}) {
   if (rudeNow) { hCount("rude"); plog("info", "🛡 грубость в адрес помощника — отвечу спокойно, с границей"); }
   const msgs = [{ role: "system", content: systemPrompt() + (rudeNow ? BOUNDARY_NOTE : "") }]
     .concat(chatHistory(liveHistory().slice(-2 * (CONV_TURNS + 2 * CONV_MARGIN)), text));
+  if (att.length) {                               // вложения — в последнюю реплику человека: текст файлов и картинки
+    const last = msgs[msgs.length - 1];
+    const body = String(last.content) + docs.map(d => `\n\n[Файл «${d.name}»${d.cut ? ", начало" : ""}]\n${d.text}`).join("");
+    last.content = pics.length ? [{ type: "text", text: body + (pics.length > 1 ? `\n(фото: ${pics.length})` : "") }, ...pics.map(a => ({ type: "image_url", image_url: { url: a.url } }))] : body;
+    if (pics.length) modelOnce = await visionModel();
+    plog("info", `📎 вложения: ${att.map(a => a.kind === "image" ? "фото" : a.name).join(", ")}`);
+  }
   let final = "", switchTo = null;
   lastDone = "";
   try {
@@ -1518,10 +1589,11 @@ async function ask(text, opts = {}) {
       quiet = gfix(quiet); showBot(quiet); say(quiet);
     }
     plog("info", `💬 ответ ${((sink.text() || final).trim() || quiet).length} симв.${quiet ? " (сам: " + clip(quiet) + ")" : ""} за ${((Date.now() - t0) / 1000).toFixed(1)} с`);
-    if (!opts.hidden) history.push({ role: "user", content: text });
+    if (!opts.hidden) history.push({ role: "user", content: text + (att.length ? ` [приложено: ${att.map(a => a.kind === "image" ? "фото" : "файл «" + a.name + "»").join(", ")}]` : "") });
     history.push(Object.assign({ role: "assistant", content: (sink.text() || final).trim() || quiet, who: persona().id },
       photoTurn ? { note: "[снимок с камеры показан на экране; показать снова — show_photo, новый — take_photo]" } : {})); saveH(); convAfter();
     if (!opts.hidden) { dayTurn(text, (sink.text() || final).trim() || quiet); try { dayLogAdd(text, (sink.text() || final).trim() || quiet); } catch (x) { } }
+    if (turnAbort === ctl) frameAnswer(sink.text() || final);
     netRecovered(); hCount("turns"); hCount("net_ok"); pauseOk();
     if (isRefused(sink.text() || final)) hCount("refused");
     if (S.llm.cloud) setTimeout(() => cloudBalance(false).catch(() => {}), 1500);
@@ -1835,6 +1907,9 @@ const CLAIMS = [
   // просили посмотреть или показать через камеру, а в ответ «Секунду, смотрю.», «Вот.», «Показываю» — без снимка ничего не произошло
   { rx: /^(?:хорошо,?\s*|секунду,?\s*|сейчас,?\s*|конечно,?\s*)*(?:смотрю|посмотрю|гляжу|взгляну|показываю|покажу|вот(?:\s+(?:он|оно|она|фото|снимок|изображение|так))?|держи)(?:[\s,.!…]|$)/i,
     tool: "take_photo (или show_photo, если снимок уже сделан и его просят показать снова)", what: "смотришь или показываешь", user: CAM_ASK_RX },
+  // «Сохранила её заметкой», «Теперь она точно в твоих заметках», «сейчас создам её заново» — без save_note заметки нет (отзыв 10.10)
+  { rx: /(?:сохранил[аи]?|записал[аи]?|создал[аи]?|добавил[аи]?|положил[аи]?|разместил[аи]?|сохраню|запишу|создам|добавлю)(?![а-яё])[^.!?]{0,60}(?:заметк|в заметки)|(?:теперь|уже)\s+(?:она|он|список|таблица|всё)[^.!?]{0,30}\sв\s+(?:твоих\s+|ваших\s+)?заметках/i,
+    tool: "save_note", what: "сохранил(а) заметку" },
   // «Готово, калькулятор сделан», «Я сделала мини-презентацию — она уже открылась на экране» — где угодно в ответе
   { rx: /(?:^|[\s,.!—–-])(?:готово|сделал[аи]?|создал[аи]?|подготовил[аи]?|собрал[аи]?|написал[аи]?|вот)(?![а-яё])[^.!?]{0,80}(?:калькулятор|игр[уаы]|страниц|программ|приложени|таймер|конвертер|викторин|презентаци|слайд|открытк|шпаргалк)|(?:открыл[аио]?сь|открыт[аоы]?|появил[аио]?сь)\s+(?:у\s+тебя\s+|тебе\s+)?на\s+экран/i,
     tool: "make_app", what: "сделал программу, страницу или презентацию" },
@@ -2710,15 +2785,18 @@ function renderSettings() {
         <label class="f" style="flex:2"><span>Комментарий</span><input id="cl-note" placeholder="как оплатили"></label></div>
         <label class="cl-shot" id="cl-shot"><input type="file" id="cl-file" accept="image/*" hidden><span id="cl-shot-t">Приложить снимок оплаты</span><img id="cl-img" alt=""></label>
         <button class="btn p w" id="cl-send" style="margin-top:8px">Отправить заявку</button><div class="res" id="cl-res"></div><div id="cl-reqs"></div></div></div>`);
-    if (S.join && S.join.id && !on) h.push(`<div class="card"><b>Заявка на Dewiar №${esc(S.join.id)} отправлена</b><p class="hint" style="margin:4px 0 10px">Как только её одобрят, ключ придёт сюда сам — ничего вводить не нужно. Пока можно подключить свою модель или ключ сервиса.</p>
+    if (S.join && S.join.id && !on) h.push(`<div class="card"><b>Заявка №${esc(S.join.id)} отправлена</b><p class="hint" style="margin:4px 0 10px">Как только её одобрят, всё подключится само — ничего вводить не нужно, я скажу. Можно закрыть приложение: проверю при следующем открытии.</p>
       <div class="row2"><button class="btn p" id="jn-check" style="flex:1">Проверить</button><button class="btn" id="jn-cancel" style="flex:1">Забыть заявку</button></div><div class="res" id="jn-res"></div></div>`);
-    const tiles = `<p class="hint" style="margin:4px 2px 10px">Мозг — модель, которая думает за всех персонажей. Выберите любой — поменять можно в любой момент.</p><div class="tiles">
+    // сначала — то, что подходит любому человеку (бесплатная проба, код, аккаунт); своя модель и ключи сервисов —
+    // свёрнуты в «Для опытных»: слова Ollama и OpenRouter новичка только пугали
+    const tiles = `<p class="hint" style="margin:4px 2px 10px">«Мозг» — это то, чем помощница думает. Проще всего — бесплатно через Dewiar; поменять можно в любой момент.</p><div class="tiles">
+      ${loggedIn() || S.join ? "" : `<button class="tile easy" data-w="join">${ICON.dewiar}<b>Подключить бесплатно</b><small>Проще всего: имя и как с вами связаться — и всё. Без регистрации, с подарком на счёте</small></button>`}
+      <button class="tile" data-w="dwkey">${ICON.key}<b>Код или ключ Dewiar</b><small>6 цифр с устройства, где Dewiar уже работает, или ключ dw-… от друга</small></button>
+      ${loggedIn() ? "" : `<button class="tile" data-w="account">${ICON.user}<b>Аккаунт dewiar.pro</b><small>Есть логин на сайте — всё настроится само</small></button>`}</div>
+      <details class="more pro"><summary>Для опытных: своя модель или ключ сервиса</summary><div class="tiles">
       <button class="tile" data-w="server">${ICON.server}<b>Своя модель</b><small>Ollama, LM Studio, vLLM — на вашем компьютере или сервере дома</small></button>
       <button class="tile" data-w="cloud">${ICON.cloud}<b>Ключ любимого сервиса</b><small>OpenAI, Claude (Anthropic), OpenRouter, DeepSeek — своим ключом</small></button>
-      ${loggedIn() || S.join ? "" : `<button class="tile" data-w="join">${ICON.dewiar}<b>Попробовать Dewiar</b><small>Заявка за минуту, без регистрации — ключ придёт сюда сам, с талером на счёте</small></button>`}
-      ${loggedIn() ? "" : `<button class="tile" data-w="account">${ICON.user}<b>Аккаунт dewiar.pro</b><small>Есть логин на сайте — модели, слух, голос и заряд настроятся сами</small></button>`}
-      <button class="tile" data-w="dwkey">${ICON.key}<b>Ключ или код Dewiar</b><small>Ключ dw-… или 6 цифр с другого своего устройства</small></button>
-      <button class="tile" data-w="pc">${ICON.pc}<b>Как на компьютере</b><small>Файл настроек из студии или адрес от администратора</small></button></div><div id="wz"></div>`;
+      <button class="tile" data-w="pc">${ICON.pc}<b>Как на компьютере</b><small>Файл настроек из студии или адрес от администратора</small></button></div></details><div id="wz"></div>`;
     // мозг уже есть — другие способы свёрнуты: видно, что подключено, и не тянет нажать лишнее
     h.push(on || loggedIn() ? `<details class="more brainalt"><summary>Подключить другой мозг</summary>${tiles}</details>` : tiles);
     h.push(`<div class="card" id="px-card" style="margin-top:12px"><b>Сеть</b><p class="hint" style="margin:4px 0 10px">Провайдер блокирует dewiar.pro? Укажите прокси — через него пойдут только запросы к Dewiar (вход, модели, Знания), остальное — напрямую.</p>
@@ -2826,7 +2904,7 @@ function wireSettings(info) {
       if (g("cl-pair")) g("cl-pair").onclick = async () => { const r = g("cl-pair-res"); r.className = "res"; r.textContent = "получаю код…";
         try { const d = await cloudPost("/pair/new", {});
           if (!d.code) { r.textContent = d.text || "Код не выдан."; return; }
-          r.className = "res ok"; r.innerHTML = `Код: <b style="font-size:22px;letter-spacing:3px">${esc(d.code.slice(0, 3) + " " + d.code.slice(3))}</b><br>На другом устройстве: «Мозг» → «Ключ или код Dewiar» → введите код. Действует 10 минут.`; }
+          r.className = "res ok"; r.innerHTML = `Код: <b style="font-size:22px;letter-spacing:3px">${esc(d.code.slice(0, 3) + " " + d.code.slice(3))}</b><br>На другом устройстве: «Мозг» → «Код или ключ Dewiar» → введите код. Действует 10 минут.`; }
         catch (e) { r.className = "res bad"; r.textContent = e.message; } };
       if (g("cl-forget")) g("cl-forget").onclick = async () => {
         if (!confirm(loggedIn() ? "Забыть ключ Dewiar? Думать буду по аккаунту " + (S.account.login || "") + "." : "Забыть ключ Dewiar? Мозг нужно будет подключить заново.")) return;
@@ -3618,12 +3696,12 @@ function wizard(kind) {
     $("#w-go").onclick = go; $("#w-pass").onkeydown = (e) => { if (e.key === "Enter") go(); };
     setTimeout(() => $("#w-login").focus(), 200);
   } else if (kind === "join") {
-    w.innerHTML = `<div class="card"><b>Попробовать модели Dewiar</b><p class="hint" style="margin:4px 0 8px">Без регистрации: напишите, как к вам обращаться и как связаться. Как только заявку одобрят, ключ придёт сюда сам — с талером на счёте, этого хватит, чтобы попробовать.</p>
+    w.innerHTML = `<div class="card"><b>Подключить бесплатно</b><p class="hint" style="margin:4px 0 8px">Без регистрации: напишите, как к вам обращаться и как связаться. Обычно всё подключается сразу; если заявку проверяют вручную — я сама скажу, когда готово. На счёте будет подарок, чтобы попробовать.</p>
       <label class="f"><span>Как к вам обращаться</span><input id="w-name" autocomplete="name"></label>
       <label class="f"><span>Как связаться: почта, Telegram или телефон</span><input id="w-contact" autocapitalize="off" spellcheck="false" placeholder="@ник или почта"></label>
       <label class="f"><span>Пара слов, зачем (необязательно)</span><input id="w-note" placeholder="например: попробовать помощника"></label>
-      <button class="btn p w" id="w-go">Отправить заявку</button><div class="res" id="w-res"></div>
-      <p class="hint">Тот же ключ потом подключится на компьютере и других телефонах кодом из 6 цифр — данные и заряд будут общими.</p></div>`;
+      <button class="btn p w" id="w-go">Подключить</button><div class="res" id="w-res"></div>
+      <p class="hint">Потом так же подключатся компьютер и другие телефоны — кодом из 6 цифр, данные и счёт будут общими.</p></div>`;
     $("#w-go").onclick = async () => { const r = $("#w-res"); r.className = "res"; r.textContent = "отправляю…"; $("#w-go").disabled = true;
       try { const d = await joinSend($("#w-name").value, $("#w-contact").value, $("#w-note").value);
         r.className = "res ok"; r.textContent = d.text || "Заявка отправлена."; if (d.key) setTimeout(renderSettings, 1400); else setTimeout(renderSettings, 2500); }
@@ -3751,8 +3829,48 @@ $("#mic").onclick = () => {
   }
   if (state !== "idle") interrupt(true); listen(); };
 $("#orbwrap").onclick = () => $("#mic").onclick();
+new MutationObserver(() => document.body.classList.toggle("typing", $("#typebox").classList.contains("on")))
+  .observe($("#typebox"), { attributes: true, attributeFilter: ["class"] });     // поле ввода открыто — сцена выше него (app.css)
 $("#b-kb").onclick = () => { const b = $("#typebox"); b.classList.toggle("on"); if (b.classList.contains("on")) $("#typed").focus(); };
-const sendTyped = () => { const t = $("#typed").value.trim(); if (!t) return; $("#typed").value = ""; $("#typed").blur(); ask(t); };
+/* Вложения: фото из галереи (уменьшается до 1280 точек) и текстовые файлы (до 30 000 знаков) — уходят модели вместе
+   с вопросом (ask opts.attach). PDF и документы Word телефон пока не читает — честно говорим. */
+let attached = [];
+const ATT_MAX = 4, ATT_TEXT = 30000;
+function shrinkImage(file, max = 1280) {
+  return new Promise((res, rej) => {
+    const u = URL.createObjectURL(file), im = new Image();
+    im.onload = () => { const k = Math.min(1, max / Math.max(im.width, im.height)), c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(im.width * k)); c.height = Math.max(1, Math.round(im.height * k));
+      c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(u); res(c.toDataURL("image/jpeg", 0.85)); };
+    im.onerror = () => { URL.revokeObjectURL(u); rej(new Error("фото не открылось")); };
+    im.src = u;
+  });
+}
+async function addAttach(f) {
+  if (attached.length >= ATT_MAX) { toast(`Не больше ${ATT_MAX} вложений за раз`); return; }
+  try {
+    if (/^image\//.test(f.type)) attached.push({ kind: "image", name: f.name || "фото", url: await shrinkImage(f) });
+    else if (/^text\/|json|csv|xml|markdown/.test(f.type) || /\.(txt|md|csv|json|log|xml|html?)$/i.test(f.name || "")) {
+      const t = await f.text(); attached.push({ kind: "text", name: f.name || "файл", text: t.slice(0, ATT_TEXT), cut: t.length > ATT_TEXT });
+    } else toast(/pdf|word|officedocument/.test(f.type) ? "PDF и Word телефон пока не читает — пришлите фото страницы или текст" : "Такой файл не открыть — подойдут фото и текстовые файлы", 4000);
+  } catch (e) { toast("Не получилось открыть: " + e.message); }
+}
+function renderAtts() {
+  const box = $("#atts");
+  box.innerHTML = attached.map((a, i) => `<div class="at">${a.kind === "image" ? `<img src="${a.url}" alt="">` : `<span>${esc(a.name)}</span>`}<button data-i="${i}" title="Убрать">${X_SVG}</button></div>`).join("");
+  $$("button", box).forEach(b => b.onclick = () => { attached.splice(+b.dataset.i, 1); renderAtts(); });
+}
+$("#b-att").onclick = () => $("#att-file").click();
+$("#att-file").onchange = async (e) => {
+  for (const f of Array.from(e.target.files || [])) await addAttach(f);
+  e.target.value = ""; renderAtts(); $("#typebox").classList.add("on");
+};
+const sendTyped = () => {
+  const t = $("#typed").value.trim(); if (!t && !attached.length) return;
+  const att = attached; attached = []; renderAtts();
+  $("#typed").value = ""; $("#typed").blur();
+  ask(t || (att.some(a => a.kind === "image") ? "Посмотри, пожалуйста." : "Посмотри этот файл."), att.length ? { attach: att } : {});
+};
 $("#send").onclick = sendTyped;
 $("#typed").onkeydown = (e) => { if (e.key === "Enter") sendTyped(); };
 N.on("intent", (e) => handleIntent(e));
@@ -3840,9 +3958,12 @@ setInterval(() => { if (!document.hidden) welcomeSeen(); }, 60000);     // по�
   applyPersona(); setState("idle"); quietCheck();
   const last = history.filter(m => m.role === "assistant").slice(-1)[0];
   if (!S.llm.base_url && !loggedIn()) {
-    if (S.join) { showBot(gfix(`Привет! Я ${persona().name}. Заявка на Dewiar ждёт проверки — как только одобрят, я подключусь сама.`)); setTimeout(() => joinPoll(false).catch(() => {}), 2500); }
-    else showBot(gfix(`Привет! Я ${persona().name}. Чтобы думать и отвечать, мне нужен «мозг» — выберите любой: свою модель, ключ любимого сервиса или Dewiar.`));
-    showCard(`<div class="row2"><button class="btn p" onclick="openBrain()" style="flex:1">Выбрать мозг</button>${S.join ? "" : `<button class="btn" onclick="openBrain('join')" style="flex:1">Попробовать Dewiar</button>`}</div>`); }
+    // первый запуск: одна понятная кнопка (отзыв: «не понимаю, как ей мозг включить») — бесплатная проба Dewiar;
+    // своя модель, ключ сервиса и код с другого устройства — второй кнопкой
+    if (S.join) { showBot(gfix(`Привет! Я ${persona().name}. Заявка отправлена — как только её одобрят, я подключусь сама и скажу. Обычно это быстро.`)); setTimeout(() => joinPoll(false).catch(() => {}), 2500); }
+    else showBot(gfix(`Привет! Я ${persona().name}. Чтобы мы могли поговорить, меня нужно один раз подключить — это бесплатно и займёт минуту.`));
+    showCard(S.join ? `<div class="row2"><button class="btn p" onclick="joinPoll(true).then(d => d && !d.key && toast((d && d.text) || 'Пока ждёт проверки')).catch(e => toast(e.message))" style="flex:1">Проверить</button><button class="btn" onclick="openBrain()" style="flex:1">Другие способы</button></div>`
+      : `<div class="start"><button class="btn p w" onclick="openBrain('join')">Подключить бесплатно</button><button class="btn w" onclick="openBrain()">У меня есть код или свой ключ</button></div>`); }
   else if (last) showBot(last.content.slice(0, 400));
   const it = D.takeIntent(); if (it) { try { handleIntent(JSON.parse(it)); } catch (e) { } }
   welcomeArm(!!it);                                // открыли кнопкой помощника — сразу слушаем, не здороваемся

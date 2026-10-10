@@ -105,6 +105,25 @@ ok(e3.lights == [True, False] and not e3.s.dev.get("light_auto") and e3.statuses
    f"память освободилась надолго — лёгкий режим, включённый самой, выключаю: {e3.lights}")
 ok(not run(warn=False).pushed, "предупреждение выключено — молчит")
 ok(not run(fake="6,16,10").pushed, "памяти хватает — молчит")
+# опасно (ещё чуть-чуть — и рабочий стол замрёт): разгружаемся с первой же проверки, не ждём вторую
+ok(D._judge(10, 0.3, 95, None)["critical"] and D._judge(16, 5, 10, None, 45.0)["critical"]
+   and not D._judge(16, 5, 10, None, 15.0)["critical"], "опасно: памяти почти нет или программы ждут её 40 % времени")
+os.environ["DEWIAR_FAKE_PRESSURE"] = "0.3,10,95"
+os.environ["DEWIAR_MEM_EVERY"] = "30"
+e4 = E.Engine.__new__(E.Engine)
+e4.s, e4.stopping, e4.pushed, e4.lights, e4.statuses, e4.status, e4.light = S(), threading.Event(), [], [], [], {}, False
+e4._push_quiet = lambda title, text: e4.pushed.append((title, text))
+e4.device_status = lambda: {"light": e4.light, "advice": ""}
+e4.set_light = lambda on: (e4.lights.append(on), ["голос — лёгкий Piper"])[1]
+e4.emit = lambda kind, **k: None
+os.environ["DEWIAR_MEM_WAIT"] = "0.05"
+th = threading.Thread(target=e4._memory_watch, daemon=True)
+th.start()
+time.sleep(1.0)
+e4.stopping.set()
+th.join(2)
+ok(e4.lights == [True] and len(e4.pushed) == 1, f"опасно — лёгкий режим с первой проверки: {e4.lights}")
+ok(isinstance(e4.mem.get("dewiar"), dict) and e4.mem["dewiar"]["core"] > 0, f"сколько занимает сам Dewiar: {e4.mem.get('dewiar')}")
 for k in ("DEWIAR_FAKE_PRESSURE", "DEWIAR_MEM_WAIT", "DEWIAR_MEM_EVERY"):
     os.environ.pop(k, None)
 

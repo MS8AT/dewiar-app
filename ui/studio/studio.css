@@ -279,6 +279,7 @@ section.wide > .lead { max-width: 860px; }
 .wtile:hover { background: var(--frost-hi); transform: translateY(-2px); }
 .wtile.cur { background: rgba(255,255,255,.17); }
 .wtile svg { width: 26px; height: 26px; fill: none; stroke: #fff; opacity: .92; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.wtile.easy { background: linear-gradient(135deg, rgba(124,92,255,.34), rgba(255,122,198,.22)); box-shadow: 0 12px 30px -18px rgba(124,92,255,.9); }
 .wtile b { font-size: 14.5px; } .wtile span { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
 .sclist { margin-top: 12px; display: grid; gap: 6px; } .sclist:empty { display: none; }
 .scit { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,.05); }

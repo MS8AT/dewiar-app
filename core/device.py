@@ -120,8 +120,8 @@ def pressure():
     программы ждали память, % за минуту, Linux; иначе None), "tight": памяти не хватает}."""
     fake = os.environ.get("DEWIAR_FAKE_PRESSURE")
     if fake:
-        free, total, swap = (float(x) for x in fake.split(","))
-        return _judge(total, free, swap, None)
+        free, total, swap, *psi10 = (float(x) for x in fake.split(","))
+        return _judge(total, free, swap, None, psi10[0] if psi10 else None)
     if os.name == "nt":
         try:
             import ctypes
@@ -137,29 +137,33 @@ def pressure():
                 return _judge(m.total / 2**30, m.avail / 2**30, commit, None)
         except Exception:  # noqa: BLE001
             pass
-        return {"total": 0, "free": 0, "swap": None, "psi": None, "tight": False}
+        return {"total": 0, "free": 0, "swap": None, "psi": None, "psi10": None, "tight": False, "critical": False}
     try:
         mem = {k: int(v) for k, v in re.findall(r"(\w+):\s+(\d+)", Path("/proc/meminfo").read_text())}
     except (OSError, ValueError):
-        return {"total": 0, "free": 0, "swap": None, "psi": None, "tight": False}
+        return {"total": 0, "free": 0, "swap": None, "psi": None, "psi10": None, "tight": False, "critical": False}
     st, sf = mem.get("SwapTotal", 0), mem.get("SwapFree", 0)
-    psi = None
+    psi = psi10 = None
     try:
-        m = re.search(r"^some avg10=[\d.]+ avg60=([\d.]+)", Path("/proc/pressure/memory").read_text(), re.M)
-        psi = float(m.group(1)) if m else None
+        m = re.search(r"^some avg10=([\d.]+) avg60=([\d.]+)", Path("/proc/pressure/memory").read_text(), re.M)
+        psi10, psi = (float(m.group(1)), float(m.group(2))) if m else (None, None)
     except (OSError, ValueError):
         pass
     return _judge(mem.get("MemTotal", 0) / 1048576, mem.get("MemAvailable", 0) / 1048576,
-                  100.0 * (st - sf) / st if st else None, psi)
+                  100.0 * (st - sf) / st if st else None, psi, psi10)
 
 
-def _judge(total, free, swap, psi):
+def _judge(total, free, swap, psi, psi10=None):
     """Тесно: свободной памяти меньше 0,7 ГБ (или 7 %) и подкачка почти полна (или её нет) — либо программы заметную
-    долю времени ждут память (PSI ≥ 20 % за минуту)."""
+    долю времени ждут память (PSI ≥ 20 % за минуту). Опасно (critical) — ещё чуть-чуть, и рабочий стол замрёт:
+    свободно меньше 0,4 ГБ (или 4 %) при почти полной подкачке либо последние 10 с программы ждали память ≥ 40 %
+    времени. Тогда разгружаться надо сразу, а не через две проверки."""
     low = total > 0 and free < max(0.7, total * 0.07)
     tight = bool((low and (swap is None or swap >= 50)) or (psi is not None and psi >= 20))
+    crit = bool((total > 0 and free < max(0.4, total * 0.04) and (swap is None or swap >= 80))
+                or (psi10 is not None and psi10 >= 40))
     return {"total": round(total, 1), "free": round(free, 2), "swap": None if swap is None else round(swap),
-            "psi": psi, "tight": tight}
+            "psi": psi, "psi10": psi10, "tight": tight or crit, "critical": crit}
 
 
 def top_memory(n=3, skip=()):

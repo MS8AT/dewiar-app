@@ -721,17 +721,17 @@
       </div>
     </div>
     <div class="wz" id="wz">
+      <button class="wtile easy" data-w="dwkey"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><b>Подключить бесплатно</b><span>Проще всего: модели Dewiar без регистрации — или аккаунт dewiar.pro, ключ, код с телефона</span></button>
       <button class="wtile" data-w="local"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg><b>На этом компьютере</b><span>Ollama или LM Studio — бесплатно и без интернета</span></button>
       <button class="wtile" data-w="server"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01"/></svg><b>Сервер компании или дома</b><span>vLLM, Ollama, llama.cpp на другом компьютере — нужен только адрес</span></button>
       <button class="wtile" data-w="cloud"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 9.5z"/></svg><b>Ключ любимого сервиса</b><span>OpenAI, Claude (Anthropic), OpenRouter — своим ключом API</span></button>
-      <button class="wtile" data-w="dwkey"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><b>Модели Dewiar</b><span>Попробовать по заявке, войти аккаунтом dewiar.pro или ключом — ничего не настраивать</span></button>
     </div>
 
     <div class="wpanel" id="w-dwkey">
       <h3>Модели Dewiar</h3>
       <div class="dk-join" id="dk-join" style="margin-bottom:14px">
         <p class="hint" style="margin:0 0 8px"><b>Попробовать без регистрации.</b> Напишите, как к вам обращаться и как связаться — как только заявку одобрят,
-          ключ придёт сюда сам, с талером на счёте. На другие устройства он переносится кодом из 6 цифр.</p>
+          всё подключится само, с подарком на счёте; если заявку проверяют вручную — придёт чуть позже. На другие устройства ключ переносится кодом из 6 цифр.</p>
         <div class="actions" style="margin:0;align-items:flex-end;flex-wrap:wrap">
           <label class="f" style="flex:1;min-width:160px">Как к вам обращаться<input type="text" id="jn-name" autocomplete="name"></label>
           <label class="f" style="flex:1;min-width:200px">Почта, Telegram или телефон<input type="text" id="jn-contact" spellcheck="false"></label>
@@ -978,7 +978,8 @@
     <div class="switch"><div>Я в наушниках<span>Эха нет — ассистент слушает и во время ответа, его можно перебить голосом, даже если эхоподавления нет (например, в Windows).</span></div><label class="tg"><input type="checkbox" data-k="audio.headphones"><i></i></label></div>
     <div class="switch"><div>Отзываться на имя любого персонажа<span>«Лира, …» — и отвечает Лира. Если выключить, слушает только имя активного.</span></div><label class="tg"><input type="checkbox" data-k="all_names"><i></i></label></div>
     <div class="switch"><div>Узнавать любые имена<span>Короткие фразы проверяет точная модель, поэтому работают имена, которых нет в словаре, — например, «Нова» или «Девиар». Немного нагружает процессор, только когда кто-то говорит.</span></div><label class="tg"><input type="checkbox" data-k="audio.asr_wake"><i></i></label></div>
-    <div class="switch"><div>Звуковые сигналы<span>Короткий сигнал «слушаю».</span></div><label class="tg"><input type="checkbox" data-k="audio.sounds"><i></i></label></div>
+    <div class="switch"><div>Звуковые сигналы<span>Короткий сигнал «слушаю» и «больше не слушаю».</span></div><label class="tg"><input type="checkbox" data-k="audio.sounds"><i></i></label></div>
+    <div class="switch"><div>Сигнал «ваша очередь»<span>Тихий звук, когда ответ закончен и можно сразу говорить, без имени.</span></div><label class="tg"><input type="checkbox" data-k="audio.turn_tone"><i></i></label></div>
     <h2>Разговор</h2>
     <div class="row">
       <label class="f">Как перебивать<select data-k="audio.barge_in">

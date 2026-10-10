@@ -180,17 +180,30 @@ class BrainMixin:
     def _memory_watch(self):
         """Фоновый поток: раз в минуту — хватает ли памяти (device.pressure). Тесно две проверки подряд — один раз
         объяснить, кто занимает память и что сделать (не чаще раза в 6 часов; выключается настройкой device.mem_warn).
-        Состояние — в self.mem (для студии)."""
+        Состояние — в self.mem (для студии). Опасно (critical: ещё чуть-чуть, и рабочий стол замрёт) — разгружаемся
+        сразу, без второй проверки, а пока тесно, проверяем каждые 10 с. Сколько занимает сам Dewiar (ядро и окна,
+        memcap.dewiar_memory) — в self.mem["dewiar"] и в журнале при заметном росте: отчёты несут цифры."""
         from device import pressure, pressure_text, top_memory
+        from memcap import dewiar_memory
         if self.stopping.wait(float(os.environ.get("DEWIAR_MEM_WAIT") or 120)):
             return
-        streak, told, calm = 0, 0.0, 0
+        streak, told, calm, said = 0, 0.0, 0, (0.0, 0.0, 0.0)
         while not self.stopping.is_set():
+            p = {}
             try:
                 p = pressure()
                 streak = streak + 1 if p["tight"] else 0
+                if p.get("critical"):
+                    streak = max(streak, 2)
+                own = dewiar_memory()
+                if (abs(own["core"] - said[0]) >= 0.5 or abs(own["ui"] - said[1]) >= 0.5
+                        or time.monotonic() - said[2] > 3600):
+                    said = (own["core"], own["ui"], time.monotonic())
+                    log.info("🧠 Dewiar занимает: ядро %.1f ГБ, окна %.1f ГБ (больше всех — %s, %.1f ГБ); свободно %.1f ГБ из %.1f",
+                             own["core"], own["ui"], own["biggest"][0] or "—", own["biggest"][1], p["free"], p["total"])
                 prev = getattr(self, "mem", None) or {}
-                self.mem = dict(p, streak=streak, text=prev.get("text", "") if p["tight"] else "")   # совет живёт, пока тесно
+                self.mem = dict(p, streak=streak, dewiar=own,
+                                text=prev.get("text", "") if p["tight"] else "")   # совет живёт, пока тесно
                 tight = streak >= 2
                 if bool(self.status.get("tight")) != tight:   # окна берегут ресурсы: облик почти неподвижен, лишнее не рисуется
                     self.status["tight"] = tight
@@ -221,7 +234,10 @@ class BrainMixin:
                     self._push_quiet("Компьютеру не хватает памяти", text)
             except Exception as e:  # noqa: BLE001
                 log.debug("проверка памяти: %s", e)
-            if self.stopping.wait(float(os.environ.get("DEWIAR_MEM_EVERY") or 60)):
+            every = float(os.environ.get("DEWIAR_MEM_EVERY") or 60)
+            if p.get("tight") or (p.get("psi10") or 0) >= 10:
+                every = min(every, 10.0)                  # тесно — следим чаще, чтобы успеть до «замирания»
+            if self.stopping.wait(every):
                 return
 
     def set_light(self, on):

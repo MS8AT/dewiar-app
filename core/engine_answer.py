@@ -1140,10 +1140,18 @@ class AnswerMixin:
                 self._pause_ok()                           # голосом и без обрыва — добавка к паузе понемногу тает
         follow = 0.0 if turn.via or time.monotonic() < self._echo_until else float(self.s.get("audio", "follow_up_seconds") or 0)
         self.follow_up_until = time.monotonic() + follow
+        opened = False
         with self._turn_lock:
             if self.turn is turn:
                 self.turn = None
                 self.set_state("listening" if follow > 0 else "idle")
+                opened = follow > 0
+        if opened and not getattr(turn, "switch_to", None):
+            # ход передан человеку: можно отвечать без имени. Окна показывают «Ваша очередь» и сколько осталось,
+            # а на слух — мягкий сигнал (истечёт окно — прозвучит «не слушаю», см. engine_audio)
+            self.emit("turn", seconds=round(follow, 1))
+            if self.s.get("audio", "turn_tone") is not False:
+                self.play_tone("turn")
         back = getattr(turn, "back_to", None)
         if back and self.s.get("persona") != back:
             self.switch_persona(back)                 # специалист ответил — снова главный

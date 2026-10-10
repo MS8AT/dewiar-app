@@ -79,13 +79,19 @@ try:
             pg.evaluate("t => ask(t)", t)
             pg.wait_for_timeout(wait)
             return pg.evaluate("""() => ({ bot: document.querySelector('#bot').textContent, st: radio.state(), log: Dewiar._radio.log.slice(),
-                chip: !document.querySelector('#rchip').hidden, chipName: document.querySelector('#rchip b').textContent,
+                chip: !document.querySelector('#radiobox').hidden, chipName: document.querySelector('#rchip b').textContent,
                 paused: document.querySelector('#rchip').classList.contains('paused') })""")
 
         r = say("Включи радио")
         ok(r["st"]["state"] == "playing" and r["chip"] and r["chipName"] == r["st"]["name"] and r["log"][-1].startswith("play"),
            f"«Включи радио» — играет здесь же, без модели: {r['st']['name']} ({r['bot']})")
-        ok(r["chip"], "сверху плашка: название станции, пауза, выключить")
+        ok(r["chip"], "плашка: название станции, пауза, выключить")
+        geo = pg.evaluate("""() => { const c = document.querySelector('#rchip').getBoundingClientRect(), t = document.querySelector('#top').getBoundingClientRect(),
+            h = document.querySelector('#rhint'); return { top: c.top, head: t.bottom, hint: h.textContent, shown: getComputedStyle(h).opacity === '1' && h.offsetHeight > 0,
+            state: getComputedStyle(document.querySelector('#state')).display }; }""")
+        ok(geo["top"] >= geo["head"], f"плашка под пластинкой, на кнопки сверху не наезжает: {geo['top']:.0f} ≥ {geo['head']:.0f}")
+        ok(geo["shown"] and "микрофон" in geo["hint"] and "дальше" in geo["hint"] and geo["state"] == "none",
+           f"подсказка: голосом — после нажатия на микрофон ({geo['hint']})")
         pg.wait_for_timeout(600)
         ok(pg.evaluate("orb && orb.vinyl") == r["st"]["name"], f"как на компьютере: вместо облика крутится пластинка с названием станции ({pg.evaluate('orb && orb.vinyl')})")
         pg.screenshot(path=str(www.parent / "radio-vinyl.png"))
@@ -154,7 +160,7 @@ try:
         ok(pg.evaluate("radio.state().state") == "playing", "кнопка на плашке — продолжить")
         pg.screenshot(path=str(www.parent / "radio-chip.png"))
         pg.click("#r-x"); pg.wait_for_timeout(200)
-        ok(pg.evaluate("radio.state().state") == "stopped" and pg.evaluate("document.querySelector('#rchip').hidden"), "кнопка ✕ — выключить")
+        ok(pg.evaluate("radio.state().state") == "stopped" and pg.evaluate("document.querySelector('#radiobox').hidden"), "кнопка ✕ — выключить")
         qs = pg.evaluate("""async () => { const out = {}; for (const t of ["поставь таймер на 2 минуты", "таймер на 3 секунды", "громкость 40 процентов"])
             { const r = await quick(t); out[t] = r && r.say; } return out; }""")
         ok(all(qs.values()) and "2 минуты" in qs["поставь таймер на 2 минуты"],

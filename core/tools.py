@@ -49,6 +49,7 @@ def desktop_env():
     """Окружение для запуска программ на рабочем столе. Linux: служба systemd --user может стартовать раньше
     графического сеанса и не знать DISPLAY/WAYLAND_DISPLAY и шины D-Bus — берём их у systemctl --user show-environment."""
     env = dict(os.environ)
+    env.pop("DEWIAR_BOX", None)
     if WIN:
         return env
     if not (env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")):
@@ -81,7 +82,8 @@ def launch(cmd):
         except OSError as e:
             raise ToolError(f"не открылось: {e}") from e
         return
-    subprocess.Popen(cmd, env=desktop_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    import memcap                       # своя коробка systemd: программа не закроется при перезапуске ядра
+    subprocess.Popen(memcap.scope_cmd(cmd), env=desktop_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True)
 
 
@@ -643,6 +645,17 @@ def t_system(a, ctx):
         pass
     du = shutil.disk_usage(str(Path.home()))
     parts.append(f"диск: свободно {du.free / 1e9:.0f} из {du.total / 1e9:.0f} ГБ")
+    try:                                   # кто занимает память — чтобы можно было предложить закрыть лишнее
+        from device import top_memory
+        from memcap import dewiar_memory
+        top = top_memory(4)
+        if top:
+            parts.append("больше всего памяти занимают: " + ", ".join(f"{k} {v} ГБ" for k, v in top))
+        own = dewiar_memory()
+        if own["core"] >= 0.1:
+            parts.append(f"сам Dewiar: {own['core'] + own['ui']:.1f} ГБ (ядро {own['core']:.1f}, окна {own['ui']:.1f})")
+    except Exception:  # noqa: BLE001
+        pass
     return "; ".join(parts)
 
 
@@ -1678,7 +1691,9 @@ TOOLS = {
     "media_control": ("Нажать кнопку плеера, который уже открыт (Яндекс Музыка, браузер, Spotify…): play — играть, pause — "
                       "пауза, next/previous — трек вперёд/назад. Всегда этим, а не кликами по экрану и не командами терминала.", S({"action": {"type": "string", "enum": ["play", "pause", "play_pause", "next", "previous", "stop"]}}, ["action"]), "safe", t_media, "Управление плеером"),
     "set_volume": ("Громкость системы: percent (0–150), или change (+/-), или mute (true/false).", S({"percent": {"type": "integer"}, "change": {"type": "integer"}, "mute": {"type": "boolean"}}), "safe", t_volume, "Громкость"),
-    "system_status": ("Состояние компьютера: батарея, память, диск, нагрузка.", S({}), "safe", t_system, "Состояние компьютера"),
+    "system_status": ("Состояние компьютера: батарея, память, диск, нагрузка и какие программы занимают больше всего памяти. "
+                      "Компьютер тормозит или программа зависла — посмотри здесь, назови виновника и предложи закрыть его "
+                      "(run_command, pkill по имени программы — только после согласия человека).", S({}), "safe", t_system, "Состояние компьютера"),
     "set_reminder": ("Поставить напоминание, будильник или таймер, в том числе повторяющееся. when — когда, обычными "
                      "словами по-русски: «через 10 минут», «завтра в 9», «в пятницу в 18:30», «каждый день в 8», «по "
                      "будням в 9:15», «каждые 2 часа». Будни, выходные, дни недели — только в when, не в text. text — о чём напомнить, коротко.",

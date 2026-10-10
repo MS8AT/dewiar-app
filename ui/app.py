@@ -87,8 +87,12 @@ def ensure_core():
             return
         time.sleep(0.3)
     if subprocess.run(["systemctl", "--user", "cat", "dewiar-core.service"], capture_output=True).returncode != 0:
+        # без службы — те же предосторожности, что у службы: потолок памяти (memcap) и уступчивость (nice 5)
+        import memcap
         log = open(Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "dewiar-core.log", "a")
-        subprocess.Popen([sys.executable, str(ROOT / "core/main.py")], stdout=log, stderr=log, start_new_session=True)
+        subprocess.Popen(memcap.scope_cmd([sys.executable, str(ROOT / "core/main.py")], "core", "Dewiar — ядро"),
+                         stdout=log, stderr=log, start_new_session=True, preexec_fn=lambda: os.nice(5),
+                         env={k: v for k, v in os.environ.items() if k != "DEWIAR_BOX"})
 
 
 def _core_call(token, cmd, timeout=4):
@@ -317,6 +321,34 @@ class Api:
         GLib.idle_add(run, priority=GLib.PRIORITY_HIGH_IDLE)
         done.wait(timeout)
         return box.get("r")
+
+    def clipboard_image(self):
+        """Картинка из буфера обмена (скопировали снимок экрана или фото) -> data:image/…;base64 или "" — нет картинки.
+        Страница сама не всегда получает картинку при вставке (WebKitGTK отдаёт только текст), поэтому — через окно:
+        Linux — буфер GTK, Windows — Pillow ImageGrab. Кнопка «из буфера» и Ctrl+V в виджете."""
+        import base64
+        try:
+            if WIN:
+                import io
+                from PIL import ImageGrab
+                im = ImageGrab.grabclipboard()
+                if im is None or isinstance(im, list):
+                    return ""
+                buf = io.BytesIO()
+                im.convert("RGB").save(buf, "JPEG", quality=88)
+                return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+            def get():
+                from gi.repository import Gdk, Gtk
+                pb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).wait_for_image()
+                if pb is None:
+                    return ""
+                ok, data = pb.save_to_bufferv("png", [], [])
+                return "data:image/png;base64," + base64.b64encode(data).decode() if ok else ""
+            return self._gtk(get, timeout=4) or ""
+        except Exception as e:  # noqa: BLE001
+            print(f"буфер обмена: {e}", file=sys.stderr)
+            return ""
 
     @staticmethod
     def _offset(mode):
@@ -1320,7 +1352,7 @@ def _loop_watchdog(api):
     def idle_tick():
         beat["idle"] = time.monotonic()
         return False
-    warned = False
+    warned, n, big = False, 0, [0]
     while True:
         GLib.idle_add(tick, priority=GLib.PRIORITY_DEFAULT)
         GLib.idle_add(idle_tick)                          # самый низкий приоритет: проверяем, бывает ли цикл свободен
@@ -1342,13 +1374,43 @@ def _loop_watchdog(api):
             if os.environ.get("DEWIAR_UI_NO_RESTART"):
                 beat["t"] = time.monotonic()
                 continue
-            launcher = ROOT / "dewiar"
-            cmd = ["/bin/sh", str(launcher)] if launcher.is_file() else [sys.executable, str(Path(__file__).resolve())]
-            try:                                              # новый — через 2 с, когда этот уже отпустит замок экземпляра
-                subprocess.Popen(["/bin/sh", "-c", 'sleep 2; exec "$@"', "dewiar-ui"] + cmd, start_new_session=True,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            finally:
-                os._exit(3)
+            _respawn()
+        n += 1
+        if n % 12 == 0 and _ui_too_big(api, big):            # раз в минуту: окна не разрослись ли (утечка WebKit)
+            _respawn()
+
+
+def _ui_too_big(api, big):
+    """Окна Dewiar (этот процесс и его WebKit) заняли больше мягкого потолка (memcap.caps("ui")) две минуты подряд —
+    значит, память утекает: перезапустить окна (ядро и разговор не прерываются), пока не замедлился весь компьютер.
+    Студия открыта — не трогаем (там может быть несохранённое), только запись в журнал."""
+    try:
+        import memcap
+        gb = memcap.tree_gb(os.getpid())
+        soft = memcap.caps("ui")[0]
+    except Exception:  # noqa: BLE001
+        return False
+    big[0] = big[0] + 1 if gb > soft else 0
+    if big[0] < 2:
+        return False
+    if api._studio is not None or os.environ.get("DEWIAR_UI_NO_RESTART"):
+        if big[0] == 2:
+            _ui_log(f"окна занимают {gb:.1f} ГБ (больше {soft:.1f}) — открыта студия, перезапуск окон отложен")
+        return False
+    _ui_log(f"окна занимают {gb:.1f} ГБ (больше {soft:.1f}) — перезапускаю окна, чтобы не тормозил компьютер")
+    return True
+
+
+def _respawn():
+    """Перезапуск интерфейса: новый процесс — через 2 с, когда этот уже отпустит замок экземпляра; код выхода 3."""
+    launcher = ROOT / "dewiar"
+    cmd = ["/bin/sh", str(launcher)] if launcher.is_file() else [sys.executable, str(Path(__file__).resolve())]
+    env = {k: v for k, v in os.environ.items() if k != "DEWIAR_BOX"}     # новые окна — в новую коробку (_own_box)
+    try:
+        subprocess.Popen(["/bin/sh", "-c", 'sleep 2; exec "$@"', "dewiar-ui"] + cmd, start_new_session=True, env=env,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    finally:
+        os._exit(3)
 
 
 class LinuxTray:
@@ -1458,6 +1520,24 @@ def watch_version(api):
             return
 
 
+def _own_box():
+    """Linux: окна — в свою коробку systemd с потолком памяти (memcap): если WebKit начнёт разрастаться, замедлятся
+    или перезапустятся только окна Dewiar, а не весь рабочий стол. Запуск из меню, из ядра или после обновления —
+    один раз перезапускаем себя через systemd-run (метка DEWIAR_BOX); нельзя — работаем как раньше."""
+    if os.environ.get("DEWIAR_BOX"):
+        return
+    os.environ["DEWIAR_BOX"] = "ui"
+    try:
+        import memcap
+        cmd = memcap.scope_cmd([sys.executable, str(Path(__file__).resolve())] + sys.argv[1:], "ui", "Dewiar — окна")
+        if cmd[0] == "systemd-run":
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.execvp(cmd[0], cmd)
+    except Exception as e:  # noqa: BLE001
+        print(f"Окна без потолка памяти: {e}", file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--settings", action="store_true")
@@ -1475,6 +1555,7 @@ def main():
 
     if WIN:
         return main_win(args, extra)
+    _own_box()
     migrate_from_cortex()
     fresh = not SETTINGS_PATH.exists() or ui_settings().get("welcome") == ""   # первый запуск — откроем «Первые шаги»
     uis = ui_settings()

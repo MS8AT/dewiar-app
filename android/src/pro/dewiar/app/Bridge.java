@@ -68,6 +68,22 @@ public final class Bridge {
         a.startActivity(Intent.createChooser(i, "Отправить").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
     }
 
+    /** Скопировать текст в буфер обмена (кнопка «Копировать» под ответом). -> удалось ли. */
+    @JavascriptInterface public boolean copy(final String text) {
+        final boolean[] ok = {false};
+        final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        a.runOnUiThread(new Runnable() { @Override public void run() {
+            try {
+                android.content.ClipboardManager cm = (android.content.ClipboardManager) a.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Dewiar", text));
+                ok[0] = true;
+            } catch (Throwable e) { ok[0] = false; }
+            done.countDown();
+        } });
+        try { done.await(1, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException e) { }
+        return ok[0];
+    }
+
     /** Текст — прямо в нужный мессенджер (MAX, Telegram…): получателя выбирает человек. Нет приложения — false. */
     @JavascriptInterface public boolean shareTo(String pkg, String text) {
         try {
