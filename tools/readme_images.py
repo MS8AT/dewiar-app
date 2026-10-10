@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "core"))
 import personas as P  # noqa: E402
 
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "docs/img"
+SITE = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "server/dwrapp"   # лица и обложка для страницы «Скачать»
 COLLECTION = ["dewiar", "agent", "jarvis", "eva", "professor", "femida", "doctor", "iris", "oskar", "gaston", "nika", "mishel"]
 
 
@@ -224,10 +225,46 @@ def main():
             print(f"{OUT / (name + '.webp')}")
         b.close()
     phone(tmp)
+    if SITE.is_dir():                                   # в открытой копии сайта нет — только картинки README
+        site_faces(tmp)
+        Image.open(OUT / "banner.webp").convert("RGB").save(SITE / "dewiar_banner.jpg", "JPEG", quality=86, optimize=True)   # превью ссылки
     if errs:
         print("Ошибки страницы:", errs)
         return 1
     return 0
+
+
+def site_faces(tmp):
+    """Круглые лица всей команды (team-<id>.webp, прозрачные углы) и team.json — для раздела «Команда» на странице
+    «Скачать» (server/dwrapp/download.php): там они на HTML, чтобы и на телефоне подписи читались."""
+    ps = people()
+    for k in ("lira", "patrik"):
+        ps[k]["photo"] = f"av/{k}.webp"
+    cells = "".join(f'<div class="f" id="f-{k}">' + (f'<img src="{p["photo"]}">' if p["photo"] else
+                    f'<canvas data-style="{p["style"]}" data-color="{p["color"]}" width="300" height="300"></canvas>') + "</div>"
+                    for k, p in ps.items())
+    (tmp / "faces.html").write_text(f"""<!doctype html><html><head><meta charset="utf-8"><style>
+body {{ margin: 0; background: transparent; display: flex; flex-wrap: wrap; gap: 10px; padding: 10px; }}
+.f {{ width: 120px; height: 120px; border-radius: 50%; overflow: hidden; background: #050508; }}
+.f img, .f canvas {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
+</style></head><body>{cells}<script src="entities.js"></script><script>
+window.ents = [...document.querySelectorAll("canvas")].map(c => {{ const e = new DewiarEntity(c, {{ style: c.dataset.style, color: c.dataset.color }}); e.set({{ state: "speaking", level: .45 }}); return e; }});
+</script></body></html>""", encoding="utf-8")
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page(viewport={"width": 1000, "height": 800}, device_scale_factor=2)
+        pg.goto((tmp / "faces.html").as_uri())
+        pg.wait_for_timeout(2500)
+        pg.evaluate("() => ents.forEach(e => e.paused = true)")
+        for k in ps:
+            png = tmp / f"f-{k}.png"
+            pg.locator(f"#f-{k}").screenshot(path=str(png), omit_background=True)
+            Image.open(png).save(SITE / f"team-{k}.webp", "WEBP", quality=88, method=6)
+        b.close()
+    meta = [{"id": k, "name": v["name"], "role": v["role"], "tagline": v["tagline"], "color": v["color"]} for k, v in ps.items()]
+    (SITE / "team.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    print(SITE / "team.json", "+", len(ps), "лиц")
 
 
 def phone(tmp):
