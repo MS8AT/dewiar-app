@@ -1207,14 +1207,25 @@ const REJECT_RX = /\b4(00|22)\b|отклонил|invalid|tool|function|unsupport
 /* Размышления модели (Qwen3, GLM, DeepSeek…) выключены по умолчанию: голосовому помощнику прироста почти нет, а ответ
    приходит на десятки секунд позже. Лимит ответа — не меньше 2048, как на компьютере: при меньшем размышление съедает
    лимит и ответ обрывается. Если модель всё же ушла в размышления и ничего не сказала — повтор.
-   Включить можно только явно: S.llm.think = "on". */
+   Сложная просьба (стихи, задачи, анализ, планы, код, длинная просьба) — модель думает перед ответом сама (wantsThink, как
+   llm.wants_think на компьютере): отзыв 10.10 — стих без рифмы. S.llm.think: "on" — всегда, "off" — никогда, иначе — сама. */
 const thinkMode = () => (S.llm.think === "on" ? "on" : "off");
+const HARD_ASK = new RegExp("стих|стишок|поэм|сонет|рифм|частушк|четверостиш|(?:напиши|придумай) песн|текст песни|сочини|напиши (?:рассказ|сказку|историю|эссе|"
+  + "сочинение|поздравлени|речь|тост)|поздрав\\S* в стихах|реши(?:ть)? задач|задач[уаи] (?:по|на)|головоломк|докажи|"
+  + "выведи формул|вероятност|проанализируй|анализ[а-яё]* (?:рынк|ситуац|данн|текст)|разбери (?:по пунктам|подробно|ситуацию|ошибк)|"
+  + "сравни|стратеги|бизнес-план|составь план|план (?:обучения|тренировок|питания|поездки|развития|проекта)|"
+  + "напиши (?:код|программ|функци|скрипт)|торгов[а-яё]* (?:на|крипт|акци)|инвестиц|криптовалют|трейдинг|пошагово|"
+  + "взвесь|за и против|плюсы и минусы", "i");
+function wantsThink(text) {
+  if (S.llm.think === "on" || S.llm.think === "off") return S.llm.think === "on";
+  const t = String(text || ""); return HARD_ASK.test(t) || t.length > 280;
+}
 /* Ответ модели потоком (OpenAI-совместимый /chat/completions или Ollama /api/chat). onText(кусок) — текст по мере прихода,
    уже без размышлений и вызовов функций текстом; -> {text, calls:[{id,name,args}]} */
 async function llmStream(messages, tools, onText, signal, opt = {}) {
   const model = await resolveModel();
   const think = opt.think != null ? !!opt.think : thinkMode() === "on";
-  const limit = opt.max || (think ? 4096 : tools && tools.length ? 6144 : 2048);   // с инструментами — запас на make_app (целый HTML)
+  const limit = opt.max || (think ? (tools && tools.length ? 8192 : 6144) : tools && tools.length ? 6144 : 2048);   // размышлениям — запас   // с инструментами — запас на make_app (целый HTML)
   let body, url, ollama = isOllama();
   if (ollama) {
     url = ollamaRoot() + "/api/chat";
@@ -1478,6 +1489,8 @@ async function ask(text, opts = {}) {
     if (pics.length) modelOnce = await visionModel();
     plog("info", `📎 вложения: ${att.map(a => a.kind === "image" ? "фото" : a.name).join(", ")}`);
   }
+  const deep = !opts.hidden && wantsThink(text);
+  if (deep) { plog("info", "🧠 сложная просьба — модель подумает перед ответом"); showBot("Подумаю как следует — минутку", "wait"); }
   let final = "", switchTo = null;
   lastDone = "";
   try {
@@ -1495,7 +1508,7 @@ async function ask(text, opts = {}) {
     const round1 = async (tools) => {
       for (let tries = 0; ; tries++) {
         try {
-          const r = await llmStream(msgs, tools, (p) => { if (turnAbort === ctl) sink.push(p); }, ctl.signal);
+          const r = await llmStream(msgs, tools, (p) => { if (turnAbort === ctl) sink.push(p); }, ctl.signal, deep ? { think: true } : {});
           if (S.llm.cloud && !String(r.text || "").trim() && !r.calls.length && !r.finish && !ctl.signal.aborted)
             throw Object.assign(new Error("связь оборвалась — ответ пришёл пустым"), { net: true });
           return r;
@@ -2774,6 +2787,8 @@ function renderSettings() {
       <div style="font-weight:600">${esc(on ? brainName() : loggedIn() ? "подключаю модели Dewiar…" : "не подключён")}</div>
       ${on && S.llm.title ? `<small class="hint" style="margin:2px 0 0;display:block">${esc(S.llm.title)}${S.llm.cloud ? " · " + esc(cloudWho()) : ""}</small>` : ""}</div>
       ${on || loggedIn() ? `<button class="btn" id="br-test">Проверить</button>` : ""}</div><div class="res" id="br-res"></div></div>`);
+    if (on) h.push(`<div class="card"><div class="sw" style="margin:0"><div>Думать над сложными просьбами<small>Стихи, задачи, анализ, планы — сначала обдумывает: дольше, зато лучше. Простые вопросы — сразу.</small></div>
+      <label class="tg"><input type="checkbox" id="br-think" ${S.llm.think !== "off" ? "checked" : ""}><i></i></label></div></div>`);
     if (S.llm.cloud) h.push(`<div class="card cloudc" id="cl-card"><div class="row2"><div style="flex:1"><b>Баланс</b><small class="hint" style="margin:2px 0 0;display:block" id="cl-sub">${esc(cloudWho())}</small></div><div class="cl-pct" id="cl-pct">…</div></div>
       <div class="cl-bar"><i id="cl-fill"></i></div><div class="hint" id="cl-turns" style="margin:0"></div>
       <div class="cl-use" id="cl-use"></div>
@@ -2873,6 +2888,7 @@ function renderSettings() {
 
 function wireSettings(info) {
   const g = (id) => $("#" + id);
+  if (g("br-think")) g("br-think").addEventListener("change", () => { if (g("br-think").checked) delete S.llm.think; else S.llm.think = "off"; saveS(); });
   if (setTab === "brain") {
     if (g("br-test")) g("br-test").onclick = async () => { const b = g("br-test"), r = g("br-res"); b.disabled = true; r.className = "res"; r.textContent = "спрашиваю модель…";
       try {

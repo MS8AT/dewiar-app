@@ -1,6 +1,6 @@
 """Телефон: ответ не обрезается из-за размышлений модели. Ловит случай, когда облако Dewiar на телефоне всегда «думает»
 при малом лимите токенов (700) — размышление съедает лимит, ответ обрывается.
-Проверяет: сложный вопрос («почему», «объясни», «посоветуй», длинный) — модель думает, лимит 4096; простой — сразу, 2048;
+Проверяет: «почему…» и простые — сразу, без размышлений; сложная просьба (стих, задача, анализ, план) — думает, лимит с запасом;
 ушла в размышления и ничего не сказала — повтор без них; сервер не понимает chat_template_kwargs — дальше их не шлём;
 переключатель «Думать над сложными вопросами» в «Мозге»."""
 import json, os, shutil, subprocess, sys, tempfile
@@ -48,6 +48,7 @@ with sync_playwright() as p:
         const out = {};
         await ask("Почему небо голубое?"); await wait(); out.deep = seen[seen.length - 1];
         await ask("Сколько будет два плюс два"); await wait(); out.simple = seen[seen.length - 1];
+        await ask("Напиши стих про осень с рифмой"); await wait(); out.poem = seen[seen.length - 1];
         mode = "reason"; const n0 = seen.length;
         await ask("Объясни, как работает фотосинтез"); await wait();
         out.retry = seen.slice(n0).map(x => [x.chat_template_kwargs, x.max_tokens]); out.retryText = document.querySelector("#bot").textContent;
@@ -58,6 +59,7 @@ with sync_playwright() as p:
         await ask("Почему море солёное?"); await wait(); out.after = seen.slice(n2).map(x => !!x.chat_template_kwargs);
         S.llm.no_kwargs = false; S.llm.think = "off"; const n3 = seen.length;
         await ask("Почему луна не падает?"); await wait(); out.off = seen[n3] && seen[n3].chat_template_kwargs;
+        const n4 = seen.length; await ask("Напиши стих про зиму"); await wait(); out.poemOff = seen[n4] && seen[n4].chat_template_kwargs;
         delete S.llm.think;
         out.sys = seen[0].messages[0].content;
         return out;
@@ -68,7 +70,9 @@ ok(R["simple"]["chat_template_kwargs"] == {"enable_thinking": False}, "прос�
 ok(len(R["retry"]) == 2 and R["retry"][1][0] == {"enable_thinking": False} and R["retry"][1][1] == 4096 and "рэлеевское" in R["retryText"],
    f"ушла в размышления и упёрлась в лимит — повтор без них, ответ есть: {R['retry']}")
 ok(R["k400"][0] and R["k400"][-1] is False and R["noKwargs"] is True and R["after"] == [False], f"сервер не понимает chat_template_kwargs — повтор без них и больше не шлём: {R['k400']} {R['after']}")
-ok(R["off"] == {"enable_thinking": False}, "размышления не включаются ничем, кроме явного think: on")
+ok(R["poem"]["chat_template_kwargs"] == {"enable_thinking": True} and R["poem"]["max_tokens"] >= 6144,
+   f"сложная просьба (стих) — модель думает, лимит с запасом: {R['poem'].get('chat_template_kwargs')} {R['poem'].get('max_tokens')}")
+ok(R["off"] == {"enable_thinking": False} and R["poemOff"] == {"enable_thinking": False}, "переключатель выключен (think: off) — не думает даже над стихом")
 ok("одним-тремя" not in R["sys"] and "четыре-восемь предложений" in R["sys"], "правила речи: на настоящие вопросы — содержательный ответ, а не одна фраза")
 ok(not errors, f"без ошибок на странице {errors}")
 print("ИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")

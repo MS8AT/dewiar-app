@@ -13,8 +13,8 @@
 <a href="https://dewiar.pro/dwrapp/Dewiar.apk"><img src="https://img.shields.io/badge/Android-%D1%81%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-3ddc84?style=for-the-badge&logo=android&logoColor=white" alt="Android — скачать"></a>
 <a href="https://dewiar.pro/dwrapp/download.php"><img src="https://img.shields.io/badge/%D0%92%D1%81%D0%B5%20%D1%83%D1%81%D1%82%D1%80%D0%BE%D0%B9%D1%81%D1%82%D0%B2%D0%B0-dewiar.pro-FF7AC6?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Все устройства — dewiar.pro"></a>
 
-![версия](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-0.36.13-7c5cff)
-![телефон](https://img.shields.io/badge/Android-0.4.33-3ddc84)
+![версия](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-0.36.14-7c5cff)
+![телефон](https://img.shields.io/badge/Android-0.4.34-3ddc84)
 [![Проверки](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml/badge.svg)](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml)
 
 [Сайт](https://dewiar.pro) · [Руководство](docs/guide.md) · [Свой сервер](docs/self-hosting.md) ·
@@ -120,7 +120,7 @@ flowchart LR
 | `server/` | Серверы речи и синтеза для своей машины с видеокартой (`install-server.sh`) |
 | `packaging/`, `tools/` | Пакет `.deb`, установщики Windows, выпуск версии одной командой |
 | `data/` | Облики персонажей, встроенные навыки, модель VAD, радио |
-| `tests/` | 115 наборов проверок: настоящее ядро, окна в Chromium, телефон на подменённом мосте |
+| `tests/` | 116 наборов проверок: настоящее ядро, окна в Chromium, телефон на подменённом мосте |
 
 </details>
 

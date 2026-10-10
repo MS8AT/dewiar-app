@@ -898,6 +898,11 @@ class AnswerMixin:
                 raise LLMError("я пока не подключён к языковой модели — откройте настройки, раздел «Мозг»"
                                + (": войдите в аккаунт dewiar.pro — модели Dewiar подключатся сами" if not self.account.logged_in() else ""))
             msgs = self._messages(text, images, prof)
+            from llm import wants_think
+            if prof.get("think") not in ("on", "off") and self.s.get("llm", "think_auto") is not False and wants_think(text):
+                # сложная просьба — модель думает (дольше, но стих с рифмой, а расчёт со смыслом); лимит — с запасом на размышления
+                prof = dict(prof, think="on", max_tokens=max(6144, int(prof.get("max_tokens") or 0)))
+                log.info("🧠 Сложная просьба — модель подумает перед ответом")
             specs = self.toolbox.specs() if self.s.get("tools", "enabled_all") is not False else []
             mode = (self.s.get("llm", "tools_modes") or {}).get(self._tools_key(prof))
             if mode in ("native", "prompt"):
