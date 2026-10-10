@@ -11,47 +11,65 @@
      С ядром страница говорит сама (core из assets/dewiar.js), окнами управляет ui/app.py (api() — класс Api:
      положение, режим, трей, студия, окно напоминания). Сторож загрузки в app.py (page_guard) ищет #card, #orb
      и window.core — без них виджет сочтут незагрузившимся и спрячут. */
-  :root { --persona: #8A9BFF; --brand: linear-gradient(135deg, #667eea 0%, #764ba2 100%); --ink: #F4F4F6; --muted: rgba(255,255,255,.62); --glass: rgba(255,255,255,.065); }
+  :root { --persona: #8A9BFF; --ink: #F4F4F6; --muted: rgba(255,255,255,.62);
+          /* сдержанная палитра (фирменные цвета владельца): стекло вместо фиолетовых заливок, акцент — холодный белый */
+          --brand: linear-gradient(135deg, rgba(255,255,255,.22) 0%, rgba(193,235,255,.13) 100%);
+          --glass: rgb(255 255 255 / 4%); --glass-shadow: 0 0 20px rgba(0,0,0,.5); }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { background: #0b0b0e; overflow: hidden; height: 100%; user-select: none; -webkit-user-select: none; }
   body { font: 14px/1.45 "Manrope", "Ubuntu", "Noto Sans", sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
 
   #card { position: absolute; inset: 0; overflow: hidden;
           display: flex; flex-direction: column; align-items: center; padding: 10px 14px 12px; cursor: grab;
-          background-color: #0b0b0e;
-          background-image: radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--persona) 13%, transparent) 0%, transparent 58%),
-                            linear-gradient(180deg, #151519 0%, #0b0b0e 55%, #09090b 100%); }
+          background-color: #0a0a0f;
+          background-image: radial-gradient(circle at 20% 80%, rgba(120,119,198,.3) 0%, transparent 50%),
+                            radial-gradient(circle at 80% 20%, rgba(193,235,255,.3) 0%, transparent 50%),
+                            linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #3e162b 100%); }
   #card.dragging { cursor: grabbing; }
+  /* Темы (ui.skin, студия → «Оформление»): calm — по умолчанию (выше), graphite — почти чёрная без цветных бликов,
+     neon — как раньше: свечение цвета персонажа и фиолетовые кнопки */
+  body.skin-graphite #card { background-image: radial-gradient(circle at 50% 0%, rgba(255,255,255,.07) 0%, transparent 60%),
+                                               linear-gradient(180deg, #16161a 0%, #0d0d10 60%, #09090b 100%); }
+  body.skin-neon { --brand: linear-gradient(135deg, #667eea 0%, #764ba2 100%); --glass: rgba(255,255,255,.065); --glass-shadow: 0 0 0 transparent; }
+  body.skin-neon #card { background-image: radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--persona) 13%, transparent) 0%, transparent 58%),
+                                           linear-gradient(180deg, #151519 0%, #0b0b0e 55%, #09090b 100%); }
+  body.skin-neon #bubble.live { background: var(--brand); }
 
   #orb { position: relative; width: 228px; height: 228px; flex: none; cursor: pointer; transition: width .35s ease, height .35s ease; }
   #card.busy #orb { width: 150px; height: 150px; }        /* есть текст — сфера уступает место */
   #orb canvas { width: 100%; height: 100%; display: block; }
 
-  #bubble { flex: none; margin-top: 2px; background: rgba(255,255,255,.08); color: #fff; border-radius: 999px;
-            padding: 6px 20px 7px; min-width: 132px; text-align: center; font-size: 14px; letter-spacing: .01em; transition: background .3s; }
-  #bubble.live { background: var(--brand); }
-  /* «Ваша очередь»: ответ закончен, можно говорить без имени. Светлая полоса внутри надписи тает слева направо —
-     столько осталось ждать; кончилась — снова покой и сигнал «не слушаю» */
-  #bubble { position: relative; overflow: hidden; }
+  /* Строка состояния под портретом — не кнопка: стекло, слева точка. Слушает, думает, говорит — точка светится и
+     дышит. «Ваша очередь» (ответ закончен, можно говорить без имени) — под надписью тонкая светлая черта тает к центру:
+     столько осталось ждать; кончилась — снова покой и сигнал «не слушаю». */
+  #bubble { flex: none; margin-top: 4px; position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+            background: var(--glass); box-shadow: var(--glass-shadow); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+            color: #fff; border-radius: 999px; padding: 6px 18px 8px 15px; min-width: 120px; font-size: 13.5px; letter-spacing: .01em; transition: background .3s; }
+  #bubble::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.28); transition: background .3s, box-shadow .3s; }
+  #bubble.live { background: rgb(255 255 255 / 7%); }
+  #bubble.live::before { background: #fff; box-shadow: 0 0 10px rgba(255,255,255,.75); animation: breathe 1.8s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .35; } }
   #bubble > span { position: relative; z-index: 1; }
-  #bubble::after { content: ""; position: absolute; inset: 0; background: rgba(255,255,255,.3); transform-origin: right center;
+  #bubble::after { content: ""; position: absolute; left: 18px; right: 18px; bottom: 3px; height: 2px; border-radius: 2px;
+                   background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.75) 20%, rgba(193,235,255,.9) 50%, rgba(255,255,255,.75) 80%, rgba(255,255,255,0));
                    transform: scaleX(0); pointer-events: none; }
   #bubble.turn::after { animation: turn-left var(--turn, 8s) linear forwards; }
   @keyframes turn-left { from { transform: scaleX(1); } to { transform: scaleX(0); } }
-  @media (prefers-reduced-motion: reduce) { #bubble.turn::after { animation: none; transform: scaleX(.5); } }
+  @media (prefers-reduced-motion: reduce) { #bubble.turn::after { animation: none; transform: scaleX(.6); } #bubble.live::before { animation: none; } }
   #bubble b { font-family: "Unbounded", "Ubuntu", sans-serif; font-weight: 600; font-size: 14px; letter-spacing: .03em; }
 
   /* по центру, но не выше имени: при нехватке места «распорки» сжимаются до нуля, а лишнее уходит вниз (не наезжает на имя) */
   #mid { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; justify-content: flex-start; gap: 8px; padding: 10px 0 8px; }
   #mid::before, #mid::after { content: ""; flex: 1 1 0; min-height: 0; margin: -4px 0; }
-  #cap { display: none; flex: 0 1 auto; min-height: 0; width: 100%; overflow: hidden; padding: 10px 13px; border-radius: 18px; background: var(--glass); font-size: 13.5px; line-height: 1.42; cursor: default; }
+  #cap { display: none; flex: 0 1 auto; min-height: 0; width: 100%; overflow: hidden; padding: 10px 13px; border-radius: 18px; background: var(--glass); font-size: 13.5px; line-height: 1.42; cursor: default;
+         box-shadow: var(--glass-shadow); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   #cap.show { display: flex; flex-direction: column; }
   #cap > * { flex: none; }
   #cap.err { background: rgba(255,90,120,.14); }
   #cap .bot:empty:not(.wait) { display: none; }
   /* ответ ещё готовится — три мягко мигающие точки цвета персонажа, а не «…» навсегда */
   #cap .bot.wait { height: 18px; display: flex; gap: 5px; align-items: center; }
-  #cap .bot.wait::before, #cap .bot.wait::after, #cap .bot.wait i { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--persona, #8A9BFF); opacity: .25; animation: wdot 1.2s infinite ease-in-out; }
+  #cap .bot.wait::before, #cap .bot.wait::after, #cap .bot.wait i { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fff; opacity: .25; animation: wdot 1.2s infinite ease-in-out; }
   #cap .bot.wait i { animation-delay: .2s; }
   #cap .bot.wait::after { animation-delay: .4s; }
   @keyframes wdot { 0%, 80%, 100% { opacity: .25; transform: scale(.85); } 40% { opacity: 1; transform: scale(1); } }
@@ -70,7 +88,7 @@
              color: #fff; background: rgba(255,255,255,.12); cursor: pointer; }
   #bot .rep:hover { background: rgba(255,255,255,.2); }
   #bot .repask { display: flex; gap: 6px; flex-wrap: wrap; } #bot .repask .rep { display: inline-block; }
-  #act { font-size: 12px; color: #C9CAFF; margin-bottom: 4px; display: none; }
+  #act { font-size: 12px; color: #D6E4F0; margin-bottom: 4px; display: none; }
   #act.on { display: block; }
   #act.bad { color: #ff8aa2; }
   #act::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 7px; vertical-align: 1px; }
@@ -86,18 +104,18 @@
   /* первая загрузка: что готовится (status.loading) — полоска под строкой; доля неизвестна — бегущий отрезок */
   #ldbar { display: none; width: 56%; height: 3px; margin: 7px auto 0; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
   #ldbar.on { display: block; } #cap.show ~ #ldbar { display: none; }
-  #ldbar i { display: block; height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, #667eea, #a78bfa, #4BE3A1); transition: width .5s; }
+  #ldbar i { display: block; height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, rgba(255,255,255,.55), rgba(193,235,255,.95)); transition: width .5s; }
   #ldbar.run i { width: 30%; animation: ldrun 1.4s ease-in-out infinite; }
   @keyframes ldrun { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
   #health { display: none; align-self: center; max-width: 100%; text-align: center; font-size: 12px; line-height: 1.35; padding: 5px 11px; border-radius: 12px;
             background: rgba(255,190,90,.14); color: #FFD9A0; cursor: default; }
   #health.on { display: block; } #health.bad { background: rgba(255,107,138,.16); color: #FFC2CF; }
-  #health.calm { background: rgba(165,180,252,.10); color: #C9CAFF; }
+  #health.calm { background: rgba(193,235,255,.08); color: #D6E4F0; }
   #health .dots::after { content: ""; animation: hdots 1.4s steps(4) infinite; }
   @keyframes hdots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
   #health button { display: block; margin: 6px auto 0; border: 0; border-radius: 9px; padding: 4px 11px; font: inherit; font-size: 12px; cursor: pointer;
                    background: rgba(255,255,255,.14); color: var(--ink); } #health button:hover { background: rgba(255,255,255,.22); }
-  #task, #upd { display: none; text-align: center; font-size: 12px; line-height: 1.35; color: #C9CAFF; padding: 6px 10px; border-radius: 12px; background: rgba(255,255,255,.05); cursor: pointer; }
+  #task, #upd { display: none; text-align: center; font-size: 12px; line-height: 1.35; color: #D6E4F0; padding: 6px 10px; border-radius: 12px; background: rgba(255,255,255,.05); cursor: pointer; }
   #task.on, #upd.on { display: block; }
   #task { text-align: left; padding: 8px 12px; }
   #rem { display: none; align-items: center; gap: 10px; padding: 9px 10px 9px 12px; border-radius: 16px;
@@ -116,15 +134,15 @@
   #task .tl em { font-style: normal; opacity: .75; font-variant-numeric: tabular-nums; }
   #task .tsub { opacity: .75; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #task .tp { display: block; height: 3px; margin-top: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }
-  #task .tp b { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #667eea, #a78bfa); transition: width .6s; }
+  #task .tp b { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, rgba(255,255,255,.55), rgba(193,235,255,.95)); transition: width .6s; }
   #task.done { background: rgba(75,227,161,.08); cursor: default; }
   #task .tx { margin-left: auto; border: 0; background: none; color: inherit; opacity: .6; font-size: 15px; line-height: 1; cursor: pointer; padding: 0 2px; }
   #task .tbtn { display: flex; gap: 6px; margin-top: 7px; }
   #task .tbtn button { flex: 1; border: 0; border-radius: 9px; padding: 5px 6px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
                        background: rgba(255,255,255,.12); color: var(--ink); }
-  #task .tbtn button:first-child { background: linear-gradient(135deg, #667eea, #764ba2); }
+  #task .tbtn button:first-child { background: var(--brand); }
   #task .tbtn button:hover { filter: brightness(1.15); } #task .tbtn button:disabled { opacity: .6; }
-  #task .spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgba(201,202,255,.3); border-top-color: #C9CAFF; animation: tspin .9s linear infinite; flex: none; }
+  #task .spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgba(214,228,240,.3); border-top-color: #D6E4F0; animation: tspin .9s linear infinite; flex: none; }
   @keyframes tspin { to { transform: rotate(360deg); } }
   #upd { color: #fff; background: var(--brand); }
   #cloudlow { display: none; text-align: center; font-size: 12px; line-height: 1.35; padding: 7px 10px; border-radius: 12px; cursor: pointer;
@@ -140,7 +158,7 @@
   #lightbox span { font-size: 12px; color: var(--muted); text-align: center; }
   #ask { display: none; width: 100%; }
   /* поле ввода — одна карточка: текст сверху, под ним вложения и «отправить» */
-  .askbox { border-radius: 18px; background: rgba(255,255,255,.075); padding: 9px 6px 4px 13px; transition: background .2s; }
+  .askbox { border-radius: 18px; background: var(--glass); box-shadow: var(--glass-shadow); padding: 9px 6px 4px 13px; transition: background .2s; }
   .askbox:focus-within { background: rgba(255,255,255,.115); }
   #ask textarea { width: 100%; padding: 2px 6px 4px 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13.5px;
     line-height: 1.45; outline: none; resize: none; display: block; height: 24px; max-height: 210px; overflow-y: hidden;
@@ -158,7 +176,7 @@
   .ab { flex: none; width: 32px; height: 32px; border: 0; border-radius: 10px; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
   .ab:hover { background: rgba(255,255,255,.09); color: var(--ink); }
   .ab svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-  .ab.send { color: #C9CAFF; }
+  .ab.send { color: #D6E4F0; }
   #atts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   #atts:empty { display: none; }
   .att { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 3px; border-radius: 10px; background: rgba(255,255,255,.08); font-size: 11.5px; color: var(--ink); }
@@ -166,9 +184,9 @@
   .att .ic { display: grid; place-items: center; background: rgba(139,140,247,.25); font-size: 9.5px; font-weight: 600; letter-spacing: .02em; }
   .att span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
   .att button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 3px; }
-  body.drop #card { background-color: #16162a; }
+  body.drop #card { box-shadow: inset 0 0 0 2px rgba(193,235,255,.35); }
 
-  #bar { flex: none; display: flex; flex-wrap: nowrap; gap: 1px; align-items: center; justify-content: center; padding: 4px 6px; border-radius: 999px; background: rgba(255,255,255,.05); opacity: .6; transition: opacity .2s; cursor: default; }
+  #bar { flex: none; display: flex; flex-wrap: nowrap; gap: 1px; align-items: center; justify-content: center; padding: 4px 6px; border-radius: 999px; background: var(--glass); box-shadow: var(--glass-shadow); opacity: .6; transition: opacity .2s; cursor: default; }
   #card:hover #bar, #bar.pinned { opacity: 1; }
   .btn { width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
   .btn:hover, .btn:focus-visible { color: #fff; background: rgba(255,255,255,.1); outline: none; }
@@ -218,7 +236,8 @@
   body.mini #corner { display: none; }
 
   /* ---------- значок ---------- */
-  body.mini #card { padding: 0; justify-content: center; background-image: radial-gradient(circle at 50% 40%, #1c1c26 0%, #0b0b0e 70%); }
+  body.mini #card { padding: 0; justify-content: center; background-image: radial-gradient(circle at 25% 80%, rgba(120,119,198,.3) 0%, transparent 60%),
+                    linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 55%, #3e162b 100%); }
   body.mini #orb { width: 92px; height: 92px; }
   body.mini #bubble, body.mini #mid, body.mini #bar { display: none; }
   #grow { display: none; position: absolute; left: 62px; top: 62px; width: 24px; height: 24px; border-radius: 50%; border: 0;
@@ -245,12 +264,12 @@
   .steps { list-style: none; margin: 0 0 14px; }
   .steps li { position: relative; padding: 0 0 10px 20px; }
   .steps li::before { content: ""; position: absolute; left: 3px; top: 6px; width: 8px; height: 8px; border-radius: 50%; background: #4BE3A1; }
-  .steps li.run::before { background: #C9CAFF; animation: blink 1s infinite; }
+  .steps li.run::before { background: #D6E4F0; animation: blink 1s infinite; }
   .steps li.error::before { background: #ff8aa2; } .steps li.declined::before { background: rgba(255,255,255,.35); }
   .steps li::after { content: ""; position: absolute; left: 6.5px; top: 18px; bottom: 2px; width: 1px; background: rgba(255,255,255,.1); }
   .steps li:last-child::after { display: none; }
   .steps .st { font-weight: 600; font-size: 13px; }
-  .steps .sd { font: 12px/1.45 ui-monospace, "Ubuntu Mono", monospace; color: #C9CAFF; word-break: break-word; margin-top: 2px; }
+  .steps .sd { font: 12px/1.45 ui-monospace, "Ubuntu Mono", monospace; color: #D6E4F0; word-break: break-word; margin-top: 2px; }
   .steps .se { color: #ff8aa2; font-size: 12px; margin-top: 2px; }
   .steps details { margin-top: 3px; } .steps summary { font-size: 11.5px; color: var(--muted); cursor: pointer; }
   .steps pre, .md pre { margin: 6px 0; }
@@ -319,7 +338,17 @@
 <script src="assets/dewiar.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
-const entity = new DewiarEntity($("cv"), { style: "nexus", color: "#8A9BFF", plate: false });   // карточка сама непрозрачная — диск-подложка не нужен
+// карточка сама непрозрачная — диск-подложка не нужен; портрет сдержанный (белый край), голос — лучами (ui.voice_fx)
+const entity = new DewiarEntity($("cv"), { style: "nexus", color: "#8A9BFF", plate: false, tone: "mono", fx: "bars" });
+const SKINS = ["calm", "graphite", "neon"], VOICE_FX = ["bars", "pulse", "wave"];
+function applyLook(ui) {                      // тема карточки и облика + чем голос отзывается вокруг портрета
+  ui = ui || {};
+  const skin = SKINS.includes(ui.skin) ? ui.skin : "calm";
+  SKINS.forEach(k => document.body.classList.toggle("skin-" + k, k === skin));
+  entity.tone = skin === "neon" ? "color" : "mono";
+  entity.fx = VOICE_FX.includes(ui.voice_fx) ? ui.voice_fx : "bars";
+}
+applyLook({});
 const LABEL = { listening: "Я вас слушаю", thinking: "Думаю…", muted: "Микрофон выключен", offline: "Нет связи с ядром" };
 let personas = [], current = null, state = "offline", capTimer = null, muted = false;
 entity.set({ state: "offline" });
@@ -490,6 +519,7 @@ function setTextOnly(on) { textOnly = !!on; $("b-voice").classList.toggle("on", 
 $("b-voice").onclick = guard($("b-voice"), () => core.call("settings_save", { patch: { tts: { text_only: !textOnly } } })
   .then(s => { setTextOnly(s.tts.text_only); showCap("", textOnly ? "Отвечаю только текстом — голос молчит." : "Снова отвечаю голосом."); hideCapLater(2500); }).catch(showErr));
 core.on("hello", d => {
+  applyLook(d.settings.ui);
   personas = d.personas; muted = d.muted; $("b-mic").classList.toggle("on", muted); setTextOnly(d.settings.tts && d.settings.tts.text_only);
   applyPersona(d.persona); setRadio(d.radio); setState(d.state); note(d.status);
   if (!d.settings.llm.active && (d.settings.ui || {}).intro !== "") { showCap("", "Чтобы я могла отвечать, меня нужно один раз подключить — бесплатно: студия → «Мозг» → «Подключить бесплатно».", true); }
@@ -508,6 +538,7 @@ core.on("hello", d => {
   clearTimeout(window._turnT);                    // полоса дотаяла — надпись обычная, даже если ядро ещё не сказало «покой»
   window._turnT = setTimeout(() => { if (Date.now() >= turnUntil - 50) setState(state); }, (e.seconds || 0) * 1000 + 100);
 })
+.on("settings", e => applyLook((e.settings || {}).ui))   // студия → «Оформление»: тема и «когда говорит»
 .on("persona", e => applyPersona(e.persona))
 .on("personas", e => { personas = e.personas; applyPersona(current ? current.id : personas[0].id); })
 .on("level", e => entity.set({ level: e.v, voice: e.src === "voice" }))

@@ -65,4 +65,5 @@ $$("nav button[data-p]").forEach(b => b.onclick = () => {
   if (b.dataset.p === "prompter") loadMeetings();
   if (b.dataset.p === "about") core.call("update_status").then(renderUpdate).catch(() => {});
   if (b.dataset.p === "voice") loadVosk();
+  if (b.dataset.p === "look") loadLook();
 });

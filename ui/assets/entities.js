@@ -922,11 +922,71 @@
       ctx.fillStyle = bg; ctx.fillRect(-R, band - 24, 2 * R, 48);
     }
     ctx.restore();
+    portraitRim(g, e, R);
+  }
+
+  /* Край портрета. Цветной (по умолчанию): кольцо цвета персонажа со свечением и пунктир. Сдержанный (tone "mono",
+     виджет и телефон): портрет «утоплен» в стекло — внутренняя тень по краю и тонкий светлый край, как у фото на сайте;
+     пока говорит — край чуть светлеет. */
+  function portraitRim(g, e, R) {
+    const { ctx, r, c, t, lv, k } = g;
+    if (e.tone === "mono") {
+      const v = ctx.createRadialGradient(0, 0, R * 0.6, 0, 0, R);
+      v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,.5)");
+      ctx.fillStyle = v; ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
+      const on = e.state === "speaking" ? lv : 0;
+      ctx.lineWidth = 2; ctx.strokeStyle = `rgba(255,255,255,${(0.1 + on * 0.22).toFixed(3)})`;
+      if (on) { ctx.shadowColor = "rgba(255,255,255,.35)"; ctx.shadowBlur = 4 + on * 12; }
+      ctx.beginPath(); ctx.arc(0, 0, R + 1, 0, TAU); ctx.stroke(); ctx.shadowBlur = 0;
+      return;
+    }
     ctx.lineWidth = 2 + lv * 4; ctx.strokeStyle = rgba(c, (0.6 + lv * 0.4) * k);
     ctx.shadowColor = rgba(c, 1); ctx.shadowBlur = 12 + lv * 20;
     ctx.beginPath(); ctx.arc(0, 0, R + 2, 0, TAU); ctx.stroke(); ctx.shadowBlur = 0;
     ctx.save(); ctx.rotate(t * 0.6); ctx.setLineDash([3, 9]); ctx.lineWidth = 1; ctx.strokeStyle = rgba(c, 0.5 * k);
     ctx.beginPath(); ctx.arc(0, 0, r * 0.92, 0, TAU); ctx.stroke(); ctx.restore(); ctx.setLineDash([]);
+  }
+
+  /* «Лучи»: голос отзывается полосками вокруг портрета (как в первых версиях Dewiar). Уровня звука один, поэтому
+     «спектр» складывается из медленных волн по кругу, а каждая полоска плавно догоняет свою длину. Слушает — короткие
+     и тихие (откликаются на ваш голос), говорит — длинные. Один путь и одно свечение на кадр — дёшево. */
+  function voiceBars(g, e) {
+    const { ctx, r, c, t, lv } = g;
+    const photoLike = e.style === "photo", R0 = photoLike ? r * 0.78 + r * 0.08 : r * 1.0;
+    const N = 60, maxL = photoLike ? r * 0.2 : r * 0.14, speaking = e.state === "speaking";
+    const B = e._bars && e._bars.length === N ? e._bars : (e._bars = new Array(N).fill(0));
+    const amp = speaking ? lv : lv * 0.45;
+    ctx.save(); ctx.lineCap = "round"; ctx.lineWidth = Math.max(2, r * 0.03);
+    ctx.strokeStyle = rgba(c, speaking ? 0.85 : 0.5);
+    if (speaking) { ctx.shadowColor = rgba(c, 0.6); ctx.shadowBlur = 8; }
+    ctx.beginPath();
+    for (let i = 0; i < N; i++) {
+      const a = i / N * TAU - Math.PI / 2;
+      const wave = Math.abs(Math.sin(i * 0.52 + t * 5.2) * 0.6 + Math.sin(i * 1.31 - t * 3.7) * 0.4 + Math.sin(i * 0.17 + t * 1.3) * 0.3);
+      const want = 1.5 + maxL * amp * (0.2 + 0.8 * Math.min(1, wave));
+      B[i] += (want - B[i]) * (want > B[i] ? 0.45 : 0.18);
+      const x = Math.cos(a), y = Math.sin(a);
+      ctx.moveTo(x * R0, y * R0); ctx.lineTo(x * (R0 + B[i]), y * (R0 + B[i]));
+    }
+    ctx.stroke(); ctx.restore();
+  }
+
+  /* «Пульс»: от портрета мягко расходятся три круга и светлое сияние — чем громче голос, тем шире и ярче. */
+  function voicePulse(g, e) {
+    const { ctx, r, c, t, lv } = g;
+    const R0 = e.style === "photo" ? r * 0.8 : r * 1.0, span = r * 0.27, speaking = e.state === "speaking";
+    const k = speaking ? 1 : 0.5;
+    ctx.save();
+    const gl = ctx.createRadialGradient(0, 0, R0, 0, 0, R0 + span);
+    gl.addColorStop(0, rgba(c, (0.05 + 0.2 * lv) * k)); gl.addColorStop(1, rgba(c, 0));
+    ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(0, 0, R0 + span, 0, TAU); ctx.arc(0, 0, R0, 0, TAU, true); ctx.fill("evenodd");
+    ctx.lineWidth = Math.max(1.5, r * 0.016);
+    for (let i = 0; i < 3; i++) {
+      const ph = (t * (speaking ? 0.5 : 0.3) + i / 3) % 1;
+      ctx.strokeStyle = rgba(c, (1 - ph) * (0.2 + 0.6 * lv) * k);
+      ctx.beginPath(); ctx.arc(0, 0, R0 + ph * span * (0.55 + 0.45 * lv), 0, TAU); ctx.stroke();
+    }
+    ctx.restore();
   }
 
   function photo(g, e) {                          // своё фото: голограмма
@@ -978,11 +1038,7 @@
       ctx.fillStyle = bg; ctx.fillRect(-R, band - 24, 2 * R, 48);
     }
     ctx.restore();
-    ctx.lineWidth = 2 + lv * 4; ctx.strokeStyle = rgba(c, (0.6 + lv * 0.4) * k);
-    ctx.shadowColor = rgba(c, 1); ctx.shadowBlur = 12 + lv * 20;
-    ctx.beginPath(); ctx.arc(0, 0, R + 2, 0, TAU); ctx.stroke(); ctx.shadowBlur = 0;
-    ctx.save(); ctx.rotate(t * 0.6); ctx.setLineDash([3, 9]); ctx.lineWidth = 1; ctx.strokeStyle = rgba(c, 0.5 * k);
-    ctx.beginPath(); ctx.arc(0, 0, r * 0.92, 0, TAU); ctx.stroke(); ctx.restore(); ctx.setLineDash([]);
+    portraitRim(g, e, R);
   }
 
   // Пластинка: пока играет радио и ассистент молчит — вращается винил, на «яблоке» — цвет персонажа и название станции.
@@ -1041,6 +1097,10 @@
   function stateRing(g, e) {
     const { ctx, r, c, t, lv } = g;
     const R = r * 1.08;
+    if (e.state === "speaking" || e.state === "listening") {
+      if (e.fx === "bars") return voiceBars(g, e);
+      if (e.fx === "pulse") return voicePulse(g, e);
+    }
     if (e.state === "listening") {
       ctx.lineWidth = 2; ctx.strokeStyle = rgba(c, 0.35 + lv * 0.6);
       ctx.beginPath(); ctx.arc(0, 0, R + lv * 6, 0, TAU); ctx.stroke();
@@ -1073,6 +1133,8 @@
       this.live = opts.live || "";
       this.plate = opts.plate !== false;
       this.still = !!opts.still;          // в покое — один кадр, без анимации (много обликов на одной странице студии)
+      this.tone = opts.tone || "color";   // "mono" — сдержанно: белый край портрета и белые лучи вместо цвета персонажа
+      this.fx = opts.fx || "wave";        // голос: "wave" — волна по кругу, "bars" — лучи вокруг портрета, "pulse" — расходящиеся круги
       this.configure(opts);
       this._last = performance.now(); this._frame = 0;
       const loop = (now) => { if (!this.dead) { this.draw(now); requestAnimationFrame(loop); } };
@@ -1124,21 +1186,24 @@
       const lvE = this.state === "speaking" ? Math.max(this.level, 0.3 + 0.1 * Math.sin(this.t * 2.3) + 0.05 * Math.sin(this.t * 5.1)) :
         this.state === "listening" ? Math.max(this.level, 0.08 + 0.05 * Math.sin(this.t * 1.7)) : this.level;
       const g = { ctx, r: PR * 0.8, c, t: this.t, lv: lvE, k: st.glow };
+      // сдержанный тон: портрет, его край и лучи — холодный белый; абстрактные облики сохраняют цвет персонажа
+      const gm = this.tone === "mono" ? Object.assign({}, g, { c: st.sat ? [226, 232, 244] : [150, 156, 168] }) : g;
       // Непрозрачный тёмный диск. Всё свечение рисуется ПО НЕМУ, а не по прозрачному окну:
       // иначе на рабочем столе с аппаратным ускорением свечение «пересвечивается» пятнами.
       const plate = this.plate && this.style !== "aura", ringOn = this.ring && this.style !== "aura";
       this._dt = dt;
       if (plate) {
         const pg = ctx.createRadialGradient(0, -PR * 0.25, PR * 0.1, 0, 0, PR);
-        pg.addColorStop(0, "#26264A"); pg.addColorStop(0.75, "#17172E"); pg.addColorStop(1, "#0D0D1A");
+        if (this.tone === "mono") { pg.addColorStop(0, "#1f2029"); pg.addColorStop(0.75, "#14141b"); pg.addColorStop(1, "#0c0c11"); }
+        else { pg.addColorStop(0, "#26264A"); pg.addColorStop(0.75, "#17172E"); pg.addColorStop(1, "#0D0D1A"); }
         ctx.fillStyle = pg; ctx.beginPath(); ctx.arc(0, 0, PR, 0, TAU); ctx.fill();
         ctx.save(); ctx.beginPath(); ctx.arc(0, 0, PR - 0.5, 0, TAU); ctx.clip();
       }
       const spin = this.vinyl && VINYL_STATES.has(this.state);
       ctx.globalCompositeOperation = plate && LIGHTER.has(this.style) && !spin ? "lighter" : "source-over";
-      (spin ? vinyl : STYLES[this.style])(spin ? Object.assign({}, g, { c: this.color }) : g, this);
+      (spin ? vinyl : STYLES[this.style])(spin ? Object.assign({}, g, { c: this.color }) : this.style === "photo" ? gm : g, this);
       ctx.globalCompositeOperation = "source-over";
-      if (ringOn && !spin) stateRing(g, this);
+      if (ringOn && !spin) stateRing(gm, this);
       if (plate) {
         ctx.restore();                                   // без обводки диска — органичнее
       }

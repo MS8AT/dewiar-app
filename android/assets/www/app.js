@@ -743,11 +743,12 @@ let orb = null;
 function applyPersona() {
   const p = persona(), [r, g, b] = hex2rgb(p.color || "#8A9BFF");
   document.documentElement.style.setProperty("--pc", p.color);
-  document.documentElement.style.setProperty("--pcg", `rgba(${r},${g},${b},.24)`);
+  document.documentElement.style.setProperty("--pcg", `rgba(${r},${g},${b},${lookSkin() === "neon" ? ".24" : ".10"})`);    // свечение персонажа: в «Неоне» — как раньше
   $("#who-name").textContent = p.name;
   $("#who-img").src = p.avatar || miniOrb(p);
   const style = p.avatar && p.style !== "aura" ? "photo" : p.style;
-  if (!orb) orb = new DewiarEntity($("#orb"), { style, color: p.color, image: p.avatar || null, plate: true, live: p.live || "" });
+  // портрет сдержанно (белый край вместо цветного кольца), голос — лучами, как на компьютере; тема — «Ещё» → «Оформление»
+  if (!orb) { orb = new DewiarEntity($("#orb"), { style, color: p.color, image: p.avatar || null, plate: true, live: p.live || "" }); applyLook(true); }
   else orb.configure({ style, color: p.color, image: p.avatar || null, live: p.live || "" });
   orb.set({ state: state === "idle" ? "idle" : state });
   faceFor(p);
@@ -777,6 +778,17 @@ function miniOrb(p) {          // значок персонажа без фот�
   const x = c.getContext("2d"), g = x.createRadialGradient(28, 24, 4, 32, 32, 32);
   g.addColorStop(0, p.color); g.addColorStop(.55, "#1d1d38"); g.addColorStop(1, "#0d0d1a");
   x.fillStyle = g; x.beginPath(); x.arc(32, 32, 32, 0, 7); x.fill(); return c.toDataURL();
+}
+
+/* Оформление (как на компьютере, студия → «Оформление»): тема фона и облика (S.skin) и чем голос отзывается вокруг
+   портрета (S.voice_fx). calm — по умолчанию: фон в фирменных цветах, белый край портрета; graphite — почти чёрный;
+   neon — как раньше: свечение и цвет персонажа. */
+const lookSkin = () => (["calm", "graphite", "neon"].includes(S.skin) ? S.skin : "calm");
+const lookFx = () => (["bars", "pulse", "wave"].includes(S.voice_fx) ? S.voice_fx : "bars");
+function applyLook(fromPersona) {
+  ["calm", "graphite", "neon"].forEach(k => document.body.classList.toggle("skin-" + k, k === lookSkin()));
+  if (orb) { orb.tone = lookSkin() === "neon" ? "color" : "mono"; orb.fx = lookFx(); }
+  if (!fromPersona) try { applyPersona(); } catch (e) { }       // свечение персонажа зависит от темы
 }
 
 /* ---------- состояние разговора ---------- */
@@ -2849,6 +2861,10 @@ function renderSettings() {
       <div class="sw" style="margin-top:8px"><div>Сам замечает, что вы вернулись<small>Открыли приложение после перерыва — коротко скажет главное: что готово, что скоро; утром — сводка дня. Сказать нечего — промолчит.</small></div>
       <label class="tg"><input type="checkbox" id="wl-on" ${(S.welcome || {}).on !== false ? "checked" : ""}><i></i></label></div></div>`);
   } else {
+    const opt = (list, cur) => list.map(([v, n]) => `<option value="${v}" ${v === cur ? "selected" : ""}>${n}</option>`).join("");
+    h.push(`<h3>Оформление</h3><div class="card"><div class="row2">
+      <label class="f" style="flex:1"><span>Тема</span><select id="ap-skin">${opt([["calm", "Сдержанная"], ["graphite", "Графит"], ["neon", "Неон"]], lookSkin())}</select></label>
+      <label class="f" style="flex:1"><span>Когда говорит</span><select id="ap-fx">${opt([["bars", "Лучи"], ["pulse", "Пульс"], ["wave", "Волна"]], lookFx())}</select></label></div></div>`);
     const perms = [[MIC, "Микрофон"], [NOTIF, "Уведомления (напоминания)"], [CONTACTS, "Контакты (звонки по имени)"], [CALLP, "Звонки без лишнего нажатия"]];
     h.push(`<h3>Сообщить о проблеме</h3><div class="card" id="bug-card"><p class="hint" style="margin-top:0">Напишите пару слов — разработчик увидит их вместе со снимком экрана и журналом работы (без ключей и паролей), ответит сюда, а когда исправит — я скажу. Голосом тоже можно: «сообщи об ошибке: …».</p>
       ${bugSnap && Date.now() - bugSnap.ts < 30 * 6e4 ? `<div class="bugsnap"><img src="data:image/jpeg;base64,${bugSnap.b64}" alt="Снимок экрана" id="bug-img"><label class="chk"><input type="checkbox" id="bug-use" checked><span>Приложить снимок экрана — каким он был до настроек</span></label></div>` : ""}
@@ -2888,6 +2904,8 @@ function renderSettings() {
 
 function wireSettings(info) {
   const g = (id) => $("#" + id);
+  if (g("ap-skin")) g("ap-skin").onchange = () => { S.skin = g("ap-skin").value; saveS(); applyLook(); };
+  if (g("ap-fx")) g("ap-fx").onchange = () => { S.voice_fx = g("ap-fx").value; saveS(); applyLook(); };
   if (g("br-think")) g("br-think").addEventListener("change", () => { if (g("br-think").checked) delete S.llm.think; else S.llm.think = "off"; saveS(); });
   if (setTab === "brain") {
     if (g("br-test")) g("br-test").onclick = async () => { const b = g("br-test"), r = g("br-res"); b.disabled = true; r.className = "res"; r.textContent = "спрашиваю модель…";

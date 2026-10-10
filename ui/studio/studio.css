@@ -832,3 +832,25 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .pr-it:hover { background: var(--panel2); }
 .pr-it span { color: var(--muted); font-size: 13px; }
 @media (max-width: 860px) { .pr-hero { grid-template-columns: 1fr; } }
+
+/* «Оформление»: живые образцы тем и анимации голоса; выбранная карточка — светлее и с тенью (без рамок) */
+.lk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.lk { text-align: left; border: 0; border-radius: 20px; padding: 10px 10px 14px; background: var(--glass); color: var(--ink); font: inherit; cursor: pointer;
+  display: flex; flex-direction: column; gap: 4px; transition: background .2s, transform .2s, box-shadow .2s; }
+.lk:hover { background: rgba(255,255,255,.09); transform: translateY(-2px); }
+.lk.on { background: rgba(255,255,255,.13); box-shadow: 0 14px 34px -18px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.12); }
+.lk b { font-size: 14.5px; margin: 8px 4px 0; } .lk span { font-size: 12.5px; color: var(--muted); line-height: 1.4; margin: 0 4px; }
+.lk.on b::after { content: "  · выбрано"; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.lk-prev { height: 150px; border-radius: 14px; position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+.lk-prev canvas { width: 140px; height: 140px; display: block; }
+.lk-prev .pt { width: 64px; height: 64px; border-radius: 50%; background: #15151c center / cover no-repeat; }
+.lk-prev .pl { font-size: 11.5px; color: #fff; padding: 4px 12px 5px; border-radius: 999px; }
+.lk-prev .pl::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #fff; margin-right: 7px; vertical-align: 2px; box-shadow: 0 0 8px rgba(255,255,255,.8); }
+.sk-calm { background: radial-gradient(circle at 20% 80%, rgba(120,119,198,.3) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(193,235,255,.3) 0%, transparent 50%),
+  linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #3e162b 100%); }
+.sk-graphite { background: radial-gradient(circle at 50% 0%, rgba(255,255,255,.07) 0%, transparent 60%), linear-gradient(180deg, #16161a 0%, #0d0d10 60%, #09090b 100%); }
+.sk-neon { background: radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--pc, #B78CFF) 16%, transparent) 0%, transparent 60%), linear-gradient(180deg, #151519 0%, #0b0b0e 100%); }
+.sk-calm .pt, .sk-graphite .pt { box-shadow: 0 0 0 2px rgba(255,255,255,.1), inset 0 0 20px rgba(0,0,0,.5); }
+.sk-neon .pt { box-shadow: 0 0 0 2px var(--pc, #B78CFF), 0 0 18px color-mix(in srgb, var(--pc, #B78CFF) 70%, transparent); }
+.sk-calm .pl, .sk-graphite .pl { background: rgb(255 255 255 / 6%); box-shadow: 0 0 20px rgba(0,0,0,.5); }
+.sk-neon .pl { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
