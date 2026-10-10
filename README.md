@@ -13,8 +13,8 @@
 <a href="https://dewiar.pro/dwrapp/Dewiar.apk"><img src="https://img.shields.io/badge/Android-%D1%81%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-3ddc84?style=for-the-badge&logo=android&logoColor=white" alt="Android — скачать"></a>
 <a href="https://dewiar.pro/dwrapp/download.php"><img src="https://img.shields.io/badge/%D0%92%D1%81%D0%B5%20%D1%83%D1%81%D1%82%D1%80%D0%BE%D0%B9%D1%81%D1%82%D0%B2%D0%B0-dewiar.pro-FF7AC6?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Все устройства — dewiar.pro"></a>
 
-![версия](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-0.36.18-7c5cff)
-![телефон](https://img.shields.io/badge/Android-0.4.38-3ddc84)
+![версия](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-0.37.0-7c5cff)
+![телефон](https://img.shields.io/badge/Android-0.5.0-3ddc84)
 [![Проверки](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml/badge.svg)](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml)
 
 [Сайт](https://dewiar.pro) · [Руководство](docs/guide.md) · [Свой сервер](docs/self-hosting.md) ·
@@ -55,6 +55,16 @@
 <img src="docs/img/phone-lira.webp" height="480" alt="Лира на телефоне">&nbsp;&nbsp;
 <img src="docs/img/phone-day.webp" height="480" alt="«Мой день» на телефоне">
 </div>
+
+
+### Стили
+
+Виджет — в любом стиле: фирменный, глассморфизм, неоморфизм, «Вижн», белоснежный и другие. Фон и анимация голоса
+выбираются отдельно — студия → «Оформление».
+
+<p align="center">
+<img src="docs/img/styles.webp" width="880" alt="Виджет Лиры в разных стилях: глассморфизм, неоморфизм, фирменный, «Вижн», белоснежный">
+</p>
 
 ## Скачать — всегда последняя версия
 

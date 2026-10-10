@@ -28,6 +28,36 @@
      сверх фона: фиолетовые кнопки и заливка строки состояния, как раньше */
   body.skin-neon { --brand: linear-gradient(135deg, #667eea 0%, #764ba2 100%); --glass: rgba(255,255,255,.065); --glass-shadow: 0 0 0 transparent; }
   body.skin-neon #bubble.live { background: var(--brand); }
+  /* Светлые темы (body.light — skins.js light): тёмный текст, кнопки-акценты — глубокий чернильный, как в дизайн-студиях */
+  body.light { --brand: linear-gradient(135deg, #2b2540 0%, #3b3560 100%); }
+  body.light #bubble { color: var(--ink); }
+  body.light #bubble::before { background: rgba(30,30,50,.25); }
+  body.light #bubble.live::before { background: var(--ink); box-shadow: none; }
+  body.light #bubble::after { background: linear-gradient(90deg, transparent, rgba(30,30,60,.55) 25%, rgba(30,30,60,.75) 50%, rgba(30,30,60,.55) 75%, transparent); }
+  body.light #cap .bot.wait::before, body.light #cap .bot.wait::after, body.light #cap .bot.wait i { background: var(--ink); }
+  body.light #cap .bot::-webkit-scrollbar-thumb { background: rgba(0,0,0,.2); }
+  body.light #bot .rep, body.light #yn button:not(.yes), body.light #team button.cur { background: rgba(20,20,40,.07); color: var(--ink); }
+  body.light #act, body.light #task, body.light #upd:not(.on), body.light #health, body.light #cloudlow { color: var(--ink); }
+  body.light .btn:hover, body.light .btn:focus-visible, body.light #corner .btn:hover, body.light .ab:hover { color: var(--ink); background: rgba(20,20,40,.07); }
+  body.light #corner .btn { color: var(--muted); }
+  body.light #team { background: #fff; color: var(--ink); box-shadow: 0 14px 40px rgba(20,30,60,.18); }
+  body.light #team button:hover { background: rgba(20,20,40,.05); }
+  body.light .sep { background: rgba(20,20,40,.12); }
+  body.light #ask textarea { color: var(--ink); }
+  body.light #ask textarea::placeholder { color: var(--muted); }
+  /* неоморфизм: портрет — выпуклая «таблетка» из того же материала (две тени вокруг круга под обликом) */
+  body.neu #orb::before { content: ""; position: absolute; left: 50%; top: 50%; width: 63%; height: 63%; transform: translate(-50%, -50%);
+                         border-radius: 50%; background: var(--glass); box-shadow: 9px 9px 18px var(--neu-dark), -9px -9px 18px var(--neu-light); }
+  body.neu #orb canvas { position: relative; }
+  body.neu .btn:hover, body.neu .ab:hover { background: transparent; box-shadow: inset 3px 3px 6px var(--neu-dark), inset -3px -3px 6px var(--neu-light); }
+  body.neu #bar { opacity: .9; }
+  /* как в наборах неоморфизма: поле ввода — вогнутое, акцент — чистый синий (точка «слушаю», черта «ваша очередь», кнопки) */
+  body.neu { --brand: linear-gradient(135deg, #6a8dff 0%, #4f6cf0 100%); --accent: #5b7cff; }
+  body.neu .askbox, body.neu .askbox:focus-within { background: var(--glass); box-shadow: inset 4px 4px 9px var(--neu-dark), inset -4px -4px 9px var(--neu-light); }
+  body.neu #bubble.live::before { background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); }
+  body.neu #bubble::after { background: linear-gradient(90deg, transparent, var(--accent) 25%, #7fd6ff 50%, var(--accent) 75%, transparent); }
+  body.neu #yn button:not(.yes) { background: var(--glass); box-shadow: 3px 3px 7px var(--neu-dark), -3px -3px 7px var(--neu-light); }
+  body.neu #team { background: var(--glass); box-shadow: 8px 8px 20px var(--neu-dark), -8px -8px 20px var(--neu-light); }
 
   #orb { position: relative; width: 228px; height: 228px; flex: none; cursor: pointer; transition: width .35s ease, height .35s ease; }
   #card.busy #orb { width: 150px; height: 150px; }        /* есть текст — сфера уступает место */
@@ -337,8 +367,10 @@ const entity = new DewiarEntity($("cv"), { style: "nexus", color: "#8A9BFF", pla
 const VOICE_FX = ["bars", "pulse", "wave"];
 function applyLook(ui) {                      // тема карточки и облика (assets/skins.*) + чем голос отзывается вокруг портрета
   ui = ui || {};
-  const sk = window.dewiarSkin ? dewiarSkin(ui.skin) : { id: "calm" };
-  (window.DEWIAR_SKIN_IDS || ["calm"]).forEach(k => document.body.classList.toggle("skin-" + k, k === sk.id));
+  const sk = window.dewiarSkin ? dewiarSkin(ui.skin) : { id: "brand" };
+  (window.DEWIAR_SKIN_IDS || ["brand"]).forEach(k => document.body.classList.toggle("skin-" + k, k === sk.id));
+  document.body.classList.toggle("light", !!sk.light);
+  document.body.classList.toggle("neu", !!sk.neu);
   entity.tone = sk.tone || "mono";
   entity.fx = VOICE_FX.includes(ui.voice_fx) ? ui.voice_fx : "bars";
 }

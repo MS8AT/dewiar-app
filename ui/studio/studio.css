@@ -848,7 +848,8 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .lk-prev .pl::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #fff; margin-right: 7px; vertical-align: 2px; box-shadow: 0 0 8px rgba(255,255,255,.8); }
 .lk-prev { background: var(--skin-bg, #111); }                 /* фон образца — та же тема, что в виджете (assets/skins.css) */
 .lk-prev canvas.pc { width: 100px; height: 100px; margin-bottom: -10px; }
-.lk-prev .pl { background: var(--glass, rgb(255 255 255 / 6%)); box-shadow: var(--glass-shadow, 0 0 20px rgba(0,0,0,.5)); }
+.lk-prev .pl { background: var(--glass, rgb(255 255 255 / 6%)); box-shadow: var(--glass-shadow, 0 0 20px rgba(0,0,0,.5)); color: var(--ink, #fff); }
+.lk-prev .pl::before { background: var(--ink, #fff); }
 .lk-prev.skin-neon .pl { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
 .lk-group { margin: 6px 0 10px; font-size: 13px; color: var(--muted); }
 #lk-skins .lk-prev { height: 128px; }

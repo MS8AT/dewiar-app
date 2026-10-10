@@ -225,6 +225,7 @@ def main():
             print(f"{OUT / (name + '.webp')}")
         b.close()
     phone(tmp)
+    styles(tmp)
     if SITE.is_dir():                                   # в открытой копии сайта нет — только картинки README
         site_faces(tmp)
         Image.open(OUT / "banner.webp").convert("RGB").save(SITE / "dewiar_banner.jpg", "JPEG", quality=86, optimize=True)   # превью ссылки
@@ -292,6 +293,51 @@ def phone(tmp):
         Image.open(png).convert("RGB").resize((420, 909), Image.LANCZOS).save(OUT / "phone-lira.webp", "WEBP", quality=86, method=6)
         print(OUT / "phone-lira.webp")
         b.close()
+
+
+def styles(tmp):
+    """Витрина стилей виджета (docs/img/styles.webp и dewiar_styles.webp для страницы «Скачать»): настоящий виджет
+    ui/hud.html с Лирой в нескольких темах (assets/skins.*), разложенный как на презентации дизайн-студии."""
+    from playwright.sync_api import sync_playwright
+    shots = [("glass", "Глассморфизм"), ("neu", "Неоморфизм"), ("brand", "Фирменная"), ("vision", "Вижн"), ("snow", "Белоснежная")]
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page(viewport={"width": 300, "height": 420}, device_scale_factor=2)
+        pg.add_init_script("window.pywebview = { api: new Proxy({}, { get: () => () => Promise.resolve(true) }) };")
+        pg.goto((ROOT / "ui/hud.html").as_uri() + "?mode=card&port=1")
+        pg.wait_for_timeout(1000)
+        pg.evaluate("""(img) => { personas = [{ id: 'lira', name: 'Лира', color: '#9BD4FF', style: 'strings', avatar_url: img, live: 'lira' }];
+            applyPersona('lira'); setState('idle'); core.emit('turn', { seconds: 60 });
+            showCap('Что у меня в среду?', 'В 15:00 — встреча с подрядчиком по кухне. Напомнить за час?'); }""", (ROOT / "data/avatars/lira.webp").as_uri())
+        pg.wait_for_timeout(1500)
+        for k, _ in shots:
+            pg.evaluate("(k) => applyLook({ skin: k })", k)
+            pg.wait_for_timeout(500)
+            pg.screenshot(path=str(tmp / f"st-{k}.png"))
+        cards = "".join(f'<figure class="c{i}"><img src="st-{k}.png"><figcaption>{n}</figcaption></figure>' for i, (k, n) in enumerate(shots))
+        (tmp / "styles.html").write_text(f"""<!doctype html><meta charset="utf-8"><style>
+@font-face {{ font-family: Manrope; font-weight: 600; src: url(fonts/manrope-cyrillic-600-normal.woff2); unicode-range: U+0400-04FF; }}
+@font-face {{ font-family: Manrope; font-weight: 600; src: url(fonts/manrope-latin-600-normal.woff2); }}
+body {{ margin: 0; }}
+#s {{ width: 1600px; height: 660px; display: flex; align-items: center; justify-content: center; gap: 34px; font-family: Manrope, sans-serif;
+  background: radial-gradient(60% 70% at 15% 20%, #f3e3ef 0%, transparent 70%), radial-gradient(60% 70% at 85% 80%, #dfe6f5 0%, transparent 70%),
+              linear-gradient(135deg, #eef0f5 0%, #dde3ed 100%); }}
+figure {{ margin: 0; display: flex; flex-direction: column; align-items: center; gap: 18px; }}
+img {{ width: 260px; border-radius: 26px; box-shadow: 0 30px 60px -20px rgba(20,30,60,.35), 0 10px 24px -12px rgba(20,30,60,.25); }}
+.c2 img {{ width: 320px; }} .c1 img, .c3 img {{ width: 285px; }}
+figcaption {{ font-size: 18px; font-weight: 600; color: #2a3140; letter-spacing: .01em; }}
+</style><div id="s">{cards}</div>""", encoding="utf-8")
+        pg2 = b.new_page(viewport={"width": 1600, "height": 660}, device_scale_factor=1.5)
+        pg2.goto((tmp / "styles.html").as_uri())
+        pg2.wait_for_timeout(600)
+        pg2.locator("#s").screenshot(path=str(tmp / "styles.png"))
+        b.close()
+    im = Image.open(tmp / "styles.png").convert("RGB")
+    im.save(OUT / "styles.webp", "WEBP", quality=88, method=6)
+    print(OUT / "styles.webp")
+    if SITE.is_dir():
+        im.save(SITE / "dewiar_styles.webp", "WEBP", quality=86, method=6)
+        print(SITE / "dewiar_styles.webp")
 
 
 if __name__ == "__main__":

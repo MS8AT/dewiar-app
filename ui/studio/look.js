@@ -11,7 +11,7 @@ let lookEnts = [];
 
 function loadLook() {
   const ui = (S && S.ui) || {};
-  const skin = window.dewiarSkin ? dewiarSkin(ui.skin).id : "calm";
+  const skin = window.dewiarSkin ? dewiarSkin(ui.skin).id : "brand";
   const fx = LOOK_FX.some(x => x[0] === ui.voice_fx) ? ui.voice_fx : "bars";
   const p = personas.find(x => x.id === "lira") || personas.find(x => x.id === active) || personas[0] || {};
   const img = p.avatar_url || "";

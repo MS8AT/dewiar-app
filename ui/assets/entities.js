@@ -884,7 +884,7 @@
     const G = L.geo, [cx0, cy0, cs] = G.crop;             // портрет целиком: видно причёску (хвостики Лиры), лицо не огромное
     const sc = (2 * R) / cs, X = (x) => -R + (x - cx0) * sc, Y = (y) => -R + (y - cy0) * sc;
     ctx.imageSmoothingQuality = "high";
-    const mono = e.tone === "mono";
+    const mono = e.tone === "mono" || e.tone === "ink";
     if (mono) {                                   // сдержанно: портрет на стекле — сквозь круг виден фон окна
       ctx.fillStyle = "rgba(255,255,255,.04)"; ctx.fillRect(-R, -R, 2 * R, 2 * R);
     } else {
@@ -943,6 +943,15 @@
      пока говорит — край чуть светлеет. */
   function portraitRim(g, e, R) {
     const { ctx, r, c, t, lv, k } = g;
+    if (e.tone === "ink") {                       // светлая тема: белая рамка и мягкая тень наружу, как у фото в Material
+      const v = ctx.createRadialGradient(0, 0, R * 0.82, 0, 0, R);
+      v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,.22)");
+      ctx.fillStyle = v; ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
+      ctx.save(); ctx.shadowColor = "rgba(20,30,60,.22)"; ctx.shadowBlur = 14; ctx.shadowOffsetY = 3;
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(255,255,255,.95)";
+      ctx.beginPath(); ctx.arc(0, 0, R + 1.5, 0, TAU); ctx.stroke(); ctx.restore();
+      return;
+    }
     if (e.tone === "mono") {
       // внутренняя тень у края, как inset 0 0 20px rgba(0,0,0,.5): мягко нарастает к кромке
       const v = ctx.createRadialGradient(0, 0, R * 0.8, 0, 0, R);
@@ -1201,15 +1210,16 @@
         this.state === "listening" ? Math.max(this.level, 0.08 + 0.05 * Math.sin(this.t * 1.7)) : this.level;
       const g = { ctx, r: PR * 0.8, c, t: this.t, lv: lvE, k: st.glow };
       // сдержанный тон: портрет, его край и лучи — холодный белый; абстрактные облики сохраняют цвет персонажа
-      const gm = this.tone === "mono" ? Object.assign({}, g, { c: st.sat ? [226, 232, 244] : [150, 156, 168] }) : g;
+      const gm = this.tone === "mono" || this.tone === "ink"
+        ? Object.assign({}, g, { c: this.tone === "ink" ? (st.sat ? [52, 58, 82] : [120, 126, 140]) : st.sat ? [226, 232, 244] : [150, 156, 168] }) : g;
       // Непрозрачный тёмный диск. Всё свечение рисуется ПО НЕМУ, а не по прозрачному окну:
       // иначе на рабочем столе с аппаратным ускорением свечение «пересвечивается» пятнами.
       // сдержанный портрет — без диска-подложки: портрет «на стекле», как в окне вокруг
-      const plate = this.plate && this.style !== "aura" && !(this.tone === "mono" && this.style === "photo"), ringOn = this.ring && this.style !== "aura";
+      const plate = this.plate && this.style !== "aura" && !((this.tone === "mono" || this.tone === "ink") && this.style === "photo"), ringOn = this.ring && this.style !== "aura";
       this._dt = dt;
       if (plate) {
         const pg = ctx.createRadialGradient(0, -PR * 0.25, PR * 0.1, 0, 0, PR);
-        if (this.tone === "mono") { pg.addColorStop(0, "#1f2029"); pg.addColorStop(0.75, "#14141b"); pg.addColorStop(1, "#0c0c11"); }
+        if (this.tone === "mono" || this.tone === "ink") { pg.addColorStop(0, "#1f2029"); pg.addColorStop(0.75, "#14141b"); pg.addColorStop(1, "#0c0c11"); }
         else { pg.addColorStop(0, "#26264A"); pg.addColorStop(0.75, "#17172E"); pg.addColorStop(1, "#0D0D1A"); }
         ctx.fillStyle = pg; ctx.beginPath(); ctx.arc(0, 0, PR, 0, TAU); ctx.fill();
         ctx.save(); ctx.beginPath(); ctx.arc(0, 0, PR - 0.5, 0, TAU); ctx.clip();

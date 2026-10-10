@@ -1,7 +1,7 @@
 /* Темы оформления Dewiar — общие для виджета (ui/hud.html), студии (образцы в «Оформлении») и телефона.
    Класс .skin-<id> задаёт переменные: --skin-bg — фон (значение для свойства background), --glass и --glass-shadow —
    стеклянные блоки, --muted — второстепенный текст (на светлых темах — плотнее). Список, названия и группы —
-   assets/skins.js. Текстуры (мрамор, зерно матового стекла) — картинки skins/*.webp из tools/skin_textures.py. */
+   assets/skins.js. Текстура — зерно матового стекла (skins/grain.webp; url() — прямыми правилами: относительный url в var() считается от страницы, а не от этого файла) — картинки skins/*.webp из tools/skin_textures.py. */
 
 .skin-calm {
   --skin-bg: radial-gradient(130% 90% at 15% 95%, rgba(120,119,198,.26) 0%, transparent 60%),
@@ -31,21 +31,7 @@
   --skin-bg: radial-gradient(circle at 100% 30%, #ffffff -14%, #000000 115%);
 }
 .skin-steel, .skin-platinum { --glass: rgb(255 255 255 / 9%); --glass-shadow: 0 0 20px rgba(0,0,0,.18); --muted: rgba(255,255,255,.78); }
-.skin-carbon {
-  --skin-bg: radial-gradient(110% 70% at 80% 0%, rgba(255,255,255,.09) 0%, transparent 60%),
-             linear-gradient(27deg, #151515 5px, transparent 5px) 0 5px / 20px 20px,
-             linear-gradient(207deg, #151515 5px, transparent 5px) 10px 0 / 20px 20px,
-             linear-gradient(27deg, #222 5px, transparent 5px) 0 10px / 20px 20px,
-             linear-gradient(207deg, #222 5px, transparent 5px) 10px 5px / 20px 20px,
-             linear-gradient(90deg, #1b1b1b 10px, transparent 10px) 0 0 / 20px 20px,
-             linear-gradient(#1d1d1d 25%, #1a1a1a 25%, #1a1a1a 50%, transparent 50%, transparent 75%, #242424 75%, #242424) 0 0 / 20px 20px,
-             #131313;
-}
 
-/* материалы */
-/* картинка в своей переменной не годится: относительный url() в var() считается от страницы, а не от этого файла —
-   поэтому текстуры прямо в правилах для тех, кто рисует фон: карточка виджета, сцена телефона, образец в студии */
-html .skin-marble #card, html .skin-marble #scene, .lk-prev.skin-marble { background: url("skins/marble.webp") center / cover no-repeat, #141417; }
 
 /* атмосфера */
 .skin-nebula {
@@ -90,3 +76,56 @@ html .skin-fog #card, html .skin-fog #scene, .lk-prev.skin-fog {
              radial-gradient(90% 70% at 50% 105%, rgba(28,36,88,1) 0%, transparent 75%),
              linear-gradient(180deg, rgba(0,0,0,.12), rgba(0,0,0,.28)), #1b2245;
 }
+
+/* светлые: тёмный текст (--ink), стекло и тени — свои */
+.skin-glass {
+  --skin-bg: radial-gradient(60% 45% at 12% 8%, rgba(255,170,195,.95) 0%, transparent 70%),
+             radial-gradient(55% 45% at 92% 18%, rgba(205,170,255,.9) 0%, transparent 70%),
+             radial-gradient(75% 55% at 50% 105%, rgba(255,200,170,.9) 0%, transparent 75%),
+             linear-gradient(160deg, #ffd3df 0%, #f1d6ff 50%, #ffe2d3 100%);
+  --glass: rgba(255,255,255,.42); --glass-shadow: inset 0 1px 0 rgba(255,255,255,.75), 0 10px 30px rgba(120,60,140,.16);
+  --ink: #2b2540; --muted: rgba(43,37,64,.62);
+}
+.skin-snow {
+  --skin-bg: radial-gradient(120% 60% at 50% 0%, #ffffff 0%, transparent 70%), linear-gradient(180deg, #f8f9fb 0%, #eceff4 100%);
+  --glass: #ffffff; --glass-shadow: 0 8px 24px rgba(20,30,60,.08), 0 1px 3px rgba(20,30,60,.07);
+  --ink: #1d2230; --muted: rgba(29,34,48,.58);
+}
+/* неоморфизм: фон и блоки — один материал, форма — от двух теней (светлой сверху-слева и тёмной снизу-справа) */
+.skin-neu {
+  --skin-bg: #e4e9f0; --glass: #e4e9f0; --neu-dark: #c2c9d4; --neu-light: #ffffff;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+  --ink: #2a3140; --muted: rgba(42,49,64,.6);
+}
+.skin-neudark {
+  --skin-bg: #262a31; --glass: #262a31; --neu-dark: #191c21; --neu-light: #333943;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+}
+.skin-neusky {
+  --skin-bg: #dbe5f1; --glass: #dbe5f1; --neu-dark: #b8c5d6; --neu-light: #f7fbff;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+  --ink: #24324a; --muted: rgba(36,50,74,.6);
+}
+.skin-neumint {
+  --skin-bg: #dde9e5; --glass: #dde9e5; --neu-dark: #bccdc7; --neu-light: #fafffd;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+  --ink: #233b35; --muted: rgba(35,59,53,.6);
+}
+.skin-neunavy {
+  --skin-bg: #1e2638; --glass: #1e2638; --neu-dark: #141a27; --neu-light: #2a344b;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+}
+
+/* «Вижн»: панель из тёплого серого стекла, сквозь которое угадывается комната — свет окна, дерево, голубая стена;
+   блоки внутри — светлее, с бликом по верхней кромке */
+html .skin-vision #card, html .skin-vision #scene, .lk-prev.skin-vision {
+  background: url("skins/grain.webp") 0 0 / 160px 160px repeat,
+              linear-gradient(rgba(118,116,114,.42), rgba(96,94,92,.48)),
+              radial-gradient(55% 40% at 18% 12%, rgba(255,244,226,.85) 0%, transparent 70%),
+              radial-gradient(50% 45% at 88% 88%, rgba(160,112,78,.75) 0%, transparent 72%),
+              radial-gradient(45% 40% at 85% 22%, rgba(170,192,214,.6) 0%, transparent 70%),
+              radial-gradient(60% 40% at 25% 85%, rgba(90,110,80,.45) 0%, transparent 72%),
+              linear-gradient(160deg, #a49d94 0%, #7d776f 55%, #5c5650 100%);
+}
+.skin-vision { --glass: rgba(255,255,255,.14); --glass-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 10px 26px rgba(0,0,0,.18);
+  --muted: rgba(255,255,255,.75); }
