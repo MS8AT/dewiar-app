@@ -22,12 +22,15 @@
   #card { position: absolute; inset: 0; overflow: hidden;
           display: flex; flex-direction: column; align-items: center; padding: 10px 14px 12px; cursor: grab;
           background-color: #0a0a0f;
-          background-image: radial-gradient(circle at 20% 80%, rgba(120,119,198,.3) 0%, transparent 50%),
-                            radial-gradient(circle at 80% 20%, rgba(193,235,255,.3) 0%, transparent 50%),
-                            linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #3e162b 100%); }
+          /* фирменные цвета, растянутые как на большом экране: мягкий переход без резкого бордового угла */
+          background-image: radial-gradient(130% 90% at 15% 95%, rgba(120,119,198,.26) 0%, transparent 60%),
+                            radial-gradient(120% 80% at 90% 5%, rgba(193,235,255,.2) 0%, transparent 60%),
+                            linear-gradient(160deg, #11121a 0%, #1b1d30 45%, #262038 75%, #33203a 100%); }
   #card.dragging { cursor: grabbing; }
   /* Темы (ui.skin, студия → «Оформление»): calm — по умолчанию (выше), graphite — почти чёрная без цветных бликов,
      neon — как раньше: свечение цвета персонажа и фиолетовые кнопки */
+  body.skin-brand #card { background-image: radial-gradient(circle at 20% 80%, rgba(120,119,198,.3) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255,119,198,.3) 0%, transparent 50%),
+                            radial-gradient(circle at 40% 40%, rgba(120,219,255,.2) 0%, transparent 50%), linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%); }
   body.skin-graphite #card { background-image: radial-gradient(circle at 50% 0%, rgba(255,255,255,.07) 0%, transparent 60%),
                                                linear-gradient(180deg, #16161a 0%, #0d0d10 60%, #09090b 100%); }
   body.skin-neon { --brand: linear-gradient(135deg, #667eea 0%, #764ba2 100%); --glass: rgba(255,255,255,.065); --glass-shadow: 0 0 0 transparent; }
@@ -236,8 +239,8 @@
   body.mini #corner { display: none; }
 
   /* ---------- значок ---------- */
-  body.mini #card { padding: 0; justify-content: center; background-image: radial-gradient(circle at 25% 80%, rgba(120,119,198,.3) 0%, transparent 60%),
-                    linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 55%, #3e162b 100%); }
+  body.mini #card { padding: 0; justify-content: center; background-image: radial-gradient(circle at 25% 85%, rgba(120,119,198,.26) 0%, transparent 65%),
+                    linear-gradient(160deg, #11121a 0%, #1b1d30 50%, #2c1f36 100%); }
   body.mini #orb { width: 92px; height: 92px; }
   body.mini #bubble, body.mini #mid, body.mini #bar { display: none; }
   #grow { display: none; position: absolute; left: 62px; top: 62px; width: 24px; height: 24px; border-radius: 50%; border: 0;
@@ -340,7 +343,7 @@
 const $ = (id) => document.getElementById(id);
 // карточка сама непрозрачная — диск-подложка не нужен; портрет сдержанный (белый край), голос — лучами (ui.voice_fx)
 const entity = new DewiarEntity($("cv"), { style: "nexus", color: "#8A9BFF", plate: false, tone: "mono", fx: "bars" });
-const SKINS = ["calm", "graphite", "neon"], VOICE_FX = ["bars", "pulse", "wave"];
+const SKINS = ["calm", "brand", "graphite", "neon"], VOICE_FX = ["bars", "pulse", "wave"];
 function applyLook(ui) {                      // тема карточки и облика + чем голос отзывается вокруг портрета
   ui = ui || {};
   const skin = SKINS.includes(ui.skin) ? ui.skin : "calm";

@@ -884,10 +884,14 @@
     const G = L.geo, [cx0, cy0, cs] = G.crop;             // портрет целиком: видно причёску (хвостики Лиры), лицо не огромное
     const sc = (2 * R) / cs, X = (x) => -R + (x - cx0) * sc, Y = (y) => -R + (y - cy0) * sc;
     ctx.imageSmoothingQuality = "high";
-    const bgr = ctx.createRadialGradient(0, -R * 0.2, R * 0.1, 0, 0, R);   // портрет на прозрачном фоне — подкладываем тёмный
-    bgr.addColorStop(0, "#1c1c2a"); bgr.addColorStop(1, "#050508");
-    ctx.fillStyle = bgr; ctx.fillRect(-R, -R, 2 * R, 2 * R);
-    ctx.globalAlpha = e.state === "muted" || e.state === "offline" ? 0.6 : 1;
+    const mono = e.tone === "mono";
+    if (mono) {                                   // сдержанно: портрет на стекле — сквозь круг виден фон окна
+      ctx.fillStyle = "rgba(255,255,255,.04)"; ctx.fillRect(-R, -R, 2 * R, 2 * R);
+    } else {
+      const bgr = ctx.createRadialGradient(0, -R * 0.2, R * 0.1, 0, 0, R);   // портрет на прозрачном фоне — подкладываем тёмный
+      bgr.addColorStop(0, "#1c1c2a"); bgr.addColorStop(1, "#050508");
+      ctx.fillStyle = bgr; ctx.fillRect(-R, -R, 2 * R, 2 * R);
+    }
     ctx.drawImage(L.base, X(0), Y(0), L.base.naturalWidth * sc, L.base.naturalHeight * sc);
     if (now > A.blinkTill) {
       if (L.mask) {                               // зрачки — только внутри разреза глаз: веки прикрывают их сверху и снизу
@@ -908,9 +912,18 @@
     if (talking) { put(L.mouths[A.mPrev], 1 - A.mBlend); put(L.mouths[A.mTarget], A.mBlend); }
     else { put(L.mouths[0], 1 - A.smile); put(L.smile, A.smile); }
     ctx.globalAlpha = 1;
-    const fade = ctx.createLinearGradient(0, R * 0.55, 0, R);   // низ портрета (обрез туловища) растворяется в тёмном фоне
-    fade.addColorStop(0, "rgba(5,5,8,0)"); fade.addColorStop(0.7, "rgba(5,5,8,0.85)"); fade.addColorStop(1, "rgba(5,5,8,1)");
-    ctx.fillStyle = fade; ctx.fillRect(-R, R * 0.55, 2 * R, R * 0.45);
+    // нет связи или микрофон выключен — притушить ВЕСЬ портрет ровно одним слоем (раньше тускнело лицо, а губы и глаза,
+    // нарисованные поверх, оставались яркими — выглядело жутковато)
+    if (e.state === "muted" || e.state === "offline") { ctx.fillStyle = "rgba(6,6,10,.45)"; ctx.fillRect(-R, -R, 2 * R, 2 * R); }
+    const fade = ctx.createLinearGradient(0, R * 0.55, 0, R);   // низ портрета (обрез туловища) растворяется в фоне
+    if (mono) {                                   // в прозрачность: внизу проступает фон окна, а не чёрное пятно
+      fade.addColorStop(0, "rgba(0,0,0,0)"); fade.addColorStop(0.75, "rgba(0,0,0,.85)"); fade.addColorStop(1, "rgba(0,0,0,1)");
+      ctx.globalCompositeOperation = "destination-out"; ctx.fillStyle = fade; ctx.fillRect(-R, R * 0.55, 2 * R, R * 0.45);
+      ctx.globalCompositeOperation = "source-over";
+    } else {
+      fade.addColorStop(0, "rgba(5,5,8,0)"); fade.addColorStop(0.7, "rgba(5,5,8,0.85)"); fade.addColorStop(1, "rgba(5,5,8,1)");
+      ctx.fillStyle = fade; ctx.fillRect(-R, R * 0.55, 2 * R, R * 0.45);
+    }
     if (speaking || thinking) {                   // говорит/думает — лёгкий оттенок цвета персонажа
       ctx.globalCompositeOperation = "soft-light"; ctx.fillStyle = rgba(c, 0.12); ctx.fillRect(-R, -R, 2 * R, 2 * R);
       ctx.globalCompositeOperation = "source-over";
@@ -931,8 +944,8 @@
   function portraitRim(g, e, R) {
     const { ctx, r, c, t, lv, k } = g;
     if (e.tone === "mono") {
-      const v = ctx.createRadialGradient(0, 0, R * 0.6, 0, 0, R);
-      v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,.5)");
+      const v = ctx.createRadialGradient(0, 0, R * 0.84, 0, 0, R);   // лёгкая внутренняя тень только у края
+      v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,.3)");
       ctx.fillStyle = v; ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
       const on = e.state === "speaking" ? lv : 0;
       ctx.lineWidth = 2; ctx.strokeStyle = `rgba(255,255,255,${(0.1 + on * 0.22).toFixed(3)})`;
@@ -1190,7 +1203,8 @@
       const gm = this.tone === "mono" ? Object.assign({}, g, { c: st.sat ? [226, 232, 244] : [150, 156, 168] }) : g;
       // Непрозрачный тёмный диск. Всё свечение рисуется ПО НЕМУ, а не по прозрачному окну:
       // иначе на рабочем столе с аппаратным ускорением свечение «пересвечивается» пятнами.
-      const plate = this.plate && this.style !== "aura", ringOn = this.ring && this.style !== "aura";
+      // сдержанный портрет — без диска-подложки: портрет «на стекле», как в окне вокруг
+      const plate = this.plate && this.style !== "aura" && !(this.tone === "mono" && this.style === "photo"), ringOn = this.ring && this.style !== "aura";
       this._dt = dt;
       if (plate) {
         const pg = ctx.createRadialGradient(0, -PR * 0.25, PR * 0.1, 0, 0, PR);

@@ -42,9 +42,10 @@ def caps(part, total=None):
     """(мягкий, жёсткий) потолок части Dewiar в ГБ; part — "core" или "ui". Памяти не узнать — нижние значения."""
     share, lo, hi, share2, lo2, hi2 = CAPS[part]
     t = ram_total_gb() if total is None else total
-    soft = min(hi, max(lo, t * share))
-    hard = min(hi2, max(lo2, t * share2))
-    return round(soft, 1), round(max(hard, soft + 1.0), 1)
+    hard = round(min(hi2, max(lo2, t * share2)), 1)
+    # мягкий потолок — у самой границы: раньше он стоял заметно ниже, и при подходе к нему система тормозила ядро
+    # (отчёт 11.10: «Лира» → «слушаю», а фраза теряется). Тормозить заранее не нужно — защищает жёсткий потолок.
+    return round(hard - 0.5, 1), hard
 
 
 def _mb(gb):

@@ -690,6 +690,28 @@ async def check_state(core, state, t_start):
         amt = float(state["money"]["amount"])
         hit = [r for r in rows if abs(abs(float(r.get("amount") or 0)) - amt) < 0.01]
         out.append({"name": f"расход {amt:g} записан", "ok": bool(hit), "detail": json.dumps(rows[-3:], ensure_ascii=False)[:300]})
+    if "note" in state:                                   # заметка правда в папке Dewiar (а не «сохранила» на словах)
+        want = [w.lower() for w in state["note"].get("all", [])]
+        tree = await core.call("ws_tree") or {}
+        files = []
+
+        def walk(items):
+            for x in items or []:
+                if x.get("type") == "dir":
+                    walk(x.get("children"))
+                elif (x.get("mtime") or 0) >= t_start - 5 and str(x.get("name", "")).endswith((".md", ".txt")):
+                    files.append(x["path"])
+        walk(tree.get("items"))
+        hit = ""
+        for f in files[:20]:
+            try:
+                text = ((await core.call("ws_read", path=f)) or {}).get("text", "").lower()
+            except Exception:  # noqa: BLE001
+                continue
+            if all(w in text for w in want):
+                hit = f
+                break
+        out.append({"name": "заметка правда сохранена: " + ", ".join(want), "ok": bool(hit), "detail": hit or ("новых заметок: %d" % len(files))})
     return out
 
 

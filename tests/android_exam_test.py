@@ -96,7 +96,7 @@ with sync_playwright() as p:
     ok("## " in rep.get("md", "") and "Сдано" in rep.get("md", ""), "отчёт Markdown — вместе с итогом")
     st = pg.evaluate("() => window._states")
     dev = pg.evaluate("() => devId()")
-    ok(st[0] == f"running:1:j1:{dev}" and st[-1] == f"done::j1:{dev}" and len(st) == 20,
+    ok(st[0] == f"running:1:j1:{dev}" and st[-1] == f"done::j1:{dev}" and len(st) == pg.evaluate("EXAM_PHONE.length") + 1,
        f"ход — в кабинет по каждому испытанию, итог — туда же: {st[:2]} … {st[-1:]} ({len(st)})")
     ok(pg.evaluate("() => D.pref('exam_dev')") == "1", "телефон запомнил, что экзамены ему дают (дальше спросит сам при открытии)")
     pg.evaluate("() => document.querySelector('#exam-stop').click()")

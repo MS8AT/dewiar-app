@@ -121,7 +121,7 @@ DEFAULTS = {
                "told": False,
                "mem_warn": True},  # предупреждать, когда памяти не хватает (открыто много других программ) — engine_brain._memory_watch
     "ui": {"hud_x": None, "hud_y": None, "subtitles": True, "force_x11": True,
-           "skin": "calm",                  # тема виджета: calm (стекло, холодный белый) | graphite | neon (как раньше)
+           "skin": "calm",                  # тема виджета: calm (стекло, холодный белый) | brand (фирменные цвета) | graphite | neon (как раньше)
            "voice_fx": "bars",              # когда говорит: bars (лучи вокруг портрета) | pulse (расходящиеся круги) | wave (волна)
            "memory_motion": "auto",         # «Память»: анимация карты — auto (на слабом компьютере выкл) | on | off
            "welcome": "",                   # «Первые шаги»: "" — показать, "later" — кнопкой в меню, "done" — всё

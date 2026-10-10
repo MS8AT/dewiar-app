@@ -401,13 +401,19 @@ class AudioMixin:
                         self.interrupt("имя")
                     elif self.state == "idle":
                         self.set_state("listening")
-                        self._wake_tone_at = now                  # звук «слушаю» — сразу на имя, а не после распознавания фразы
-                        self.play_tone("wake")
+                        # звук «слушаю» — как только после имени пауза (≈0,25 с), а не поверх речи: звонок посреди
+                        # «Лира, кратко как дела» попадал в микрофон и мешал распознать вопрос (отчёт 11.10)
+                        self._wake_tone_at, self._wake_tone_due = now, now
                 elif kind == "stop" and self.alarm:
                     log.info("✋ «%s» — выключаю будильник", phrase)
                     self.stop_utt, self.stop_time = True, now
                     self.alarm_finish("ack")
-                elif kind == "stop" and self.state in ("idle", "listening") and phrase in MEDIA_STOP and not self.meeting:
+                elif kind == "stop" and self.state == "listening" and not self.meeting:
+                    # ждём ответа («Ваша очередь») или вопроса после имени — «стоп», «хватит»: спим сразу (и музыку на
+                    # паузу, если это «пауза»/«стоп»). Раньше «стоп» здесь уходил в ветку музыки и не усыплял (отчёт 11.10)
+                    self.stop_utt, self.stop_time = True, now
+                    self.go_sleep(phrase)
+                elif kind == "stop" and self.state == "idle" and phrase in MEDIA_STOP and not self.meeting:
                     self._pending_media_stop = now            # решим, когда Vosk закончит фразу: одно слово — пауза
                 elif kind == "stop" and self.state == "speaking" and self._own_word(phrase):
                     log.info("«%s» — это моё же слово во фразе (эхо), не останавливаюсь", phrase)
@@ -417,9 +423,6 @@ class AudioMixin:
                     self.stop_time, self._stop_sleep = now, self.stop_utt
                     self.interrupt(phrase, follow=False)
                     self.follow_up_until = now + 3.0             # «стоп, лучше расскажи…» — договорить успеете
-                elif kind == "stop" and self.state == "listening":
-                    self.stop_utt, self.stop_time = True, now    # «Девиар… стоп» — передумали: спим
-                    self.go_sleep(phrase)
 
             fin = getattr(self.spotter, "last_final", None)
             if fin is not None:
@@ -433,6 +436,11 @@ class AudioMixin:
                 self._pending_media_stop = 0.0
 
             p = self.vad.prob(frame)
+            due = getattr(self, "_wake_tone_due", 0.0)
+            if due and ((not in_speech and p < 0.5) or silence >= 8 or now - due > 6):
+                self._wake_tone_due = 0.0                      # после имени замолчали — теперь «слушаю»
+                if self.state in ("listening", "thinking") and now - due <= 6:
+                    self.play_tone("wake")
             a = np.frombuffer(frame, dtype=np.int16).astype(np.float32)
             rms = float(np.sqrt(np.mean(a * a)))
             if self.state == "listening":                  # для журнала: насколько громко было, пока ждали вопрос
@@ -940,7 +948,7 @@ class AudioMixin:
             self.announce("Передал в задачу.")
             return
         pid, end = find_name(text, self.aliases) if text else (None, 0)
-        if not pid and by_wake and dur is not None and dur <= 1.6 and len(text.split()) <= 2:
+        if not pid and by_wake and dur is not None and dur <= 1.6 and len(text.split()) <= 2 and self._name_like(text):
             # Быстрый слух услышал имя, а точная модель в короткой фразе ослышалась («Игрова», «Элла» вместо «Эва»):
             # это и было имя. Слушаем вопрос, а не гаснем и не отправляем «Эллу» модели как вопрос.
             spotted = self.personas.wake_map().get(getattr(self, "_wake_phrase", ""))
@@ -955,7 +963,9 @@ class AudioMixin:
                 self.switch_persona(pid)
             rest = text[end:].lstrip(" ,.!?:;—-").strip()
             word = _norm(re.sub(r"[^\w ]", "", rest)).strip()
-            if word in STOP_WORDS or is_sleep_phrase(rest):
+            if thanks_phrase(rest):                          # «Лира, спасибо» — «Пожалуйста!» и сон
+                self._thanks(rest)
+            elif word in STOP_WORDS or is_sleep_phrase(rest):
                 self.go_sleep(word, media=False)
                 if word in MEDIA_STOP:
                     threading.Thread(target=self._media_stop_word, args=(word, True), daemon=True).start()
@@ -973,6 +983,17 @@ class AudioMixin:
             self.set_state(back)
             if back == "idle" and time.monotonic() - getattr(self, "_wake_tone_at", 0.0) < 15:
                 self.play_tone("sleep")                    # звучало «слушаю», а вопроса не было — так же ясно «не слушаю»
+
+    def _name_like(self, text):
+        """Похоже ли короткое распознанное на ослышанное имя («Игрова», «Элла» вместо «Эва»), а не на ответ человека.
+        Отчёт 11.10: «Лира» → «Слушаю…», затем быстрое «спасибо» / «как дела» принимались за ослышанное имя — фраза
+        терялась, и снова «Слушаю…». Пусто или первое слово хоть немного похоже на имя (≥ 0,55) — имя; иначе — фраза."""
+        import difflib
+        w = _norm(re.sub(r"[^\w ]", " ", text or "")).split()
+        if not w:
+            return True
+        names = [_norm(a).replace(" ", "") for al in self.aliases.values() for a in al]
+        return any(difflib.SequenceMatcher(None, w[0], a).ratio() >= 0.55 for a in names)
 
     def listen_for_command(self, seconds=8):
         """Имя услышали без вопроса: ждём вопрос seconds секунд (без имени) и даём короткий сигнал."""

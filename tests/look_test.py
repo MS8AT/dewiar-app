@@ -17,6 +17,8 @@ def ok(c, m):
 
 from settings import DEFAULTS  # noqa: E402
 ok(DEFAULTS["ui"]["skin"] == "calm" and DEFAULTS["ui"]["voice_fx"] == "bars", "по умолчанию — сдержанная тема и лучи")
+ok('"brand"' in (ROOT / "ui/hud.html").read_text(encoding="utf-8") and "skin-brand" in (ROOT / "android/assets/www/app.css").read_text(encoding="utf-8"),
+   "фирменная тема — в виджете и на телефоне")
 IMG = (ROOT / "data/avatars/lira.webp").as_uri()
 FAKE = "window.pywebview = { api: new Proxy({}, { get: () => () => Promise.resolve(true) }) };"
 with sync_playwright() as p:
@@ -52,10 +54,10 @@ for (const fx of ["bars", "pulse", "wave"]) for (const tone of ["mono", "color"]
     w0 = pg.evaluate("() => [document.body.className, entity.tone, entity.fx]")
     ok("skin-calm" in w0[0] and w0[1] == "mono" and w0[2] == "bars", f"виджет по умолчанию: {w0}")
     pg.evaluate("() => core.emit('settings', { settings: { ui: { skin: 'neon', voice_fx: 'pulse' } } })")
-    w1 = pg.evaluate("() => [document.body.className, entity.tone, entity.fx, getComputedStyle(document.getElementById('card')).backgroundImage.includes('62, 22, 43')]")
+    w1 = pg.evaluate("() => [document.body.className, entity.tone, entity.fx, getComputedStyle(document.getElementById('card')).backgroundImage.includes('51, 32, 58')]")
     ok("skin-neon" in w1[0] and "skin-calm" not in w1[0] and w1[1] == "color" and w1[2] == "pulse" and not w1[3], f"студия выбрала «Неон» и «Пульс» — виджет сразу перекрасился: {w1[:3]}")
     pg.evaluate("() => core.emit('settings', { settings: { ui: { skin: 'calm' } } })")
-    ok(pg.evaluate("getComputedStyle(document.getElementById('card')).backgroundImage.includes('62, 22, 43')"), "сдержанная тема — фон в фирменных цветах (#3e162b)")
+    ok(pg.evaluate("getComputedStyle(document.getElementById('card')).backgroundImage.includes('51, 32, 58')"), "сдержанная тема — мягкий фон в фирменных цветах (#33203a в углу)")
     ok(pg.evaluate("getComputedStyle(document.getElementById('bubble')).borderTopWidth") == "0px", "строка состояния — без рамки")
     pg.close()
 
@@ -68,7 +70,7 @@ for (const fx of ["bars", "pulse", "wave"]) for (const tone of ["mono", "color"]
       $('nav button[data-p="look"]').click(); }""", IMG)
     pg.wait_for_timeout(600)
     cards = pg.evaluate("() => [$$('#lk-skins .lk').length, $$('#lk-fx .lk canvas').length, $('#lk-skins .lk.on').dataset.skin, $('#lk-fx .lk.on').dataset.fx]")
-    ok(cards == [3, 3, "calm", "bars"], f"три темы и три живых образца анимации, выбранное отмечено: {cards}")
+    ok(cards == [4, 3, "calm", "bars"], f"четыре темы и три живых образца анимации, выбранное отмечено: {cards}")
     pg.click('.lk[data-skin="graphite"]'); pg.wait_for_timeout(300)
     pg.click('.lk[data-fx="wave"]'); pg.wait_for_timeout(300)
     ok(pg.evaluate("saved") == [{"ui": {"skin": "graphite"}}, {"ui": {"voice_fx": "wave"}}] and pg.evaluate("$('#lk-skins .lk.on').dataset.skin") == "graphite",
@@ -85,6 +87,8 @@ for (const fx of ["bars", "pulse", "wave"]) for (const tone of ["mono", "color"]
     pg = b.new_page(viewport={"width": 393, "height": 820}); pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.route("https://**", lambda r: r.abort())
     pg.goto((www / "index.html").as_uri()); pg.wait_for_timeout(900)
+    th = pg.evaluate("async () => [(await quick('Спасибо большое')) || null, (await quick('ладно, благодарю')) || null, await quick('спасибо, а что ещё ты умеешь')]")
+    ok(th[0] and th[1] and th[0]["say"].startswith(("Пожалуйста", "Обращайтесь")) and not th[2], f"телефон: «спасибо» — вежливый ответ без модели: {th}")
     ph0 = pg.evaluate("() => [document.body.className, orb.tone, orb.fx]")
     ok("skin-calm" in ph0[0] and ph0[1] == "mono" and ph0[2] == "bars", f"телефон по умолчанию: {ph0}")
     pg.evaluate("openSettings('more')"); pg.wait_for_timeout(400)

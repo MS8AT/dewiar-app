@@ -20,10 +20,11 @@ def ok(c, m):
 
 import memcap as M  # noqa: E402
 
-for t, core, ui in ((8, (3.0, 4.0), (1.5, 2.5)), (16, (4.8, 7.2), (2.4, 4.0)), (64, (6.0, 8.0), (3.0, 5.0))):
+# мягкий потолок — в 0,5 ГБ от жёсткого: заранее ядро не тормозим (отчёт 11.10: фразы терялись)
+for t, core, ui in ((8, (3.5, 4.0), (2.0, 2.5)), (16, (6.7, 7.2), (3.5, 4.0)), (64, (7.5, 8.0), (4.5, 5.0))):
     ok(M.caps("core", t) == core and M.caps("ui", t) == ui, f"{t} ГБ памяти: ядро {M.caps('core', t)}, окна {M.caps('ui', t)}")
 os.environ["DEWIAR_FAKE_RAM_GB"] = "16"
-ok(M.props("core") == ["MemoryHigh=4915M", "MemoryMax=7372M", "MemorySwapMax=1G"], f"свойства службы: {M.props('core')}")
+ok(M.props("core") == ["MemoryHigh=6860M", "MemoryMax=7372M", "MemorySwapMax=1G"], f"свойства службы: {M.props('core')}")
 
 # systemd-run есть — запуск в своей коробке; нет — как раньше
 tmp = Path(tempfile.mkdtemp())
@@ -38,7 +39,7 @@ os.environ.update(PATH=f"{fake.parent}:{os.environ['PATH']}", XDG_RUNTIME_DIR=st
 os.environ.pop("DEWIAR_NO_SCOPE", None)
 M._SCOPE.clear()
 cmd = M.scope_cmd(["python3", "ui/app.py"], "ui", "Dewiar — окна")
-ok(cmd[:5] == ["systemd-run", "--user", "--scope", "--quiet", "--collect"] and "MemoryMax=4096M" in cmd
+ok(cmd[:5] == ["systemd-run", "--user", "--scope", "--quiet", "--collect"] and "MemoryMax=4096M" in cmd and "MemoryHigh=3584M" in cmd
    and cmd[-2:] == ["python3", "ui/app.py"], f"окна — в коробке с потолком: {' '.join(cmd)}")
 app = M.scope_cmd(["xdg-open", "https://ya.ru"])
 ok(app[0] == "systemd-run" and not any(x.startswith("Memory") for x in app), "программа, открытая Лирой, — отдельно и без потолка")
@@ -75,7 +76,7 @@ os.environ.update(env0)
 os.environ["DEWIAR_FAKE_RAM_GB"] = "16"
 setup = SourceFileLoader("dewiar_setup", str(ROOT / "packaging" / "dewiar-setup")).load_module()
 u = setup.UNIT_TEXT
-ok("MemoryHigh=4915M" in u and "MemoryMax=7372M" in u and "MemorySwapMax=1G" in u and "CPUWeight=50" in u
+ok("MemoryHigh=6860M" in u and "MemoryMax=7372M" in u and "MemorySwapMax=1G" in u and "CPUWeight=50" in u
    and "IOWeight=50" in u and "Nice=5" in u, "служба ядра с потолком памяти и скромной долей процессора")
 ok(setup.VERSION != "0.16.1", "версия настройки сменилась — юнит перепишется при обновлении")
 src = (ROOT / "core" / "tts.py").read_text(encoding="utf-8")

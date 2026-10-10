@@ -68,6 +68,9 @@ class AnswerMixin:
                 r["said"] = text
                 self._set_reminder_fast(r, via)
                 return
+        if not raw and not quiet and not via and not images and thanks_phrase(text):
+            self._thanks(text)
+            return
         if not raw and not quiet and not via and not images and is_sleep_phrase(text):
             self.emit("heard", text=text)
             self.go_sleep(text)
@@ -746,6 +749,13 @@ class AnswerMixin:
             log.info("📎 %s → %s", name, rel)
         q = text.strip() or "Посмотри вложения и коротко скажи, что в них."
         return q + "\n\nВложения:\n" + "\n\n".join(parts)
+
+    def _thanks(self, text):
+        """«Спасибо» — коротко ответить и уснуть до имени (без окна «можно без имени» и без модели)."""
+        import random
+        self.follow_up_until = 0.0
+        log.info("🙏 «%s» — отвечаю и сплю до имени", text)
+        self._say_quick(random.choice(THANKS_REPLIES), text, then=lambda: (setattr(self, "follow_up_until", 0.0), self.play_tone("sleep")))
 
     def go_sleep(self, word="", media=True):
         """Замолчать и уснуть до следующего имени: без «слушаю», без продолжения разговора. Звенит будильник —

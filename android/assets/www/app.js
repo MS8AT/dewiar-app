@@ -783,10 +783,11 @@ function miniOrb(p) {          // значок персонажа без фот�
 /* Оформление (как на компьютере, студия → «Оформление»): тема фона и облика (S.skin) и чем голос отзывается вокруг
    портрета (S.voice_fx). calm — по умолчанию: фон в фирменных цветах, белый край портрета; graphite — почти чёрный;
    neon — как раньше: свечение и цвет персонажа. */
-const lookSkin = () => (["calm", "graphite", "neon"].includes(S.skin) ? S.skin : "calm");
+const SKINS = ["calm", "brand", "graphite", "neon"];
+const lookSkin = () => (SKINS.includes(S.skin) ? S.skin : "calm");
 const lookFx = () => (["bars", "pulse", "wave"].includes(S.voice_fx) ? S.voice_fx : "bars");
 function applyLook(fromPersona) {
-  ["calm", "graphite", "neon"].forEach(k => document.body.classList.toggle("skin-" + k, k === lookSkin()));
+  SKINS.forEach(k => document.body.classList.toggle("skin-" + k, k === lookSkin()));
   if (orb) { orb.tone = lookSkin() === "neon" ? "color" : "mono"; orb.fx = lookFx(); }
   if (!fromPersona) try { applyPersona(); } catch (e) { }       // свечение персонажа зависит от темы
 }
@@ -1744,6 +1745,9 @@ async function quick(text) {
   { const bq = await bugQuick(text.replace(/^[А-ЯЁA-Z][а-яёa-z-]+\s*,\s*(?=\S)/, (m) => findPersona(m.replace(/[\s,]/g, ""), true) ? "" : m)); if (bq) return bq; }
   const t = text.toLowerCase().replace(/ё/g, "е").replace(/[.!?,]+$/g, "").replace(/\s+/g, " ").trim();
   if (NEW_CONV_RX.test(t) || NEW_CONV_RX.test(t.replace(/^\S+\s+/, ""))) { convReset(); return { say: "Хорошо, начинаем с чистого листа." }; }
+  // «спасибо», «спасибо большое», «ладно, благодарю» — коротко и вежливо, без модели (как на компьютере, отзыв 11.10)
+  if (/^(?:(?:ну|ладно|хорошо|окей|ок|отлично|супер)[\s,]+)?(?:спасибо|благодарю|спс)(?:[\s,]+(?:большое|огромное|тебе|вам|за помощь|за все|очень))*$/.test(t))
+    return { say: ["Пожалуйста!", "Обращайтесь!", "Пожалуйста, обращайтесь!"][Math.floor(Math.random() * 3)] };
   { // позвать персонажа: «позови Патрика», «дай Лиру», «Патрик, как думаешь…»
     let m = t.match(/^(?:позови(?:те)?|позвать|зови|пригласи|дай|переключи(?:сь)? на|передай(?: слово)?)\s+(\S+)(?:\s+(?:пожалуйста|сюда))?$/);
     let p = m && findPersona(m[1]);
@@ -2863,7 +2867,7 @@ function renderSettings() {
   } else {
     const opt = (list, cur) => list.map(([v, n]) => `<option value="${v}" ${v === cur ? "selected" : ""}>${n}</option>`).join("");
     h.push(`<h3>Оформление</h3><div class="card"><div class="row2">
-      <label class="f" style="flex:1"><span>Тема</span><select id="ap-skin">${opt([["calm", "Сдержанная"], ["graphite", "Графит"], ["neon", "Неон"]], lookSkin())}</select></label>
+      <label class="f" style="flex:1"><span>Тема</span><select id="ap-skin">${opt([["calm", "Сдержанная"], ["brand", "Фирменная"], ["graphite", "Графит"], ["neon", "Неон"]], lookSkin())}</select></label>
       <label class="f" style="flex:1"><span>Когда говорит</span><select id="ap-fx">${opt([["bars", "Лучи"], ["pulse", "Пульс"], ["wave", "Волна"]], lookFx())}</select></label></div></div>`);
     h.push(`<h3>Этот телефон в кабинете</h3><div class="card"><p class="hint" style="margin-top:0">В кабинете облака (экзамен, здоровье) этот телефон —
       <b>${esc((info.device || "Телефон") + " · " + (info.version || "") + " · №" + devId().slice(-4))}</b>. Нет в списке — нажмите «Отметиться в кабинете»: появится через минуту.</p>
