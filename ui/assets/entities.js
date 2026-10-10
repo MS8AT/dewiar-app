@@ -944,8 +944,9 @@
   function portraitRim(g, e, R) {
     const { ctx, r, c, t, lv, k } = g;
     if (e.tone === "mono") {
-      const v = ctx.createRadialGradient(0, 0, R * 0.84, 0, 0, R);   // лёгкая внутренняя тень только у края
-      v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,.3)");
+      // внутренняя тень у края, как inset 0 0 20px rgba(0,0,0,.5): мягко нарастает к кромке
+      const v = ctx.createRadialGradient(0, 0, R * 0.8, 0, 0, R);
+      v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(0.6, "rgba(0,0,0,.12)"); v.addColorStop(1, "rgba(0,0,0,.42)");
       ctx.fillStyle = v; ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
       const on = e.state === "speaking" ? lv : 0;
       ctx.lineWidth = 2; ctx.strokeStyle = `rgba(255,255,255,${(0.1 + on * 0.22).toFixed(3)})`;

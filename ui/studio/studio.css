@@ -846,14 +846,9 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .lk-prev .pt { width: 64px; height: 64px; border-radius: 50%; background: #15151c center / cover no-repeat; }
 .lk-prev .pl { font-size: 11.5px; color: #fff; padding: 4px 12px 5px; border-radius: 999px; }
 .lk-prev .pl::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #fff; margin-right: 7px; vertical-align: 2px; box-shadow: 0 0 8px rgba(255,255,255,.8); }
-.sk-calm { background: radial-gradient(130% 90% at 15% 95%, rgba(120,119,198,.26) 0%, transparent 60%),
-                            radial-gradient(120% 80% at 90% 5%, rgba(193,235,255,.2) 0%, transparent 60%),
-                            linear-gradient(160deg, #11121a 0%, #1b1d30 45%, #262038 75%, #33203a 100%); }
-.sk-brand { background: radial-gradient(circle at 20% 80%, rgba(120,119,198,.3) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255,119,198,.3) 0%, transparent 50%),
-                            radial-gradient(circle at 40% 40%, rgba(120,219,255,.2) 0%, transparent 50%), linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%); }
-.sk-graphite { background: radial-gradient(circle at 50% 0%, rgba(255,255,255,.07) 0%, transparent 60%), linear-gradient(180deg, #16161a 0%, #0d0d10 60%, #09090b 100%); }
-.sk-neon { background: radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--pc, #B78CFF) 16%, transparent) 0%, transparent 60%), linear-gradient(180deg, #151519 0%, #0b0b0e 100%); }
-.sk-calm .pt, .sk-brand .pt, .sk-graphite .pt { box-shadow: 0 0 0 2px rgba(255,255,255,.1), inset 0 0 14px rgba(0,0,0,.3); }
-.sk-neon .pt { box-shadow: 0 0 0 2px var(--pc, #B78CFF), 0 0 18px color-mix(in srgb, var(--pc, #B78CFF) 70%, transparent); }
-.sk-calm .pl, .sk-brand .pl, .sk-graphite .pl { background: rgb(255 255 255 / 6%); box-shadow: 0 0 20px rgba(0,0,0,.5); }
-.sk-neon .pl { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+.lk-prev { background: var(--skin-bg, #111); }                 /* фон образца — та же тема, что в виджете (assets/skins.css) */
+.lk-prev canvas.pc { width: 100px; height: 100px; margin-bottom: -10px; }
+.lk-prev .pl { background: var(--glass, rgb(255 255 255 / 6%)); box-shadow: var(--glass-shadow, 0 0 20px rgba(0,0,0,.5)); }
+.lk-prev.skin-neon .pl { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+.lk-group { margin: 6px 0 10px; font-size: 13px; color: var(--muted); }
+#lk-skins .lk-prev { height: 128px; }

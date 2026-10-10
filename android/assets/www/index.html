@@ -1,7 +1,7 @@
 <!doctype html>
 <!-- Каркас единственного экрана телефона (открывает MainActivity в WebView): облик персонажа (#orb), строка состояния,
      разговор, нижняя панель с микрофоном и листы снизу. Содержимое листов и всю логику рисует app.js, стили — app.css.
-     personas.js и radio.js создаёт сборка (tools/build_apk.sh), entities.js (облики) она копирует из ui/assets —
+     personas.js и radio.js создаёт сборка (tools/build_apk.sh), entities.js (облики) и skins.css/skins.js/skins (темы) она копирует из ui/assets —
      в этой папке их нет. Они должны грузиться раньше app.js: он читает window.DEWIAR_PERSONAS, RADIO_LIST, DewiarEntity.
      id элементов — договорённость с app.js и app.css. -->
 <html lang="ru">
@@ -9,6 +9,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>Dewiar</title>
+<link rel="stylesheet" href="skins.css">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -65,6 +66,7 @@
 
 <script src="personas.js"></script>
 <script src="entities.js"></script>
+<script src="skins.js"></script>
 <script src="radio.js"></script>
 <script src="app.js"></script>
 <script src="exam.js"></script>

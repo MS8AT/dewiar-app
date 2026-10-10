@@ -19,6 +19,8 @@ mkdir -p "$B/gen" "$B/classes" "$B/assets/www"
 # интерфейс: свои файлы + облики персонажей из настольного Dewiar
 cp -r "$HERE/assets/www/." "$B/assets/www/"
 cp "$ROOT/ui/assets/entities.js" "$B/assets/www/entities.js"
+cp "$ROOT/ui/assets/skins.css" "$ROOT/ui/assets/skins.js" "$B/assets/www/"     # темы оформления — те же, что у виджета
+cp -r "$ROOT/ui/assets/skins" "$B/assets/www/skins"
 cp -r "$ROOT/ui/assets/live" "$B/assets/www/live"                # слои живого лица Эвы (entities.js берёт их из live/)
 python3 "$HERE/tools/personas_json.py" "$ROOT" > "$B/assets/www/personas.js"
 python3 -c 'import json,sys; print("window.RADIO_LIST = " + json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), ensure_ascii=False) + ";")' \

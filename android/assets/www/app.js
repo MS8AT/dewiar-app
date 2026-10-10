@@ -734,7 +734,7 @@ function convPrompt() {
 const NEW_CONV_RX = /^(?:давай(?:те)?\s+)?(?:начн(?:ем|и)|начать)\s+(?:новый\s+разговор|разговор\s+заново|сначала|заново|с\s+чистого\s+листа)$|^(?:забудь|сотри|очисти)\s+(?:наш\s+|этот\s+|весь\s+)?разговор$|^новый\s+разговор$|^новая\s+тема$/;
 
 /* ---------- персонажи и облик ---------- */
-const PERSONAS = window.DEWIAR_PERSONAS || [{ id: "lira", name: "Лира", style: "strings", color: "#B78CFF", character: "Ты — Лира, голосовой помощник Dewiar.", focus: "", gender: "female", role: "Главная помощница", aliases: ["лира"] }];
+const PERSONAS = window.DEWIAR_PERSONAS || [{ id: "lira", name: "Лира", style: "strings", color: "#9BD4FF", character: "Ты — Лира, голосовой помощник Dewiar.", focus: "", gender: "female", role: "Главная помощница", aliases: ["лира"] }];
 // с 0.4.27 встроенных двое — Лира и Патрик; выбранный прежде Агент, Джарвис, Эва или Кодер — теперь Лира
 if (!PERSONAS.some(p => p.id === S.persona)) { S.persona = PERSONAS[0].id; try { prefSet("settings", JSON.stringify(S)); } catch (e) { } }
 const persona = () => PERSONAS.find(p => p.id === S.persona) || PERSONAS[0];
@@ -783,12 +783,12 @@ function miniOrb(p) {          // значок персонажа без фот�
 /* Оформление (как на компьютере, студия → «Оформление»): тема фона и облика (S.skin) и чем голос отзывается вокруг
    портрета (S.voice_fx). calm — по умолчанию: фон в фирменных цветах, белый край портрета; graphite — почти чёрный;
    neon — как раньше: свечение и цвет персонажа. */
-const SKINS = ["calm", "brand", "graphite", "neon"];
+const SKINS = window.DEWIAR_SKIN_IDS || ["calm"];                 // skins.js — общий с виджетом
 const lookSkin = () => (SKINS.includes(S.skin) ? S.skin : "calm");
 const lookFx = () => (["bars", "pulse", "wave"].includes(S.voice_fx) ? S.voice_fx : "bars");
 function applyLook(fromPersona) {
   SKINS.forEach(k => document.body.classList.toggle("skin-" + k, k === lookSkin()));
-  if (orb) { orb.tone = lookSkin() === "neon" ? "color" : "mono"; orb.fx = lookFx(); }
+  if (orb) { orb.tone = (window.dewiarSkin && dewiarSkin(lookSkin()).tone) || "mono"; orb.fx = lookFx(); }
   if (!fromPersona) try { applyPersona(); } catch (e) { }       // свечение персонажа зависит от темы
 }
 
@@ -2867,7 +2867,8 @@ function renderSettings() {
   } else {
     const opt = (list, cur) => list.map(([v, n]) => `<option value="${v}" ${v === cur ? "selected" : ""}>${n}</option>`).join("");
     h.push(`<h3>Оформление</h3><div class="card"><div class="row2">
-      <label class="f" style="flex:1"><span>Тема</span><select id="ap-skin">${opt([["calm", "Сдержанная"], ["brand", "Фирменная"], ["graphite", "Графит"], ["neon", "Неон"]], lookSkin())}</select></label>
+      <label class="f" style="flex:1"><span>Фон</span><select id="ap-skin">${[...new Set((window.DEWIAR_SKINS || []).map(x => x.group))].map(gr =>
+        `<optgroup label="${esc(gr)}">${opt(window.DEWIAR_SKINS.filter(x => x.group === gr).map(x => [x.id, x.name]), lookSkin())}</optgroup>`).join("") || opt([["calm", "Сдержанная"]], "calm")}</select></label>
       <label class="f" style="flex:1"><span>Когда говорит</span><select id="ap-fx">${opt([["bars", "Лучи"], ["pulse", "Пульс"], ["wave", "Волна"]], lookFx())}</select></label></div></div>`);
     h.push(`<h3>Этот телефон в кабинете</h3><div class="card"><p class="hint" style="margin-top:0">В кабинете облака (экзамен, здоровье) этот телефон —
       <b>${esc((info.device || "Телефон") + " · " + (info.version || "") + " · №" + devId().slice(-4))}</b>. Нет в списке — нажмите «Отметиться в кабинете»: появится через минуту.</p>
