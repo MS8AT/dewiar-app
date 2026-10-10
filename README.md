@@ -1,37 +1,37 @@
 <div align="center">
 
-<img src="brand/dewiar-icon-512.png" width="112" alt="Dewiar">
+<img src="docs/img/banner.webp" width="880" alt="Dewiar — Лира и Патрик">
 
-# Dewiar
-
-**Голосовой ИИ-ассистент с командой персонажей — на компьютере, телефоне и вашем сервере.**
+### Голосовая помощница с командой персонажей — на компьютере, телефоне и вашем сервере
 
 Зовёте по имени и разговариваете голосом. Перебиваете на полуслове, передаёте слово другому персонажу,
 поручаете большую задачу — и она делается в фоне, пока вы заняты своим. Думает любой моделью: вашей
 (vLLM, Ollama, llama.cpp, LM Studio) или облачной (Dewiar, OpenRouter, OpenAI, Claude).
 
-![версия](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-0.36.10-7c5cff)
+<a href="https://github.com/dwr-git/dewiar-app/releases/latest/download/Dewiar-Setup-online.exe"><img src="https://img.shields.io/badge/Windows-%D1%81%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-667eea?style=for-the-badge&logo=windows&logoColor=white" alt="Windows — скачать"></a>
+<a href="https://github.com/dwr-git/dewiar-app/releases/latest/download/dewiar-assistant_all.deb"><img src="https://img.shields.io/badge/Ubuntu-%D1%81%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-764ba2?style=for-the-badge&logo=ubuntu&logoColor=white" alt="Ubuntu — скачать"></a>
+<a href="https://dewiar.pro/dwrapp/Dewiar.apk"><img src="https://img.shields.io/badge/Android-%D1%81%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-3ddc84?style=for-the-badge&logo=android&logoColor=white" alt="Android — скачать"></a>
+<a href="https://dewiar.pro/dwrapp/download.php"><img src="https://img.shields.io/badge/%D0%92%D1%81%D0%B5%20%D1%83%D1%81%D1%82%D1%80%D0%BE%D0%B9%D1%81%D1%82%D0%B2%D0%B0-dewiar.pro-FF7AC6?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Все устройства — dewiar.pro"></a>
+
+![версия](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-0.36.11-7c5cff)
 ![телефон](https://img.shields.io/badge/Android-0.4.31-3ddc84)
-![платформы](https://img.shields.io/badge/Ubuntu%20%C2%B7%20Windows%20%C2%B7%20Android-%D0%B3%D0%BE%D1%82%D0%BE%D0%B2%D0%BE-2b2f3a)
 [![Проверки](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml/badge.svg)](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml)
 
 [Сайт](https://dewiar.pro) · [Руководство](docs/guide.md) · [Свой сервер](docs/self-hosting.md) ·
 [История версий](CHANGELOG.md) · [Для разработчика](CONTRIBUTING.md)
-
-<br>
-
-<img src="docs/img/widget.webp" height="420" alt="Виджет на рабочем столе">&nbsp;&nbsp;
-<img src="docs/img/phone.webp" height="420" alt="Приложение для Android">&nbsp;&nbsp;
-<img src="docs/img/phone-day.webp" height="420" alt="«Мой день» на телефоне">
 
 </div>
 
 ## Что умеет
 
 **Разговор, а не команды.** Слышит имя офлайн и мгновенно — даже то, которое вы придумали сами. Начали говорить
-поверх ответа — он затихает и слушает; «стоп», «хватит» — замолкает. Лира с живым лицом ведёт ваш день, Патрик
-помогает обдумать решения; ещё десяток персонажей — Кодер, Джарвис, Эва, профессор, юрист, врач — добавляются одной
-кнопкой, и главный сам передаёт им вопрос по их части. Свой персонаж — с любым именем, голосом и вашим фото.
+поверх ответа — затихает и слушает; «стоп», «хватит» — замолкает. Лира с живым лицом ведёт ваш день, Патрик помогает
+обдумать решения; ещё дюжина персонажей добавляется одной кнопкой, и Лира сама передаёт им вопрос по их части.
+Свой персонаж — с любым именем, голосом и вашим фото.
+
+<div align="center">
+<img src="docs/img/team.webp" width="880" alt="Команда: Лира, Патрик и готовые персонажи">
+</div>
 
 **Руки и глаза.** Открывает сайты и программы, ищет в интернете, ставит напоминания и будильники, управляет
 музыкой, телевизором и умным домом, пишет заметки и ведёт деньги, читает почту и календарь, видит экран и камеру.
@@ -52,7 +52,8 @@
 пароли — в сейфе, отчёт разработчику — без ключей и паролей.
 
 <div align="center">
-<img src="docs/img/studio.webp" width="860" alt="Студия: персонажи">
+<img src="docs/img/phone-lira.webp" height="480" alt="Лира на телефоне">&nbsp;&nbsp;
+<img src="docs/img/phone-day.webp" height="480" alt="«Мой день» на телефоне">
 </div>
 
 ## Скачать — всегда последняя версия
@@ -83,6 +84,14 @@
 
 ## Как устроено
 
+<div align="center">
+<img src="docs/img/how.webp" width="880" alt="Компьютер, телефон и сервер — через dewiar.pro; думает любой моделью">
+</div>
+
+<details>
+<summary><b>Для разработчика: из чего состоит программа</b></summary>
+<br>
+
 ```mermaid
 flowchart LR
   subgraph PC["Компьютер · Linux / Windows"]
@@ -112,6 +121,8 @@ flowchart LR
 | `packaging/`, `tools/` | Пакет `.deb`, установщики Windows, выпуск версии одной командой |
 | `data/` | Облики персонажей, встроенные навыки, модель VAD, радио |
 | `tests/` | 110 наборов проверок: настоящее ядро, окна в Chromium, телефон на подменённом мосте |
+
+</details>
 
 ## Разработка
 

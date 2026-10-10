@@ -111,7 +111,11 @@ jobs:
           R="https://github.com/$GITHUB_REPOSITORY/releases/download/v$V"
           L="https://github.com/$GITHUB_REPOSITORY/releases/latest/download"
           {
+            echo "<img src=\"https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/docs/img/banner.webp\" width=\"880\" alt=\"Dewiar\">"
+            echo
             echo "## Скачать — Dewiar $V · телефон $PH"
+            echo
+            echo "Проще всего — страница **[dewiar.pro/dwrapp/download.php](https://dewiar.pro/dwrapp/download.php)**: сама узнаёт устройство и даёт свежую версию."
             echo
             echo "| Где | Файл этой версии | Всегда самая свежая |"
             echo "|---|---|---|"
