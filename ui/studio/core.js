@@ -19,6 +19,13 @@ function save(patch, quiet) {
   return core.call("settings_save", { patch }).then(s => { S = s; if (!quiet) toast("Сохранено"); refreshStatic(); }).catch(e => toast(e.message));
 }
 
+/* «Безопасность» → «Ваши данные»: общий текст assets/privacy.js (тот же — на телефоне и у самой помощницы) */
+if (window.DEWIAR_PRIVACY && $("#priv-box")) {
+  const e = (t) => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  $("#priv-box").innerHTML = `<h3 style="font-size:15px;margin-bottom:8px">${e(DEWIAR_PRIVACY.title)}</h3>`
+    + DEWIAR_PRIVACY.items.map(([t, x]) => `<p class="hint" style="margin:0 0 6px"><b style="color:var(--ink);font-weight:600">${e(t)}.</b> ${e(x)}</p>`).join("");
+}
+
 /* навигация */
 /* «Душа»: дневник, душа, конституция и «Обо мне» — один пункт слева; каждая страница остаётся отдельной <section>,
    а сверху у неё полоска вкладок. Вкладку открывает скрытая кнопка nav с тем же data-p; _direct отличает такой

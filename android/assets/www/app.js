@@ -1128,6 +1128,21 @@ function feminine(t) {
 }
 const gfix = (t) => persona().gender === "female" ? feminine(t) : t;
 
+/* «Ваши данные» (privacy.js — общий текст со студией): факты для вопросов о конфиденциальности и как устроено у этого
+   человека — где думает модель, включена ли синхронизация (как core/privacy.py) */
+function privacyWhere() {
+  const u = llmBase(); if (!u) return "модель ещё не подключена";
+  let h = ""; try { h = new URL(/:\/\//.test(u) ? u : "http://" + u).hostname.toLowerCase(); } catch (e) { }
+  if (S.llm.cloud || /dewiar/.test(h)) return "в облаке Dewiar (наши серверы; текст разговоров не сохраняется)";
+  if (/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|\.local$/.test(h)) return "на компьютере или сервере пользователя — разговор никуда не уходит";
+  return `во внешнем сервисе ${h} по ключу пользователя — вопросы уходят туда`;
+}
+function privacyRule() {
+  const P = window.DEWIAR_PRIVACY; if (!P) return "";
+  return "ДАННЫЕ И КОНФИДЕНЦИАЛЬНОСТЬ. Спросят, где хранятся данные, кто видит разговоры, как защищены персональные данные, — ответь спокойно и по сути, своими словами, в 2–4 предложениях, из этих фактов: "
+    + P.items.map(([t, x]) => `${t}: ${x}`).join(" ") + ` Сейчас у этого пользователя ты думаешь ${privacyWhere()}; синхронизация ${S.sync.on && syncCred() ? "включена" : "выключена"}.`
+    + " Подробно — в настройках («Ещё» → «Ваши данные»). Не выдумывай того, чего здесь нет: сертификатов, законов, сроков хранения.";
+}
 function systemPrompt() {
   const p = persona(), others = PERSONAS.filter(x => x.id !== p.id).map(x => `${x.name} — ${(x.role || "").toLowerCase()}`).join("; ");
   const parts = [p.character, (window.DEWIAR_GENDER_RULES || {})[p.gender] || "", p.focus, window.DEWIAR_VOICE_RULES || "Отвечай коротко, живой речью, по-русски.",
@@ -1145,7 +1160,7 @@ function systemPrompt() {
     "СПИСКИ И ТЕКСТЫ: просят список, таблицу, план, подборку или текст — пиши его прямо в ответе (пунктами или таблицей Markdown): "
     + "он появится на экране в рамке с кнопками «Копировать», «В заметки» и «Скачать». В заметки сохраняй, только если об этом просят, и только вызовом save_note; "
     + "не говори «сохранила», «записала», «теперь она в заметках», если в этом ходе не вызвала save_note. Не нашла заметку — так и скажи и покажи содержимое в ответе.",
-    BOUNDARY_RULE,
+    BOUNDARY_RULE, privacyRule(),
     "Никогда не говори, что у тебя нет доступа к интернету или свежим данным: погода, новости, курсы — ищи (web_search) и отвечай по найденному. "
     + "У тебя есть камера телефона (take_photo): «сфотографируй меня», «посмотри, что это», «прочитай надпись» — снимай и описывай. "
     + "«Посмотри, как я выгляжу», «покажи мне моё лицо» — take_photo с camera: front (камера на человека); «где я», «что вокруг», «другой камерой» — camera: back. "
@@ -2838,6 +2853,9 @@ function renderSettings() {
         <label class="f" style="flex:2"><span>Комментарий</span><input id="cl-note" placeholder="как оплатили"></label></div>
         <label class="cl-shot" id="cl-shot"><input type="file" id="cl-file" accept="image/*" hidden><span id="cl-shot-t">Приложить снимок оплаты</span><img id="cl-img" alt=""></label>
         <button class="btn p w" id="cl-send" style="margin-top:8px">Отправить заявку</button><div class="res" id="cl-res"></div><div id="cl-reqs"></div></div></div>`);
+    // приглашения друзей (cloud.php ?p=/ref): одна строка и «Пригласить»; список и чужой код — свёрнуты (refFill)
+    if (S.llm.cloud) h.push(`<div class="card refc" id="ref-card"><div class="row2"><div style="flex:1"><b>Пригласить друга</b><small class="hint" id="ref-sub" style="margin:2px 0 0;display:block">Подарки вам и другу — талерами</small></div>
+      <button class="btn p" id="ref-share">Пригласить</button></div><div id="ref-more"></div></div>`);
     if (S.join && S.join.id && !on) h.push(`<div class="card"><b>Заявка №${esc(S.join.id)} отправлена</b><p class="hint" style="margin:4px 0 10px">Как только её одобрят, всё подключится само — ничего вводить не нужно, я скажу. Можно закрыть приложение: проверю при следующем открытии.</p>
       <div class="row2"><button class="btn p" id="jn-check" style="flex:1">Проверить</button><button class="btn" id="jn-cancel" style="flex:1">Забыть заявку</button></div><div class="res" id="jn-res"></div></div>`);
     // сначала — то, что подходит любому человеку (бесплатная проба, код, аккаунт); своя модель и ключи сервисов —
@@ -2898,6 +2916,7 @@ function renderSettings() {
       <div class="snds">${ALARM_SOUNDS.map(([id, n, sub]) => `<button class="snd ${id === (snd.id || "chime") ? "on" : ""}" data-snd="${id}"><i>${PLAY_SVG}</i><span><b>${n}</b><small>${sub}</small></span></button>`).join("")}
         <button class="snd ${snd.id === "custom" ? "on" : ""} ${snd.custom ? "" : "nofile"}" data-snd="custom"><i>${PLAY_SVG}</i><span><b>Свой звук</b><small id="snd-name">${snd.custom ? esc(snd.custom) : "Любая мелодия с телефона"}</small></span></button></div>
       <label class="btn w" id="snd-pick"><input type="file" id="snd-file" accept="audio/*" hidden>${snd.custom ? "Выбрать другой файл" : "Выбрать файл…"}</label><div class="res" id="snd-res"></div></div>`);
+    if (window.DEWIAR_PRIVACY) h.push(`<h3>${esc(DEWIAR_PRIVACY.title)}</h3><div class="card priv">${DEWIAR_PRIVACY.items.map(([t, x]) => `<p><b>${esc(t)}.</b> ${esc(x)}</p>`).join("")}</div>`);
     h.push(`<h3>Этот телефон в кабинете</h3><div class="card"><p class="hint" style="margin-top:0">В кабинете облака (экзамен, здоровье) этот телефон —
       <b>${esc((info.device || "Телефон") + " · " + (info.version || "") + " · №" + devId().slice(-4))}</b>. Нет в списке — нажмите «Отметиться в кабинете»: появится через минуту.</p>
       <button class="btn w" id="dev-ping">Отметиться в кабинете</button><div class="res" id="dev-res"></div></div>`);
@@ -2992,6 +3011,7 @@ function wireSettings(info) {
     if (g("acc-out")) g("acc-out").onclick = () => { if (!confirm("Выйти из аккаунта dewiar.pro? Модели и Знания по аккаунту отключатся.")) return; accountLogout(); toast("Вы вышли из аккаунта"); renderSettings(); };
     if (g("acc-use")) g("acc-use").onclick = async () => { const b = g("acc-use"); b.disabled = true;
       try { await cloudConnect(S.account.token, S.accCloud.base, { account: true }); toast("Думают модели Dewiar"); renderSettings(); } catch (e) { b.disabled = false; toast(e.message); } };
+    if (g("ref-card")) { refLoad(); g("ref-share").onclick = () => refShare().catch(e => toast(e.message)); }
     if (g("cl-card")) {
       cloudFill(cloudInfo); cloudBalance(true).then(cloudFill).catch(async e => {
         if (await fixDeadKey(e.message)) { renderSettings(); return; }            // ключ удалён, а аккаунт есть — переключились сами
@@ -3476,7 +3496,45 @@ async function cloudConnect(key, base, opts = {}) {
     disable_thinking: false, account: !!opts.account, stt: !!md.stt, tts: !!md.tts });
   if (md.stt && !D.recognizer()) S.stt = { engine: "server", url: base + "?p=", key, model: "gigaam" };      // в телефоне нет своего распознавания
   saveS(); cloudInfo = info; cloudAt = Date.now();
+  if (S.refPending) setTimeout(refPendingUse, 500);            // пришли по приглашению — код введётся сам
   return info;
+}
+
+/* ---------- приглашения друзей (cloud.php ?p=/ref, /ref/use) ----------
+   У каждого свой код и ссылка …/download.php?ref=КОД. Друг вводит код (или открывает ссылку → dewiar://ref?c=КОД) в первые
+   дни — ему подарок сразу, вам — когда он попользуется облаком несколько дней. Код из ссылки, пока облако не подключено, ждёт
+   в S.refPending и вводится сам после подключения (refPendingUse). */
+let refInfo = null;
+const talers = (x) => String(Math.round((+x || 0) * 100) / 100).replace(".", ",");
+async function refLoad() {
+  try { refInfo = await cloudGet(cloudBase(), S.llm.api_key, "/ref"); } catch (e) { return; }
+  const d = refInfo, sub = $("#ref-sub"), more = $("#ref-more"); if (!sub || !more) return;
+  sub.textContent = (d.bonus > 0 ? `Вам +${talers(d.bonus)} тал. за каждого, кто попользуется ${d.days} дн.` : "Поделитесь Dewiar с друзьями")
+    + (d.bonus_new > 0 ? `, другу — +${talers(d.bonus_new)} сразу` : "") + ".";
+  const list = d.invited || [];
+  more.innerHTML = `<details class="more" style="margin:8px 2px 0"><summary>Мой код <b>${esc(d.code)}</b>${list.length ? ` · приглашено ${list.length}` + (d.earned > 0 ? `, получено ${talers(d.earned)} тал.` : "") : ""}</summary>
+      ${list.length ? `<div class="refs">${list.map(x => `<div class="refi"><span>${esc(x.name)}</span><small>${x.paid ? "засчитано ✓" : `пользуется ${x.days} из ${x.need} дн.`}</small></div>`).join("")}</div>` : `<p class="hint" style="margin:6px 0">Пока никого — нажмите «Пригласить» и отправьте ссылку.</p>`}
+      <button class="btn w" id="ref-copy" style="margin-top:6px">Скопировать ссылку</button></details>
+    ${d.can_use ? `<details class="more" style="margin:4px 2px 0"><summary>Есть код приглашения?</summary><div class="row2" style="margin-top:6px"><input id="ref-code" placeholder="6 знаков" autocapitalize="characters" style="flex:1;padding:12px 14px;border-radius:14px;border:0;background:var(--field)"><button class="btn p" id="ref-use">Ввести</button></div><div class="res" id="ref-res"></div></details>` : ""}`;
+  if ($("#ref-copy")) $("#ref-copy").onclick = () => { D.copy(d.link); toast("Ссылка скопирована"); };
+  if ($("#ref-use")) $("#ref-use").onclick = async () => { const r = $("#ref-res"); r.className = "res"; r.textContent = "проверяю…";
+    try { const u = await refUse($("#ref-code").value); r.className = "res ok"; r.textContent = u.gift > 0 ? `Готово — вам +${talers(u.gift)} тал.` : "Готово — код принят."; cloudBalance(true).then(cloudFill).catch(() => { }); setTimeout(refLoad, 1500); }
+    catch (e) { r.className = "res bad"; r.textContent = e.message; } };
+}
+const refShareText = (d) => `Попробуй Dewiar — помощницу Лиру для телефона и компьютера: слышит по имени, отвечает голосом, помнит и напоминает. ${d.link}\nКод приглашения: ${d.code}`;
+async function refShare() {
+  const d = refInfo || await cloudGet(cloudBase(), S.llm.api_key, "/ref"); refInfo = d;
+  D.share(refShareText(d));
+}
+async function refUse(code) {
+  code = String(code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (code.length < 4) throw new Error("Введите код из приглашения — 6 букв и цифр.");
+  const u = await cloudPost("/ref/use", { code }); S.refPending = ""; saveS(); return u;
+}
+async function refPendingUse() {
+  if (!S.refPending || !S.llm.cloud) return;
+  try { const u = await refUse(S.refPending); if (u.gift > 0) { showBot(`Код приглашения принят — вам подарок +${talers(u.gift)} тал.`); } }
+  catch (e) { if (!/сети|интернет|network/i.test(e.message)) { S.refPending = ""; saveS(); } }
 }
 
 /* ---------- аккаунт dewiar.pro: вход логином сайта, модели по аккаунту, Знания ----------
@@ -3989,6 +4047,11 @@ function handleIntent(e) {
       applyConfig(m, ""); if (m.home && m.home.token) { S.home.token = m.home.token; saveS(); }
       showBot(`Готово — настройки с компьютера перенесены. Мозг: ${brainName()}. Нажмите микрофон и спросите что-нибудь.`); say("Готово! Настройки перенесены.");
     } catch (x) { showBot("Код с настройками не подошёл: " + x.message, "err"); }
+  }
+  else if (e.action === "link" && /^dewiar:\/\/ref/.test(e.url || "")) {            // приглашение друга: …/download.php?ref= → «Открыть в Dewiar»
+    S.refPending = ((/[?&]c=([A-Za-z0-9]+)/.exec(e.url) || [])[1] || "").toUpperCase(); saveS();
+    if (S.llm.cloud) refPendingUse();
+    else showBot("Код приглашения сохранён. Подключите мозг бесплатно через Dewiar — и подарок придёт сам.");
   }
   else if (e.action === "link") { const m = /server=([^&]+)/.exec(e.url || ""); if (m) { openSettings("brain"); setTimeout(() => { const d = $(".brainalt"); if (d) d.open = true; $('.tile[data-w="pc"]').click(); $("#w-addr").value = decodeURIComponent(m[1]); }, 300); } }
 }

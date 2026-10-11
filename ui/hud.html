@@ -402,7 +402,16 @@ function renderDots() {                       // список команды —
 let radioNow = "";                           // играет радио — в покое вместо персонажа крутится пластинка
 let stateSince = Date.now();
 let turnUntil = 0;                           // до какого времени ждём ответа без имени (событие turn от ядра)
+// обновление: ядро перезапускается — это не «нет связи», а спокойное «обновляюсь» с обычным лицом (без притушенного
+// портрета и пунктирного круга); дольше 3 минут — значит, правда что-то не так, и снова честное «Нет связи с ядром»
+let updating = 0;
 function setState(s) {
+  if (s === "offline" && updating && Date.now() - updating < 180000) {
+    state = "offline"; entity.set({ state: "idle" });
+    $("bubble").classList.remove("live", "turn"); $("say").textContent = "Обновляюсь — скоро вернусь"; $("say").title = "";
+    return;
+  }
+  if (s !== "offline") updating = 0;
   if (s !== state) stateSince = Date.now();
   if (s !== "listening") turnUntil = 0;
   state = s; entity.set({ state: s });
@@ -831,8 +840,10 @@ function showUpd(u) {
     // страница новее запущенной программы (обновились, а интерфейс не перезапускали) — кнопки установки в ней нет
     if (typeof x.install_update !== "function") { $("upd").textContent = "Закройте Dewiar и откройте снова — затем обновите"; return; }
     $("upd").textContent = navigator.platform.startsWith("Win") ? "Устанавливаю… Dewiar перезапустится сам" : "Устанавливаю… GNOME спросит пароль";
+    updating = Date.now();
     const r = await x.install_update(a.path).catch(e => ({ ok: false, error: e.message }));
     $("upd").textContent = r.ok ? "Готово — перезапускаюсь…" : `Не получилось: ${r.error}`;
+    updating = r.ok ? Date.now() : 0;
   };
 }
 

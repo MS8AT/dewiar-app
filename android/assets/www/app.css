@@ -492,3 +492,13 @@ body.neu .snd.on { background: var(--glass); box-shadow: var(--press); }
 body.neu .snd i { background: var(--glass); box-shadow: var(--raise-s); }
 body.neu .snd.on i, body.neu .snd.play i { background: var(--brand); }
 @media (prefers-reduced-motion: reduce) { .snd.play i { animation: none; } }
+
+/* «Ещё» → «Ваши данные» (privacy.js) */
+.priv p { margin: 0 0 8px; font-size: 14px; line-height: 1.5; color: var(--muted); }
+.priv p:last-child { margin-bottom: 0; }
+.priv b { color: var(--ink); font-weight: 600; }
+
+/* «Мозг» → «Пригласить друга» */
+.refs { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 4px; }
+.refi { display: flex; justify-content: space-between; gap: 10px; padding: 8px 12px; border-radius: 12px; background: var(--frost); font-size: 14px; }
+.refi small { color: var(--muted); }

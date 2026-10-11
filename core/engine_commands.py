@@ -723,6 +723,25 @@ class CommandsMixin:
                 return r
             except CloudError as e:
                 raise ValueError(str(e)) from e
+        if cmd in ("ref_info", "ref_use"):              # приглашения друзей (cloud.php ?p=/ref): мой код, кто пришёл, чужой код
+            from cloud import CloudError, fetch
+            token, _, base = self.credentials()
+            if not token:
+                raise ValueError("сначала подключите Dewiar: вход аккаунтом dewiar.pro или ключ")
+            try:
+                if cmd == "ref_info":
+                    return fetch(base, token, "/ref")
+                code = "".join(ch for ch in str(a.get("code", "")).upper() if ch.isalnum())
+                if len(code) < 4:
+                    raise ValueError("введите код из приглашения — 6 букв и цифр")
+                r = fetch(base, token, "/ref/use", body={"code": code})
+                try:
+                    self.cloud.refresh()
+                except Exception:  # noqa: BLE001
+                    pass
+                return r
+            except CloudError as e:
+                raise ValueError(str(e)) from e
         if cmd in ("join_send", "join_check", "join_forget", "pair_new"):   # Dewiar по заявке и перенос кодом
             from cloud import CloudError
             try:

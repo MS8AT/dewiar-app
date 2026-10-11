@@ -201,6 +201,12 @@ class AnswerMixin:
         base += self.diary.prompt()                    # выводы, которые ассистент записал ночью в дневник
         from boundaries import RULE
         base += "\n\n" + RULE                          # границы: достоинство без обидчивости (boundaries.py)
+        try:                                           # «Ваши данные»: что хранится и куда уходит (privacy.py)
+            import privacy
+            base += "\n\n" + privacy.rule((self.s.active_llm() or {}).get("base_url", ""),
+                                           bool(getattr(self, "_sync_on", lambda: False)()))
+        except Exception:  # noqa: BLE001
+            log.debug("конфиденциальность: подсказка", exc_info=True)
         # сами фразы ловит _window_cmd без модели; это — чтобы ассистент мог подсказать их, если спросят
         base += ("\n\nЕсли спросят, как тебя спрятать или выключить: «спрячься» — виджет уходит в трей, а ты слушаешь и "
                  "появляешься на имя; «покажись» — вернуть виджет; «отключись» — выйти из Dewiar совсем (включить снова — "

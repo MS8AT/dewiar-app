@@ -379,6 +379,17 @@
             <div class="actions" style="margin:8px 0 0"><input type="text" id="dw-key" placeholder="dw-xxxxxx-xxxxxx-xxxxxx-xxxxxx" style="flex:1;min-width:220px"><button class="btn" id="dw-key-go">Подключить</button></div></details></div>
         <p class="res" id="dw-cloud-res" style="margin-top:6px"></p>
       </div>
+      <div class="dwc" id="dwc-ref">
+        <div class="dh"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M18 8v6M15 11h6"/></svg><h3>Пригласить друзей</h3><span class="dws" id="dws-ref">—</span></div>
+        <p class="hint" id="dw-ref-text">Поделитесь Dewiar — подарки талерами и вам, и другу.</p>
+        <div id="dw-ref-box" style="display:none">
+          <div class="actions" style="margin:0 0 8px;flex-wrap:wrap"><span class="dw-path" id="dw-ref-link" style="flex:1;margin:0;min-width:220px"></span><button class="btn primary" id="dw-ref-copy">Скопировать</button></div>
+          <div id="dw-ref-list"></div>
+          <details id="dw-ref-use" style="display:none;margin-top:6px"><summary class="hint" style="cursor:pointer">Есть код приглашения?</summary>
+            <div class="actions" style="margin:8px 0 0"><input type="text" id="dw-ref-code" placeholder="6 букв и цифр" style="flex:1;min-width:160px;text-transform:uppercase"><button class="btn" id="dw-ref-go">Ввести</button></div></details>
+        </div>
+        <p class="res" id="dw-ref-res" style="margin-top:6px"></p>
+      </div>
       <div class="dwc" id="dwc-speech">
         <div class="dh"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><h3>Речь на сервере</h3><span class="dws" id="dws-speech">—</span></div>
         <p class="hint">Голос в текст и текст в голос может делать сервер Dewiar — тогда компьютеру почти ничего не нужно. Нет связи — ассистент сам вернётся к своему.</p>
@@ -1048,6 +1059,7 @@
   <section id="p-safety">
     <h1>Безопасность</h1>
     <p class="lead">Ваши пароли, копия всего, что знает ассистент, и границы, которые он не переходит.</p>
+    <div class="prof on priv" id="priv-box" style="padding:16px 18px;margin-bottom:22px"></div>
     <div class="prof on" style="padding:16px 18px;margin-bottom:22px">
       <h3 style="font-size:15px;margin-bottom:6px">Сейф</h3>
       <p class="hint" style="margin-bottom:12px">Пароли, пин-коды, коды от домофона, ключи. Зашифрованы ключом этого компьютера и лежат отдельно: не попадают
@@ -1220,6 +1232,7 @@
 <script src="assets/entities.js"></script>
 <script src="assets/skins.js"></script>
 <script src="studio/theme.js"></script>
+<script src="assets/privacy.js"></script>
 <script src="assets/dewiar.js"></script>
 <script src="assets/qrcode.js"></script>
 <script src="assets/help.js"></script>

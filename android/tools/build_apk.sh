@@ -20,6 +20,7 @@ mkdir -p "$B/gen" "$B/classes" "$B/assets/www"
 cp -r "$HERE/assets/www/." "$B/assets/www/"
 cp "$ROOT/ui/assets/entities.js" "$B/assets/www/entities.js"
 cp "$ROOT/ui/assets/skins.css" "$ROOT/ui/assets/skins.js" "$B/assets/www/"     # темы оформления — те же, что у виджета
+cp "$ROOT/ui/assets/privacy.js" "$B/assets/www/"                    # «Ваши данные» — тот же текст, что в студии
 cp -r "$ROOT/ui/assets/skins" "$B/assets/www/skins"
 cp -r "$ROOT/ui/assets/live" "$B/assets/www/live"                # слои живого лица Эвы (entities.js берёт их из live/)
 python3 "$HERE/tools/personas_json.py" "$ROOT" > "$B/assets/www/personas.js"

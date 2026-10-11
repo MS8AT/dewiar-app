@@ -70,6 +70,11 @@ for (const fx of ["bars", "pulse", "wave"]) for (const tone of ["mono", "color"]
     pg.evaluate("() => core.emit('settings', { settings: { ui: { skin: 'calm' } } })")
     ok(pg.evaluate("getComputedStyle(document.getElementById('card')).backgroundImage.includes('51, 32, 58')"), "сдержанная тема — мягкий фон в фирменных цветах (#33203a в углу)")
     ok(pg.evaluate("getComputedStyle(document.getElementById('bubble')).borderTopWidth") == "0px", "строка состояния — без рамки")
+    pg.evaluate("() => { updating = Date.now(); core.emit('offline'); }")
+    up = pg.evaluate("() => [entity.state, $('say').textContent]")
+    ok(up == ["idle", "Обновляюсь — скоро вернусь"], f"обновление: спокойное «обновляюсь», лицо не притушено: {up}")
+    pg.evaluate("() => { updating = 0; core.emit('offline'); }")
+    ok(pg.evaluate("entity.state") == "offline", "без обновления — честное «нет связи»")
     pg.close()
 
     # студия → «Оформление»
