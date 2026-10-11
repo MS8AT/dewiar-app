@@ -898,3 +898,4 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 @media (max-width: 900px) { .cl-box { grid-template-columns: 1fr; } }
 .cl-qr.seal { background: none; padding: 0; border-radius: 7%; box-shadow: 0 18px 40px -18px rgba(0,0,0,.6); }   /* печать — сама белая скруглённая плашка с рамкой */
 .hguide { margin-top: 18px; } .hguide a { color: var(--accent); font-weight: 600; text-decoration: none; }     /* справка «?» → руководство на сайте */
+.dw-refnet { max-width: 440px; margin: 4px 0 12px; }     /* «Моё созвездие» приглашённых (assets/refnet.js) */

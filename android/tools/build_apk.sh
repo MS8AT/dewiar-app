@@ -27,6 +27,7 @@ cp "$ROOT/ui/assets/closecrypto.js" "$B/assets/www/"                # «Близ
 cp "$ROOT/ui/assets/qrcode.js" "$B/assets/www/"                     # QR-код приглашения в «Близкие»
 cp "$ROOT/ui/assets/call.js" "$B/assets/www/"                       # звонки «Близким» (WebRTC) — тот же код, что у компьютера
 cp "$ROOT/ui/assets/codes.js" "$ROOT/ui/assets/vendor/zxing.min.js" "$B/assets/www/"   # печать Dewiar (Aztec) и сканер кодов
+cp "$ROOT/ui/assets/refnet.js" "$B/assets/www/"                     # «Моё созвездие» — приглашённые друзья картиной
 cp "$ROOT/ui/assets/vendor/zxing.LICENSE-APACHE-2.0" "$B/assets/www/"
 cp -r "$ROOT/ui/assets/skins" "$B/assets/www/skins"
 cp -r "$ROOT/ui/assets/live" "$B/assets/www/live"                # слои живого лица Эвы (entities.js берёт их из live/)

@@ -393,12 +393,12 @@ class HealthMixin:
 
     def complaints_view(self, fresh=False):
         """Для студии: мои жалобы (новые сверху) и помощники проекта (с сервера, раз в час)."""
-        th = getattr(self, "_thanks", None)
+        th = getattr(self, "_thanks_list", None)          # не «_thanks»: так называется ответ на «спасибо» (engine_answer)
         if fresh or not th or time.time() - th[0] > 3600:
             try:
                 import httpx
                 r = httpx.get(self._cloud_base() + "?p=/thanks", timeout=10)
-                self._thanks = th = (time.time(), (r.json() or {}).get("people") or [])
+                self._thanks_list = th = (time.time(), (r.json() or {}).get("people") or [])
             except Exception:  # noqa: BLE001
                 th = th or (0, [])
         return {"mine": [{k: v for k, v in c.items() if k != "s"} for c in reversed(self._complaints())], "thanks": th[1],

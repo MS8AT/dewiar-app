@@ -136,6 +136,8 @@ async function dwRef() {
     + (d.bonus_new > 0 ? ` Другу — +${refTal(d.bonus_new)} тал. сразу.` : "") + ` Ваш код — ${d.code}.`;
   $("#dw-ref-link").textContent = d.link;
   const list = d.invited || [];
+  if (window.DewiarRefNet) { const r = DewiarRefNet.render($("#dw-ref-net"), d, { me: "Вы", seenKey: "dw_refnet_seen" });
+    if (r.fresh) toast(r.fresh === 1 ? "Ещё один друг засчитан — звезда загорелась!" : `Засчитано новых друзей: ${r.fresh}`, 3500); }
   dwSet("ref", list.some(x => x.paid) ? "ok" : list.length ? "run" : "", list.length ? `приглашено ${list.length}` : "никого");
   $("#dw-ref-list").innerHTML = list.length ? `<div class="dw-kv">${list.map(x => `<span>${escH(x.name)}</span><b style="font-weight:500">${x.paid ? "засчитано ✓" : `пользуется ${x.days} из ${x.need} дн.`}</b>`).join("")}</div>`
     + (d.earned > 0 ? `<p class="hint" style="margin:0 0 6px">Получено: ${refTal(d.earned)} тал.</p>` : "") : "";

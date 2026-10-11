@@ -60,6 +60,7 @@ run "«Близкие»: шифрование (Python и JS)" $PY "$T/close_cryp
 run "«Близкие»: чужие данные и брошенный звонок" $PY "$T/close_robust_test.py"
 run "телефон: чужой код и чужие ссылки" $PY "$T/android_safety_test.py"
 run "голос с сервера: клиент" $PY "$T/tts_client_test.py"
+run "ядро: данные не затирают методы" $PY "$T/engine_names_test.py"
 run "короткие фразы: спасибо, ослышанное имя" $PY "$T/voice_short_test.py"
 run "сервер: dewiar-server setup"   $PY "$T/server_setup_test.py"
 run "персонажи: переименование"     $PY "$T/personas_rename_test.py"

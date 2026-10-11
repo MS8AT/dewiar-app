@@ -3540,10 +3540,14 @@ async function refLoad() {
   sub.textContent = (d.bonus > 0 ? `Вам +${talers(d.bonus)} тал. за каждого, кто попользуется ${d.days} дн.` : "Поделитесь Dewiar с друзьями")
     + (d.bonus_new > 0 ? `, другу — +${talers(d.bonus_new)} сразу` : "") + ".";
   const list = d.invited || [];
-  more.innerHTML = `<details class="more" style="margin:8px 2px 0"><summary>Мой код <b>${esc(d.code)}</b>${list.length ? ` · приглашено ${list.length}` + (d.earned > 0 ? `, получено ${talers(d.earned)} тал.` : "") : ""}</summary>
+  more.innerHTML = `<div id="ref-net" style="margin:12px 0 4px"></div><details class="more" style="margin:8px 2px 0"><summary>Мой код <b>${esc(d.code)}</b>${list.length ? ` · приглашено ${list.length}` + (d.earned > 0 ? `, получено ${talers(d.earned)} тал.` : "") : ""}</summary>
       ${list.length ? `<div class="refs">${list.map(x => `<div class="refi"><span>${esc(x.name)}</span><small>${x.paid ? "засчитано ✓" : `пользуется ${+x.days || 0} из ${+x.need || 0} дн.`}</small></div>`).join("")}</div>` : `<p class="hint" style="margin:6px 0">Пока никого — нажмите «Пригласить» и отправьте ссылку.</p>`}
       <button class="btn w" id="ref-copy" style="margin-top:6px">Скопировать ссылку</button></details>
     ${d.can_use ? `<details class="more" style="margin:4px 2px 0"><summary>Есть код приглашения?</summary><div class="row2" style="margin-top:6px"><input id="ref-code" placeholder="6 знаков" autocapitalize="characters" style="flex:1;padding:12px 14px;border-radius:14px;border:0;background:var(--field)"><button class="btn p" id="ref-use">Ввести</button></div><div class="res" id="ref-res"></div></details>` : ""}`;
+  if (window.DewiarRefNet && $("#ref-net")) {                     // созвездие друзей; новая золотая звезда — звук «нашёл» и поздравление
+    const r = DewiarRefNet.render($("#ref-net"), d, { me: (S.user_name || "Вы").slice(0, 6), seenKey: "dw_refnet_seen" });
+    if (r.fresh) { try { scanChime(); } catch (e) { } toast(r.fresh === 1 ? "Ещё один друг засчитан — звезда загорелась!" : `Засчитано новых друзей: ${r.fresh}`, 3500); }
+  }
   if ($("#ref-copy")) $("#ref-copy").onclick = () => { D.copy(d.link); toast("Ссылка скопирована"); };
   if ($("#ref-use")) $("#ref-use").onclick = async () => { const r = $("#ref-res"); r.className = "res"; r.textContent = "проверяю…";
     try { const u = await refUse($("#ref-code").value); r.className = "res ok"; r.textContent = u.gift > 0 ? `Готово — вам +${talers(u.gift)} тал.` : "Готово — код принят."; cloudBalance(true).then(cloudFill).catch(() => { }); setTimeout(refLoad, 1500); }
