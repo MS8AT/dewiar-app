@@ -898,7 +898,28 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 @media (max-width: 900px) { .cl-box { grid-template-columns: 1fr; } }
 .cl-qr.seal { background: none; padding: 0; border-radius: 7%; box-shadow: 0 18px 40px -18px rgba(0,0,0,.6); }   /* печать — сама белая скруглённая плашка с рамкой */
 .hguide { margin-top: 18px; } .hguide a { color: var(--accent); font-weight: 600; text-decoration: none; }     /* справка «?» → руководство на сайте */
-.dw-refnet { max-width: 440px; margin: 4px 0 12px; }     /* «Моё созвездие» приглашённых (assets/refnet.js) */
+/* «Рефералы»: большое созвездие (assets/refnet.js, big) — ночное небо главным; справа код, печать и правила; ниже друзья */
+.rf-box { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 16px; align-items: start; }
+.rf-sky { min-height: 420px; border-radius: 28px; box-shadow: 0 30px 60px -36px rgba(0,0,0,.9); }
+.rf-wait { min-height: 420px; border-radius: 28px; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; text-align: center; padding: 30px;
+  color: var(--muted); background: radial-gradient(90% 70% at 50% 46%, #2a2160 0%, #151233 46%, #0a0917 78%, #07060d 100%); }
+.rf-wait b { font: 600 16px "Unbounded", sans-serif; color: var(--ink); } .rf-wait span { max-width: 360px; font-size: 13.5px; }
+.rf-side { display: flex; flex-direction: column; gap: 12px; }
+.rf-card { background: var(--glass); border-radius: 22px; padding: 16px 18px; }
+.rf-code { display: block; font: 600 26px "Unbounded", sans-serif; letter-spacing: .14em; margin: 2px 0 12px; }
+.rf-qr { width: 168px; height: 168px; margin: 0 0 12px; border-radius: 7%; box-shadow: 0 18px 40px -18px rgba(0,0,0,.6); }
+.rf-qr svg { width: 100%; height: 100%; display: block; }
+.rf-lists { margin-top: 8px; }
+.rf-list { display: flex; flex-direction: column; gap: 6px; max-width: 760px; }
+.rf-p { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; background: var(--panel); cursor: pointer; transition: background .2s; }
+.rf-p:hover { background: rgba(255,255,255,.09); } .rf-p.cur { background: rgba(255,255,255,.14); }
+.rf-p span { flex: 1; min-width: 0; } .rf-p b { display: block; font-size: 14.5px; } .rf-p small { display: block; font-size: 12.5px; color: var(--muted); }
+.rf-wt { font-style: normal; font-size: 12.5px; color: var(--muted); padding: 0 6px; }
+.rf-empty { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; border-radius: 18px; background: var(--panel); max-width: 760px; }
+.rf-empty span { color: var(--muted); font-size: 13.5px; }
+@media (max-width: 1000px) { .rf-box { grid-template-columns: minmax(0, 1fr); } .rf-side { flex-direction: row; flex-wrap: wrap; } .rf-side > * { flex: 1 1 260px; } }
+.cl-of { border-radius: 16px; padding: 12px 14px; background: linear-gradient(135deg, rgba(255,127,182,.18), rgba(139,140,247,.18)); display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.cl-of b { font-size: 14px; } .cl-of span { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
 /* «Календарь» → «Заметки» */
 .nt-bar { display: flex; gap: 10px; margin: 6px 0 14px; } .nt-bar input { flex: 1; }
 .nt-cols { display: grid; grid-template-columns: minmax(240px, 340px) minmax(0, 1fr); gap: 16px; align-items: start; }

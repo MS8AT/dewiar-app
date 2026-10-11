@@ -189,6 +189,7 @@ class Close:
         with self._lock:
             self.st["me"] = d.get("me") or {}
             self.st["people"] = d.get("people") or []
+            self.st["offers"] = d.get("offers") or []   # «… зовёт вас в «Близкие»» (из «Рефералов») — ждут ответа
             self._save()
         self.host.emit("close", state=self.state())
 
@@ -205,7 +206,8 @@ class Close:
         with self._lock:
             people = [dict(p, unread=int(self.st["unread"].get(p["pid"], 0)),
                            last=(self.st["hist"].get(p["pid"]) or [{}])[-1]) for p in self.st["people"]]
-            return {"me": self.st.get("me") or {}, "people": people, "error": self.error, "invite": self.st.get("invite") or None,
+            return {"me": self.st.get("me") or {}, "people": people, "offers": list(self.st.get("offers") or []),
+                    "error": self.error, "invite": self.st.get("invite") or None,
                     "ready": bool(self.st.get("pub"))}
 
     def history(self, pid, mark_read=True):
@@ -243,6 +245,33 @@ class Close:
         self._people(d)
         self.soon.set()
         return d.get("person") or {}
+
+    # ---------- «Рефералы»: свой первый уровень — в «Близкие» с согласия ----------
+    def ref_map(self, rids):
+        """Знаки связи из ref_info -> {rid: {pid} — уже близкий | {offered} — позвали, ждём ответа}."""
+        rids = [str(r) for r in (rids or []) if r][:120]
+        return self._req("POST", "/close/refs", {"rids": rids}).json().get("map") or {} if rids else {}
+
+    def ref_close(self, rid):
+        """«Позвать в Близкие» реферала. -> {person} — уже (или сразу, если он тоже звал) близкий; {offered} — ждём согласия."""
+        self._keys()
+        if not self.st["me"]:
+            self.hello()
+        d = self._req("POST", "/close/ref", {"rid": str(rid or "")}).json()
+        if d.get("person"):
+            self._people(d)
+            self.soon.set()
+            return {"person": d["person"]}
+        return {"offered": True}
+
+    def offer(self, pid, yes):
+        """Ответ на «… зовёт вас в «Близкие»»: yes — близкие оба. -> состояние."""
+        self._keys()
+        if not self.st["me"]:
+            self.hello()
+        self._people(self._req("POST", "/close/offer", {"pid": pid, "yes": bool(yes)}).json())
+        self.soon.set()
+        return self.state()
 
     def remove(self, pid):
         self._people(self._req("POST", "/close/remove", {"pid": pid}).json())
@@ -431,7 +460,7 @@ class Close:
             try:
                 token = self.host.credentials()[0]
                 if token:
-                    if time.time() - float(self.st.get("hello_at") or 0) > 6 * 3600:
+                    if time.time() - float(self.st.get("hello_at") or 0) > 3600:   # раз в час: новые близкие и «зовут в Близкие»
                         self.hello()
                     self.poll()
                     self.error = ""

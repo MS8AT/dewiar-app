@@ -10,7 +10,7 @@ const clTime = (ts) => { const d = new Date(ts), now = new Date(); const hm = d.
 const clSize = (n) => n > 1048576 ? (n / 1048576).toFixed(1).replace(".", ",") + " МБ" : Math.max(1, Math.round(n / 1024)) + " КБ";
 
 function clDot(st) {
-  const n = ((st && st.people) || []).reduce((a, p) => a + (p.unread || 0), 0);
+  const n = ((st && st.people) || []).reduce((a, p) => a + (p.unread || 0), 0) + ((st && st.offers) || []).length;   // и «зовут в Близкие»
   $("#close-dot").classList.toggle("on", n > 0);
 }
 async function loadClose(hello) {
@@ -31,9 +31,22 @@ function clRender() {
       ${p.unread ? `<em>${p.unread}</em>` : ""}</button>`).join("")
     : `<p class="hint" style="margin:6px 2px 12px">Пока никого. Пригласите тех, с кем хотите переписываться через помощников.</p>`;
   $$("#cl-people .cl-p").forEach(b => b.onclick = () => clOpen(b.dataset.pid));
+  clOffers(st.offers || []);
   if (CL.cur && !people.some(p => p.pid === CL.cur)) CL.cur = "";
   if (!CL.cur && people.length && !$("#cl-invite").offsetParent) clOpen(people[0].pid);
   else clHead();
+}
+/* Зовут в «Близкие» из «Рефералов» (тот, кто пригласил вас в Dewiar, или кого пригласили вы) — согласие здесь */
+function clOffers(list) {
+  $("#cl-offers").innerHTML = list.map(o => `<div class="cl-of"><b>${clEsc(o.name)} зовёт вас в «Близкие»</b>
+      <span>Вы связаны приглашением в Dewiar. Согласитесь — помощники смогут передавать друг другу сообщения, можно будет созваниваться.</span>
+      <div class="actions" style="margin:8px 0 0"><button class="btn primary small" data-y="${clEsc(o.pid)}">Принять</button><button class="btn small" data-n="${clEsc(o.pid)}">Не сейчас</button></div></div>`).join("");
+  $$("#cl-offers [data-y], #cl-offers [data-n]").forEach(b => b.onclick = async () => {
+    const pid = b.dataset.y || b.dataset.n, yes = !!b.dataset.y; b.disabled = true;
+    try { CL.st = await core.call("close_offer", { pid, yes }); clRender();
+      if (yes) { const p = (CL.st.people || []).find(x => x.pid === pid); if (p) { toast(`${p.name} теперь в ваших близких`); clOpen(pid); } } }
+    catch (e) { b.disabled = false; toast(e.message, 4000); }
+  });
 }
 function clHead() {
   const p = ((CL.st && CL.st.people) || []).find(x => x.pid === CL.cur);

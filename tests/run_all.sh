@@ -138,6 +138,7 @@ run "«Близкие»: шифрование (Python и JS)" $PY "$T/close_cryp
 run "«Близкие»: чужие данные и брошенный звонок" $PY "$T/close_robust_test.py"
 run "телефон: чужой код и чужие ссылки" $PY "$T/android_safety_test.py"
 run "голос с сервера: клиент" $PY "$T/tts_client_test.py"
+run "«Рефералы»: созвездие, ссылка, «Позвать в Близкие»" $PY "$T/refs_section_test.py"
 run "ядро: данные не затирают методы" $PY "$T/engine_names_test.py"
 run "телефон: длинная диктовка" $PY "$T/android_dictation_test.py"
 run "телефон: заметки, фото и файлы" $PY "$T/android_notes_test.py"

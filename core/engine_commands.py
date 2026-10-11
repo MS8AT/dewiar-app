@@ -746,6 +746,12 @@ class CommandsMixin:
                     return c.peek(a.get("link", ""))
                 if cmd == "close_accept":
                     return c.accept(a.get("link", ""))
+                if cmd == "close_refs":
+                    return c.ref_map(a.get("rids") or [])
+                if cmd == "close_ref":
+                    return c.ref_close(a.get("rid", ""))
+                if cmd == "close_offer":
+                    return c.offer(a.get("pid", ""), a.get("yes"))
                 if cmd == "close_remove":
                     return c.remove(a.get("pid", ""))
                 if cmd == "close_history":

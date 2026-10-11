@@ -498,6 +498,25 @@ body.neu .snd.on i, body.neu .snd.play i { background: var(--brand); }
 .priv p:last-child { margin-bottom: 0; }
 .priv b { color: var(--ink); font-weight: 600; }
 
+/* «Близкие» → «Рефералы»: большое созвездие (refnet.js, big) — ночное небо во всю ширину листа; ниже код и друзья */
+.rfnet { margin: 0 -6px 12px; }
+.rfnet .rn.big { border-radius: 24px; }
+.rfnet .rn.big .rk { padding: 18px 18px 0; } .rfnet .rn.big .rk b { font-size: 20px; } .rfnet .rn.big .bar { width: 160px; }
+.rfnet .rn.big .coin { font-size: 21px; } .rfnet .rn.big .coin i { width: 23px; height: 23px; }
+.rfnet .rn.big svg { margin: -26px auto -10px; }
+.rfinv .row2 { align-items: center; gap: 8px; }
+.rfcode { display: block; font: 600 22px "Unbounded", sans-serif; letter-spacing: .12em; margin-top: 2px; }
+.rfp { display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 12px; margin-bottom: 6px; border-radius: 16px; background: var(--frost); transition: background .2s; }
+.rfp.cur { background: var(--frost-hi); }
+.rfp span { flex: 1; min-width: 0; } .rfp b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rfp small { display: block; color: var(--muted); font-size: 12.5px; }
+.rfp .ib { width: 40px; height: 40px; flex: none; } .rfp .ib svg { width: 19px; height: 19px; }
+.rfo { padding: 9px 12px; font-size: 13px; border-radius: 12px; flex: none; }
+.rfw { font-style: normal; font-size: 12px; color: var(--muted); flex: none; padding: 0 6px; }
+.clof { background: linear-gradient(135deg, rgba(255,127,182,.2), rgba(139,140,247,.2)); }
+.refgo { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; white-space: normal; }
+.refgo small { font-weight: 400; color: var(--muted); font-size: 12.5px; }
+
 /* «Мозг» → «Пригласить друга» */
 .refs { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 4px; }
 .refi { display: flex; justify-content: space-between; gap: 10px; padding: 8px 12px; border-radius: 12px; background: var(--frost); font-size: 14px; }

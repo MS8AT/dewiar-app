@@ -63,6 +63,7 @@
   <button data-p="calendar">Календарь</button>
   <button data-p="reminders">Напоминания</button>
   <button data-p="close" title="Переписка с помощниками близких людей">Близкие<i class="ndot" id="close-dot"></i></button>
+  <button data-p="ref" title="Приглашённые друзья: созвездие, ссылка, награды">Рефералы</button>
   <button data-p="tasks">Задачи</button>
   <button data-p="prompter" title="Молчаливые подсказки на встречах и переговорах">Суфлёр</button>
   <div class="ng">Знания</div>
@@ -162,6 +163,34 @@
     </div>
   </section>
 
+  <section id="p-ref" class="wide">
+    <h1>Рефералы</h1>
+    <p class="lead">Друзья, которых вы позвали в Dewiar. Каждый засчитанный — звезда в вашем созвездии и талеры на счёт.
+      С приглашёнными можно переписываться и созваниваться — позовите их в «Близкие».</p>
+    <div class="rf-box">
+      <div class="rf-sky" id="rf-net"><div class="rf-wait">Загружаю созвездие…</div></div>
+      <aside class="rf-side">
+        <div class="rf-card" id="rf-inv">
+          <span class="hint" style="margin:0">Ваш код</span>
+          <b class="rf-code" id="rf-code">—</b>
+          <div class="rf-qr" id="rf-qr"></div>
+          <div class="dw-path" id="rf-link"></div>
+          <div class="actions" style="margin:8px 0 0"><button class="btn primary" id="rf-copy" style="flex:1">Скопировать приглашение</button></div>
+          <p class="hint" id="rf-rules" style="margin:10px 0 0"></p>
+        </div>
+        <details class="rf-card" id="rf-use" style="display:none"><summary class="hint" style="cursor:pointer;margin:0">Есть код приглашения?</summary>
+          <div class="actions" style="margin:8px 0 0"><input type="text" id="rf-ucode" placeholder="6 букв и цифр" style="flex:1;min-width:0;text-transform:uppercase"><button class="btn" id="rf-ugo">Ввести</button></div></details>
+        <p class="res" id="rf-res"></p>
+      </aside>
+    </div>
+    <div class="rf-lists">
+      <div id="rf-by"></div>
+      <h2 id="rf-h">Приглашённые</h2>
+      <div class="rf-list" id="rf-list"></div>
+      <p class="hint" style="max-width:62ch;margin-top:12px">Переписываться и созваниваться можно с теми, кого пригласили вы, и с тем, кто пригласил вас, — когда оба согласны:
+        «Позвать в Близкие» — друг увидит приглашение и примет его или откажется.</p>
+    </div>
+  </section>
   <section id="p-close" class="wide">
     <h1>Близкие</h1>
     <p class="lead">Переписка между помощниками. Скажите «Лира, напиши маме, что я задержусь» — у мамы её помощница покажет
@@ -169,6 +198,7 @@
     <div class="cl-box">
       <aside class="cl-side">
         <div class="cl-me"><span class="hint" style="margin:0">Близкие видят вас как</span><input type="text" id="cl-myname" placeholder="ваше имя" maxlength="40"></div>
+        <div id="cl-offers"></div>
         <div id="cl-people"></div>
         <button class="btn primary" id="cl-inv-go" style="width:100%">Пригласить близкого</button>
         <details class="cl-add"><summary class="hint">Пришла ссылка-приглашение?</summary>
@@ -426,16 +456,9 @@
         <p class="res" id="dw-cloud-res" style="margin-top:6px"></p>
       </div>
       <div class="dwc" id="dwc-ref">
-        <div class="dh"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M18 8v6M15 11h6"/></svg><h3>Пригласить друзей</h3><span class="dws" id="dws-ref">—</span></div>
+        <div class="dh"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M18 8v6M15 11h6"/></svg><h3>Рефералы</h3><span class="dws" id="dws-ref">—</span></div>
         <p class="hint" id="dw-ref-text">Поделитесь Dewiar — подарки талерами и вам, и другу.</p>
-        <div id="dw-ref-box" style="display:none">
-          <div class="actions" style="margin:0 0 8px;flex-wrap:wrap"><span class="dw-path" id="dw-ref-link" style="flex:1;margin:0;min-width:220px"></span><button class="btn primary" id="dw-ref-copy">Скопировать</button></div>
-          <div id="dw-ref-net" class="dw-refnet"></div>
-          <div id="dw-ref-list"></div>
-          <details id="dw-ref-use" style="display:none;margin-top:6px"><summary class="hint" style="cursor:pointer">Есть код приглашения?</summary>
-            <div class="actions" style="margin:8px 0 0"><input type="text" id="dw-ref-code" placeholder="6 букв и цифр" style="flex:1;min-width:160px;text-transform:uppercase"><button class="btn" id="dw-ref-go">Ввести</button></div></details>
-        </div>
-        <p class="res" id="dw-ref-res" style="margin-top:6px"></p>
+        <div class="actions" style="margin:0"><button class="btn primary" id="dw-ref-open">Открыть «Рефералы»</button></div>
       </div>
       <div class="dwc" id="dwc-speech">
         <div class="dh"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><h3>Речь на сервере</h3><span class="dws" id="dws-speech">—</span></div>
@@ -1304,5 +1327,6 @@
 <script src="studio/dewiar.js"></script>
 <script src="studio/look.js"></script>
 <script src="studio/close.js"></script>
+<script src="studio/refs.js"></script>
 </body>
 </html>

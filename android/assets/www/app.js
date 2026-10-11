@@ -3654,17 +3654,78 @@ async function refLoad() {
   sub.textContent = (d.bonus > 0 ? `Вам +${talers(d.bonus)} тал. за каждого, кто попользуется ${d.days} дн.` : "Поделитесь Dewiar с друзьями")
     + (d.bonus_new > 0 ? `, другу — +${talers(d.bonus_new)} сразу` : "") + ".";
   const list = d.invited || [];
-  more.innerHTML = `<div id="ref-net" style="margin:12px 0 4px"></div><details class="more" style="margin:8px 2px 0"><summary>Мой код <b>${esc(d.code)}</b>${list.length ? ` · приглашено ${list.length}` + (d.earned > 0 ? `, получено ${talers(d.earned)} тал.` : "") : ""}</summary>
-      ${list.length ? `<div class="refs">${list.map(x => `<div class="refi"><span>${esc(x.name)}</span><small>${x.paid ? "засчитано ✓" : `пользуется ${+x.days || 0} из ${+x.need || 0} дн.`}</small></div>`).join("")}</div>` : `<p class="hint" style="margin:6px 0">Пока никого — нажмите «Пригласить» и отправьте ссылку.</p>`}
-      <button class="btn w" id="ref-copy" style="margin-top:6px">Скопировать ссылку</button></details>
+  // всё о приглашённых — в «Близкие» → «Рефералы»; здесь — код, счёт и дорога туда
+  more.innerHTML = `<button class="btn w refgo" id="ref-open" style="margin-top:10px"><span>Рефералы — созвездие и друзья</span><small>Мой код <b>${esc(d.code)}</b>${list.length ? ` · приглашено ${list.length}` + (d.earned > 0 ? `, получено ${talers(d.earned)} тал.` : "") : ""}</small></button>`;
+  $("#ref-open").onclick = () => openRefs();
+  refFresh(d);
+}
+function refFresh(d) {                       // новая золотая звезда с прошлого раза — звук «нашёл» и поздравление (один раз)
+  let seen = []; try { seen = JSON.parse(localStorage.getItem("dw_refnet_seen") || "[]"); } catch (e) { }
+  const fresh = (d.invited || []).filter(x => x.paid && !seen.includes(x.name + "|" + (x.since || ""))).length;
+  if (!fresh) return;
+  try { localStorage.setItem("dw_refnet_seen", JSON.stringify((d.invited || []).filter(x => x.paid).map(x => x.name + "|" + (x.since || "")).slice(-200))); } catch (e) { }
+  try { scanChime(); } catch (e) { } toast(fresh === 1 ? "Ещё один друг засчитан — звезда загорелась!" : `Засчитано новых друзей: ${fresh}`, 3500);
+}
+
+/* «Близкие» → «Рефералы»: большое созвездие, ссылка и код, кто позвал вас и кого позвали вы. Первый уровень (в обе стороны):
+   уже в «Близких» — «Написать» и «Позвонить»; нет — «Позвать в Близкие» (cloud.php ?p=/close/ref): друг увидит «… зовёт вас»
+   и согласится или откажется. rid — знак связи от сервера (подделать нельзя). refMap — rid → {pid} | {offered}. */
+let refMap = {}, refSel = null;
+async function refTab() {
+  const box = $("#rf-body"); if (!box) return;
+  if (!S.llm.cloud && !syncCred()) { box.innerHTML = `<div class="card"><b>Нужен Dewiar</b><p class="hint" style="margin:6px 0 10px">Приглашения работают через облако Dewiar: подключите мозг бесплатно или войдите аккаунтом dewiar.pro.</p><button class="btn p w" id="rf-brain">Подключить</button></div>`;
+    $("#rf-brain").onclick = () => openSettings("brain"); return; }
+  if (refInfo) refDraw(); else box.innerHTML = `<p class="hint" style="text-align:center;margin:30px 0">Загружаю созвездие…</p>`;
+  try { refInfo = await cloudGet(cloudBase(), S.llm.api_key, "/ref"); } catch (e) { if (!refInfo) box.innerHTML = `<div class="card"><b>Не получилось</b><p class="hint" style="margin:4px 0 0">${esc(e.message)}</p></div>`; return; }
+  const rids = (refInfo.invited || []).map(x => x.rid).concat(refInfo.by ? [refInfo.by.rid] : []).filter(Boolean);
+  if (rids.length && syncCred()) { try { refMap = (await clReq("POST", "/close/refs", { rids })).map || {}; } catch (e) { } }
+  if ($("#rf-body")) { refDraw(); refFresh(refInfo); }
+}
+function refPeer(x) {                         // друг в «Близких» — его имя оттуда и pid; иначе — как назвал сервер
+  const m = (x && refMap[x.rid]) || {}, p = m.pid && clLoad().people.find(q => q.pid === m.pid);
+  return { pid: p ? p.pid : "", name: p ? p.name : x.name, offered: !!m.offered, devs: p ? (p.devs || []).length : 0 };
+}
+function refRow(x, key, sub) {
+  const q = refPeer(x), col = window.DewiarRefNet ? DewiarRefNet.color(x.name) : clCol(x.name);   // цвет — как у звезды в созвездии
+  const act = q.pid ? `<button class="ib soft" data-w="${esc(q.pid)}" title="Написать"><svg viewBox="0 0 24 24"><path d="M4 5.5h16v11H9l-5 4z"/></svg></button>`
+      + (q.devs && window.DewiarCall ? `<button class="ib soft" data-c="${esc(q.pid)}" title="Позвонить"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg></button>` : "")
+    : q.offered ? `<em class="rfw">ждём ответа</em>` : `<button class="btn rfo" data-o="${esc(x.rid)}">Позвать в Близкие</button>`;
+  return `<div class="rfp ${refSel === key ? "cur" : ""}" data-k="${key}"><i class="clava" style="--c:${col}">${esc((q.name || "?")[0].toUpperCase())}</i>
+    <span><b>${esc(q.name)}</b><small>${sub}</small></span>${act}</div>`;
+}
+function refDraw(calm) {
+  const d = refInfo, box = $("#rf-body"); if (!d || !box) return;
+  if (calm === undefined) calm = !!$("#rf-net .rn");              // уже нарисовано — звёзды не появляются заново
+  const list = d.invited || [];
+  const rules = (d.bonus > 0 ? `Вам +${talers(d.bonus)} тал. за каждого друга, который попользуется Dewiar ${d.days} дн.` : "Поделитесь Dewiar с друзьями.")
+    + (d.bonus_new > 0 ? ` Другу — +${talers(d.bonus_new)} тал. сразу.` : "");
+  box.innerHTML = `<div id="rf-net" class="rfnet"></div>
+    <div class="card rfinv"><div class="row2"><div style="flex:1;min-width:0"><small class="hint" style="margin:0">Ваш код</small><b class="rfcode">${esc(d.code)}</b></div>
+      <button class="btn p" id="rf-share">Пригласить</button><button class="ib soft" id="rf-copy" title="Скопировать ссылку"><svg viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></svg></button></div>
+      <p class="hint" style="margin:8px 0 0">${esc(rules)}</p></div>
+    ${d.by ? `<h3>Вас пригласил</h3>${refRow(d.by, "by", "с этого приглашения вы в Dewiar")}` : ""}
+    <h3>Приглашённые${list.length ? ` · ${list.length}` : ""}</h3>
+    ${list.length ? list.map((x, i) => refRow(x, i, (x.paid ? "засчитан ✓" : `пользуется ${+x.days || 0} из ${+x.need || 0} дн.`) + (x.sub ? ` · позвал ещё ${x.sub}` : ""))).join("")
+      : `<div class="card"><b>Пока никого</b><p class="hint" style="margin:4px 0 0">Нажмите «Пригласить» — ссылка с вашим кодом уйдёт в любой мессенджер. Каждый засчитанный друг — новая звезда.</p></div>`}
+    <p class="hint" style="margin:10px 4px">Переписываться и созваниваться можно с теми, кого пригласили вы, и с тем, кто пригласил вас, — когда оба согласны: «Позвать в Близкие».</p>
     ${d.can_use ? `<details class="more" style="margin:4px 2px 0"><summary>Есть код приглашения?</summary><div class="row2" style="margin-top:6px"><input id="ref-code" placeholder="6 знаков" autocapitalize="characters" style="flex:1;padding:12px 14px;border-radius:14px;border:0;background:var(--field)"><button class="btn p" id="ref-use">Ввести</button></div><div class="res" id="ref-res"></div></details>` : ""}`;
-  if (window.DewiarRefNet && $("#ref-net")) {                     // созвездие друзей; новая золотая звезда — звук «нашёл» и поздравление
-    const r = DewiarRefNet.render($("#ref-net"), d, { me: (S.user_name || "Вы").slice(0, 6), seenKey: "dw_refnet_seen" });
-    if (r.fresh) { try { scanChime(); } catch (e) { } toast(r.fresh === 1 ? "Ещё один друг засчитан — звезда загорелась!" : `Засчитано новых друзей: ${r.fresh}`, 3500); }
+  if (window.DewiarRefNet) {
+    const net = Object.assign({}, d, { invited: list.map(x => { const q = refPeer(x); return Object.assign({}, x, { label: q.name, close: q.pid }); }) });
+    DewiarRefNet.render($("#rf-net"), net, { big: true, calm, me: (S.user_name || "Вы").slice(0, 7), by: d.by ? refPeer(d.by).name : "", sel: refSel,
+      seenKey: "dw_refnet_seen_big", onPick: (i) => { refSel = refSel === i ? null : i; refDraw(true); const r = $(`.rfp[data-k="${i}"]`); if (r) r.scrollIntoView({ block: "nearest", behavior: "smooth" }); } });
   }
-  if ($("#ref-copy")) $("#ref-copy").onclick = () => { D.copy(d.link); toast("Ссылка скопирована"); };
+  $$(".rfp").forEach(r => r.onclick = (e) => { if (e.target.closest("button")) return; const k = r.dataset.k === "by" ? "by" : +r.dataset.k; refSel = refSel === k ? null : k; refDraw(true); });
+  $$(".rfp [data-w]").forEach(b => b.onclick = () => { clTab = "close"; clCur = b.dataset.w; clRender(); });
+  $$(".rfp [data-c]").forEach(b => b.onclick = () => clCall(b.dataset.c, false).catch(e => toast(e.message, 4000)));
+  $$(".rfp [data-o]").forEach(b => b.onclick = async () => { b.disabled = true;
+    try { clKeys(); if (!clLoad().me.pid) await clHello(); const r = await clReq("POST", "/close/ref", { rid: b.dataset.o });
+      if (r.person) { clPeople(r); refMap[b.dataset.o] = { pid: r.person.pid }; toast(`${r.person.name} — в ваших близких: можно писать и звонить`, 3500); }
+      else { refMap[b.dataset.o] = { offered: true }; toast("Позвали — когда друг согласится, он появится в «Близких»", 3500); }
+      refDraw(true); } catch (e) { b.disabled = false; toast(e.message, 4000); } });
+  $("#rf-share").onclick = () => refShare().catch(e => toast(e.message));
+  $("#rf-copy").onclick = () => { D.copy(d.link); toast("Ссылка скопирована"); };
   if ($("#ref-use")) $("#ref-use").onclick = async () => { const r = $("#ref-res"); r.className = "res"; r.textContent = "проверяю…";
-    try { const u = await refUse($("#ref-code").value); r.className = "res ok"; r.textContent = u.gift > 0 ? `Готово — вам +${talers(u.gift)} тал.` : "Готово — код принят."; cloudBalance(true).then(cloudFill).catch(() => { }); setTimeout(refLoad, 1500); }
+    try { const u = await refUse($("#ref-code").value); r.className = "res ok"; r.textContent = u.gift > 0 ? `Готово — вам +${talers(u.gift)} тал.` : "Готово — код принят."; cloudBalance(true).then(cloudFill).catch(() => { }); refInfo = null; setTimeout(refTab, 1500); }
     catch (e) { r.className = "res bad"; r.textContent = e.message; } };
 }
 const refShareText = (d) => `Попробуй Dewiar — помощницу Лиру для телефона и компьютера: слышит по имени, отвечает голосом, помнит и напоминает. ${d.link}\nКод приглашения: ${d.code}`;
@@ -4252,7 +4313,7 @@ async function clReq(method, path, body, query) {
   if (r.status >= 400) throw new Error((d.error && d.error.message) || ("облако ответило " + r.status));
   return d;
 }
-function clPeople(d) { const st = clLoad(); st.me = d.me || {}; st.people = d.people || []; clSave(); clBadge(); }
+function clPeople(d) { const st = clLoad(); st.me = d.me || {}; st.people = d.people || []; st.offers = d.offers || []; clSave(); clBadge(); }
 async function clHello() {
   const k = clKeys();
   clPeople(await clReq("POST", "/close/hello", { dev: k.dev, pub: k.pub, devname: (clInfo().device || "Телефон"), name: (S.close && S.close.name) || S.user_name || "" }));
@@ -4316,7 +4377,7 @@ async function clPoll() {
   clBusy = true;
   try {
     const st = clLoad(), k = clKeys();
-    if (!st.me.pid || Date.now() - (st.hello || 0) > 6 * 3600000) await clHello();
+    if (!st.me.pid || Date.now() - (st.hello || 0) > 3600000) await clHello();   // раз в час: новые близкие и «зовут в Близкие»
     const d = await clReq("GET", "/close/inbox", null, "&after=" + (+st.cursor || 0));
     let got = 0, refreshed = false;
     for (const it of d.items || []) {
@@ -4345,7 +4406,7 @@ function clTell(name, m) {
   if (!busy && state === "idle") { showBot(line); if (!(S.close && S.close.speak === false)) say(line); }
 }
 function clBadge() {
-  const st = clLoad(), n = Object.values(st.unread || {}).reduce((a, x) => a + (+x || 0), 0);
+  const st = clLoad(), n = Object.values(st.unread || {}).reduce((a, x) => a + (+x || 0), 0) + (st.offers || []).length;   // и «зовут в Близкие»
   const b = $("#b-close"); if (b) b.classList.toggle("has", n > 0);
 }
 /* фоновая проверка, пока приложение закрыто (CloseWatch.java): только если есть близкие; номер прочитанного — чтобы не
@@ -4506,10 +4567,23 @@ const clTime = (ts) => { const d = new Date(ts), now = new Date(), hm = pad(d.ge
 const CL_COL = ["#9BD4FF", "#FFB547", "#3DF5C8", "#FF7AB6", "#B78CFF", "#9BE15D", "#7C8CFF", "#FF6B5A"];
 const clCol = (pid) => CL_COL[[...String(pid)].reduce((a, c) => a + c.charCodeAt(0), 0) % CL_COL.length];
 const clKb = (n) => n > 1048576 ? (n / 1048576).toFixed(1).replace(".", ",") + " МБ" : Math.max(1, Math.round(n / 1024)) + " КБ";
+/* Вкладки листа «Близкие»: «Близкие» | «Рефералы». Зовут в «Близкие» из «Рефералов» (offers) — карточка с согласием. */
+let clTab = "close";
+function clTabs() { $$("#cl-tabs button").forEach(b => b.onclick = () => { clTab = b.dataset.t; clRender(); }); }
+const clOffers = (st) => (st.offers || []).map(o => `<div class="card clof"><b>${esc(o.name)} зовёт вас в «Близкие»</b>
+  <p class="hint" style="margin:4px 0 10px">Вы связаны приглашением в Dewiar. Согласитесь — и ваши помощники смогут передавать друг другу сообщения, можно будет созваниваться.</p>
+  <div class="row2"><button class="btn p" data-y="${esc(o.pid)}" style="flex:1">Принять</button><button class="btn" data-n="${esc(o.pid)}" style="flex:1">Не сейчас</button></div></div>`).join("");
+function clOfferBind() {
+  $$(".clof [data-y], .clof [data-n]").forEach(b => b.onclick = async () => { const pid = b.dataset.y || b.dataset.n, yes = !!b.dataset.y; b.disabled = true;
+    try { clKeys(); if (!clLoad().me.pid) await clHello(); const d = await clReq("POST", "/close/offer", { pid, yes }); clPeople(d);
+      if (yes && d.person) { toast(`${d.person.name} теперь в ваших близких`); clTab = "close"; clCur = d.person.pid; } clRender(); }
+    catch (e) { b.disabled = false; toast(e.message, 4000); } });
+}
+function openRefs() { clTab = "ref"; openClose(""); }
 function openClose(pid) { clCur = pid || ""; openSheet("#sh-close"); clRender(); if (syncCred()) clHello().then(() => clRender()).catch(() => { }); }
 function clRender() {
   const st = clLoad(), box = $("#close-body"), p = clCur && st.people.find(x => x.pid === clCur);
-  $("#cl-h").firstChild.textContent = p ? "" : "Близкие";
+  $("#cl-h").firstChild.textContent = p ? "" : clTab === "ref" ? "Рефералы" : "Близкие";
   $("#cl-inv").style.display = p ? "none" : "";
   if (!syncCred()) { box.innerHTML = `<div class="card"><b>Нужен Dewiar</b><p class="hint" style="margin:6px 0 10px">«Близкие» работают через облако Dewiar: подключите мозг бесплатно или войдите аккаунтом dewiar.pro.</p><button class="btn p w" id="cl-brain">Подключить</button></div>`;
     $("#cl-brain").onclick = () => openSettings("brain"); return; }
@@ -4537,8 +4611,10 @@ function clRender() {
     $("#cl-go").onclick = go;
     return;
   }
+  const tabs = `<div class="tabs" id="cl-tabs"><button data-t="close" class="${clTab === "close" ? "on" : ""}">Близкие</button><button data-t="ref" class="${clTab === "ref" ? "on" : ""}">Рефералы</button></div>`;
+  if (clTab === "ref") { if (!$("#rf-body")) { box.innerHTML = tabs + `<div id="rf-body"></div>`; clTabs(); } refTab(); return; }
   const inv = st.invite && Date.now() / 1000 < (st.invite.expires || 0) ? st.invite : null;
-  box.innerHTML = `<button class="btn w clscan" id="cl-scan"><svg viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></svg>Сканировать приглашение</button>
+  box.innerHTML = tabs + clOffers(st) + `<button class="btn w clscan" id="cl-scan"><svg viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></svg>Сканировать приглашение</button>
     <p class="hint" style="margin:0 4px 12px">Переписка между помощниками: скажите «напиши маме, что я задержусь» — у мамы её помощница прочитает это вслух. Сообщения шифруются на устройствах.</p>
     <div id="cl-invbox"></div>
     ${st.people.length ? st.people.map(x => `<button class="clp" data-pid="${esc(x.pid)}"><i class="clava" style="--c:${clCol(x.pid)}">${esc((x.name || "?")[0].toUpperCase())}</i>
@@ -4548,6 +4624,7 @@ function clRender() {
       <div class="sw" style="margin-top:10px"><div>Читать сообщения вслух<small>«Мама пишет: …»</small></div><label class="tg"><input type="checkbox" id="cl-speak" ${S.close && S.close.speak === false ? "" : "checked"}><i></i></label></div></div>
     <details class="more"><summary>Пришла ссылка-приглашение?</summary><div class="row2" style="margin-top:8px"><input id="cl-link" placeholder="вставьте ссылку" style="flex:1;padding:12px 14px;border-radius:14px;border:0;background:var(--field)"><button class="btn p" id="cl-link-go">Принять</button></div></details>`;
   $$(".clp").forEach(b => b.onclick = () => { clCur = b.dataset.pid; clRender(); });
+  clTabs(); clOfferBind();
   $("#cl-scan").onclick = () => scanCode();
   if (inv) clInvShow(inv);
   $("#cl-name").onchange = () => { S.close = Object.assign({}, S.close, { name: $("#cl-name").value.trim() }); saveS(); clHello().then(() => toast("Сохранено")).catch(e => toast(e.message)); };
@@ -4587,7 +4664,7 @@ async function clSaveFile(p, m, j) {
   } catch (e) { toast("Не скачался: " + e.message, 4000); }
 }
 $("#b-close").onclick = () => openClose("");
-$("#cl-inv").onclick = async () => { try { const d = await clInvite(false); clInvShow(d); } catch (e) { toast(e.message, 4000); } };
+$("#cl-inv").onclick = async () => { if (clTab === "ref") return refShare().catch(e => toast(e.message, 4000)); try { const d = await clInvite(false); clInvShow(d); } catch (e) { toast(e.message, 4000); } };
 document.addEventListener("visibilitychange", () => { if (!document.hidden && syncCred()) clPoll(); });
 setTimeout(() => { clLoad(); clBadge(); if (S.closePending && syncCred()) clAcceptLink(S.closePending); clPoll(); clSchedule(); }, 4000);
 

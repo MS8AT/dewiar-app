@@ -126,27 +126,17 @@ function dwRender() {
   const okN = cards.filter(k => ($("#dws-" + k).className || "").includes(" ok")).length, badN = cards.filter(k => ($("#dws-" + k).className || "").includes(" bad")).length;
   $("#dw-sum").textContent = DW.checked.at ? `Работает ${okN} из ${cards.length}` + (badN ? ` · требует внимания: ${badN}` : "") + ` · проверено в ${new Date(DW.checked.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` : "";
 }
-/* «Пригласить друзей» (core: ref_info / ref_use → cloud.php ?p=/ref): ссылка с кодом, кого пригласили, чужой код в первые дни */
+/* Карточка «Рефералы» — только код, сколько приглашено и дорога в раздел «Рефералы» (studio/refs.js) */
 const refTal = (x) => String(Math.round((+x || 0) * 100) / 100).replace(".", ",");
 async function dwRef() {
   let d;
-  try { d = await core.call("ref_info"); } catch (e) { $("#dw-ref-box").style.display = "none"; dwSet("ref", "", "нужен вход"); $("#dw-ref-text").textContent = "Поделитесь Dewiar — подарки талерами и вам, и другу. Сначала войдите аккаунтом или подключите ключ Dewiar."; return; }
-  $("#dw-ref-box").style.display = "";
-  $("#dw-ref-text").textContent = (d.bonus > 0 ? `Вам +${refTal(d.bonus)} тал. за каждого друга, который попользуется Dewiar ${d.days} дн.` : "Поделитесь Dewiar с друзьями.")
-    + (d.bonus_new > 0 ? ` Другу — +${refTal(d.bonus_new)} тал. сразу.` : "") + ` Ваш код — ${d.code}.`;
-  $("#dw-ref-link").textContent = d.link;
+  try { d = await core.call("ref_info"); } catch (e) { dwSet("ref", "", "нужен вход"); $("#dw-ref-text").textContent = "Поделитесь Dewiar — подарки талерами и вам, и другу. Сначала войдите аккаунтом или подключите ключ Dewiar."; return; }
   const list = d.invited || [];
-  if (window.DewiarRefNet) { const r = DewiarRefNet.render($("#dw-ref-net"), d, { me: "Вы", seenKey: "dw_refnet_seen" });
-    if (r.fresh) toast(r.fresh === 1 ? "Ещё один друг засчитан — звезда загорелась!" : `Засчитано новых друзей: ${r.fresh}`, 3500); }
   dwSet("ref", list.some(x => x.paid) ? "ok" : list.length ? "run" : "", list.length ? `приглашено ${list.length}` : "никого");
-  $("#dw-ref-list").innerHTML = list.length ? `<div class="dw-kv">${list.map(x => `<span>${escH(x.name)}</span><b style="font-weight:500">${x.paid ? "засчитано ✓" : `пользуется ${x.days} из ${x.need} дн.`}</b>`).join("")}</div>`
-    + (d.earned > 0 ? `<p class="hint" style="margin:0 0 6px">Получено: ${refTal(d.earned)} тал.</p>` : "") : "";
-  $("#dw-ref-use").style.display = d.can_use ? "" : "none";
-  $("#dw-ref-copy").onclick = () => { navigator.clipboard.writeText(`Попробуй Dewiar — помощницу Лиру для компьютера и телефона: ${d.link}\nКод приглашения: ${d.code}`).then(() => toast("Приглашение скопировано"), () => toast(d.link)); };
-  $("#dw-ref-go").onclick = async () => { const r = $("#dw-ref-res"); r.className = "res"; r.textContent = "проверяю…";
-    try { const u = await core.call("ref_use", { code: $("#dw-ref-code").value }); r.className = "res ok"; r.textContent = u.gift > 0 ? `Код принят — вам +${refTal(u.gift)} тал.` : "Код принят."; dwRef(); }
-    catch (e) { r.className = "res bad"; r.textContent = e.message; } };
+  $("#dw-ref-text").textContent = `Ваш код — ${d.code}.` + (list.length ? ` Приглашено ${list.length}, засчитано ${list.filter(x => x.paid).length}` + (d.earned > 0 ? `, получено ${refTal(d.earned)} тал.` : ".")
+    : d.bonus > 0 ? ` Вам +${refTal(d.bonus)} тал. за каждого друга, который попользуется Dewiar ${d.days} дн.` : "");
 }
+$("#dw-ref-open").onclick = () => $('nav button[data-p="ref"]').click();
 async function dwLoad(full) {
   dwRef();
   const tasks = [core.call("device").then(x => DW.dev = x), core.call("sync_status").then(x => DW.sync = x), core.call("cloud_status", { refresh: !!full }).then(x => DW.cloud = x), core.call("update_status").then(x => DW.upd = x)];
