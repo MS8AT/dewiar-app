@@ -435,8 +435,57 @@ public final class Bridge {
     }
 
     /** Снимок экрана приложения для жалобы разработчику (только своё окно — не другие приложения): JPEG в base64,
-     *  уменьшенный до ~1080 точек по длинной стороне; не вышло — "". Рисуется в главном потоке, ждём до 2 с. */
+     *  уменьшенный до ~1080 точек по длинной стороне; не вышло — "". Android 8+ — PixelCopy: то, что правда на экране
+     *  (отзыв 11.10: прежний снимок через View.draw не видел облик и слои с ускорением — жалоба приходила с пустым местом
+     *  вместо облика и полосой сверху). Старше или не вышло — как раньше, рисованием окна в главном потоке. */
     @JavascriptInterface public String snapshot() {
+        String px = pixelCopy();
+        return px.isEmpty() ? drawSnapshot() : px;
+    }
+
+    private String pixelCopy() {
+        if (Build.VERSION.SDK_INT < 26) return "";
+        android.os.HandlerThread ht = new android.os.HandlerThread("snap");
+        try {
+            final android.view.Window win = a.getWindow();
+            android.view.View v = win.getDecorView();
+            int w = v.getWidth(), h = v.getHeight();
+            if (w <= 0 || h <= 0) return "";
+            final android.graphics.Bitmap full = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+            final int[] res = { -1 };
+            final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+            Class<?> pc = Class.forName("android.view.PixelCopy");
+            Class<?> lis = Class.forName("android.view.PixelCopy$OnPixelCopyFinishedListener");
+            Object l = java.lang.reflect.Proxy.newProxyInstance(lis.getClassLoader(), new Class<?>[] { lis }, new java.lang.reflect.InvocationHandler() {
+                @Override public Object invoke(Object proxy, java.lang.reflect.Method m, Object[] args) {
+                    if ("onPixelCopyFinished".equals(m.getName()) && args != null && args.length > 0) { res[0] = (Integer) args[0]; done.countDown(); }
+                    return null;
+                }
+            });
+            ht.start();
+            pc.getMethod("request", android.view.Window.class, android.graphics.Bitmap.class, lis, android.os.Handler.class)
+                    .invoke(null, win, full, l, new android.os.Handler(ht.getLooper()));
+            if (!done.await(2, java.util.concurrent.TimeUnit.SECONDS) || res[0] != 0) { full.recycle(); return ""; }   // 0 — PixelCopy.SUCCESS
+            return jpeg(full);
+        } catch (Throwable e) {
+            return "";
+        } finally {
+            ht.quitSafely();
+        }
+    }
+
+    /** Картинка -> JPEG base64, не больше 1080 точек по длинной стороне; исходник освобождается. */
+    private static String jpeg(android.graphics.Bitmap src) {
+        float k = Math.min(1f, 1080f / Math.max(src.getWidth(), src.getHeight()));
+        android.graphics.Bitmap bm = k < 1f ? android.graphics.Bitmap.createScaledBitmap(src, Math.max(1, (int) (src.getWidth() * k)), Math.max(1, (int) (src.getHeight() * k)), true) : src;
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+        bm.compress(android.graphics.Bitmap.CompressFormat.JPEG, 78, o);
+        if (bm != src) bm.recycle();
+        src.recycle();
+        return android.util.Base64.encodeToString(o.toByteArray(), android.util.Base64.NO_WRAP);
+    }
+
+    private String drawSnapshot() {
         final String[] out = {""};
         final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
         a.runOnUiThread(new Runnable() { @Override public void run() {

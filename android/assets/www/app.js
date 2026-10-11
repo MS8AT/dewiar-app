@@ -449,7 +449,7 @@ async function reportSend(note, auto, summary, extra) {
   const c = syncCred(), base = (c ? c.base : CLOUD_URL).split("?")[0];
   const headers = { "Content-Type": "application/json" }; if (c) headers.Authorization = "Bearer " + c.token;
   const errLines = errs.filter(l => / ERROR /.test(l)).map(l => l.replace(/^\S+ ERROR /, ""));
-  const body = { kind: auto ? "auto" : "manual", app: "phone", version: info.version || "", os: "Android " + (info.android || ""), device: info.device || "",
+  const body = { kind: auto ? "auto" : "manual", app: "phone", version: info.version || "", os: "Android " + (info.android || "") + webviewVer(), device: info.device || "",
     summary: String(summary || errLines.slice(-3).join("; ") || "").slice(0, 500), note, text };
   if (extra && extra.shot) body.shot = extra.shot;                 // жалоба: снимок экрана и подпись автора
   if (extra && extra.who) body.who = extra.who;
@@ -517,7 +517,7 @@ async function pulseSend() {
   if (S.pulse === false) return false;
   let info = {}; try { info = JSON.parse(D.info() || "{}"); } catch (e) { }
   const h = hLoad();
-  const body = { dev: devId(), app: "phone", version: info.version || "", os: "Android " + (info.android || ""), hw: { device: info.device || "" },
+  const body = { dev: devId(), app: "phone", version: info.version || "", os: "Android " + (info.android || ""), hw: { device: info.device || "", webview: webviewVer().replace(/^ · /, "") },
     brain: brainKind(), uptime_h: Math.round((Date.now() - H_T0) / 36e4) / 10, starts: h.starts || [], turns: h.turns || 0, net_ok: h.net_ok || 0,
     net_fail: h.net_fail || 0, errors: h.errors || 0, rude: h.rude || 0, refused: h.refused || 0, problems: Object.entries(h.problems || {}).map(([sig, p]) => ({ sig, text: p.text, n: p.n })) };
   let r; try { r = await http("POST", healthBase() + "?p=/pulse", { headers: { "Content-Type": "application/json" }, body, timeout: 20000 }); }
@@ -846,6 +846,9 @@ function setState(s) {
 }
 let radioDucked = false;
 function toast(t, ms = 2200) { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("on"), ms); }
+/* Версия движка страниц (Android System WebView / Chrome): у части планшетов (Huawei без сервисов Google) он старый,
+   и новое оформление может выглядеть иначе — в жалобе и пульсе видно, какой. -> " · WebView 99" или "" */
+function webviewVer() { const m = /(?:Chrome|Chromium)\/(\d+)/.exec(navigator.userAgent || ""); return m ? " · WebView " + m[1] : ""; }
 function showYou(t) { $("#you").textContent = t ? "«" + t + "»" : ""; quietCheck(); }
 /* Длинный ответ (список, таблица, план) — в рамке: облик уменьшается, текст слева и мельче; когда ответ готов
    (frameAnswer) — разметка и кнопки «Копировать», «В заметки», «Скачать». Отзыв: длинный ответ налезал на облик и поле
