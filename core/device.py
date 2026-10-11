@@ -103,11 +103,37 @@ def light_plan(stt, tts, cloud_stt=False, account_stt=""):
 # кто больше всех занимает, pressure_text() — понятный совет. Для проверки: DEWIAR_FAKE_PRESSURE="свободно,всего,подкачка%".
 
 NAMES = {"chrome": "Chrome", "chromium": "Chromium", "chromium-browser": "Chromium", "msedge": "Edge", "firefox": "Firefox",
-         "isolated web co": "Firefox", "web content": "Firefox", "java": "Java", "milvus": "Milvus", "code": "VS Code",
+         "isolated web co": "Firefox", "web content": "Firefox", "java": "Java", "javaw": "Java", "milvus": "Milvus", "code": "VS Code",
          "telegram": "Telegram", "telegram-deskto": "Telegram", "slack": "Slack", "discord": "Discord", "zoom": "Zoom",
          "teams": "Teams", "ms-teams": "Teams", "docker": "Docker", "dockerd": "Docker", "containerd": "Docker",
          "postgres": "PostgreSQL", "mysqld": "MySQL", "ollama": "Ollama", "steam": "Steam", "obs": "OBS",
          "gnome-shell": "рабочий стол GNOME", "plasmashell": "рабочий стол KDE", "explorer": "Проводник"}
+
+
+# Java — это не одна программа: в её командной строке видно, какая (отзыв 11.10: «Java 1,7 ГБ — это наш Dewiar?» — нет,
+# Dewiar на Python; чаще это среда разработки, сборка Gradle, игра или сервер).
+JAVA_APPS = [(r"android-studio|android studio", "Android Studio"), (r"pycharm", "PyCharm"), (r"idea|intellij", "IntelliJ IDEA"),
+             (r"webstorm", "WebStorm"), (r"clion", "CLion"), (r"goland", "GoLand"), (r"rider", "Rider"), (r"datagrip", "DataGrip"),
+             (r"jetbrains-toolbox|toolbox", "JetBrains Toolbox"), (r"kotlin.*daemon|kotlincompiledaemon", "сборка Kotlin"),
+             (r"gradle", "сборка Gradle"), (r"maven|plexus-classworlds", "сборка Maven"), (r"minecraft|tlauncher|\.minecraft", "Minecraft"),
+             (r"elasticsearch", "Elasticsearch"), (r"opensearch", "OpenSearch"), (r"dbeaver", "DBeaver"), (r"eclipse", "Eclipse"),
+             (r"netbeans", "NetBeans"), (r"jenkins", "Jenkins"), (r"kafka", "Kafka"), (r"zookeeper", "ZooKeeper"),
+             (r"languagetool", "LanguageTool"), (r"libreoffice|soffice", "LibreOffice"), (r"freeplane|freemind", "Freeplane"),
+             (r"jdownloader", "JDownloader"), (r"burp", "Burp Suite"), (r"ghidra", "Ghidra"), (r"sonar", "SonarQube"), (r"tomcat|catalina", "Tomcat")]
+
+
+def java_name(cmdline):
+    """Командная строка процесса Java (байты с \\0 или текст) -> «Java (IntelliJ IDEA)», «Java (app.jar)» или «Java»."""
+    c = cmdline.decode("utf-8", "replace") if isinstance(cmdline, (bytes, bytearray)) else str(cmdline or "")
+    c = c.replace("\0", " ")
+    low = c.lower()
+    for rx, nm in JAVA_APPS:
+        if re.search(rx, low):
+            return f"Java ({nm})"
+    m = re.search(r"-jar\s+(\S+\.jar)", c)
+    if m:
+        return f"Java ({Path(m.group(1)).name})"
+    return "Java"
 
 
 def _nice(name):
@@ -176,6 +202,11 @@ def top_memory(n=3, skip=()):
                 if p.info["pid"] in skip or not p.info.get("memory_info"):
                     continue
                 k = _nice(p.info["name"])
+                if k in ("Java", "javaw"):
+                    try:
+                        k = java_name(" ".join(p.cmdline()))
+                    except Exception:  # noqa: BLE001
+                        k = "Java"
                 if k.lower().startswith("python"):
                     try:
                         k = "Dewiar" if "dewiar" in " ".join(p.cmdline()).lower() else k
@@ -196,6 +227,11 @@ def top_memory(n=3, skip=()):
             rss = re.search(r"^VmRSS:\s+(\d+)", txt, re.M)
             if nm and rss:
                 k = _nice(nm.group(1))
+                if k == "Java":                              # какая именно программа на Java
+                    try:
+                        k = java_name((d / "cmdline").read_bytes())
+                    except OSError:
+                        pass
                 if k.lower().startswith("python"):           # сам Dewiar — тоже Python: называем его по имени
                     try:
                         k = "Dewiar" if b"dewiar" in (d / "cmdline").read_bytes().lower() else k

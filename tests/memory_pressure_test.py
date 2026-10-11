@@ -127,5 +127,9 @@ ok(isinstance(e4.mem.get("dewiar"), dict) and e4.mem["dewiar"]["core"] > 0, f"с
 for k in ("DEWIAR_FAKE_PRESSURE", "DEWIAR_MEM_WAIT", "DEWIAR_MEM_EVERY"):
     os.environ.pop(k, None)
 
+# «Java 1,7 ГБ — это наш Dewiar?» (11.10) — нет: Dewiar на Python и так и называется; Java — по командной строке, какая именно
+got = [D.java_name(c) for c in (b"/usr/lib/jvm/bin/java\0-cp\0/home/u/.gradle/wrapper/gradle-launcher-8.5.jar\0org.gradle.launcher.daemon.bootstrap.GradleDaemon\0",
+                                b"/opt/idea-IC/jbr/bin/java\0com.intellij.idea.Main\0", b"java\0-jar\0/opt/x/server.jar\0", b"java\0Main\0")]
+ok(got == ["Java (сборка Gradle)", "Java (IntelliJ IDEA)", "Java (server.jar)", "Java"], f"Java в совете — с именем программы: {got}")
 print("\nИТОГ:", "всё хорошо" if not fails else f"ошибок {len(fails)}")
 sys.exit(1 if fails else 0)
