@@ -207,6 +207,7 @@ body.radio-on #state.idle { display: none; }      /* в покое вместо 
 .repask { padding: 12px 14px; border-radius: 16px; background: rgba(255, 180, 90, .12); box-shadow: inset 0 1px 0 rgba(255, 200, 120, .12); font-size: 14px; line-height: 1.45; }
 .repask small { display: block; margin-top: 6px; opacity: .7; font: 11.5px/1.4 monospace; }
 .repask .row2 { margin-top: 10px; }
+#cl-top { -webkit-user-select: text; user-select: text; } #cl-top a { color: var(--accent, #A5B4FC); overflow-wrap: anywhere; }   /* как пополнить — копируют реквизиты */
 .crash { white-space: pre-wrap; font: 11px/1.4 monospace; max-height: 30vh; overflow: auto; background: var(--field); padding: 10px; border-radius: 12px; -webkit-user-select: text; user-select: text; }
 
 /* Dewiar Облако: полоса заряда */

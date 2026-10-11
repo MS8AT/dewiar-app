@@ -45,6 +45,7 @@ ALARM_TITLE = "Dewiar — напоминание"
 ALARM_RADIUS = 26
 PROMPTER_TITLE = "Dewiar — суфлёр"
 PROMPTER_RADIUS = 24
+PROMPTER_BAR, PROMPTER_BTNS = 56, 180   # заголовок суфлёра (prompter.html, header): высота и место под кнопки справа
 STUDIO_TITLE = "Dewiar — студия"
 STUDIO_RADIUS = 12              # скругление углов студии (своя рамка в Linux)
 STUDIO_BAR = 38                 # высота своей полосы заголовка, px — как в settings.html
@@ -959,6 +960,45 @@ class Api:
                 if hasattr(win.events, ev):
                     getattr(win.events, ev).__iadd__(lambda *a, m=m: __import__("threading").Thread(target=remember, args=(m,), daemon=True).start())
 
+    # ---------- перетаскивание окна без рамки (Linux) ----------
+
+    @staticmethod
+    def _wm_drag(gw, zone):
+        """Нажали в zone(x, y, ширина) окна gw — двигает оконный менеджер (begin_move_drag), а не страница.
+        Перетаскивание силами pywebview (pywebview-drag-region) считает по screenX/screenY — при нескольких мониторах
+        (и разном масштабе) окно уезжало на другой экран и шло за мышью там (отзыв 11.10, Суфлёр на трёх мониторах).
+        Главный поток GTK; подключается один раз."""
+        from gi.repository import Gdk, Gtk
+        if gw is None or getattr(gw, "_dw_drag", False):
+            return
+        gw._dw_drag = True
+        view = [gw]
+        while not type(view[-1]).__name__ == "WebView" and isinstance(view[-1], Gtk.Bin) and view[-1].get_child():
+            view.append(view[-1].get_child())
+        wv, st = view[-1], {"press": None}
+
+        def on_press(_w, ev):
+            if ev.button == 1 and ev.type == Gdk.EventType.BUTTON_PRESS and zone(ev.x, ev.y, wv.get_allocated_width()):
+                st["press"] = (ev.x_root, ev.y_root)
+                return True
+            return False
+
+        def on_motion(_w, ev):
+            p0 = st.get("press")
+            if p0 and abs(ev.x_root - p0[0]) + abs(ev.y_root - p0[1]) > 3:
+                st["press"] = None
+                gw.begin_move_drag(1, int(ev.x_root), int(ev.y_root), ev.time)
+                return True
+            return False
+
+        def on_release(_w, ev):
+            st["press"] = None
+            return False
+
+        wv.connect("button-press-event", on_press)
+        wv.connect("motion-notify-event", on_motion)
+        wv.connect("button-release-event", on_release)
+
     # ---------- своя рамка студии (Linux) ----------
 
     def _studio_frame(self):
@@ -1269,6 +1309,8 @@ class Api:
                     gw.set_skip_taskbar_hint(False)
                     gw.realize()
                     shape_window(gw, "prompter", (w, h), PROMPTER_RADIUS)
+                    # заголовок (кроме кнопок справа) двигает оконный менеджер — верно на любом из мониторов
+                    self._wm_drag(gw, lambda px, py, ww: py < PROMPTER_BAR and px < ww - PROMPTER_BTNS)
                     gw.show_all()
                     if x is not None:
                         gw.get_window().move(x, y)

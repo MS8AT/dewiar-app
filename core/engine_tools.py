@@ -144,6 +144,23 @@ class ToolsMixin:
             raise RuntimeError((d.get("error") or {}).get("message") or f"сервер ответил {r.status_code}")
         return (d.get("results") or []) if kind == "search" else str(d.get("text") or "")
 
+    # ---------- общее для своих устройств (close.own_send, сквозное шифрование): ключ умного дома ----------
+    def own_snapshot(self):
+        h = self.home.share()
+        return {"home": h} if h else None
+
+    def own_apply(self, body):
+        h = (body or {}).get("home")
+        if isinstance(h, dict) and self.home.adopt(h.get("token"), h.get("at")):
+            self.emit("tools", tools=self.toolbox.catalog())
+
+    def own_share(self):
+        """Умный дом поменяли здесь — отправить своим устройствам (в фоне; нет связи — дойдёт со следующим изменением)."""
+        snap = self.own_snapshot()
+        if snap and self.credentials()[0]:
+            import threading
+            threading.Thread(target=self.close._own_quiet, args=(snap,), daemon=True).start()
+
     def device_name(self):
         from sync import default_device_name
         return default_device_name()

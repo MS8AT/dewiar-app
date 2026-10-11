@@ -339,7 +339,7 @@ const DEF = {
   // server — свой OpenAI-совместимый сервер (voice / voice_m), eleven — ElevenLabs своим ключом (el_*)
   tts: { engine: "system", url: "", key: "", model: "", voice: "", voice_m: "", rate: 1.0, sys_voice: "", sys_voice_m: "",
          el_key: "", el_model: "eleven_flash_v2_5", el_voice_f: "", el_voice_m: "" },
-  home: { token: "", client_id: "" },
+  home: { token: "", client_id: "", at: 0 },
   memory: [], onboarded: false, textMode: false,   // textMode — отвечать только текстом (значок динамика вверху)
   relations: {},                 // кто есть кто в контактах: {жена: {name, number}} — «позвони жене» (doCall, REL)
   report: { auto: null },        // отчёты разработчику при сбое: null — ещё не спрашивали
@@ -3076,7 +3076,7 @@ function renderSettings() {
         : `<p class="hint" style="margin:0 0 10px">Пишите и присылайте голосовые боту Dewiar в Telegram — ассистент ответит, даже когда телефон убран: поставит напоминание, запишет заметку, ответит голосом.</p><button class="btn p w" id="tg-go">Подключить Telegram</button>`}<div class="res" id="tg-res"></div></div>
       <h3>Умный дом Яндекса</h3><div class="card">${S.home.token ? `<div class="row2"><span class="res ok" style="flex:1" id="home-st">Подключён</span><button class="btn" id="home-off">Отключить</button></div>` :
       `<p class="hint" style="margin-top:0">Тот же дом, что у Алисы: «включи свет в спальне», «кондиционер на 22».</p>
-      <p class="hint">Уже подключён на компьютере? Студия → «Подключение» → «Умный дом Яндекса» → «На телефон» — и скажите здесь «отсканируй код».</p>
+      <p class="hint">Уже подключён на компьютере? Если телефон с ним связан (один аккаунт или «Добавить устройство»), дом появится здесь сам в течение нескольких минут. Иначе: студия → «Подключение» → «Умный дом Яндекса» → «На телефон» — и скажите здесь «отсканируй код».</p>
       <p class="hint"><b>1.</b> «Получить ключ» → войдите в Яндекс тем же аккаунтом, что в «Доме с Алисой» → «Разрешить».<br><b>2.</b> Скопируйте ключ, который покажет Яндекс (начинается с y0_), и вставьте сюда.</p>
       <button class="btn w" id="home-auth" style="margin-bottom:10px">Получить ключ</button>
       <label class="f"><span>Ключ от Яндекса</span><input id="home-tok" type="password" placeholder="y0_…"></label><button class="btn p w" id="home-go">Подключить</button>`}<div class="res" id="home-res"></div></div>
@@ -3206,11 +3206,11 @@ function wireSettings(info) {
       if (/^[0-9a-f]{32}$/i.test(tok)) { r.className = "res bad"; r.textContent = "Это ClientID приложения, а не ключ. Нажмите «Получить ключ» → «Разрешить» — Яндекс покажет ключ (начинается с y0_)"; return; }
       if (tok.length < 20) { r.className = "res bad"; r.textContent = tok ? "Это не похоже на ключ — скопируйте его целиком (начинается с y0_)" : "Сначала «Получить ключ» — Яндекс покажет ключ, вставьте его сюда"; return; }
       const old = S.home.token; S.home.token = tok; r.className = "res"; r.textContent = "проверяю…";
-      try { const i = await homeGet(true); saveS(); r.className = "res ok"; r.textContent = `Готово: устройств ${i.devices.length}, сценариев ${i.scenarios.length}. Скажите «включи свет».`; setTimeout(renderSettings, 1800); }
+      try { const i = await homeGet(true); homeSet(tok); r.className = "res ok"; r.textContent = `Готово: устройств ${i.devices.length}, сценариев ${i.scenarios.length}. Скажите «включи свет».`; setTimeout(renderSettings, 1800); }
       catch (e) { S.home.token = old; r.className = "res bad"; r.textContent = e.message; } };
     if (g("home-auth")) g("home-auth").onclick = () => D.openUrl("https://oauth.yandex.ru/authorize?response_type=token&client_id=" + ((S.home.client_id || "").trim() || YANDEX_CID));
     if (g("home-off")) { homeGet().then(i => g("home-st") && (g("home-st").textContent = `Подключён: устройств ${i.devices.length}`)).catch(e => g("home-st") && (g("home-st").textContent = e.message));
-      g("home-off").onclick = () => { S.home.token = ""; homeInfo = null; saveS(); renderSettings(); }; }
+      g("home-off").onclick = () => { homeSet(""); renderSettings(); }; }
     wireHands();
     if (g("tg-go")) g("tg-go").onclick = async () => { const b = g("tg-go"), r = g("tg-res"); b.disabled = true; r.className = "res"; r.textContent = "готовлю ссылку…";
       try { await tgLink(r); toast("Telegram подключён"); renderSettings(); } catch (e) { r.className = "res bad"; r.textContent = e.message; b.disabled = false; } };
@@ -3574,7 +3574,12 @@ function clReqs(list) {
   const el = $("#cl-reqs"); if (!el) return;
   el.innerHTML = (list || []).map(r => `<div class="rqi ${esc(r.status)}"><span>${new Date(r.ts * 1000).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}${r.amount ? " · " + (+r.amount || 0) + " тал." : ""}${r.reply ? " · «" + esc(r.reply) + "»" : ""}</span><b>${RQ[r.status] || esc(r.status)}${r.status === "done" ? " +" + (+r.credited || 0) : ""}</b></div>`).join("");
 }
-async function clPayLoad() { try { const r = await cloudGet(cloudBase(), S.llm.api_key, "/topup"); $("#cl-top").textContent = r.text || ""; clReqs(r.requests); } catch (e) { $("#cl-top").textContent = e.message; } }
+async function clPayLoad() {
+  try { const r = await cloudGet(cloudBase(), S.llm.api_key, "/topup"), el = $("#cl-top");      // как пополнить: выделяется, ссылки открываются
+    el.innerHTML = esc(r.text || "").replace(/(https?:\/\/[^\s<>"]+[^\s<>".,;:!?)»])/g, '<a href="#" data-ext="$1">$1</a>');
+    $$("#cl-top a[data-ext]").forEach(x => x.onclick = (e) => { e.preventDefault(); D.openUrl(x.dataset.ext); }); clReqs(r.requests); }
+  catch (e) { $("#cl-top").textContent = e.message; }
+}
 async function cloudUsage() {
   try {
     const u = await cloudGet(cloudBase(), S.llm.api_key, "/usage"), days = u.days || [], mx = Math.max(1, ...days.map(d => d.answers));
@@ -4264,11 +4269,11 @@ function handleIntent(e) {
       const m = JSON.parse(decodeURIComponent(escape(atob(c))));
       if (!m.llm && m.home && m.home.token) {                                      // только умный дом с компьютера
         if (!confirm("Подключить на телефоне умный дом Яндекса — тот же, что на компьютере? Мозг и голос телефона не изменятся.")) return;
-        S.home.token = String(m.home.token); saveS(); homeInfo = null;
+        homeSet(String(m.home.token));
         showBot("Готово — умный дом подключён. Скажите: «включи свет в спальне»."); say("Готово! Умный дом подключён."); return;
       }
       if (!cfgAsk(m)) return;
-      applyConfig(m, ""); if (m.home && m.home.token) { S.home.token = m.home.token; saveS(); }
+      applyConfig(m, ""); if (m.home && m.home.token) homeSet(String(m.home.token));
       showBot(`Готово — настройки с компьютера перенесены. Мозг: ${brainName()}. Нажмите микрофон и спросите что-нибудь.`); say("Готово! Настройки перенесены.");
     } catch (x) { showBot("Код с настройками не подошёл: " + x.message, "err"); }
   }
@@ -4313,7 +4318,34 @@ async function clReq(method, path, body, query) {
   if (r.status >= 400) throw new Error((d.error && d.error.message) || ("облако ответило " + r.status));
   return d;
 }
-function clPeople(d) { const st = clLoad(); st.me = d.me || {}; st.people = d.people || []; st.offers = d.offers || []; clSave(); clBadge(); }
+function clPeople(d) {
+  const st = clLoad(); st.me = d.me || {}; st.people = d.people || []; st.offers = d.offers || [];
+  const k = clKeys(), mine = (st.me.devs || []).map(x => x.dev).filter(x => x && x !== k.dev).sort(), fresh = mine.some(x => !(st.ownDevs || []).includes(x));
+  st.ownDevs = mine; clSave(); clBadge();
+  if (fresh) setTimeout(() => ownShare(!(S.home.at || S.home.token)).catch(() => { }), 0);   // ещё одно своё устройство — передать ему дом (или попросить)
+}
+/* Общее своих устройств, которое не должно лежать на сервере открытым, — ключ умного дома Яндекса. Настроили (или
+   отключили) здесь — уходит конвертом на свои устройства (cloud.php ?p=/close/self), зашифрованным их ключами, как
+   сообщения «Близких»; там берётся, если поменяли позже (at). Компьютер делает то же (core/close.py own_send). */
+function homeSet(tok) { S.home.token = tok; S.home.at = Date.now(); homeInfo = null; saveS(); ownShare().catch(e => plog("info", "умный дом на свои устройства: " + e.message)); }
+async function ownShare(want) {
+  const at = +S.home.at || (S.home.token ? 1 : 0);                 // подключили до 0.6.10 — «давно»: свежее с компьютера важнее
+  if (!syncCred() || !DC() || (!at && !want)) return false;
+  const k = clKeys(); if (!clLoad().me.pid || Date.now() - (CLS.hello || 0) > 600000) await clHello();
+  const t = {}; ((CLS.me || {}).devs || []).forEach(d => { if (d.pub && d.dev && d.dev !== k.dev) t[d.dev] = DC().b64d(d.pub); });
+  if (!Object.keys(t).length) return false;                         // других своих устройств пока нет
+  t[k.dev] = DC().b64d(k.pub);
+  const env = DC().encryptFor(Object.assign(at ? { home: { token: S.home.token || "", at } } : { want: ["home"] }, { ts: Date.now() }), DC().b64d(k.priv), k.dev, t);
+  await clReq("POST", "/close/self", { env }); return true;
+}
+function ownApply(body) {
+  if (body && body.want && (S.home.at || S.home.token)) setTimeout(() => ownShare().catch(() => { }), 0);   // другое моё устройство просит
+  const h = body && body.home; if (!h || typeof h !== "object") return;
+  const tok = String(h.token || ""), at = +h.at || 0;
+  if (at <= (+S.home.at || 0) || (tok && !/^[\w.-]{20,}$/.test(tok)) || tok === (S.home.token || "")) return;
+  S.home.token = tok; S.home.at = at; homeInfo = null; saveS();
+  plog("info", "🏠 умный дом Яндекса " + (tok ? "подключён" : "отключён") + " с другого своего устройства");
+}
 async function clHello() {
   const k = clKeys();
   clPeople(await clReq("POST", "/close/hello", { dev: k.dev, pub: k.pub, devname: (clInfo().device || "Телефон"), name: (S.close && S.close.name) || S.user_name || "" }));
@@ -4387,6 +4419,7 @@ async function clPoll() {
       if (!pub) continue;
       let body; try { body = DC().decryptFrom(env, DC().b64d(k.priv), k.dev, pub); } catch (e) { plog("warn", "близкие: не открылось — " + e.message); continue; }
       if (it.kind === "sig") { try { clSig(it.peer, it.name, body.s || {}); } catch (e) { } continue; }
+      if (it.kind === "own") { if (it.out && env.fd !== k.dev) ownApply(body); continue; }   // от своего же устройства
       const m = { mid: body.mid || String(it.id), ts: +body.ts || it.ts * 1000, out: !!it.out, t: String(body.t || "").slice(0, 20000), f: (body.f || []).filter(x => x && typeof x === "object").slice(0, 10) };
       if (!clAdd(it.peer, m) || m.out) continue;
       got++;

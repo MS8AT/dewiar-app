@@ -256,7 +256,7 @@ function cloudFill(c) {
       : `Общий счёт с сайтом dewiar.pro: на нём ${bal}` + (c.turns ? ` — примерно на ${c.turns.toLocaleString("ru-RU")} ${turnsWord(c.turns)}` : ""))
     : c.frozen ? "Ключ приостановлен — напишите администратору." : c.empty ? "Заряд закончился — пополните, и ассистент снова будет отвечать."
     : `Хватит примерно на ${c.turns.toLocaleString("ru-RU")} ${turnsWord(c.turns)}` + (c.low ? " — скоро понадобится пополнить" : "");
-  $("#cc-topup").textContent = c.topup || "";
+  topupText(c.topup || "");
   $("#cc-use").style.display = c.active ? "none" : "";
   // по аккаунту ключа нет — «Убрать ключ» только у своего ключа dw-
   $("#cc-off").style.display = c.account || c.site ? "none" : "";
@@ -278,7 +278,14 @@ function cpList(reqs) {
   $("#cp-list").innerHTML = (reqs || []).map(r => `<div class="rqi ${r.status}"><span>${new Date(r.ts * 1000).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
     ${r.amount ? " · " + r.amount + " тал." : ""}${r.reply ? " · «" + escH(r.reply) + "»" : ""}</span><b>${RQ[r.status] || r.status}${r.status === "done" ? " +" + r.credited : ""}</b></div>`).join("");
 }
-async function cpLoad() { try { const r = await core.call("cloud_topup"); $("#cc-topup").textContent = r.text || ""; cpList(r.requests); } catch (e) { $("#cc-topup").textContent = e.message; } }
+async function cpLoad() { try { const r = await core.call("cloud_topup"); topupText(r.text || ""); cpList(r.requests); } catch (e) { $("#cc-topup").textContent = e.message; } }
+/* Как пополнить (текст администратора): выделяется и копируется, ссылки открываются в браузере (отзыв 11.10: «нельзя
+   выделить, ссылка на донаты не нажимается»). pywebview по умолчанию запрещает выделение — здесь оно включено (CSS). */
+function topupText(t) {
+  const el = $("#cc-topup");
+  el.innerHTML = escH(t).replace(/(https?:\/\/[^\s<>"]+[^\s<>".,;:!?)»])/g, '<a href="#" data-ext="$1">$1</a>');
+  $$("a[data-ext]", el).forEach(a => a.onclick = (e) => { e.preventDefault(); openExt(a.dataset.ext); });
+}
 function cpSet(file) {
   if (!file || !/^image\//.test(file.type)) return;
   if (file.size > 6 * 1024 * 1024) { toast("Снимок больше 6 МБ — сохраните его поменьше"); return; }

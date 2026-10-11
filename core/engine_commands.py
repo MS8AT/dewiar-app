@@ -223,8 +223,10 @@ class CommandsMixin:
                         self.s.update({"smarthome": {"client_id": tok.lower()}})
                         return dict(self.home.public(), client_saved=True)
                     r = self.home.connect(tok)
+                    self.own_share()                # и на телефоне Лира сможет — ключ уходит зашифрованным
                 elif cmd == "home_forget":
                     r = self.home.forget()
+                    self.own_share()
                 elif cmd == "home_refresh":
                     self.home.info(force=True)
                     r = self.home.public()

@@ -159,7 +159,7 @@ class Home:
             raise HomeError("это не похоже на ключ — Яндекс показывает его после «Разрешить»: длинная строка, начинается с y0_. "
                             "Скопируйте её целиком")
         old = dict(self.data)
-        self.data = {"token": token}
+        self.data = {"token": token, "at": int(time.time() * 1000)}   # at — когда поменяли: свои устройства берут более позднее
         try:
             info = self.info(force=True)
         except HomeError:
@@ -170,12 +170,26 @@ class Home:
         return self.public()
 
     def forget(self):
-        self.data, self._info = {}, None
-        try:
-            self.path.unlink()
-        except OSError:
-            pass
+        self.data, self._info = {"at": int(time.time() * 1000)}, None   # «отключили тогда-то» — чтобы и телефон отключился
+        self._save()
         return self.public()
+
+    def adopt(self, token, at):
+        """Ключ (или отключение — пустой) с другого своего устройства; берём, только если там поменяли позже. -> взяли ли."""
+        token, at = str(token or "").strip(), int(at or 0)
+        if at <= int(self.data.get("at") or 0) or (token and not re.fullmatch(r"[\w.-]{20,}", token)) or token == self.data.get("token", ""):
+            return False
+        with self._lock:
+            self.data, self._info = ({"token": token, "at": at} if token else {"at": at}), None
+            self._save()
+        log.info("🏠 Умный дом Яндекса: %s с другого своего устройства", "подключён" if token else "отключён")
+        return True
+
+    def share(self):
+        """Что передать своим устройствам: {token, at} — подключён или отключён; None — ни разу не настраивали."""
+        if not self.data.get("at") and not self.data.get("token"):
+            return None
+        return {"token": self.data.get("token", ""), "at": int(self.data.get("at") or 1)}   # подключили до 0.38.10 — «давно»
 
     def public(self):
         """Для студии: комнаты, устройства, сценарии и адрес входа в Яндекс; сам ключ не отдаётся."""

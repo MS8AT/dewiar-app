@@ -190,8 +190,14 @@ class Close:
             self.st["me"] = d.get("me") or {}
             self.st["people"] = d.get("people") or []
             self.st["offers"] = d.get("offers") or []   # «… зовёт вас в «Близкие»» (из «Рефералов») — ждут ответа
+            mine = sorted({x.get("dev") for x in (self.st["me"].get("devs") or []) if x.get("dev") and x.get("dev") != self.st.get("dev")})
+            new = set(mine) - set(self.st.get("own_devs") or [])
+            self.st["own_devs"] = mine
             self._save()
         self.host.emit("close", state=self.state())
+        if new:                                         # появилось ещё одно своё устройство — передать ему общее (умный дом)
+            snap = getattr(self.host, "own_snapshot", lambda: None)()   # а у самого нет — попросить у своих
+            threading.Thread(target=self._own_quiet, args=(snap or {"want": ["home"]},), daemon=True).start()
 
     def hello(self):
         """Представиться серверу: открытый ключ этого устройства и имя для близких. -> состояние."""
@@ -245,6 +251,28 @@ class Close:
         self._people(d)
         self.soon.set()
         return d.get("person") or {}
+
+    # ---------- свои устройства: общее, что не должно лежать на сервере открытым (ключ умного дома) ----------
+    def own_send(self, body):
+        """Конверт всем своим устройствам (тот же аккаунт или связанный ключ). Шифруется их открытыми ключами — сервер
+        видит только шифротекст. Приходит им в ящик как kind «own» -> host.own_apply(body)."""
+        priv, pub = self._keys()
+        if not self.st.get("me") or time.time() - float(self.st.get("hello_at") or 0) > 600:
+            self.hello()
+        targets = {d["dev"]: CC.b64d(d["pub"]) for d in (self.st.get("me") or {}).get("devs") or [] if d.get("pub") and d.get("dev")}
+        targets.pop(self.st["dev"], None)
+        if not targets:
+            return False                                # других своих устройств пока нет
+        targets[self.st["dev"]] = CC.b64d(pub)          # и себе — своё эхо из ящика откроется и будет пропущено
+        env = CC.encrypt_for(dict(body, ts=int(time.time() * 1000)), priv, self.st["dev"], targets)
+        self._req("POST", "/close/self", {"env": env})
+        return True
+
+    def _own_quiet(self, body):
+        try:
+            self.own_send(body)
+        except Exception as e:  # noqa: BLE001 — нет связи: дойдёт со следующим изменением или новым устройством
+            log.info("свои устройства: не отправилось: %s", e)
 
     # ---------- «Рефералы»: свой первый уровень — в «Близкие» с согласия ----------
     def ref_map(self, rids):
@@ -383,6 +411,16 @@ class Close:
             return 0, refreshed
         if it.get("kind") == "sig":
             self._sig(peer, it.get("name", ""), body)
+            return 0, refreshed
+        if it.get("kind") == "own":                     # от своего же устройства (ключ шифрования — из моих устройств)
+            if it.get("out") and env.get("fd") != self.st["dev"]:
+                try:
+                    getattr(self.host, "own_apply", lambda b: None)(body)
+                    snap = body.get("want") and getattr(self.host, "own_snapshot", lambda: None)()
+                    if snap:                            # другое моё устройство просит — отдаём, что есть
+                        threading.Thread(target=self._own_quiet, args=(snap,), daemon=True).start()
+                except Exception:  # noqa: BLE001
+                    log.exception("свои устройства: не применилось")
             return 0, refreshed
         item = {"mid": body.get("mid") or str(it.get("id")), "ts": _int(body.get("ts")) or _int(it.get("ts")) * 1000, "out": bool(it.get("out")),
                 "t": str(body.get("t") or "")[:20000], "f": [x for x in body.get("f") or [] if isinstance(x, dict)][:10]}

@@ -274,13 +274,22 @@ section.wide > .lead { max-width: 860px; }
 .tq { background: rgba(184,134,11,.18); border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 14px; }
-.wz { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.wtile { text-align: left; border: 0; border-radius: 18px; background: var(--glass); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: var(--ink); padding: 16px 16px 14px; cursor: pointer; font: inherit; display: flex; flex-direction: column; gap: 6px; transition: background .2s, transform .2s, box-shadow .2s; }
-.wtile:hover { background: var(--frost-hi); transform: translateY(-2px); }
-.wtile.cur { background: rgba(255,255,255,.17); }
-.wtile svg { width: 26px; height: 26px; fill: none; stroke: #fff; opacity: .92; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.wtile.easy { background: linear-gradient(135deg, rgba(124,92,255,.34), rgba(255,122,198,.22)); box-shadow: 0 12px 30px -18px rgba(124,92,255,.9); }
-.wtile b { font-size: 14.5px; } .wtile span { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+/* Плитки «где думать» («Мозг»): ровная сетка во всю ширину карточки. Без размытия и «сцены» под плиткой и без
+   сдвига при наведении — на Linux отрисовка программная, и стекло с размытием подтормаживало на каждом наведении
+   (отзыв 11.10); наведение — только цвет фона, коротко. Рекомендуемая — тише: тон и значок в цвете акцента. */
+.wz { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.wtile { text-align: left; border: 0; border-radius: 18px; background: rgba(255,255,255,.055); color: var(--ink); padding: 16px 16px 15px; cursor: pointer;
+  font: inherit; display: flex; flex-direction: column; gap: 4px; transition: background-color .12s ease-out; }
+.wtile:hover { background: rgba(255,255,255,.09); }
+.wtile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wtile.cur { background: rgba(255,255,255,.13); }
+.wtile svg { width: 34px; height: 34px; padding: 7px; margin-bottom: 8px; border-radius: 11px; background: rgba(255,255,255,.07); fill: none; stroke: #fff;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.wtile.easy { background: rgba(139,140,247,.15); }
+.wtile.easy:hover { background: rgba(139,140,247,.21); }
+.wtile.easy.cur { background: rgba(139,140,247,.27); }
+.wtile.easy svg { background: var(--brand); }
+.wtile b { font-size: 14.5px; line-height: 1.3; } .wtile span { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
 .sclist { margin-top: 12px; display: grid; gap: 6px; } .sclist:empty { display: none; }
 .scit { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,.05); }
 .scit i { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 12px; font-weight: 700; margin-top: 1px;
@@ -300,6 +309,9 @@ section.wide > .lead { max-width: 860px; }
 .cc-f { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
 .cc-act { display: flex; gap: 6px; flex-wrap: wrap; }
 .cc-pay { margin-top: 14px; padding: 14px 16px; border-radius: 16px; background: rgba(255,255,255,.05); }
+/* pywebview запрещает выделение на всей странице (body) — текст, который копируют, выделяется */
+#cc-topup, .cl-m .tx, .dw-path, .seltext { -webkit-user-select: text; user-select: text; cursor: text; }
+#cc-topup a { color: var(--accent); cursor: pointer; overflow-wrap: anywhere; }
 .cp-shot { margin-top: 10px; min-height: 64px; border-radius: 14px; background: rgba(0,0,0,.22); display: flex; align-items: center; justify-content: center;
   gap: 12px; padding: 10px; cursor: pointer; color: var(--muted); font-size: 13px; outline: none; transition: background .2s; }
 .cp-shot:hover, .cp-shot:focus { background: rgba(0,0,0,.32); } .cp-shot img { max-height: 120px; max-width: 220px; border-radius: 10px; display: none; }
