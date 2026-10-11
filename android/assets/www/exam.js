@@ -55,6 +55,9 @@ const EXAM_PHONE = [
   { id: "thanks", group: "Разговор", title: "На «спасибо» — коротко и вежливо",
     steps: ["Сколько будет 15 процентов от 2400?", "Спасибо!"], expect: { any: ["пожалуйста", "обращайтесь"] },
     judge: "На первый вопрос — 360. На «Спасибо!» ответил коротко и вежливо, не начал новую тему и не промолчал." },
+  { id: "stop_misheard", group: "Разговор", title: "«Стоп», распознанный с ошибкой, — всё равно стоп",
+    steps: ["Ctop.", "Сстоп!", "Паузу."], expect: { any: ["хорошо", "пауза"], none: ["слушаю"] },
+    judge: "На «стоп», распознанное с ошибкой («Ctop», «Сстоп», «Паузу»), коротко замолчал («Хорошо.»), не продолжил разговор и не ответил «слушаю»." },
   { id: "list_inline", group: "Разговор", title: "Список — прямо в ответе",
     steps: ["Составь список из пяти идей подарка для мамы на день рождения."],
     expect: { regex: "(?:^|\\n)\\s*(?:[-*•]|\\d+[.)])\\s+\\S[\\s\\S]*(?:\\n\\s*(?:[-*•]|\\d+[.)])\\s+\\S[\\s\\S]*){4}" },
@@ -113,7 +116,7 @@ const EXAM_PHONE = [
   { id: "notes_find", group: "Заметки", title: "Отвечает по своим заметкам", seed: { notes: EXAM_SEED_NOTES },
     steps: ["Что я записывал про ремонт?"], expect: { any: ["обои"] },
     judge: "Нашёл заметку про ремонт и пересказал её: обои в спальню, краска для кухни. «Ничего не нашла» или выдумки — 0 баллов." },
-  { id: "reminders_show", group: "Заметки", title: "«Какие у меня напоминания» — а они есть", seed: { alarms: [{ title: "позвонить маме", in_h: 20 }] },
+  { id: "reminders_show", group: "Заметки", title: "«Какие у меня напоминания» — а они есть", seed: { alarms: [{ title: "позвонить маме", in_h: 0.2 }] },
     steps: ["Какие у меня напоминания?"], expect: { any: ["мам"], none: ["напоминаний нет", "нет напоминаний", "чистый лист", "ничего не запланировано"] },
     judge: "Назвал напоминание «позвонить маме» и когда оно. Сказать, что напоминаний нет, — 0 баллов." },
   { id: "note_photo", group: "Заметки", title: "Фото к заметке — в заметке", steps: [{ say: "Сохрани в заметки: чек за краску для кухни", image: true }],
@@ -123,6 +126,15 @@ const EXAM_PHONE = [
     steps: ["Запиши в заметки: Лира не открывает сканер, при этом говорит что открыла сканер, надо проверить на телефоне после обновления"],
     note: { any: ["сканер"] }, expect: { none: ["…"] },
     judge: "Записал всю фразу в заметки и коротко подтвердил («Записала в заметки»), без обрезанного пересказа с многоточием." },
+  { id: "close_call_voice", group: "Близкие", title: "«Набери Мише Исаеву» — сначала близкие, через Dewiar", seed: { close: ["Миша Исаев", "Людмила Исаева"] },
+    steps: ["Набери Мише Исаеву"], tool: { close_call: {} },
+    judge: "Миша Исаев есть в «Близких» — позвонил через Dewiar (close_call), а не искал в контактах телефона и мессенджерах." },
+  { id: "close_video_voice", group: "Близкие", title: "Видеозвонок Люде — понимает и форму имени", seed: { close: ["Миша Исаев", "Людмила Исаева"] },
+    steps: ["Позвони Люде Исаевой по видео"], tool: { close_call: { video: true } },
+    judge: "Людмила Исаева есть в «Близких» («Люде» — она): видеозвонок через Dewiar (close_call, video)." },
+  { id: "close_msg_voice", group: "Близкие", title: "«Отправь Людмиле Исаевой — привет» — через Dewiar", seed: { close: ["Миша Исаев", "Людмила Исаева"] },
+    steps: ["Отправь Исаевой Людмиле - привет, как дела!"], tool: { close_send: {} },
+    judge: "Отправил сообщение близкой через Dewiar (close_send) с текстом «привет, как дела» и коротко подтвердил. Мессенджеры и SMS — 0 баллов." },
   { id: "scanner_open", group: "Телефон", title: "«Лира, открой сканер» — правда открывает",
     steps: ["Лира, открой сканер"], tool: { scan_code: {} },
     judge: "Открыл сканер (scan_code) и попросил навести камеру на код. Сказать «открыла», не открыв, — 0 баллов." },
@@ -131,7 +143,7 @@ const EXAM_PHONE = [
 let EXAM = null;
 // действия, которые трогают телефон, — в экзамене только записываются
 // (будильник ставит addAlarm, фонарик и громкость — devTorch/devVolume: они сами пишут в песочницу)
-const EXAM_FAKE = new Set(["list_reminders", "cancel_reminder", "call", "send_sms", "send_message", "open_app", "open_url",
+const EXAM_FAKE = new Set(["close_call", "close_send", "list_reminders", "cancel_reminder", "call", "send_sms", "send_message", "open_app", "open_url",
   "play_radio", "radio_control", "take_photo", "show_photo", "make_app", "open_made", "start_task", "smart_home"]);
 
 function examFill(t) {
@@ -168,6 +180,8 @@ function examFakeTool(name, a) {
     case "open_made": return "Открыто.";
     case "start_task": return "Задача передана компьютеру.";
     case "smart_home": return "Готово.";
+    case "close_call": return `Звоню через Dewiar: ${a.to || ""}.`;
+    case "close_send": return `Отправлено ${a.to || ""}.`;
   }
   return "Готово.";
 }
@@ -179,7 +193,11 @@ addAlarm = function (title, at, kind, repeat) {                 // eslint-disabl
   EXAM.alarms.push(x);
   return x;
 };
-doCall = async function (who) { return EXAM ? { ok: true, text: examFakeTool("call", { who }) } : _examDoCall(who); };   // eslint-disable-line no-global-assign
+doCall = async function (who) {                         // eslint-disable-line no-global-assign
+  if (!EXAM) return _examDoCall(who);
+  const c = await closeCallFirst(String(who || "").replace(/^(мне|пожалуйста)\s+/, "").trim());   // близкий — через Dewiar (clCall отмечается)
+  return c || { ok: true, text: examFakeTool("call", { who }) };
+};   // eslint-disable-line no-global-assign
 if (_examDial) dial = function (num, name) { return EXAM ? { ok: true, text: `Звоню: ${name || num}.` } : _examDial(num, name); };   // eslint-disable-line no-global-assign
 const _examRunTool = runTool;
 runTool = async function (name, a) {                       // eslint-disable-line no-global-assign
@@ -200,6 +218,16 @@ radio.play = async function (...a) { if (!EXAM) return _examRadio.play.apply(rad
 radio.next = async function (...a) { if (!EXAM) return _examRadio.next.apply(radio, a); SANDBOX.dev.push({ name: "radio_control", args: "next", t: Date.now() }); return { ok: true, station: { name: "Jazz Radio 2" } }; };
 const _examScan = scanCode;                               // сканер в экзамене не открывает камеру — отмечается
 scanCode = async function () { if (!EXAM) return _examScan(); SANDBOX.dev.push({ name: "scan_code", args: "", t: Date.now() }); };   // eslint-disable-line no-global-assign
+// звонок и сообщение близкому без модели (doCall, быстрый ответ) — тоже только отмечаются
+const _examClCall = clCall, _examClSend = clSend;
+clCall = async function (who, video) {                     // eslint-disable-line no-global-assign
+  if (!EXAM) return _examClCall(who, video);
+  const p = clPerson(who); SANDBOX.dev.push({ name: "close_call", args: p.name + (video ? " видео" : ""), argsObj: { to: p.name, video: !!video }, t: Date.now() }); return p;
+};
+clSend = async function (who, text, files, kind, extra) {  // eslint-disable-line no-global-assign
+  if (!EXAM || (kind && kind !== "msg")) return _examClSend(who, text, files, kind, extra);
+  const p = clPerson(who); SANDBOX.dev.push({ name: "close_send", args: `${p.name}: ${text}`, argsObj: { to: p.name, text }, t: Date.now() }); return { to: p.name, t: text };
+};
 const _examSay = say;
 say = function (t) { if (!EXAM) return _examSay(t); };     // eslint-disable-line no-global-assign
 const _examSyncSoon = syncSoon, _examSyncRun = syncRun;
@@ -245,7 +273,7 @@ function examChecks(sc, last, toolsAll, t0) {
     out.push({ name: "заметка записана" + (w.att ? " с вложением" : ""), ok: !!hit, detail: fresh.map(n => `${n.title} (${(n.att || []).length} влож.)`).join("; ").slice(0, 300) });
   }
   for (const [name, want] of Object.entries(sc.tool || {})) {
-    const dev = (SANDBOX.dev || []).filter(x => x.t >= t0 && x.name === name);    // быстрые ответы без модели (фонарик, громкость)
+    const dev = (SANDBOX.dev || []).filter(x => x.t >= t0 && x.name === name && (!x.argsObj || Object.entries(want).every(([k, v]) => x.argsObj[k] === v)));    // быстрые ответы без модели
     const hit = dev.length || toolsAll.find(x => x.name === name && x.ok && Object.entries(want).every(([k, v]) => +x.argsObj[k] === +v || x.argsObj[k] === v));
     out.push({ name: `действие ${name} выполнено`, ok: !!hit, detail: toolsAll.map(x => x.name).join(", ") });
   }
@@ -277,6 +305,7 @@ async function examJudge(sc, steps, checks, at) {
 function examSeed(seed) {
   const ids = { notes: [], alarms: [] }; if (!seed) return ids;
   if (seed.notes) { const all = notes(); seed.notes.forEach((n, i) => { const id = "seed" + i + Date.now(); ids.notes.push(id); all.push({ id, title: n.title, text: n.text, time: Date.now() - (i + 1) * 3600e3 }); }); saveNotes(all); }
+  if (seed.close) { const st = clLoad(); ids.close = st.people; st.people = seed.close.map((n, i) => ({ pid: "pseed" + i, name: n, devs: [{ dev: "d" + i, pub: "A".repeat(43) }] })); }
   (seed.alarms || []).forEach((a, i) => { const id = "seedA" + i; ids.alarms.push(id); EXAM.alarms.push({ id, title: a.title, at: Date.now() + (a.in_h || 1) * 36e5, kind: "reminder", repeat: "", made: 0 }); });
   return ids;
 }
@@ -284,6 +313,7 @@ function examUnseed(ids) {
   if (!ids) return;
   if (ids.notes.length) saveNotes(notes().filter(n => !ids.notes.includes(n.id)));
   EXAM.alarms = EXAM.alarms.filter(a => !ids.alarms.includes(a.id));
+  if (ids.close) clLoad().people = ids.close;
 }
 async function examScenario(sc) {
   let seeded = null;
@@ -299,6 +329,12 @@ async function examScenario(sc) {
     const last = res.steps.length ? res.steps[res.steps.length - 1].answer : "";
     const toolsAll = EXAM.tools.filter(x => x.t >= t0);
     res.checks = examChecks(sc, last, toolsAll, t0);
+    if (sc.seed) {                                      // судье — что было в программе (иначе «выдумал заметки», которые правда есть)
+      const ns = notes().slice().sort((x, y) => (+y.time || 0) - (+x.time || 0)).map(n => n.title);
+      res.checks.push({ name: "в программе было", ok: true, detail: (sc.seed.notes ? `заметок ${ns.length}: ${ns.slice(0, 8).join("; ")}` : "")
+        + (sc.seed.alarms ? ` напоминаний ${EXAM.alarms.length}: ${EXAM.alarms.map(a => `${a.title} — ${whenText(new Date(a.at))}`).join("; ")}` : "")
+        + (sc.seed.close ? ` в «Близких»: ${sc.seed.close.join(", ")}` : "") });
+    }
     res.judge = await examJudge(sc, res.steps, res.checks, new Date(t0));
   } catch (e) { res.error = String(e.message || e); }
   examUnseed(seeded);

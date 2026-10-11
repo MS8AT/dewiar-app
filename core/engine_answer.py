@@ -111,6 +111,7 @@ class AnswerMixin:
             self.turn_n += 1
             turn = Turn(self.turn_n)
             turn.via = via
+            turn.asked = text                         # о чём просили (save_note без просьбы записать — не пишем)
             turn.report = report
             turn.back_to = prev if handoff and self.s.get("team", "back") is not False else None
             turn.persona = self.s.get("persona")      # кто отвечает; по нему _cancel_locked решает, возвращать ли слово главному
@@ -184,6 +185,10 @@ class AnswerMixin:
         выводы из дневника; with_tools — ещё навыки и правила действий (инструменты, музыка, компьютер, серверы)."""
         now = datetime.now()
         now_str = f"{WEEKDAYS[now.weekday()]}, {now.day} {MONTHS[now.month - 1]} {now.year} года, {now:%H:%M}"
+        # ближайшая неделя по дням — чтобы «в среду», «через сколько дней» не считались в уме с ошибкой (экзамен 11.10)
+        week = "; ".join(f"{WEEKDAYS[(now + timedelta(days=i)).weekday()]} — {(now + timedelta(days=i)).day} {MONTHS[(now + timedelta(days=i)).month - 1]}"
+                         for i in range(1, 8))
+        now_str += f". Ближайшие дни: {week}. Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой"
         base = self.personas.system_prompt(self.s.get("persona"), self.s.get("user_name") or "", now_str)
         mem = self.workspace.memory_text()
         if mem:

@@ -11,7 +11,7 @@
 (function (root) {
   "use strict";
   let cur = null;
-  const RING_MAX = 45000, GATHER = 3000;
+  const RING_MAX = 60000, GATHER = 3000;   // минута: у близкого с закрытым приложением телефон звонит уведомлением — успеть открыть
   const esc = (t) => String(t == null ? "" : t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   const mmss = (s) => String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(Math.floor(s % 60)).padStart(2, "0");
@@ -205,6 +205,7 @@
 
   root.DewiarCall = {
     active: () => !!cur,
+    accept: () => { if (cur && cur.role === "callee" && !cur.pc) accept(); },   // «Ответить» на уведомлении звонка
     peer: () => cur && cur.peer && cur.peer.pid,
     async start(o) {
       if (cur) throw new Error("уже идёт звонок");

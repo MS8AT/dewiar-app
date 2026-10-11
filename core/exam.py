@@ -540,10 +540,15 @@ class Core:
         await self.call("say", **args)
         t0 = time.monotonic()
         answer = None
+        slept = None
         while time.monotonic() - t0 < timeout:
             for e in self.events[n0:]:
                 if e.get("type") == "answer" and e.get("done"):
                     answer = e.get("text") or ""
+            if answer is None and any(e.get("type") == "sleep" for e in self.events[n0:]):
+                slept = slept or time.monotonic()        # «стоп» — замолчала без ответа: ждать ответа нечего
+                if time.monotonic() - slept > 1.5:
+                    return "", self.events[n0:]
             if answer is not None:
                 await asyncio.sleep(1.0)                 # хвост хода: напоминание, задача, событие инструмента
                 more = [e for e in self.events[n0:] if e.get("type") == "answer" and e.get("done")]
@@ -644,6 +649,8 @@ def check_answer(expect, answer):
         if k.startswith("any"):
             ok = any(x.lower() in low for x in v)
             out.append({"name": f"в ответе есть: {' / '.join(v)}", "ok": ok})
+        elif k == "sleep":                                 # проверяется по событиям хода (run_one)
+            continue
         elif k == "none":                                  # «заметок нет», когда они есть, — такого быть не должно
             out.append({"name": f"в ответе нет: {' / '.join(v)}", "ok": not any(x.lower() in low for x in v)})
         elif k == "regex":
@@ -884,7 +891,15 @@ async def _run_scenario(core, sc, judge_prof, work, log, t0):
                 res["steps"].append({"say": said, "image": stp.get("image"), "answer": ans[:2000], "tools": tools_of(ev)})
             last = res["steps"][-1]["answer"]
             res["checks"] += check_answer(sc.get("expect"), last)
+            if (sc.get("expect") or {}).get("sleep"):       # «стоп» (и ослышанное «Ctop.») — замолчать, а не «Хорошо, я слушаю»
+                res["checks"].append({"name": "замолчала до имени, без ответа", "ok": any(e.get("type") == "sleep" for e in ev) and not last.strip(),
+                                      "detail": last[:120]})
             res["checks"] += await check_state(core, sc.get("state"), t0)
+            if sc.get("seed"):                          # судье — что было в программе (иначе «выдумал заметки», которые правда есть)
+                sd = sc["seed"]
+                res["checks"].append({"name": "в программе было", "ok": True, "detail": "; ".join(
+                    ([f"заметки: {', '.join(n['title'] for n in sd.get('notes') or [])}"] if sd.get("notes") else [])
+                    + ([f"напоминания: {', '.join(sd.get('reminders') or [])}"] if sd.get("reminders") else []))})
             if (sc.get("state") or {}).get("task"):
                 want = sc["state"]["task"]
                 t = await wait_task(core, t0, float(want.get("timeout", 1200)))

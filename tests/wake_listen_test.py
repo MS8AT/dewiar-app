@@ -36,6 +36,7 @@ def stub():
     e.emit = lambda *a, **k: None
     e.tones = []
     e.play_tone = lambda k: e.tones.append(k)
+    e._media_stop_word = lambda *a, **k: None
     return e
 
 
@@ -56,6 +57,24 @@ ok(("listen",) not in r and ("state", "idle") in r, "длинный чужой �
 ok(run("Лира, включи радио", True, dur=1.8, phrase="лира") == [("persona", "lira"), ("ask", "включи радио")], "«Лира, включи радио» одной фразой — как раньше")
 ok(run("Играй.", False, follow=True) == [("ask", "Играй.")], "после «слушаю» — «Играй.» идёт вопросом")
 ok(run("Привет", False, follow=False) == [("state", "idle")], "без имени и не в ожидании — не отвечаем")
+# люди рядом разговаривают (отчёт 11.10): длинная фраза без имени в «продолжении разговора» — не вопрос; «…Пауза.» — стоп
+r = run("Я внутрь встроил ещё мессенджер безопасный, то есть, собственно, переписываться можно файлами, и звонить, и это всё "
+        "работает через наш сервер, вот так", False, follow=True, dur=25.0)
+ok(("ask",) not in [c[:1] for c in r] and ("state", "idle") in r, f"продолжение разговора: 25 с чужой речи без имени — не вопрос: {r}")
+ok(run("То есть можно ещё пригласить людей? Так, думает. Вроде я её не вызывал. Пауза.", False, follow=True, dur=6.0) == [("sleep",)],
+   "«…Вроде я её не вызывал. Пауза.» — это «стоп», а не вопрос")
+ok(run("А какая завтра погода?", False, follow=True, dur=2.0) == [("ask", "А какая завтра погода?")], "короткое продолжение — как раньше, вопросом")
+# «стоп» ослышан (отзыв 11.10: «Вы: Ctop.» → «Хорошо, я слушаю.») — всё равно стоп
+r = {t: run(t, False, follow=True, dur=0.8) for t in ("Ctop.", "Сстоп!", "Стоб.", "Паузу.", "Pauza", "Стопп")}
+ok(all(v == [("sleep",)] for v in r.values()), f"ослышанное «стоп/пауза» в продолжении разговора — сон: {r}")
+ok(run("Лира, Ctop.", True, dur=1.0, phrase="лира") == [("persona", "lira"), ("sleep",)], "«Лира, Ctop.» — стоп")
+ok(run("Стол.", False, follow=True, dur=0.8) == [("ask", "Стол.")] and run("Стопа болит", False, follow=True)[0][0] == "ask",
+   "похожие, но другие слова («стол», «стопа болит») — не стоп")
+from engine_base import is_sleep_phrase as _isp  # noqa: E402
+ok(all(_isp(t) for t in ("Ctop.", "Хорошо, Ctop", "Пayзa", "хватить")) and not any(_isp(t) for t in ("Стол", "сто", "Топ")),
+   "is_sleep_phrase: латиница и ослышки — стоп, «стол», «сто», «топ» — нет")
+src = (ROOT / "core/engine_audio.py").read_text(encoding="utf-8")
+ok('bool(lf.get("follow"))' in src and '"follow": follow}' in src, "склейка частей фразы не превращает фразу без имени в вопрос")
 
 # --- цикл слушания: 20 с «музыки», которую детектор принимает за речь, и имя в конце ---
 FR = E.FRAME

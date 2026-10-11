@@ -1,7 +1,7 @@
 #!/bin/bash
 # Сборка Dewiar для Android без Gradle и Google Maven: инструменты из пакетов Ubuntu
 #   sudo apt install android-sdk android-sdk-platform-23 android-framework-res dalvik-exchange
-# Ресурсы линкуются с framework-res Android 14 (новые атрибуты манифеста), Java — против android.jar API 23
+# Ресурсы линкуются с framework-res из пакетов (атрибуты манифеста до Android 11; новее — fgs_type.py), Java — против android.jar API 23
 # (новые API — отражением, см. Compat.java). Подпись — ключом DEWIAR_KEYSTORE (по умолчанию ~/dewiar-keys).
 # Использование: android/tools/build_apk.sh [папка-результата]
 set -e
@@ -54,6 +54,7 @@ for V in hands base; do
   "$BT/aapt2" link -I "$FR" --manifest "$M" --java "$B/gen" -A "$B/assets" -o "$B/base-$V.apk" \
     --min-sdk-version 24 --target-sdk-version 34 --version-code "$CODE" --version-name "$VER" "$B/res.zip"
 done
+python3 "$HERE/tools/fgs_type.py" "$B/base-hands.apk" "$B/base-base.apk"   # тип службы CloseLive — remoteMessaging (см. сам файл)
 cp "$B/base-hands.apk" "$B/base.apk"                    # R.java — из полной сборки (в ней есть все ресурсы)
 javac -nowarn -Xlint:-options -encoding UTF-8 -source 8 -target 8 -bootclasspath "$AJ" -d "$B/classes" \
   $(find "$HERE/src" "$B/gen" -name "*.java") 2>&1 | grep -v "JAVA_TOOL_OPTIONS" | tee "$B/javac.log" || true

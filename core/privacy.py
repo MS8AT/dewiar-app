@@ -28,7 +28,7 @@ def where_model(base_url: str) -> str:
     if not u:
         return "модель ещё не подключена"
     host = (urlparse(u if "://" in u else "http://" + u).hostname or "").lower()
-    if "dewiar" in host:
+    if "dewiar" in host or "cloud.php" in u or "/dwrapp/" in u:     # облако Dewiar и по внутреннему адресу сервера
         return "в облаке Dewiar (наши серверы; текст разговоров не сохраняется)"
     if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".local") or re.match(r"^(10|192\.168|172\.(1[6-9]|2\d|3[01]))\.", host):
         return "на компьютере или сервере пользователя — разговор никуда не уходит"

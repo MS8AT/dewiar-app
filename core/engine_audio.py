@@ -563,7 +563,9 @@ class AudioMixin:
         if lf and lf.get("cut") == uid and self.state == "thinking":
             # человек договаривал: первая часть ещё у модели — склеиваем обе в один вопрос (первая отменится, в историю не попадёт)
             gap = np.zeros(int(RATE * 0.25), dtype=np.int16).tobytes()
-            pcm, by_wake, follow = lf["pcm"] + gap + pcm, lf["by_wake"], True
+            # «продолжение разговора» — только если оно было и у первой части: иначе склейка превращала отклонённую
+            # фразу без имени (разговор людей рядом) в вопрос, и Лира отвечала сама (отчёт 11.10)
+            pcm, by_wake, follow = lf["pcm"] + gap + pcm, lf["by_wake"], bool(lf.get("follow"))
             self.cancel_turn()
             log.info("⏸ Фраза продолжилась после паузы — склеиваю в один вопрос (%.1f с)", len(pcm) / 2 / RATE)
         own_tail = not by_wake and (self.state == "speaking" or t0 < self.last_speak_end + 0.1)
@@ -581,7 +583,7 @@ class AudioMixin:
         if by_wake:
             self.wake_time = 0.0
         log.info("Фраза %.1f с → распознаю (%s)", dur, "по имени" if by_wake else "продолжение разговора")
-        self._last_final = {"t": now, "uid": uid, "pcm": pcm, "by_wake": by_wake}
+        self._last_final = {"t": now, "uid": uid, "pcm": pcm, "by_wake": by_wake, "follow": follow}
         self.stt_q.put((pcm, by_wake, follow))
         self.set_state("thinking")
 
@@ -963,6 +965,7 @@ class AudioMixin:
                 self.switch_persona(pid)
             rest = text[end:].lstrip(" ,.!?:;—-").strip()
             word = _norm(re.sub(r"[^\w ]", "", rest)).strip()
+            word = stop_word(word) or word if " " not in word else word      # «Лира, Ctop» → «стоп»
             if thanks_phrase(rest):                          # «Лира, спасибо» — «Пожалуйста!» и сон
                 self._thanks(rest)
             elif word in STOP_WORDS or is_sleep_phrase(rest):
@@ -974,6 +977,19 @@ class AudioMixin:
             else:
                 self.ask(rest)
         elif follow and text:
+            ws = _norm(re.sub(r"[^\w ]", " ", text)).split()
+            last = stop_word(ws[-1]) if ws else None       # «…Пауза.», и ослышанное «…Ctop.»
+            if last and last not in {"всё", "все", "пока", "спасибо", "спасиб", "благодарю"}:
+                self.go_sleep(last, media=False)       # «…Вроде я её не вызывал. Пауза.» — это «стоп», а не вопрос
+                return
+            if (dur is not None and dur > FOLLOW_MAX_S) or len(ws) > FOLLOW_MAX_WORDS:
+                # без имени, долго и много слов — это разговор людей рядом, а не продолжение со мной (отчёт 11.10:
+                # «как только кто-то рядом — она сама вклинивается в беседу»). Слушаю дальше только по имени.
+                log.info("Продолжение разговора: длинная фраза без имени (%.1f с, %d слов) — похоже, говорят не со мной",
+                         dur or 0.0, len(ws))
+                self.follow_up_until = 0.0
+                self.set_state("idle")
+                return
             self.ask(text)
         else:
             if by_wake:

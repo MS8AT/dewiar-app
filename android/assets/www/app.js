@@ -48,6 +48,7 @@ const D = window.Dewiar || (() => {
     saveDownload: (n, m, t) => { (window._downloads = window._downloads || []).push([n, t]); return "Загрузки/Dewiar/" + n; },
     copy: (t) => { window._copied = t; return true; }, bars: (c, l) => { window._bars = [c, l]; },
     closeWatch: (j) => { window._closeWatch = j; },
+    closeLive: (on) => { window._closeLive = on; }, batteryOk: () => true, askBattery() {},
     alarmSound: () => JSON.stringify({ id: store.alarm_sound || "signature", custom: store.alarm_custom_name || "" }),
     alarmSoundSet: (id) => { if (id === "custom" && !store.alarm_custom_name) return false; store.alarm_sound = id; return true; },
     alarmSoundTry: (id) => { const on = window._trying !== id; window._trying = on ? id : ""; return on; },
@@ -1185,7 +1186,10 @@ function systemPrompt() {
     + "У тебя есть камера телефона (take_photo): «сфотографируй меня», «посмотри, что это», «прочитай надпись» — снимай и описывай. "
     + "«Посмотри, как я выгляжу», «покажи мне моё лицо» — take_photo с camera: front (камера на человека); «где я», «что вокруг», «другой камерой» — camera: back. "
     + "Снимок уже сделан и его просят показать снова («покажи фото», «покажи на экране») — show_photo. Не отвечай «Вот» и «Смотрю», не вызвав камеру: без вызова ничего не покажется.",
-    `Сейчас ${nowText()}.`];
+    `Сейчас ${nowText()}.`,
+    // ближайшая неделя по дням — «в среду», «через сколько дней» не считаются в уме с ошибкой (экзамен 11.10)
+    "Ближайшие дни: " + [1, 2, 3, 4, 5, 6, 7].map(i => { const d = new Date(Date.now() + i * 864e5); return `${WD[d.getDay()]} — ${d.getDate()} ${MON[d.getMonth()]}`; }).join("; ")
+      + ". Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой и сравни."];
   const hands = typeof D.handsState === "function" ? D.handsState() : "";
   parts.push(hands === "on"
     ? "Ты умеешь работать в других приложениях телефона, как человек пальцем: open_app, затем phone_screen (что на экране), phone_tap, phone_type, phone_scroll, phone_nav. "
@@ -1530,7 +1534,7 @@ async function ask(text, opts = {}) {
   convCheck();
   const att = opts.attach || [], pics = att.filter(a => a.kind === "image"), docs = att.filter(a => a.kind === "text");
   if (pics.length) { showCard(`<div class="attshow">${pics.map(a => `<img src="${a.url}" alt="">`).join("")}</div>`); cardSticky = Date.now() + 60000; }
-  turnAtt = att;
+  turnAtt = att; turnAsk = opts.hidden ? "" : text;    // hidden — просьба приложения (сканер, сводка): без проверки
   const fast = opts.hidden ? null : att.length ? (() => { const say = noteQuick(text, att); return say ? { say } : null; })() : await quick(text);
   if (fast && fast.switchTo) { setState("idle"); showYou(text); switchPersona(fast.switchTo, fast.question); return; }
   if (fast) { fast.say = gfix(fast.say); history.push({ role: "user", content: text }, { role: "assistant", content: fast.say, who: persona().id }); saveH(); convAfter(); dayTurn(text, fast.say); answerLocal(fast); return; }
@@ -1797,9 +1801,50 @@ window.cancelAlarm = (id, btn) => { D.alarmCancel(id); syncSoon(); if (btn) btn.
 /* ---------- быстрые команды без модели (работают и без интернета) ---------- */
 /* -> {say, card?, silent? (не озвучивать), switchTo?/question? (передать другому персонажу)} или null — тогда решает модель.
    Фразы — только целиком (^…$): похожая, но длиннее просьба уходит модели, а не исполняется наполовину. */
+/* «стоп» ослышан: «Ctop.», «Сстоп», «Стоб», «Паузу» (отзыв 11.10) — то же, что stop_word на компьютере (engine_base.py):
+   латиница — по виду (C→С, p→р) и по звуку (p→п), затем близость к стоп-словам не меньше 0,8 по числу правок */
+const STOP_CORE = ["стоп", "пауза", "хватит", "замолчи", "помолчи", "прекрати", "остановись"];
+const STOP_EXACT = new Set([...STOP_CORE, "стой", "тихо", "отмена", "стопэ", "стоб", "stop", "достаточно", "замолкни", "перестань", "отбой"]);
+const STOP_FILL = new Set(["ну", "а", "все", "уже", "пожалуйста", "давай", "же", "так", "ладно", "хорошо", "окей", "ок"]);
+const LAT_LOOK = { a: "а", c: "с", e: "е", o: "о", p: "р", x: "х", y: "у", k: "к", t: "т", m: "м", h: "н", b: "в" };
+const LAT_PHON = { a: "а", b: "б", c: "с", d: "д", e: "е", f: "ф", g: "г", h: "х", i: "и", k: "к", l: "л", m: "м", n: "н", o: "о", p: "п", r: "р", s: "с", t: "т", u: "у", v: "в", y: "ы", z: "з" };
+function wordSimilar(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur.push(Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)));
+    prev = cur;
+  }
+  return 1 - prev[b.length] / Math.max(a.length, b.length, 1);
+}
+function stopWord(w) {
+  w = String(w || "").toLowerCase().replace(/ё/g, "е");
+  if (STOP_EXACT.has(w)) return w === "stop" || w === "стоб" || w === "стопэ" ? "стоп" : w;
+  const c = [w];
+  if (/[a-z]/.test(w)) c.push(w.replace(/[a-z]/g, (x) => LAT_LOOK[x] || x), w.replace(/[a-z]/g, (x) => LAT_PHON[x] || x));
+  for (const x of c) if (STOP_EXACT.has(x)) return x;
+  for (const x of c) {
+    if (x.length < 4 || /[a-z]/.test(x)) continue;
+    let best = null, r = 0;
+    for (const s of STOP_CORE) { const k = wordSimilar(x, s); if (k > r) { r = k; best = s; } }
+    if (r >= 0.8) return best;
+  }
+  return null;
+}
+/* фраза целиком — «стоп» (с вежливыми словами): → стоп-слово, иначе null */
+function stopPhrase(t) {
+  const ws = String(t || "").toLowerCase().replace(/[^\p{L}\s]/gu, " ").split(/\s+/).filter(Boolean);
+  if (!ws.length || ws.length > 4) return null;
+  let hit = null;
+  for (const w of ws) { if (STOP_FILL.has(w.replace(/ё/g, "е"))) continue; const s = stopWord(w); if (!s) return null; hit = hit || s; }
+  return hit;
+}
+
 async function quick(text) {
   { const bq = await bugQuick(text.replace(/^[А-ЯЁA-Z][а-яёa-z-]+\s*,\s*(?=\S)/, (m) => findPersona(m.replace(/[\s,]/g, ""), true) ? "" : m)); if (bq) return bq; }
-  const t = text.toLowerCase().replace(/ё/g, "е").replace(/[.!?,]+$/g, "").replace(/\s+/g, " ").trim();
+  // «Лира, позвони…», «Лира открой сканер» — имя персонажа в начале не мешает быстрым ответам
+  const t = text.toLowerCase().replace(/ё/g, "е").replace(/[.!?,]+$/g, "").replace(/\s+/g, " ").trim()
+    .replace(/^([а-яa-z-]+)\s*,?\s+(?=\S)/, (m, w) => findPersona(w, true) ? "" : m);
   if (NEW_CONV_RX.test(t) || NEW_CONV_RX.test(t.replace(/^\S+\s+/, ""))) { convReset(); return { say: "Хорошо, начинаем с чистого листа." }; }
   // «запиши в заметки …», «добавь в заметки …», «заметка: …» — сразу в заметки, без модели: модель иногда отвечала
   // «Записала.», не вызвав save_note, и заметка терялась (отзыв 11.10). Текст — как сказан, заголовок — первые слова.
@@ -1811,7 +1856,7 @@ async function quick(text) {
       const l = alarmsNow().sort((x, y) => x.at - y.at), jobs = (mind().jobs || []).filter(j => !j.paused);
       setTimeout(() => { openSheet("#sh-day"); dayTab = "rem"; $$("#day-tabs button").forEach(x => x.classList.toggle("on", x.dataset.t === "rem")); renderDay(); }, 200);
       if (!l.length && !jobs.length) return { say: "Напоминаний нет. Скажите: «напомни завтра в 9 позвонить маме»." };
-      const near = l.length === 1 ? ` ${whenText(new Date(l[0].at))} — ${l[0].title}.` : l.length ? ` Ближайшие: ${l.slice(0, 3).map(x => `${whenText(new Date(x.at))} — ${x.title}`).join("; ")}.` : "";
+      const near = l.length === 1 ? ` ${whenText(new Date(l[0].at))} — ${l[0].title}.` : l.length ? ` Ближайшие: ${l.slice(0, 4).map(x => `${whenText(new Date(x.at))} — ${x.title}`).join("; ")}.` : "";
       return { say: `Напоминаний: ${l.length}${jobs.length ? `, и дел по расписанию: ${jobs.length}` : ""}.${near}` };
     } }
   // «покажи заметки», «мои заметки», «что у меня в заметках» — открыть их и коротко сказать, сколько и какая последняя
@@ -1820,7 +1865,9 @@ async function quick(text) {
       const all = notes().slice().sort((x, y) => (+y.time || 0) - (+x.time || 0));
       setTimeout(() => { openSheet("#sh-day"); dayTab = "notes"; $$("#day-tabs button").forEach(x => x.classList.toggle("on", x.dataset.t === "notes")); renderDay(); }, 200);
       const k = all.length, w = k % 10 === 1 && k % 100 !== 11 ? "заметка" : [2, 3, 4].includes(k % 10) && ![12, 13, 14].includes(k % 100) ? "заметки" : "заметок";
-      return { say: !k ? "Заметок пока нет. Скажите: «запиши в заметки…»" : `Вот ваши заметки — ${k} ${w}, новые сверху.` };
+      // названия — коротко и целиком (без обрезанного «…»), последние три
+      const names = all.slice(0, 3).map(n => String(n.title || "").replace(/…$/, "").split(/\s+/).slice(0, 5).join(" ")).filter(Boolean);
+      return { say: !k ? "Заметок пока нет. Скажите: «запиши в заметки…»" : `Вот ваши заметки — ${k} ${w}, новые сверху` + (names.length ? `: ${names.map(x => `«${x}»`).join(", ")}${k > 3 ? " и другие" : ""}.` : ".") };
     } }
   // «отсканируй код», «открой сканер», «сканер qr» — сразу сканер, без модели
   const SCAN_OBJ = "(?:код|qr|кьюар|ку ар|qr[- ]?код|кьюар[- ]?код|ацтек|aztec|штрих[- ]?код|дата ?матрикс|data ?matrix|датаматрикс|товар|этикетку|упаковку|маркировку|честный знак|ценник)";
@@ -1840,8 +1887,8 @@ async function quick(text) {
     p = m && findPersona(m[1], true);
     if (p && p.id !== persona().id && m[2].trim().length > 1) return { say: "", switchTo: p.id, question: m[2].trim() };
   }
+  { const sw = stopPhrase(t); if (sw) { const rq = await radioQuick(sw); if (rq) return rq; return { say: "Хорошо.", silent: true, stop: true }; } }
   const rq = await radioQuick(t); if (rq) return rq;
-  if (/^(стоп|хватит|замолчи|тихо|отмена)$/.test(t)) return { say: "Хорошо.", silent: true };
   if (/^(который час|сколько времени|сколько сейчас времени)$/.test(t)) { const d = new Date(); return { say: `Сейчас ${d.getHours()}:${pad(d.getMinutes())}.` }; }
   if (/^(какое (сегодня )?число|какой сегодня день)$/.test(t)) { const d = new Date(); return { say: `Сегодня ${WD[d.getDay()]}, ${d.getDate()} ${MON[d.getMonth()]}.` }; }
   let m;
@@ -1895,8 +1942,22 @@ async function quick(text) {
     if (r.ok && lastCall) { relRemember(rel, lastCall); lastCall.rel = rel; return { say: `${r.text} Запомнил${persona().gender === "female" ? "а" : ""}: ${REL_RU[rel]} — «${lastCall.name || m[1]}».` }; }
     if (r.final) return { say: r.text };
   }
+  // «отправь Людмиле Исаевой — привет, как дела», «напиши маме: задержусь» — близкому через Dewiar, сразу
+  if ((m = t.match(/^(?:напиши|отправь|передай|скажи|сообщи)\s+(.+)$/)) && clLoad().people.length) {
+    const ws = m[1].split(" ");
+    for (let k = Math.min(3, ws.length - 1); k >= 1; k--) {
+      const p = clMatch(ws.slice(0, k).join(" "), clLoad().people, true); if (!p) continue;
+      const orig = text.replace(/^.*?(?:^|[\s,])(?:напиши|отправь|передай|скажи|сообщи)\s+/i, "").split(/\s+/).slice(k).join(" ");
+      const body = orig.replace(/^[\s,:;—–-]+/, "").replace(/^(?:что|чтобы)\s+/i, "").trim();
+      if (!body) break;
+      try { const it = await clSend(p.pid, body.charAt(0).toUpperCase() + body.slice(1)); return { say: `${persona().gender === "female" ? "Отправила" : "Отправил"} через Dewiar. ${it.to} услышит: «${body}».` }; }
+      catch (e) { return { say: e.message }; }
+    }
+  }
   if (/^(?:перезвони|повтори звонок|набери ещ[её] раз|позвони ещ[её] раз|позвони снова)(?:\s+пожалуйста)?$/.test(t)) return { say: (await doCall("ещё раз")).text };
   if (/^(?:(?:можешь|можно|пожалуйста|давай)\s+)?(?:позвони(?:ть)?|набери|набрать|звони|звякни)(?:\s+(?:пожалуйста|мне|кому-нибудь|кое-кому))?$/.test(t)) return { say: "Кому позвонить?" };
+  // «видеозвонок Люде», «сделай видеозвонок маме» — близкому по видео (doCall понимает «по видео»)
+  if ((m = t.match(/^(?:(?:сделай|набери|начни)\s+)?видеозвонок\s+(.+)$/))) { const r = await doCall(m[1] + " по видео"); if (r.ok || r.final) return { say: r.text }; }
   // «позвони Наташе МТС» — сразу; «позвони жене, а если не ответит — напиши…» (условие, второе действие) — модели
   if ((m = t.match(/^(?:(?:можешь|можно|пожалуйста|давай)\s+)?(?:позвони(?:ть)?|набери|набрать|звони|звякни)\s+(.+)$/))
       && !/[,;:—]|(?:^|\s)(?:если|когда|потом|затем|и|а|но|или|скажи|напиши|отправь|сообщение|передай|через|после|пока)(?=\s|$)/.test(m[1])) {
@@ -1973,8 +2034,18 @@ function dial(number, name) {
   lastCall = { number, name, at: Date.now() };
   return { ok: true, text: D.has(CALLP) ? (name ? `Звоню: ${name}.` : "Звоню.") : `Открыл${persona().gender === "female" ? "а" : ""} номер${name ? " — " + name : ""}: нажмите зелёную кнопку. Чтобы звонить сразу, разрешите Dewiar звонки.` };
 }
+/* человек из «Близких» — звоним через Dewiar (аудио или видео), а не ищем в контактах и мессенджерах (отзыв 11.10).
+   -> ответ doCall или null — не близкий (тогда телефонная книга) */
+async function closeCallFirst(who) {
+  const VRX = /\s(?:по\s+)?видео(?:звонком|связи)?$|^по\s+видео(?:связи)?\s+/i, video = VRX.test(who), name = who.replace(VRX, "").trim();
+  const p = clLoad().people.length && name && !/^(?:ещ[её]\s+раз|снова|опять|обратно)$/.test(name) ? clMatch(name, clLoad().people, true) : null;
+  if (!p || !(p.devs || []).length || !window.DewiarCall) return null;
+  try { await clCall(p.pid, video); return { ok: true, final: true, text: `${video ? "Видеозвонок" : "Звоню"} через Dewiar: ${p.name}.` }; }
+  catch (e) { return { ok: false, final: true, text: e.message }; }
+}
 async function doCall(who) {
   who = who.replace(/^(мне|пожалуйста)\s+/, "").replace(/\s+пожалуйста$/, "").trim();
+  { const c = await closeCallFirst(who); if (c) return c; }
   const rel = relOf(who);
   if (rel) {
     const known = (S.relations || {})[rel];
@@ -2170,7 +2241,7 @@ function toolSpecs() {
     { name: "calc", description: "Посчитать точно: любые вычисления (проценты, суммы, скидки, деление) и даты. Считай ВСЕГДА этим инструментом, не в уме. Выражение: 2350 * 17 / 100, (1200 - 15%) * 3; даты ГГГГ-ММ-ДД: days_until(\"2027-01-01\") — сколько дней до даты, days_between(\"2026-10-01\", \"2026-12-31\"), weekday(\"2026-10-14\").",
       parameters: O({ expression: STR }, ["expression"]) },
     { name: "cancel_reminder", description: "Отменить напоминание или будильник (id из list_reminders или слова из текста).", parameters: O({ id: STR }, ["id"]) },
-    { name: "call", description: "Позвонить: who — имя из контактов («мама», «Лёша») или номер.", parameters: O({ who: STR }, ["who"]) },
+    { name: "call", description: "Позвонить по телефону: who — имя из контактов («мама», «Лёша») или номер. Человеку из «Близких» звони через close_call.", parameters: O({ who: STR }, ["who"]) },
     { name: "send_sms", description: "Подготовить SMS: who — имя или номер, text — текст. Откроется приложение сообщений, отправит пользователь.", parameters: O({ who: STR, text: STR }, ["text"]) },
     { name: "open_app", description: "Открыть приложение на телефоне по названию.", parameters: O({ name: STR }, ["name"]) },
     { name: "open_url", description: "Открыть сайт или ссылку в браузере (YouTube, карты, поиск). Не для радио — для него play_radio.", parameters: O({ url: STR }, ["url"]) },
@@ -2246,10 +2317,11 @@ async function runTool(name, a) {
       else if (a.when && !a.at) { const w = parseWhen(a.when); if (w) { at = w.at; if (!a.repeat && w.repeat) a.repeat = w.repeat; } }
       else if (a.at) { at = new Date(a.at); if (isNaN(at)) { const w = parseWhen(a.at); at = w && w.at; } }
       if (!at || isNaN(at)) return "Ошибка: не понял время — спроси у пользователя, когда напомнить.";
-      if (at < new Date(Date.now() - 60000) && !a.repeat) return "Ошибка: это время уже прошло — уточни.";
+      let moved = "";                                    // «на 17:00», а уже 17:26 — на завтра в 17:00, а не в прошлое
+      if (at < new Date(Date.now() - 60000) && !a.repeat) { while (at < new Date()) at = new Date(at.getTime() + 864e5); moved = " Это время сегодня уже прошло — поэтому на завтра; так и скажи."; }
       const x = addAlarm(a.text || "Напоминание", at, a.kind || "reminder", a.repeat || "");
       showCard(alarmCard(x));
-      return `Поставлено: ${whenText(at)}${a.repeat ? ", " + REP_RU[a.repeat] : ""} — ${x.title} (id ${x.id}).`;
+      return `Поставлено: ${whenText(at)}${a.repeat ? ", " + REP_RU[a.repeat] : ""} — ${x.title} (id ${x.id}).${moved}`;
     }
     case "calc": {
       try { const r = calcEval(String(a.expression || "")); return `${a.expression} = ${typeof r === "number" ? String(+r.toFixed(10)).replace(".", ",") : r}`; }
@@ -2311,7 +2383,11 @@ async function runTool(name, a) {
     }
     case "set_volume": return `Громкость ${devVolume(a.action, a.percent || (a.action === "set" ? 0 : 20))}%.`;
     case "battery": { const b = JSON.parse(D.battery() || "{}"); return `Заряд ${b.percent}%${b.charging ? ", заряжается" : ""}.`; }
-    case "save_note": { const att = noteAttSave(turnAtt); turnAtt = [];             // фото и файлы этого хода — в заметку
+    case "save_note": {
+      // стихи, список идей, ответ на вопрос — в чат, а не в заметки без спроса (экзамен 11.10)
+      if (turnAsk && !/заметк|запиш|запис|сохран|запомн|занеси|зафиксир|в\s+файл|конспект/i.test(turnAsk))
+        return "Не записано: пользователь не просил сохранять в заметки. Ответь прямо в чате (список — пунктами в самом ответе) и не говори, что записала.";
+      const att = noteAttSave(turnAtt); turnAtt = [];             // фото и файлы этого хода — в заметку
       const n = notes(); n.push(Object.assign({ id: "n" + Date.now(), title: a.title, text: a.text, time: Date.now() }, att.length ? { att } : {})); saveNotes(n);
       return `Записано: «${a.title}»` + (att.length ? ` (вложений: ${att.length})` : "") + "."; }
     case "recall": return recall(a.days, a.query);
@@ -2502,7 +2578,8 @@ async function weather(city, days) {
   const u = `https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=${Math.min(7, Math.max(1, days))}`;
   const w = JSON.parse((await http("GET", u, { timeout: 12000 })).body || "{}"), c = w.current || {}, d = w.daily || {};
   const lines = [`${p.name}: сейчас ${Math.round(c.temperature_2m)}°, ощущается как ${Math.round(c.apparent_temperature)}°, ${WMO[c.weather_code] || ""}, ветер ${Math.round(c.wind_speed_10m)} км/ч.`];
-  (d.time || []).forEach((t, i) => lines.push(`${t}: ${Math.round(d.temperature_2m_min[i])}…${Math.round(d.temperature_2m_max[i])}°, ${WMO[d.weather_code[i]] || ""}, осадки ${d.precipitation_probability_max[i] != null ? d.precipitation_probability_max[i] : 0}%.`));
+  const dayName = (t) => { const k = Math.round((new Date(t + "T12:00") - new Date(isoLocal(new Date()).slice(0, 10) + "T12:00")) / 864e5); return k === 0 ? " (сегодня)" : k === 1 ? " (завтра)" : k === 2 ? " (послезавтра)" : ""; };
+  (d.time || []).forEach((t, i) => lines.push(`${t}${dayName(t)}: ${Math.round(d.temperature_2m_min[i])}…${Math.round(d.temperature_2m_max[i])}°, ${WMO[d.weather_code[i]] || ""}, осадки ${d.precipitation_probability_max[i] != null ? d.precipitation_probability_max[i] : 0}%.`));
   return lines.join("\n");
 }
 
@@ -2533,7 +2610,7 @@ function noteQuick(text, att) {
 /* ---------- заметка целиком: открыть, поправить, фото и файлы (лист #sh-note) ----------
    Вложения — файлы natt-<id> во внутренней памяти (data: URL; фото сжаты shrinkImage), в заметке — только их список att.
    Синхронизация уносит на компьютер текст заметки; вложения пока живут на телефоне (syncApply их сохраняет). */
-let turnAtt = [], noteCur = "", notePend = [];
+let turnAtt = [], turnAsk = "", noteCur = "", notePend = [];
 const noteBody = (t) => String(t || "").replace(/^\s*#[^\n]*\n+(\*[^\n]*\*\n+)?/, "");   // заметка с компьютера: без заголовка и даты
 const noteAttGet = (id) => fileGet("natt-" + id) || "";
 function noteAttSave(list) {
@@ -4336,6 +4413,8 @@ function handleIntent(e) {
     } catch (x) { showBot("Код с настройками не подошёл: " + x.message, "err"); }
   }
   else if (e.action === "close") openClose("");                                     // нажали уведомление «Близких»
+  else if (e.action === "close_call") {                                             // уведомление звонка близкого (CloseLive)
+    clAutoAnswer = e.answer ? { pid: e.pid, until: Date.now() + 40000 } : null; clPoll(); }
   else if (e.action === "link" && /^dewiar:\/\/close/.test(e.url || "")) clAcceptLink(e.url);    // приглашение в «Близкие»
   else if (e.action === "link" && /^dewiar:\/\/ref/.test(e.url || "")) {            // приглашение друга: …/download.php?ref= → «Открыть в Dewiar»
     S.refPending = ((/[?&]c=([A-Za-z0-9]+)/.exec(e.url) || [])[1] || "").toUpperCase(); saveS();
@@ -4410,15 +4489,23 @@ async function clHello() {
   CLS.hello = Date.now(); clSave(); return CLS;
 }
 const clInfo = () => { try { return JSON.parse(D.info() || "{}"); } catch (e) { return {}; } };
-function clMatch(name, people) {                 // «Андрею», «маме», «Свете» -> человек (по общему началу имени), как match_name в close.py
+// «Люда», «Люде», «Людочке» → Людмила: уменьшительные имена близких (как NICKS в core/close.py)
+const CL_NICK = { люд: "людмила", тан: "татьяна", саш: "александр", шур: "александр", жен: "евгений", миш: "михаил", лен: "елена", кат: "екатерина", маш: "мария", наташ: "наталья", натах: "наталья", оль: "ольга", свет: "светлана", вов: "владимир", дим: "дмитрий", кол: "николай", сереж: "сергей", серег: "сергей", андрюш: "андрей", ван: "иван", леш: "алексей", юл: "юлия", ир: "ирина", гал: "галина", вал: "валентина", над: "надежда", люб: "любовь", ан: "анна", пет: "петр", паш: "павел", кост: "константин", ген: "геннадий", тол: "анатолий", вит: "виктор", слав: "вячеслав", гош: "георгий", лид: "лидия", том: "тамара", нин: "нина", зин: "зинаида", рит: "маргарита", вик: "виктория" };
+const CL_NICK_RX = new RegExp("^(андрюш|наташ|натах|сереж|серег|свет|кост|слав|люд|тан|саш|шур|жен|миш|лен|кат|маш|оль|вов|дим|кол|ван|леш|гал|вал|над|люб|пет|паш|ген|тол|вит|гош|лид|том|нин|зин|рит|вик|юл|ир|ан)(?:а|я|е|у|ю|ы|и|ой|ей|ою|ею|очк[а-я]*|ечк[а-я]*|оньк[а-я]*|еньк[а-я]*|ик[а-я]*|ок|ул[а-я]*|ус[а-я]*|юш[а-я]*|уш[а-я]*)?$");
+const clNick = (w) => { const m = CL_NICK_RX.exec(w); return m ? CL_NICK[m[1]] : ""; };
+function clMatch(name, people, all) {                 // «Андрею», «маме», «Исаевой Людмиле» -> человек (по общему началу слов), как match_name в close.py
   const st = (w) => String(w || "").toLowerCase().replace(/ё/g, "е").replace(/[^а-яa-z]/g, "");
-  const q = st(name); if (!q) return null;
+  const qs = String(name || "").split(/[\s,]+/).map(st).filter(Boolean); if (!qs.length) return null;
+  const hit = (q, n) => { let k = 0; while (k < Math.min(n.length, q.length) && n[k] === q[k]) k++;
+    const need = n.length <= 4 ? Math.min(n.length, 3) : Math.max(3, n.length - 2); return n === q ? k + 10 : k >= need ? k : 0; };
   let best = null, score = 0, tie = false;
-  for (const p of people) for (const w of [p.name || ""].concat(String(p.name || "").split(/\s+/))) {
-    const n = st(w); if (!n) continue;
-    let k = 0; while (k < Math.min(n.length, q.length) && n[k] === q[k]) k++;
-    const need = n.length <= 4 ? Math.min(n.length, 3) : Math.max(3, n.length - 2);
-    if (k >= need || n === q) { const sc = k + (n === q ? 10 : 0); if (sc > score) { best = p; score = sc; tie = false; } else if (sc === score && best !== p) tie = true; }
+  for (const p of people) {
+    const ws = String(p.name || "").split(/\s+/).map(st).filter(Boolean); if (!ws.length) continue;
+    // каждое слово запроса — к лучшему слову имени (порядок любой: «Исаевой Людмиле» = «Людмила Исаева»)
+    const per = qs.map(q => Math.max(0, ...[q, clNick(q)].filter(Boolean).flatMap(v => ws.map(n => hit(v, n)).concat(hit(v, ws.join(""))))));
+    const sc = per.reduce((a, b) => a + b, 0) - per.filter(x => !x).length * 4;
+    if (!per.some(Boolean) || sc <= 0 || (all && per.some(x => !x))) continue;   // all — все слова запроса из имени
+    if (sc > score) { best = p; score = sc; tie = false; } else if (sc === score && best !== p) tie = true;
   }
   return tie ? null : best;
 }
@@ -4471,6 +4558,7 @@ async function clPoll() {
     const d = await clReq("GET", "/close/inbox", null, "&after=" + (+st.cursor || 0));
     let got = 0, refreshed = false;
     for (const it of d.items || []) {
+      if (it.kind === "ring") continue;                    // признак звонка — для службы CloseLive; сам звонок — в «sig»
       const env = it.env || {};
       let pub = clPubOf(it.peer, env.fd, it.out);
       if (!pub && !refreshed) { refreshed = true; try { await clHello(); } catch (e) { } pub = clPubOf(it.peer, env.fd, it.out); }
@@ -4506,6 +4594,8 @@ function clWatch() {
   if (!D.closeWatch) return;
   const c = syncCred(), st = clLoad(), j = c && st.people.length ? JSON.stringify({ base: c.base, token: c.token, link: c.link && c.link !== c.token ? c.link : "", cursor: +st.cursor || 0 }) : "";
   if (j !== clWatch.last) { clWatch.last = j; D.closeWatch(j); }
+  const live = !!j && clLiveOn();                         // «на связи» — служба CloseLive: сообщения и звонки сразу
+  if (D.closeLive && live !== clWatch.live) { clWatch.live = live; D.closeLive(live); }
 }
 const clActive = () => { const st = clLoad(); return st.people.length > 0 || (st.invite && Date.now() / 1000 < (st.invite.expires || 0)); };
 function clSchedule() {
@@ -4515,7 +4605,7 @@ function clSchedule() {
 function clPrompt() {
   const st = clLoad(); if (!st.people.length) return "";
   return "БЛИЗКИЕ (переписка с их помощниками Dewiar, сообщения шифруются): " + st.people.map(p => p.name).join(", ")
-    + ". «Напиши/передай/скажи Андрею…» кому-то из них — инструмент close_send (дойдёт в его Dewiar, он услышит вслух); «что мне писали», «что ответила мама» — close_read. Другим людям — как обычно, мессенджерами.";
+    + ". Кто-то из них (в любой форме имени: «Люде» = Людмила, «Исаевой Людмиле» = Людмила Исаева) — СНАЧАЛА через Dewiar: «напиши/передай/скажи» — close_send (дойдёт в его Dewiar, он услышит вслух), «позвони» — close_call (video true — «по видео»); «что мне писали», «что ответила мама» — close_read. Только людям НЕ из этого списка — телефон (call) и мессенджеры.";
 }
 function clRecent(who, n = 8) {
   const st = clLoad(), ps = who ? [clPerson(who)] : st.people, out = [];
@@ -4562,9 +4652,12 @@ async function clCall(who, video) {
   if (video && !(await needPerm("android.permission.CAMERA"))) video = false;
   clCallPrep();
   closeSheets();
+  // открытый признак «звонят» (без содержимого): у близкого с закрытым приложением служба CloseLive зазвонит сразу
+  clReq("POST", "/close/send", { to: p.pid, kind: "ring", env: { v: 0, video: !!video } }).catch(() => { });
   await DewiarCall.start({ role: "caller", peer: { pid: p.pid, name: p.name, color: clCol(p.pid) }, video: !!video, transport: clTransport(p) });
   return p;
 }
+let clAutoAnswer = null;
 function clCallPrep() { try { stopListen(); } catch (e) { } try { D.radioPause(); } catch (e) { } try { D.stopSpeak(); } catch (e) { } }
 function clSig(peer, name, s) {
   if (!window.DewiarCall) return;
@@ -4575,7 +4668,9 @@ function clSig(peer, name, s) {
       clCallPrep(); closeSheets();
       if (r.video && !D.has("android.permission.CAMERA")) await needPerm("android.permission.CAMERA");
       if (!D.has("android.permission.RECORD_AUDIO")) await needPerm("android.permission.RECORD_AUDIO");
-      DewiarCall.start({ role: "callee", peer: { pid: p.pid, name: p.name, color: clCol(p.pid) }, video: !!r.video, call: r.call, offer: r.sdp, transport: clTransport(p) });
+      await DewiarCall.start({ role: "callee", peer: { pid: p.pid, name: p.name, color: clCol(p.pid) }, video: !!r.video, call: r.call, offer: r.sdp, transport: clTransport(p) });
+      // нажали «Ответить» на уведомлении звонка (приложение было закрыто) — отвечаем сразу
+      if (clAutoAnswer && clAutoAnswer.pid === p.pid && Date.now() < clAutoAnswer.until && DewiarCall.accept) { clAutoAnswer = null; DewiarCall.accept(); }
     },
     busy: (r) => clSend(peer, "", [], "sig", { s: { type: "busy", call: r.call } }).catch(() => { }),
   });
@@ -4704,23 +4799,57 @@ function clRender() {
   }
   const tabs = `<div class="tabs" id="cl-tabs"><button data-t="close" class="${clTab === "close" ? "on" : ""}">Близкие</button><button data-t="ref" class="${clTab === "ref" ? "on" : ""}">Рефералы</button></div>`;
   if (clTab === "ref") { if (!$("#rf-body")) { box.innerHTML = tabs + `<div id="rf-body"></div>`; clTabs(); } refTab(); return; }
+  // сверху — сами близкие (лица крупно: нажал — переписка), «+» — пригласить; печать с приглашением — только когда
+  // её позвали («Пригласить» или «+»), а не на пол-экрана каждый раз (отзыв 11.10)
   const inv = st.invite && Date.now() / 1000 < (st.invite.expires || 0) ? st.invite : null;
-  box.innerHTML = tabs + clOffers(st) + `<button class="btn w clscan" id="cl-scan"><svg viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></svg>Сканировать приглашение</button>
-    <p class="hint" style="margin:0 4px 12px">Переписка между помощниками: скажите «напиши маме, что я задержусь» — у мамы её помощница прочитает это вслух. Сообщения шифруются на устройствах.</p>
-    <div id="cl-invbox"></div>
-    ${st.people.length ? st.people.map(x => `<button class="clp" data-pid="${esc(x.pid)}"><i class="clava" style="--c:${clCol(x.pid)}">${esc((x.name || "?")[0].toUpperCase())}</i>
-      <span><b>${esc(x.name)}</b><small>${(() => { const l = (st.hist[x.pid] || []).slice(-1)[0]; return l ? esc((l.out ? "Вы: " : "") + (l.t || "📎 " + ((l.f || [])[0] || {}).name)) : "пока без сообщений"; })()}</small></span>${st.unread[x.pid] ? `<em>${st.unread[x.pid]}</em>` : ""}</button>`).join("")
-      : `<div class="card"><b>Пока никого</b><p class="hint" style="margin:4px 0 0">Нажмите «Пригласить» вверху — и отправьте ссылку близкому или покажите ему QR-код.</p></div>`}
-    <h3>Как вас видят близкие</h3><div class="card"><input id="cl-name" placeholder="ваше имя" maxlength="40" value="${esc(st.me.name && st.me.name !== "Без имени" ? st.me.name : (S.close && S.close.name) || S.user_name || "")}">
+  const last = (x) => { const l = (st.hist[x.pid] || []).slice(-1)[0]; return l ? esc((l.out ? "Вы: " : "") + (l.t || "📎 " + ((l.f || [])[0] || {}).name)) : "пока без сообщений"; };
+  const PH = `<svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>`,
+    VI = `<svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="13" height="11" rx="2.5"/><path d="m15.5 10.5 6-3.5v10l-6-3.5"/></svg>`;
+  box.innerHTML = tabs + clOffers(st)
+    + `<div class="clfaces">${st.people.map(x => `<button class="clface" data-pid="${esc(x.pid)}"><i class="clava" style="--c:${clCol(x.pid)}">${esc((x.name || "?")[0].toUpperCase())}${st.unread[x.pid] ? `<em>${st.unread[x.pid]}</em>` : ""}</i><span>${esc(String(x.name || "").split(/\s+/)[0])}</span></button>`).join("")}
+        <button class="clface add" id="cl-add"><i class="clava">+</i><span>Добавить</span></button></div>`
+    + (st.people.length ? st.people.map(x => `<div class="clp" data-pid="${esc(x.pid)}"><i class="clava" style="--c:${clCol(x.pid)}">${esc((x.name || "?")[0].toUpperCase())}</i>
+        <span><b>${esc(x.name)}</b><small>${last(x)}</small></span>${st.unread[x.pid] ? `<em>${st.unread[x.pid]}</em>` : ""}
+        ${(x.devs || []).length && window.DewiarCall ? `<button class="ib soft" data-call="${esc(x.pid)}" title="Позвонить">${PH}</button><button class="ib soft" data-vcall="${esc(x.pid)}" title="Видеозвонок">${VI}</button>` : ""}</div>`).join("")
+      : `<div class="card"><b>Пока никого</b><p class="hint" style="margin:4px 0 0">Нажмите «Пригласить» — покажите близкому печать Dewiar или отправьте ссылку. Потом говорите: «напиши маме, что я задержусь», «позвони маме по видео».</p></div>`)
+    + `<div id="cl-invbox"></div>`
+    + (inv && !clInvOpen ? `<button class="btn w clinvrow" id="cl-inv-show">Ссылка-приглашение действует до ${new Date(inv.expires * 1000).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })} — показать печать</button>` : "")
+    + clLiveCard()
+    + `<h3>Как вас видят близкие</h3><div class="card"><input id="cl-name" placeholder="ваше имя" maxlength="40" value="${esc(st.me.name && st.me.name !== "Без имени" ? st.me.name : (S.close && S.close.name) || S.user_name || "")}">
       <div class="sw" style="margin-top:10px"><div>Читать сообщения вслух<small>«Мама пишет: …»</small></div><label class="tg"><input type="checkbox" id="cl-speak" ${S.close && S.close.speak === false ? "" : "checked"}><i></i></label></div></div>
+    <p class="hint" style="margin:12px 4px">Переписка и звонки между помощниками, сообщения шифруются на устройствах. Голосом: «напиши Людмиле: привет», «позвони маме по видео».</p>
+    <button class="btn w clscan" id="cl-scan"><svg viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></svg>Сканировать приглашение</button>
     <details class="more"><summary>Пришла ссылка-приглашение?</summary><div class="row2" style="margin-top:8px"><input id="cl-link" placeholder="вставьте ссылку" style="flex:1;padding:12px 14px;border-radius:14px;border:0;background:var(--field)"><button class="btn p" id="cl-link-go">Принять</button></div></details>`;
-  $$(".clp").forEach(b => b.onclick = () => { clCur = b.dataset.pid; clRender(); });
-  clTabs(); clOfferBind();
+  $$(".clp, .clface[data-pid]").forEach(b => b.onclick = (e) => { if (e.target.closest("[data-call],[data-vcall]")) return; clCur = b.dataset.pid; clRender(); });
+  $$("[data-call]").forEach(b => b.onclick = () => clCall(b.dataset.call, false).catch(e => toast(e.message, 4000)));
+  $$("[data-vcall]").forEach(b => b.onclick = () => clCall(b.dataset.vcall, true).catch(e => toast(e.message, 4000)));
+  $("#cl-add").onclick = () => clInviteOpen();
+  if ($("#cl-inv-show")) $("#cl-inv-show").onclick = () => clInviteOpen();
+  clTabs(); clOfferBind(); clLiveBind();
   $("#cl-scan").onclick = () => scanCode();
-  if (inv) clInvShow(inv);
+  if (inv && clInvOpen) clInvShow(inv);
   $("#cl-name").onchange = () => { S.close = Object.assign({}, S.close, { name: $("#cl-name").value.trim() }); saveS(); clHello().then(() => toast("Сохранено")).catch(e => toast(e.message)); };
   $("#cl-speak").onchange = () => { S.close = Object.assign({}, S.close, { speak: $("#cl-speak").checked }); saveS(); };
   $("#cl-link-go").onclick = () => clAcceptLink($("#cl-link").value);
+}
+let clInvOpen = false;
+const clLiveOn = () => !(S.close && S.close.live === false);
+function clLiveCard() {
+  if (!D.closeLive || !clLoad().people.length) return "";
+  const batt = clLiveOn() && D.batteryOk && !D.batteryOk();
+  return `<h3>Когда приложение закрыто</h3><div class="card"><div class="sw"><div>Сообщения и звонки — сразу<small>В шторке — тихий значок «Dewiar на связи»; звонок близкого — на весь экран, даже на заблокированном</small></div>
+    <label class="tg"><input type="checkbox" id="cl-live" ${clLiveOn() ? "checked" : ""}><i></i></label></div>
+    ${batt ? `<button class="btn w" id="cl-batt" style="margin-top:10px">Разрешить работу в фоне</button><p class="hint" style="margin:6px 2px 0">Иначе телефон может усыплять Dewiar, и звонки будут доходить с опозданием.</p>` : ""}</div>`;
+}
+function clLiveBind() {
+  if ($("#cl-live")) $("#cl-live").onchange = async () => { const on = $("#cl-live").checked; S.close = Object.assign({}, S.close, { live: on }); saveS();
+    if (on) await needPerm("android.permission.POST_NOTIFICATIONS"); clWatch(); clRender(); };
+  if ($("#cl-batt")) $("#cl-batt").onclick = () => D.askBattery();
+}
+async function clInviteOpen() {
+  clInvOpen = true; clTab = "close";
+  try { const d = await clInvite(false); clRender(); clInvShow(d); setTimeout(() => { const b = $("#cl-invbox"); if (b) b.scrollIntoView({ block: "center", behavior: "smooth" }); }, 50); }
+  catch (e) { toast(e.message, 4000); }
 }
 function clInvShow(d) {
   const box = $("#cl-invbox"); if (!box) return;
@@ -4728,7 +4857,8 @@ function clInvShow(d) {
   const seal = window.DewiarCodes && window.ZXing ? DewiarCodes.seal(code) : "";
   box.innerHTML = `<div class="card clinv"><div class="clqr ${seal ? "seal" : ""}" id="cl-code">${seal || (typeof qrcode === "function" ? clQr(code) : "")}</div>
     <p class="hint" style="margin:8px 0">Покажите печать близкому: в Dewiar — «Сканер» в «Близких», без Dewiar — Google Lens. Или отправьте ссылку. Одна ссылка — для всех, кого зовёте, 7 дней; поэтому отправляйте её только своим.</p><p class="hint cllinks">${seal ? `<a href="#" id="cl-code-qr">Обычный QR</a>` : ""}<a href="#" id="cl-renew">Новая ссылка</a></p>
-    <div class="row2"><button class="btn p" id="cl-share" style="flex:1">Отправить ссылку</button><button class="btn" id="cl-copy" style="flex:1">Скопировать</button></div></div>`;
+    <div class="row2"><button class="btn p" id="cl-share" style="flex:1">Отправить</button><button class="btn" id="cl-copy" style="flex:1">Копировать</button><button class="btn" id="cl-inv-hide" style="flex:1">Скрыть</button></div></div>`;
+  $("#cl-inv-hide").onclick = () => { clInvOpen = false; clRender(); };
   if ($("#cl-code-qr")) $("#cl-code-qr").onclick = (e) => { e.preventDefault(); const c = $("#cl-code"), isSeal = c.classList.contains("seal");
     c.innerHTML = isSeal ? clQr(code) : seal; c.classList.toggle("seal", !isSeal); e.target.textContent = isSeal ? "Печать Dewiar" : "Обычный QR"; };
   $("#cl-share").onclick = () => D.share(`Добавь меня в «Близкие» в Dewiar — наши помощники смогут передавать друг другу сообщения: ${d.link}`);
@@ -4755,7 +4885,7 @@ async function clSaveFile(p, m, j) {
   } catch (e) { toast("Не скачался: " + e.message, 4000); }
 }
 $("#b-close").onclick = () => openClose("");
-$("#cl-inv").onclick = async () => { if (clTab === "ref") return refShare().catch(e => toast(e.message, 4000)); try { const d = await clInvite(false); clInvShow(d); } catch (e) { toast(e.message, 4000); } };
+$("#cl-inv").onclick = () => { if (clTab === "ref") return refShare().catch(e => toast(e.message, 4000)); clInviteOpen(); };
 document.addEventListener("visibilitychange", () => { if (!document.hidden && syncCred()) clPoll(); });
 setTimeout(() => { clLoad(); clBadge(); if (S.closePending && syncCred()) clAcceptLink(S.closePending); clPoll(); clSchedule(); }, 4000);
 

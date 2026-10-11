@@ -7,6 +7,9 @@
 from engine_base import *  # noqa: F401,F403 — общие импорты и помощники движка
 
 
+# просьба записать: «запиши», «сохрани», «в заметки», «запомни списком», «зафиксируй», «в файл»
+NOTE_ASK_RX = re.compile(r"заметк|запиш|запис|сохран|запомн|занеси|зафиксир|в\s+файл|в\s+папк|конспект", re.I)
+
 class ToolsMixin:
     # ---------- инструменты ----------
 
@@ -19,6 +22,13 @@ class ToolsMixin:
         log.info("🛠  %s %s", name, redact(json.dumps(args, ensure_ascii=False))[:200])
         if not on:
             return f"Инструмент {name} выключен пользователем."
+        asked = getattr(turn, "asked", None)
+        if name == "save_note" and asked is not None and not NOTE_ASK_RX.search(asked):
+            # стихи, список идей, ответ на вопрос — в чат, а не в заметки без спроса (экзамен 11.10: «записала это в
+            # заметку», хотя просили просто четверостишие)
+            log.info("📝 save_note без просьбы записать — не пишу")
+            return ("Не записано: пользователь не просил сохранять в заметки. Ответь прямо в чате (список — пунктами в "
+                    "самом ответе) и не говори, что записала.")
         blocked, force, warn_q = self.toolbox.guard(name, args)
         if blocked:
             log.warning("🛡 Защита: %s %s — %s", name, json.dumps(args, ensure_ascii=False)[:200], blocked)

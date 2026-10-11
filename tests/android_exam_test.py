@@ -20,6 +20,7 @@ def ok(c, m):
 www = Path(tempfile.mkdtemp()) / "www"
 shutil.copytree(ROOT / "android/assets/www", www)
 shutil.copy(ROOT / "ui/assets/entities.js", www / "entities.js")
+shutil.copy(ROOT / "ui/assets/call.js", www / "call.js")
 shutil.copytree(ROOT / "ui/assets/live", www / "live", dirs_exist_ok=True)
 (www / "personas.js").write_text(subprocess.run([sys.executable, str(ROOT / "android/tools/personas_json.py"), str(ROOT)],
                                                 capture_output=True, text=True, check=True).stdout, encoding="utf-8")
@@ -91,7 +92,8 @@ with sync_playwright() as p:
     ok(sc.get("flashlight", {}).get("passed"), "фонарик через быстрый ответ — засчитан (в песочнице)")
     ok(all(s.get("judge", {}).get("score") == 8 for s in sc.values()), "судья оценил каждое испытание")
     # ошибки, найденные руками 11.10, — в экзамене: заметки и напоминания «есть, а говорит нет», фото к заметке, сканер
-    for k in ("notes_show", "reminders_show", "note_photo", "note_long", "scanner_open"):
+    for k in ("notes_show", "reminders_show", "note_photo", "note_long", "scanner_open", "close_call_voice", "close_video_voice", "close_msg_voice",
+              "stop_misheard"):
         ok(sc.get(k, {}).get("passed"), f"экзамен ловит «{k}»: {[(c['name'], c['ok']) for c in sc.get(k, {}).get('checks', [])]} · {[x.get('answer') for x in sc.get(k, {}).get('steps', [])]}")
     ok(not sc.get("notes_find", {}).get("passed"), "«что я записывал про ремонт» без поиска по заметкам (заглушка модели) — не засчитан")
     ok(R["alarms"] == [], f"на «телефоне» не появилось ни одного будильника: {R['alarms']}")

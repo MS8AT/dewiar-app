@@ -1201,9 +1201,14 @@ def t_reminder(a, ctx):
     if rep and rep.get("kind") == "weekly" and rep.get("days") and when.weekday() not in rep["days"]:
         from when import next_time
         when = next_time(rep, datetime.now())              # первый раз — в ближайший подходящий день
+    moved = ""
+    if not rep and when < datetime.now() - timedelta(minutes=1):     # это время уже прошло («на 17:00», а сейчас 17:26) —
+        while when < datetime.now():                                  # ставим на ближайшее такое же время, а не в прошлое
+            when += timedelta(days=1)
+        moved = " Это время сегодня уже прошло — поэтому на завтра; так и скажи."
     item = ctx["reminders"].add(when, text or "Напоминание", rep, kind)
     return (f"Напоминание «{item['text']}» поставлено: {human(when)}" + (f", {describe_repeat(rep)}" if rep else "") +
-            f" (id {item['id']}). Подтверди коротко одной фразой.")
+            f" (id {item['id']}).{moved} Подтверди коротко одной фразой.")
 
 
 def calc_eval(expr, today=None):

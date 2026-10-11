@@ -70,27 +70,42 @@ def _stem(w):
     return w
 
 
+# «Люда», «Люде», «Людочке» → Людмила: уменьшительные имена близких (как CL_NICK в app.js)
+NICKS = {"люд": "людмила", "тан": "татьяна", "саш": "александр", "шур": "александр", "жен": "евгений", "миш": "михаил", "лен": "елена", "кат": "екатерина", "маш": "мария", "наташ": "наталья", "натах": "наталья", "оль": "ольга", "свет": "светлана", "вов": "владимир", "дим": "дмитрий", "кол": "николай", "сереж": "сергей", "серег": "сергей", "андрюш": "андрей", "ван": "иван", "леш": "алексей", "юл": "юлия", "ир": "ирина", "гал": "галина", "вал": "валентина", "над": "надежда", "люб": "любовь", "ан": "анна", "пет": "петр", "паш": "павел", "кост": "константин", "ген": "геннадий", "тол": "анатолий", "вит": "виктор", "слав": "вячеслав", "гош": "георгий", "лид": "лидия", "том": "тамара", "нин": "нина", "зин": "зинаида", "рит": "маргарита", "вик": "виктория"}
+NICK_RX = re.compile(r"^(андрюш|наташ|натах|сереж|серег|свет|кост|слав|люд|тан|саш|шур|жен|миш|лен|кат|маш|оль|вов|дим|кол|ван|леш|гал|вал|над|люб|пет|паш|ген|тол|вит|гош|лид|том|нин|зин|рит|вик|юл|ир|ан)(?:а|я|е|у|ю|ы|и|ой|ей|ою|ею|очк[а-я]*|ечк[а-я]*|оньк[а-я]*|еньк[а-я]*|ик[а-я]*|ок|ул[а-я]*|ус[а-я]*|юш[а-я]*|уш[а-я]*)?$")
+
+
+def _nick(w):
+    m = NICK_RX.match(w)
+    return NICKS[m.group(1)] if m else ""
+
+
 def match_name(name, people):
-    """«Андрею», «маме», «Свете» -> человек из близких (по общему началу имени), иначе None (или несколько — тоже None)."""
-    q = _stem(name)
-    if not q:
+    """«Андрею», «маме», «Исаевой Людмиле» -> человек из близких (по общему началу слов, порядок любой), иначе None
+    (или несколько одинаково подходящих — тоже None)."""
+    qs = [w for w in (_stem(x) for x in re.split(r"[\s,]+", str(name or ""))) if w]
+    if not qs:
         return None
+
+    def hit(q, n):
+        k = 0
+        while k < min(len(n), len(q)) and n[k] == q[k]:
+            k += 1
+        need = min(len(n), 3) if len(n) <= 4 else max(3, len(n) - 2)
+        return k + 10 if n == q else (k if k >= need else 0)
     best, score, tie = None, 0, False
     for p in people:
-        for word in [p.get("name", "")] + p.get("name", "").split():
-            n = _stem(word)
-            if not n:
-                continue
-            k = 0
-            while k < min(len(n), len(q)) and n[k] == q[k]:
-                k += 1
-            need = min(len(n), 3) if len(n) <= 4 else max(3, len(n) - 2)
-            if k >= need or n == q:
-                s = k + (10 if n == q else 0)
-                if s > score:
-                    best, score, tie = p, s, False
-                elif s == score and best is not p:
-                    tie = True
+        ws = [w for w in (_stem(x) for x in p.get("name", "").split()) if w]
+        if not ws:
+            continue
+        per = [max(hit(v, n) for v in (q, _nick(q)) if v for n in ws + ["".join(ws)]) for q in qs]
+        s = sum(per) - 4 * per.count(0)
+        if not any(per) or s <= 0:
+            continue
+        if s > score:
+            best, score, tie = p, s, False
+        elif s == score and best is not p:
+            tie = True
     return None if tie else best
 
 
@@ -390,6 +405,8 @@ class Close:
 
     def _take(self, it, priv, refreshed):
         """Одно входящее из ящика. -> (1, если новое сообщение — для счёта, обновлён ли список устройств)."""
+        if it.get("kind") == "ring":                    # признак звонка — для телефона в фоне; сам звонок — в «sig»
+            return 0, refreshed
         env, peer = it.get("env") or {}, it.get("peer", "")
         pub = self._pub_of(peer, env.get("fd", ""), it.get("out"))
         if pub is None and not refreshed:
@@ -548,13 +565,17 @@ class Close:
         cid = uuid.uuid4().hex[:12]
         c = self.calls[cid] = {"call": cid, "role": "caller", "pid": p["pid"], "name": p["name"], "video": bool(video), "offer": "", "at": time.time(), "fast": True}
         self.soon.set()
+        try:                                            # открытый признак «звонят»: у близкого с закрытым приложением
+            self._req("POST", "/close/send", {"to": p["pid"], "kind": "ring", "env": {"v": 0, "video": bool(video)}})   # зазвонит телефон
+        except CloseError:
+            pass
         self._open_call(c)
         return {"call": cid, "name": p["name"]}
 
     def _sig(self, peer, name, body):
         s = (body or {}).get("s") or {}
         if s.get("type") == "ring":
-            if time.time() * 1000 - _int(s.get("ts")) > 45000 or s.get("call") in self.calls:
+            if time.time() * 1000 - _int(s.get("ts")) > 60000 or s.get("call") in self.calls:
                 return
             if not re.fullmatch(r"[0-9a-z]{6,32}", str(s.get("call") or "")):           # id звонка уходит в адрес страницы
                 return
@@ -617,7 +638,9 @@ class Close:
             return ""
         return ("\n\nБЛИЗКИЕ (переписка с их помощниками Dewiar, сообщения шифруются): " + ", ".join(names)
                 + ". «Напиши/передай/скажи Андрею…» кому-то из них — инструмент close_send (дойдёт в его Dewiar, он услышит вслух); "
-                  "«что мне писали», «что ответила мама» — close_read; «позвони маме» — close_call (откроется окно звонка). Другим людям (не из этого списка) — как обычно, мессенджерами.")
+                  "«что мне писали», «что ответила мама» — close_read; «позвони маме» — close_call (откроется окно звонка; «по видео» — video true). Имя может быть в любой форме "
+                  "(«Люде» = Людмила, «Исаевой Людмиле» = Людмила Исаева) — люди из этого списка ВСЕГДА через Dewiar, в первую очередь. "
+                  "Другим людям (не из этого списка) — как обычно, мессенджерами.")
 
     def recent(self, who="", n=8):
         with self._lock:

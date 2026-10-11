@@ -86,7 +86,7 @@ ok(X.days_to_new_year(__import__("datetime").date(2026, 12, 30)) == 2, "дни �
 im = X.make_image("receipt")
 ok(im and im.startswith("data:image/png;base64,"), "картинка чека рисуется")
 logs = []
-rep = asyncio.run(X.run_exam(prof, only={"memory_meeting", "money", "oven", "honest_breakfast", "vision_receipt", "code_bugfix", "notes_show", "reminders_show"},
+rep = asyncio.run(X.run_exam(prof, only={"memory_meeting", "money", "oven", "honest_breakfast", "vision_receipt", "code_bugfix", "notes_show", "reminders_show", "stop_misheard"},
                              log=lambda s: (print(s), logs.append(s))))
 R = {r["id"]: r for r in rep["scenarios"]}
 ok(R["memory_meeting"]["passed"], f"память через новый разговор — сдан: {R['memory_meeting']['steps'][-1]['answer']}")
@@ -98,10 +98,12 @@ cb = R["code_bugfix"]
 ok(cb["passed"] and all(c["ok"] for c in cb["checks"]), f"код: задача, тесты, тесты не тронуты — {[(c['name'], c['ok']) for c in cb['checks']]}")
 for k in ("notes_show", "reminders_show"):      # заметки и напоминания положены перед сценарием — и найдены
     ok(R[k]["passed"], f"экзамен: {k} — {[(c['name'], c['ok']) for c in R[k]['checks']]} · {R[k]['steps'][-1]['answer'][:160]}")
+sm = R["stop_misheard"]                         # «Ctop.», «Сстоп!», «Паузу.» — замолчала, а не «Хорошо, я слушаю» (отзыв 11.10)
+ok(sm["passed"] and [x["answer"] for x in sm["steps"]] == ["", "", ""], f"экзамен: ослышанное «стоп» — сон: {sm['checks']} {sm.get('error')}")
 s = rep["summary"]
-ok(s["total"] == 8 and s["passed"] == 7 and "Код" in s["by_group"], f"итог: {s}")
+ok(s["total"] == 9 and s["passed"] == 8 and "Код" in s["by_group"], f"итог: {s}")
 md = X.markdown(rep)
-ok("# Экзамен Dewiar" in md and "❌ Честность" in md and "Сдано **7 из 8**" in md, "отчёт Markdown")
+ok("# Экзамен Dewiar" in md and "❌ Честность" in md and "Сдано **8 из 9**" in md, "отчёт Markdown")
 ok(json.loads(json.dumps(rep, ensure_ascii=False))["version"], "отчёт JSON")
 srv.shutdown()
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")

@@ -89,6 +89,33 @@ public final class Bridge {
     @JavascriptInterface public void closeWatch(String json) {
         prefs.edit().putString("close_watch", json == null ? "" : json).apply();
         CloseWatch.schedule(a, json != null && !json.isEmpty());
+        CloseLive.apply(a);
+    }
+
+    /** «Близкие» на связи, когда приложение закрыто (служба CloseLive): включить или выключить. */
+    @JavascriptInterface public void closeLive(boolean on) {
+        prefs.edit().putBoolean("close_live", on).apply();
+        CloseLive.apply(a);
+    }
+
+    /** Не усыпляет ли система Dewiar в фоне (экономия батареи). До Android 6 — не усыпляет. */
+    @JavascriptInterface public boolean batteryOk() {
+        if (Build.VERSION.SDK_INT < 23) return true;
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) a.getSystemService(Context.POWER_SERVICE);
+            return (Boolean) android.os.PowerManager.class.getMethod("isIgnoringBatteryOptimizations", String.class).invoke(pm, a.getPackageName());
+        } catch (Throwable e) { return true; }
+    }
+
+    /** Попросить систему не усыплять Dewiar: окно Android «Разрешить работу в фоне?». Не вышло — настройки батареи. */
+    @JavascriptInterface public void askBattery() {
+        a.runOnUiThread(new Runnable() { @Override public void run() {
+            try {
+                a.startActivity(new Intent("android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", android.net.Uri.parse("package:" + a.getPackageName())));
+            } catch (Throwable e) {
+                try { a.startActivity(new Intent("android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS")); } catch (Throwable ignored) { }
+            }
+        } });
     }
 
     // ---------- звук напоминаний (Sounds) ----------

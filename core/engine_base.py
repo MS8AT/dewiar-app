@@ -147,6 +147,8 @@ class Turn:
         self.error = ""
 
 
+# продолжение разговора без имени — не дольше и не длиннее этого: дальше это разговор людей рядом, не со мной
+FOLLOW_MAX_S, FOLLOW_MAX_WORDS = 9.0, 26
 SLEEP_STRONG = {"стоп", "stop", "хватит", "замолчи", "замолкни", "стой", "тихо", "тишина", "пауза", "достаточно", "помолчи",
                 "прекрати", "прекращай", "остановись", "останови", "перестань", "отмена", "отмени", "отбой", "всё", "все",
                 "спасибо", "спасиб", "благодарю", "пока", "стопэ", "стоб"}
@@ -190,11 +192,51 @@ def thanks_phrase(text):
     return any(w in THANKS for w in words) and all(w in THANKS or w in THANKS_FILL for w in words)
 
 
+# Распознаватель иногда пишет «стоп» латиницей или с ошибкой («Ctop.», «Сстоп», «Стоб», «Паузу», отзыв 11.10) — и тогда
+# помощница не замолкала, а отвечала «Хорошо, я слушаю». Слово приводим к нашему: латинские буквы — двумя способами
+# (похожие по виду: C→С, p→р; по звуку: p→п, u→у), затем близость к главным стоп-словам (не меньше 0,8 по правкам).
+# Тот же разбор — на телефоне (stopWord в app.js).
+_LOOK = str.maketrans("aceopxyktmhb", "асеорхуктмнв")
+_PHON = str.maketrans("abcdefghiklmnoprstuvyz", "абсдефгхиклмнопрстувыз")
+STOP_CORE = ("стоп", "пауза", "хватит", "замолчи", "помолчи", "прекрати", "остановись")
+
+
+def _similar(a, b):
+    """Похожесть слов по числу правок (Левенштейн): 1 — одинаковые. Так же считает телефон."""
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return 1 - prev[-1] / max(len(a), len(b), 1)
+
+
+def stop_word(w):
+    """Слово → стоп-слово из SLEEP_STRONG («Ctop» → «стоп», «паузу» → «пауза», «сстоп» → «стоп») или None."""
+    w = (w or "").lower().replace("ё", "е")
+    if w in SLEEP_STRONG:
+        return w
+    cands = [w]
+    if re.search(r"[a-z]", w):
+        cands += [w.translate(_LOOK), w.translate(_PHON)]
+    for c in cands:
+        if c in SLEEP_STRONG and c not in {"все", "всё", "пока", "спасибо", "спасиб", "благодарю"}:
+            return c
+    for c in cands:
+        if len(c) >= 4 and not re.search(r"[a-z]", c):
+            best = max(STOP_CORE, key=lambda s: _similar(c, s))
+            if _similar(c, best) >= 0.8:
+                return best
+    return None
+
+
 def is_sleep_phrase(text):
     """«Стоп», «Stop.», «хватит, спасибо», «всё, отбой», «ладно, помолчи» — фраза целиком про «замолчи».
-    Такие фразы не идут в модель: ассистент засыпает до следующего имени (как «Алиса, хватит»)."""
+    Такие фразы не идут в модель: ассистент засыпает до следующего имени (как «Алиса, хватит»).
+    Ослышки «стопа» («Ctop.», «Сстоп», «Паузу») — тоже (stop_word)."""
     t = re.sub(r"[^\w\s]", " ", (text or "").lower().replace("ё", "е"))
-    words = t.split()
+    words = [w if w in SLEEP_SOFT else (stop_word(w) or w) for w in t.split()]
     if not words or len(words) > 5:
         return False
     if " ".join(words) in {"не надо", "не нужно", "ничего", "забудь", "никак", "ничего не надо", "уже не надо", "не надо уже"}:

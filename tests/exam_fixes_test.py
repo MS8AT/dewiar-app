@@ -139,6 +139,21 @@ if shutil.which("node"):
         + 'let bad = ""; try { calcEval("alert(1)"); } catch (e) { bad = "ok"; } console.log(JSON.stringify(r.concat([bad])));'
     out = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True).stdout)
     ok(out == [399.5, 917.5, "среда", "ok"], f"телефон: калькулятор считает и не выполняет чужое: {out}")
+# экзамен 0.38.13: напоминание «на 17:00», когда уже 17:26, — на завтра, а не в прошлое; заметка без просьбы — не пишется;
+# облако Dewiar по внутреннему адресу сервера — «в облаке», а не «на твоём компьютере»
+import tools as T, privacy as PV, engine_tools as ET  # noqa: E402
+class _R:
+    def __init__(self): self.items = []
+    def add(self, when, text, rep, kind): self.items.append((when, text)); return {"id": "x1", "text": text}
+rr = _R()
+past = (dt.datetime.now() - dt.timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M")
+out = T.t_reminder({"text": "Позвонить Ольге", "at": past}, {"reminders": rr})
+w = rr.items[-1][0]
+ok(w > dt.datetime.now() and w.strftime("%H:%M") == past[-5:] and "на завтра" in out, f"время уже прошло — на завтра в то же время: {w} · {out[-80:]}")
+ok(not ET.NOTE_ASK_RX.search("Напиши четверостишие про осень с настоящей рифмой") and not ET.NOTE_ASK_RX.search("Составь список из пяти идей подарка")
+   and ET.NOTE_ASK_RX.search("Сохрани в заметки список покупок") and ET.NOTE_ASK_RX.search("запиши это"), "заметка — только когда просили записать")
+ok("облаке Dewiar" in PV.where_model("http://127.0.0.1/dwrapp/cloud.php?p=") and "компьютере" in PV.where_model("http://127.0.0.1:11434/v1"),
+   "где думает модель: облако Dewiar и по внутреннему адресу")
 srv.shutdown()
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 print("ALL OK" if not fails else "")

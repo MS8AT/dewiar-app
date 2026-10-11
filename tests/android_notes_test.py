@@ -59,6 +59,11 @@ with sync_playwright() as p:
       const a = await quick('Лира, открой сканер'), b = await quick('лира открой сканер'); await new Promise(r => setTimeout(r, 400)); scanCode = s0;
       return [a && a.say, b && b.say, opened, !!claimedAction('Открыла сканер, наведи камеру.', new Set(), 'сканер'), !!claimedAction('Открыла сканер.', new Set(['scan_code']), 'сканер')]; }""")
     ok(r == ["Наведите камеру на код.", "Наведите камеру на код.", 2, True, False], f"«Лира, открой сканер» — сканер открывается; «открыла» без открытия — ловится: {r}")
+    # «стоп» ослышан («Вы: Ctop.» → «Хорошо, я слушаю.», отзыв 11.10) — всё равно стоп, без модели; «стол» — нет
+    r = pg.evaluate("""async () => { const out = [];
+      for (const t of ['Ctop.', 'Сстоп!', 'Стоб', 'Паузу.', 'Pauza', 'Лира, Ctop', 'ну всё, хватить']) { const q = await quick(t); out.push(q && q.say); }
+      return [out, ['Стол', 'Стопа болит', 'Топ', 'сто'].map(stopPhrase)]; }""")
+    ok(r[0] == ["Хорошо."] * 7 and r[1] == [None] * 4, f"телефон: ослышанное «стоп/пауза» — стоп без модели, похожие слова — нет: {r}")
     # «покажи заметки» — открывает заметки; поиск «заметки», «все» — последние, а не «заметок нет» (отзыв 11.10)
     r = pg.evaluate("""async () => { const a = await quick('Покажи заметки'), b = await quick('Лира, что у меня в заметках');
       await new Promise(r => setTimeout(r, 400)); const open = document.querySelector('#sh-day').classList.contains('on') && dayTab === 'notes';

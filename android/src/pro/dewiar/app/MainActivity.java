@@ -152,6 +152,9 @@ public class MainActivity extends Activity implements Net.Sink {
                 pending = new JSONObject().put("action", "type");
             } else if ("pro.dewiar.CLOSE".equals(a)) {              // уведомление «Близких» (CloseWatch) — открыть переписку
                 pending = new JSONObject().put("action", "close");
+            } else if ("pro.dewiar.CLOSE_CALL".equals(a)) {         // звонок близкого из уведомления (CloseLive): открыть, ответить
+                CloseLive.cancelRing(this);
+                pending = new JSONObject().put("action", "close_call").put("pid", i.getStringExtra("pid")).put("answer", i.getBooleanExtra("answer", false));
             } else if (Intent.ACTION_ASSIST.equals(a) || "android.intent.action.VOICE_COMMAND".equals(a) || "pro.dewiar.LISTEN".equals(a)) {
                 pending = new JSONObject().put("action", "listen");
             } else if (Intent.ACTION_VIEW.equals(a) && i.getData() != null) {
@@ -222,11 +225,13 @@ public class MainActivity extends Activity implements Net.Sink {
 
     @Override protected void onResume() {
         super.onResume();
+        CloseLive.visible = true;                            // на экране — сообщения и звонки показывает само приложение
         if (pageReady) event("resume", new JSONObject());
     }
 
     @Override protected void onPause() {
         super.onPause();
+        CloseLive.visible = false;
         if (pageReady) event("pause", new JSONObject());
     }
 
