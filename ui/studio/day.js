@@ -175,9 +175,42 @@ async function loadMoney() {
 }
 $$("#cal-tabs button").forEach(b => b.onclick = () => {
   calTab = b.dataset.ct; $$("#cal-tabs button").forEach(x => x.classList.toggle("on", x === b));
-  ["month", "money", "feed"].forEach(k => $("#ct-" + k).style.display = k === calTab ? "" : "none");
-  if (calTab === "money") loadMoney(); if (calTab === "feed") renderFeed();
+  ["month", "money", "notes", "feed"].forEach(k => $("#ct-" + k).style.display = k === calTab ? "" : "none");
+  if (calTab === "money") loadMoney(); if (calTab === "feed") renderFeed(); if (calTab === "notes") ntLoad();
 });
+
+/* ---------- «Заметки»: все заметки папки ассистента (и с телефона), новые сверху, поиск по словам, правка на месте ---------- */
+let ntCur = "", ntT = 0;
+const ntDate = (s) => { const d = new Date(s * 1000), now = new Date();
+  return d.toDateString() === now.toDateString() ? "сегодня, " + d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" }); };
+function ntMark(t, q) {                                    // подсветить найденные слова (текст уже экранирован)
+  let h = escH(t); for (const w of String(q || "").toLowerCase().split(/\s+/).filter(x => x.length > 1))
+    h = h.replace(new RegExp("(" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[её]/g, "[её]") + ")", "gi"), "<mark>$1</mark>");
+  return h; }
+async function ntLoad() {
+  const q = $("#nt-q").value.trim(); let l = [];
+  try { l = await core.call("notes_list", { q }); } catch (e) { $("#nt-list").innerHTML = `<p class="hint">${escH(e.message)}</p>`; return; }
+  $("#nt-list").innerHTML = l.length ? l.map(n => `<button class="nt-row ${n.path === ntCur ? "cur" : ""}" data-p="${escH(n.path)}"><b>${ntMark(n.title, q)}</b>
+      <small>${ntDate(n.mtime)}${n.folder ? " · " + escH(n.folder) : ""}</small><span>${ntMark(n.snippet, q)}</span></button>`).join("")
+    : `<p class="hint" style="padding:8px 4px">${q ? "Ничего не нашлось — попробуйте другое слово." : "Заметок пока нет. Скажите: «запиши в заметки…» или нажмите «Новая заметка»."}</p>`;
+  $$("#nt-list .nt-row").forEach(b => b.onclick = () => ntOpen(b.dataset.p));
+  if (!ntCur && l.length && !$("#nt-view").innerHTML) ntOpen(l[0].path);
+}
+async function ntOpen(path) {
+  let d; try { d = await core.call("ws_read", { path }); } catch (e) { toast(e.message); return; }
+  ntCur = path; $$("#nt-list .nt-row").forEach(b => b.classList.toggle("cur", b.dataset.p === path));
+  const title = path.split("/").pop().replace(/\.md$/, "");
+  $("#nt-view").innerHTML = `<div class="nt-head"><b>${escH(title)}</b><small>${escH(path)} · ${ntDate(d.mtime)}</small></div>
+    <textarea id="nt-text" spellcheck="true">${escH(d.text || "")}</textarea>
+    <div class="actions"><button class="btn primary" id="nt-save">Сохранить</button><button class="btn" id="nt-open">Открыть в программе</button><button class="btn" id="nt-del">Удалить</button><span class="res" id="nt-res"></span></div>`;
+  $("#nt-save").onclick = async () => { try { await core.call("ws_write", { path, text: $("#nt-text").value }); $("#nt-res").className = "res ok"; $("#nt-res").textContent = "Сохранено"; ntLoad(); } catch (e) { $("#nt-res").className = "res bad"; $("#nt-res").textContent = e.message; } };
+  $("#nt-open").onclick = () => core.call("ws_open", { path }).catch(e => toast(e.message));
+  $("#nt-del").onclick = async () => { if (!confirm(`Удалить заметку «${title}»? Она уйдёт в корзину.`)) return;
+    try { await core.call("ws_delete", { path }); ntCur = ""; $("#nt-view").innerHTML = ""; ntLoad(); } catch (e) { toast(e.message); } };
+}
+$("#nt-q").oninput = () => { clearTimeout(ntT); ntT = setTimeout(ntLoad, 200); };
+$("#nt-add").onclick = async () => { try { const r = await core.call("ws_new_note", { title: "Новая заметка", folder: "Заметки", text: "" }); $("#nt-q").value = ""; ntCur = r.path; await ntLoad(); ntOpen(r.path); setTimeout(() => $("#nt-text") && $("#nt-text").focus(), 100); } catch (e) { toast(e.message); } };
 $$("#mo-per button").forEach(b => b.onclick = () => {
   moPer = b.dataset.per; $$("#mo-per button").forEach(x => x.classList.toggle("on", x === b));
   $("#mo-custom").style.display = moPer === "custom" ? "inline-flex" : "none"; loadMoney();
@@ -296,6 +329,9 @@ $("#sh-cid").onchange = async () => { const v = $("#sh-cid").value.trim().toLowe
   await save({ smarthome: { client_id: v } }, true); S.smarthome = Object.assign({}, S.smarthome, { client_id: v });
   shFill(await core.call("home_get")); r.className = "res ok"; r.textContent = v ? "ClientID сохранён — теперь «Получить ключ»." : "Используется общее приложение Dewiar."; };
 $("#sh-refresh").onclick = () => core.call("home_refresh").then(shFill).catch(e => toast(e.message));
+// умный дом — на телефон QR-кодом (только ключ дома; через сервер ключ не ходит): dewiar://import?c=… с одним «home»
+$("#sh-phone").onclick = async () => { const box = $("#sh-qrbox"); if (box.style.display !== "none") { box.style.display = "none"; $("#sh-qr").innerHTML = ""; return; }
+  try { const d = await core.call("phone_home"); $("#sh-qr").innerHTML = qrSvg(d.url); box.style.display = ""; } catch (e) { toast(e.message); } };
 $("#sh-off").onclick = () => { if (confirm("Отключить умный дом?")) core.call("home_forget").then(shFill).catch(e => toast(e.message)); };
 
 /* ---------- календари Google/Яндекс ---------- */

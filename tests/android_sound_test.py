@@ -32,6 +32,8 @@ rcv = (SRC / "AlarmReceiver.java").read_text(encoding="utf-8")
 ok("Sounds.channel(c)" in rcv and "Sounds.quietChannel(c)" in rcv and "Compat.CH_ALARM" not in rcv, "уведомление — в канал выбранного звука")
 ok("addAction(action(c, DONE" in rcv and "SNOOZE" in rcv and "AlarmActivity.closeIfOpen(id)" in rcv and "4 /* IMPORTANCE_HIGH */" in snd and "QUIET = \"alarm_watch\"" in snd,
    "напоминание видно на часах: тихое уведомление остаётся важным, кнопки «Понял» и «Через 10 минут» работают и с часов")
+ok("SOUND_DELAY_MS" in act and "postDelayed" in act and "nm.cancel(id.hashCode());            // снятое" not in rcv and '.putExtra("fired"' in rcv,
+   "первые секунды звучит само уведомление (его видят часы), окно берёт звук потом; уведомление не снимается, а обновляется")
 man = (ROOT / "android/AndroidManifest.xml").read_text(encoding="utf-8")
 prov = (SRC / "SoundProvider.java").read_text(encoding="utf-8")
 ok('android:name=".SoundProvider"' in man and '"/custom".equals(uri.getPath())' in prov and "MODE_READ_ONLY" in prov,

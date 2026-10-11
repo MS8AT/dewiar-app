@@ -545,3 +545,19 @@ body.neu .clsend textarea, body.neu #cl-name { background: var(--glass); box-sha
 .clinv .cllinks { display: flex; gap: 18px; margin: -2px 0 10px; } .clinv .row2 { flex-wrap: wrap; } .clinv .row2 .btn { flex: 1 1 140px !important; min-width: 0; }   /* узкий экран — кнопки в две строки, а не за край */
 .clscan { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px; }
 .clscan svg { width: 20px; height: 20px; }
+
+/* заметка: открыть, поправить, фото и файлы (openNote) */
+#note-body input, #note-body textarea { width: 100%; border: 0; border-radius: 14px; background: var(--field); color: var(--ink); font: inherit; font-size: 16px; padding: 12px 14px; margin-bottom: 8px; outline: none; }
+#note-body input { font-weight: 600; }
+#note-body textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
+.ntatt { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; } .ntatt:empty { display: none; }
+.ntimg { width: 92px; height: 92px; border-radius: 16px; overflow: hidden; padding: 0; border: 0; background: var(--frost); position: relative; }
+.ntimg img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ntf { border: 0; border-radius: 14px; background: var(--frost-hi); color: var(--ink); padding: 10px 12px; font: inherit; font-size: 13.5px; max-width: 100%; text-align: left; }
+.ntf small { color: var(--muted); margin-left: 6px; }
+.ntadd { display: flex; gap: 8px; margin-bottom: 10px; } .ntadd .btn { flex: 1; text-align: center; }
+.nthumb { width: 46px; height: 46px; border-radius: 12px; object-fit: cover; flex: none; }
+.it.note { cursor: pointer; } .it .bd .ntc { color: var(--accent); font-size: 12px; margin-left: 4px; }
+.ntnew { width: 100%; margin-bottom: 10px; }
+#imgview { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.94); display: none; place-items: center; padding: 16px; }
+#imgview.on { display: grid; } #imgview img { max-width: 100%; max-height: 100%; border-radius: 10px; }

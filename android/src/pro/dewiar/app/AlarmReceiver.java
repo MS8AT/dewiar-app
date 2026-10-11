@@ -40,6 +40,7 @@ public class AlarmReceiver extends BroadcastReceiver {
     @SuppressWarnings("deprecation")
     private static void post(Context c, String id, String title, String kind, String who, boolean loud) {
         Intent full = new Intent(c, AlarmActivity.class).putExtra("id", id).putExtra("title", title).putExtra("kind", kind).putExtra("who", who)
+                .putExtra("fired", loud ? System.currentTimeMillis() : 0L)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_USER_ACTION);
         PendingIntent fp = PendingIntent.getActivity(c, id.hashCode(), full, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         String head = "alarm".equals(kind) ? "⏰ Будильник" : "timer".equals(kind) ? "⏱ Таймер" : "🔔 Напоминание";
@@ -61,7 +62,8 @@ public class AlarmReceiver extends BroadcastReceiver {
         if (!"timer".equals(kind)) b.addAction(action(c, SNOOZE, id, title, kind, who, "Через 10 минут"));
         if (!name.isEmpty()) b.setSubText(head.substring(head.indexOf(' ') + 1));
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (!loud) nm.cancel(id.hashCode());            // снятое уведомление смолкает наверняка; тихое встаёт на его место
+        // тихое — обновлением того же уведомления, а не снятием: часы (Honor/Huawei Health) видят одно уведомление,
+        // а не «появилось и пропало»; звук уведомления к этому времени уже отзвучал (окно ждёт AlarmActivity.SOUND_DELAY_MS)
         nm.notify(id.hashCode(), b.build());
         if (!loud) return;
         // приложение на экране — окно сразу; из фона Android 10+ окно не откроет — тогда остаётся уведомление

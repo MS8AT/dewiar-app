@@ -110,7 +110,7 @@
     <h1>Календарь</h1>
     <p class="lead">Ваш день, деньги и дела — в одном месте. Скажите «купил кофе за 8 рублей», «получил зарплату 3000»,
       «напомни в пятницу в 15:00 позвонить Лёше» — всё появится здесь. «Сколько я потратил за неделю?» — ответит голосом.</p>
-    <div class="tabs" id="cal-tabs"><button data-ct="month" class="on">Календарь</button><button data-ct="money">Деньги</button><button data-ct="feed">Список</button></div>
+    <div class="tabs" id="cal-tabs"><button data-ct="month" class="on">Календарь</button><button data-ct="money">Деньги</button><button data-ct="notes">Заметки</button><button data-ct="feed">Список</button></div>
 
     <div id="ct-month">
       <div class="calbar">
@@ -150,6 +150,11 @@
           <div id="mo-list"></div>
         </div>
       </div>
+    </div>
+
+    <div id="ct-notes" style="display:none">
+      <div class="nt-bar"><input id="nt-q" type="search" placeholder="Найти в заметках: слово или несколько слов" autocomplete="off"><button class="btn primary" id="nt-add">Новая заметка</button></div>
+      <div class="nt-cols"><div id="nt-list" class="nt-list"></div><div id="nt-view" class="nt-view"></div></div>
     </div>
 
     <div id="ct-feed" style="display:none">
@@ -700,7 +705,10 @@
       <div id="sh-on" style="display:none">
         <div id="sh-devs" class="chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
         <div class="actions" style="margin:0"><span class="res ok" id="sh-state" style="flex:1"></span>
-          <button class="btn" id="sh-refresh">Обновить</button><button class="btn" id="sh-off">Отключить</button></div>
+          <button class="btn" id="sh-refresh">Обновить</button><button class="btn" id="sh-phone">На телефон</button><button class="btn" id="sh-off">Отключить</button></div>
+        <div id="sh-qrbox" style="display:none;margin-top:12px"><div class="actions" style="align-items:center;gap:16px;flex-wrap:wrap"><div class="cl-qr" id="sh-qr"></div>
+          <p class="hint" style="flex:1;min-width:220px;margin:0">Откройте Dewiar на телефоне и скажите «отсканируй код» (или «Близкие» → «Сканировать») — телефон спросит
+          и подключит этот же умный дом. Мозг и голос телефона не меняются. В коде — ключ от вашего дома: не показывайте его чужим.</p></div></div>
       </div>
       <p class="res" id="sh-res" style="margin-top:6px"></p>
     </div>

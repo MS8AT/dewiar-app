@@ -141,6 +141,7 @@ async def run():
     await asyncio.sleep(1)
     R["tools"] = [t["name"] for t in (await call("tools"))["data"] if t.get("enabled")]
     R["phone"] = (await call("phone_config"))["data"]
+    R["homeqr"] = (await call("phone_home"))["data"]
     rd.cancel()
 
 try:
@@ -161,3 +162,7 @@ c = ph.get("url", "").split("c=", 1)[-1]
 d = json.loads(base64.urlsafe_b64decode(c + "=" * (-len(c) % 4)).decode()) if c else {}
 ok(d.get("llm", {}).get("profiles", {}).get("p", {}).get("model") == "chat" and d.get("home", {}).get("token") == "good_token_0123456789abcdef"
    and ph.get("apk", "").endswith("/Dewiar.apk") and ph.get("lan"), "QR для телефона: мозг и умный дом этого компьютера, ссылка на приложение")
+hq = (R.get("homeqr") or {}).get("url", "").split("c=", 1)[-1]
+dh = json.loads(base64.urlsafe_b64decode(hq + "=" * (-len(hq) % 4)).decode()) if hq else {}
+ok(dh == {"dewiar": 1, "home": {"token": "good_token_0123456789abcdef"}}, f"«На телефон»: в коде только умный дом, без мозга и ключей: {sorted(dh)}")
+

@@ -1527,7 +1527,8 @@ async function ask(text, opts = {}) {
   convCheck();
   const att = opts.attach || [], pics = att.filter(a => a.kind === "image"), docs = att.filter(a => a.kind === "text");
   if (pics.length) { showCard(`<div class="attshow">${pics.map(a => `<img src="${a.url}" alt="">`).join("")}</div>`); cardSticky = Date.now() + 60000; }
-  const fast = opts.hidden || att.length ? null : await quick(text);
+  turnAtt = att;
+  const fast = opts.hidden ? null : att.length ? (() => { const say = noteQuick(text, att); return say ? { say } : null; })() : await quick(text);
   if (fast && fast.switchTo) { setState("idle"); showYou(text); switchPersona(fast.switchTo, fast.question); return; }
   if (fast) { fast.say = gfix(fast.say); history.push({ role: "user", content: text }, { role: "assistant", content: fast.say, who: persona().id }); saveH(); convAfter(); dayTurn(text, fast.say); answerLocal(fast); return; }
   if (!S.llm.base_url && loggedIn()) showBot("Подключаюсь к мозгу — секунду…", "wait");
@@ -1797,6 +1798,9 @@ async function quick(text) {
   { const bq = await bugQuick(text.replace(/^[А-ЯЁA-Z][а-яёa-z-]+\s*,\s*(?=\S)/, (m) => findPersona(m.replace(/[\s,]/g, ""), true) ? "" : m)); if (bq) return bq; }
   const t = text.toLowerCase().replace(/ё/g, "е").replace(/[.!?,]+$/g, "").replace(/\s+/g, " ").trim();
   if (NEW_CONV_RX.test(t) || NEW_CONV_RX.test(t.replace(/^\S+\s+/, ""))) { convReset(); return { say: "Хорошо, начинаем с чистого листа." }; }
+  // «запиши в заметки …», «добавь в заметки …», «заметка: …» — сразу в заметки, без модели: модель иногда отвечала
+  // «Записала.», не вызвав save_note, и заметка терялась (отзыв 11.10). Текст — как сказан, заголовок — первые слова.
+  { const n = noteQuick(text); if (n) return { say: n }; }
   // «отсканируй код», «открой сканер», «сканер qr» — сразу сканер, без модели
   const SCAN_OBJ = "(?:код|qr|кьюар|ку ар|qr[- ]?код|кьюар[- ]?код|ацтек|aztec|штрих[- ]?код|дата ?матрикс|data ?matrix|датаматрикс|товар|этикетку|упаковку|маркировку|честный знак|ценник)";
   if (new RegExp(`^(?:(?:открой|запусти|включи|покажи)\\s+)?(?:сканер|сканирование)(?:\\s+(?:кодов|${SCAN_OBJ}))?$|^(?:от|про)?сканируй(?:\\s+(?:мне\\s+)?(?:этот\\s+|эту\\s+)?${SCAN_OBJ})?$|^(?:считай|прочитай|проверь)\\s+(?:этот\\s+|эту\\s+)?${SCAN_OBJ}$`).test(t))
@@ -1995,6 +1999,9 @@ const CLAIMS = [
   // просили посмотреть или показать через камеру, а в ответ «Секунду, смотрю.», «Вот.», «Показываю» — без снимка ничего не произошло
   { rx: /^(?:хорошо,?\s*|секунду,?\s*|сейчас,?\s*|конечно,?\s*)*(?:смотрю|посмотрю|гляжу|взгляну|показываю|покажу|вот(?:\s+(?:он|оно|она|фото|снимок|изображение|так))?|держи)(?:[\s,.!…]|$)/i,
     tool: "take_photo (или show_photo, если снимок уже сделан и его просят показать снова)", what: "смотришь или показываешь", user: CAM_ASK_RX },
+  // просили про заметку, а в ответ голое «Записала.» / «Готово, сохранила» — без save_note заметки нет (отзыв 11.10)
+  { rx: /^\s*(?:(?:готово|хорошо|сделано|конечно|да)[,.!]?\s*)?(?:записал[аи]?|сохранил[аи]?|добавил[аи]?|занесл[аи]|запомнил[аи]?)(?:\s+(?:это|её|его|всё))?\s*[.!]?\s*$/i,
+    tool: "save_note", what: "сохранил(а) заметку", user: /заметк/i },
   // «Сохранила её заметкой», «Теперь она точно в твоих заметках», «сейчас создам её заново» — без save_note заметки нет (отзыв 10.10)
   { rx: /(?:сохранил[аи]?|записал[аи]?|создал[аи]?|добавил[аи]?|положил[аи]?|разместил[аи]?|сохраню|запишу|создам|добавлю)(?![а-яё])[^.!?]{0,60}(?:заметк|в заметки)|(?:теперь|уже)\s+(?:она|он|список|таблица|всё)[^.!?]{0,30}\sв\s+(?:твоих\s+|ваших\s+)?заметках/i,
     tool: "save_note", what: "сохранил(а) заметку" },
@@ -2275,7 +2282,9 @@ async function runTool(name, a) {
     }
     case "set_volume": return `Громкость ${devVolume(a.action, a.percent || (a.action === "set" ? 0 : 20))}%.`;
     case "battery": { const b = JSON.parse(D.battery() || "{}"); return `Заряд ${b.percent}%${b.charging ? ", заряжается" : ""}.`; }
-    case "save_note": { const n = notes(); n.push({ id: "n" + Date.now(), title: a.title, text: a.text, time: Date.now() }); saveNotes(n); return `Записано: «${a.title}».`; }
+    case "save_note": { const att = noteAttSave(turnAtt); turnAtt = [];             // фото и файлы этого хода — в заметку
+      const n = notes(); n.push(Object.assign({ id: "n" + Date.now(), title: a.title, text: a.text, time: Date.now() }, att.length ? { att } : {})); saveNotes(n);
+      return `Записано: «${a.title}»` + (att.length ? ` (вложений: ${att.length})` : "") + "."; }
     case "recall": return recall(a.days, a.query);
     case "open_made": {
       const l = apps(), q = String(a.title || "").toLowerCase().trim();
@@ -2465,6 +2474,90 @@ async function weather(city, days) {
 /* ---------- заметки и деньги — файлы notes.json и money.json в памяти приложения (Dewiar.files/saveFile);
    после каждой записи — синхронизация с компьютером (syncSoon) ---------- */
 const notes = () => { try { return JSON.parse(fileGet("notes.json") || "[]"); } catch (e) { return []; } };
+const NOTE_RX = /^(?:(?:запиши|запишите|сохрани|добавь|занеси|сделай|создай|оставь)(?:\s+(?:мне|себе|пожалуйста))*\s+)?(?:в\s+)?(?:заметк(?:а|у|и|ах)|новую\s+заметку)(?:\s+(?:что|о том,?\s+что))?\s*[:,—–-]?\s+(\S[\s\S]{2,})$/i;
+/* -> текст ответа, если фраза — явная просьба записать заметку (и заметка записана), иначе "" */
+function noteQuick(text, att) {
+  const t = String(text || "").trim().replace(/^[А-ЯЁA-Z][а-яёa-z-]+\s*,\s*(?=\S)/, (m) => findPersona(m.replace(/[\s,]/g, ""), true) ? "" : m);
+  const m = NOTE_RX.exec(t); if (!m) return "";
+  let body = m[1].trim().replace(/^[«"]|[»"]$/g, "");
+  if (!/[а-яёa-z0-9]/i.test(body) || /^(?:что|как|где|сколько|покажи|прочитай)(?:\s|$)/i.test(body)) return "";   // «в заметках что?» — не запись
+  body = body.charAt(0).toUpperCase() + body.slice(1);
+  const words = body.replace(/[.!?…].*$/s, "").split(/\s+/), title = words.slice(0, 6).join(" ").replace(/[,:;—–-]+$/, "") + (words.length > 6 ? "…" : "");
+  const files = noteAttSave(att || []); turnAtt = [];
+  const n = notes(); n.push(Object.assign({ id: "n" + Date.now(), title, text: body, time: Date.now() }, files.length ? { att: files } : {})); saveNotes(n);
+  plog("info", "📝 заметка без модели: " + clip(title, 60) + (files.length ? ` + вложений ${files.length}` : ""));
+  if (SANDBOX) SANDBOX.dev.push({ name: "save_note", args: title, t: Date.now() });      // экзамен: действие видно, как фонарик
+  return `${persona().gender === "female" ? "Записала" : "Записал"} в заметки: «${title}»` + (files.length ? (files.length === 1 ? " — с вложением." : ` — вложений: ${files.length}.`) : ".");
+}
+/* ---------- заметка целиком: открыть, поправить, фото и файлы (лист #sh-note) ----------
+   Вложения — файлы natt-<id> во внутренней памяти (data: URL; фото сжаты shrinkImage), в заметке — только их список att.
+   Синхронизация уносит на компьютер текст заметки; вложения пока живут на телефоне (syncApply их сохраняет). */
+let turnAtt = [], noteCur = "", notePend = [];
+const noteBody = (t) => String(t || "").replace(/^\s*#[^\n]*\n+(\*[^\n]*\*\n+)?/, "");   // заметка с компьютера: без заголовка и даты
+const noteAttGet = (id) => fileGet("natt-" + id) || "";
+function noteAttSave(list) {
+  return (list || []).filter(a => a && (a.url || a.text != null)).slice(0, 12).map((a, i) => {
+    const id = "na" + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 5);
+    const data = a.url || ("data:text/plain;charset=utf-8," + encodeURIComponent(a.text || ""));
+    fileSave("natt-" + id, data);
+    return { id, name: String(a.name || (a.kind === "image" ? "фото" : "файл")).slice(0, 120), type: a.kind === "image" || /^data:image\//.test(data) ? "image" : (a.type || "file"), size: Math.round(data.length * 0.75) };
+  });
+}
+function noteDelete(id, ask) {
+  const n = notes().find(x => x.id === id); if (!n) return;
+  if (ask && (n.att || []).length && !confirm(`Удалить заметку «${n.title}» вместе с вложениями?`)) return;
+  (n.att || []).forEach(a => fileSave("natt-" + a.id, ""));
+  saveNotes(notes().filter(x => x.id !== id)); if (noteCur === id) closeSheets(); renderDay();
+}
+function openNote(id) { noteCur = id || ""; notePend = []; renderNote(); openSheet("#sh-note"); if (!id) setTimeout(() => $("#nt-text") && $("#nt-text").focus(), 300); }
+function renderNote() {
+  const n = noteCur ? notes().find(x => x.id === noteCur) : null, att = (n ? n.att || [] : []).concat(notePend);
+  $("#nt-h").textContent = n ? "Заметка" : "Новая заметка";
+  $("#note-body").innerHTML = `<input id="nt-title" placeholder="Заголовок" maxlength="120" value="${esc(n ? n.title : "")}">
+    <textarea id="nt-text" placeholder="Текст заметки…">${esc(n ? noteBody(n.text) : "")}</textarea>
+    <div class="ntatt">${att.map(a => a.type === "image" ? `<button class="ntimg" data-id="${esc(a.id)}"><img src="${a.data || noteAttGet(a.id)}" alt="${esc(a.name)}"></button>`
+      : `<button class="ntf" data-id="${esc(a.id)}">📎 ${esc(a.name)}<small>${fsize(a.size)}</small></button>`).join("")}</div>
+    <div class="ntadd"><label class="btn"><input type="file" id="nt-photo" accept="image/*" multiple hidden>Добавить фото</label><label class="btn"><input type="file" id="nt-file" multiple hidden>Добавить файл</label></div>
+    <div class="row2"><button class="btn p" id="nt-save" style="flex:1">Сохранить</button>${n ? `<button class="btn" id="nt-share">Поделиться</button><button class="btn" id="nt-del">Удалить</button>` : ""}</div>`;
+  const view = (a) => a.type === "image" ? imgView(a.data || noteAttGet(a.id)) : noteFileSave(a);
+  $$("#note-body .ntimg, #note-body .ntf").forEach(b => b.onclick = () => { const a = att.find(x => x.id === b.dataset.id); if (a) view(a); });
+  const add = async (files, photo) => {
+    for (const f of Array.from(files || [])) {
+      if (f.size > 10 * 1024 * 1024) { toast(`«${f.name}» больше 10 МБ`); continue; }
+      try {
+        const url = photo || /^image\//.test(f.type) ? await shrinkImage(f) : await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => no(new Error("не прочитался")); r.readAsDataURL(f); });
+        const one = { kind: /^data:image\//.test(url) ? "image" : "file", name: f.name || "файл", type: f.type, url };
+        if (n) { const saved = noteAttSave([one]); const all = notes(); const x = all.find(y => y.id === n.id); if (x) { x.att = (x.att || []).concat(saved); x.time = Date.now(); saveNotes(all); } }
+        else notePend.push({ id: "p" + Date.now() + notePend.length, name: one.name, type: one.kind === "image" ? "image" : (f.type || "file"), size: f.size, data: url, src: one });
+      } catch (e) { toast("Не получилось добавить: " + e.message); }
+    }
+    keepTyped(); renderNote(); restoreTyped();
+  };
+  let typed = null; const keepTyped = () => { typed = { t: $("#nt-title").value, x: $("#nt-text").value }; };
+  const restoreTyped = () => { if (typed) { $("#nt-title").value = typed.t; $("#nt-text").value = typed.x; } };
+  $("#nt-photo").onchange = (e) => add(e.target.files, true);
+  $("#nt-file").onchange = (e) => add(e.target.files, false);
+  $("#nt-save").onclick = () => {
+    const title = $("#nt-title").value.trim(), text = $("#nt-text").value.trim();
+    if (!title && !text && !notePend.length) { toast("Пустая заметка"); return; }
+    const all = notes(), t0 = title || text.split(/\n/)[0].slice(0, 60) || "Фото";
+    if (n) { const x = all.find(y => y.id === n.id); if (x) { x.title = t0; x.text = text; x.time = Date.now(); } }
+    else all.push(Object.assign({ id: "n" + Date.now(), title: t0, text, time: Date.now() }, notePend.length ? { att: noteAttSave(notePend.map(p => p.src)) } : {}));
+    notePend = []; saveNotes(all); closeSheets(); renderDay(); openSheet("#sh-day"); toast("Заметка сохранена");
+  };
+  if (n) {
+    $("#nt-del").onclick = () => noteDelete(n.id, true);
+    $("#nt-share").onclick = () => D.share((n.title ? n.title + "\n\n" : "") + noteBody(n.text));
+  }
+}
+function noteFileSave(a) {
+  const d = noteAttGet(a.id), m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(d);
+  if (!m) { toast("Файл не найден"); return; }
+  const b64 = m[2] ? m[3] : btoa(unescape(encodeURIComponent(decodeURIComponent(m[3]))));
+  const where = D.saveDownloadB64 ? D.saveDownloadB64(a.name, m[1] || "application/octet-stream", b64) : "";
+  toast(where ? "Сохранено: " + where : "Не получилось сохранить", 3500);
+}
+function imgView(src) { const v = $("#imgview"); $("img", v).src = src; v.classList.add("on"); v.onclick = () => { v.classList.remove("on"); $("img", v).src = ""; }; }
 const saveNotes = (n) => { fileSave("notes.json", JSON.stringify(n)); syncSoon(); };
 const money = () => { try { return JSON.parse(fileGet("money.json") || "[]"); } catch (e) { return []; } };
 const saveMoney = (m) => { fileSave("money.json", JSON.stringify(m)); syncSoon(); };
@@ -2631,11 +2724,14 @@ function renderDay() {
       + (D.exactAlarms() ? "" : `<div class="card"><b>Будильники могут опаздывать</b><p class="hint">Разрешите точное время: «Будильники и напоминания».</p><button class="btn p" onclick="Dewiar.openSettings('alarms')">Разрешить</button></div>`);
     $$(".x", box).forEach(b => b.onclick = () => { D.alarmCancel(b.dataset.id); syncSoon(); renderDay(); });
   } else if (dayTab === "notes") {
-    const n = notes().slice().reverse();
-    const body = (t) => String(t || "").replace(/^\s*#[^\n]*\n+(\*[^\n]*\*\n+)?/, "");      // заметка с компьютера: без заголовка и даты
-    box.innerHTML = n.length ? n.map(x => `<div class="it"><div class="bd"><b>${esc(x.title)}</b><small>${esc(body(x.text).slice(0, 220))}</small></div><button class="x" data-id="${esc(x.id)}">${X_SVG}</button></div>`).join("")
-      : `<div class="empty">Заметок нет.<br>Скажите: «запиши: купить хлеб и молоко».</div>`;
-    $$(".x", box).forEach(b => b.onclick = () => { saveNotes(notes().filter(x => x.id !== b.dataset.id)); renderDay(); });
+    const n = notes().slice().sort((a, b) => (+b.time || 0) - (+a.time || 0));          // новые сверху — и с компьютера тоже
+    box.innerHTML = `<button class="btn p ntnew" id="nt-new">Новая заметка</button>` + (n.length ? n.map(x => {
+      const img = (x.att || []).find(a => a.type === "image"), more = (x.att || []).length;
+      return `<div class="it note" data-id="${esc(x.id)}">${img ? `<img class="nthumb" src="${noteAttGet(img.id)}" alt="">` : ""}<div class="bd"><b>${esc(x.title)}${more ? `<span class="ntc">📎${more}</span>` : ""}</b><small>${esc(noteBody(x.text).slice(0, 220))}</small></div><button class="x" data-id="${esc(x.id)}" title="Удалить">${X_SVG}</button></div>`; }).join("")
+      : `<div class="empty">Заметок нет.<br>Скажите: «запиши в заметки: купить хлеб и молоко» — или нажмите «Новая заметка».</div>`);
+    $("#nt-new").onclick = () => openNote("");
+    $$(".it.note", box).forEach(el => el.onclick = (e) => { if (!e.target.closest(".x")) openNote(el.dataset.id); });
+    $$(".x", box).forEach(b => b.onclick = () => noteDelete(b.dataset.id, true));
   } else if (dayTab === "made") {
     const l = apps().slice().reverse();
     box.innerHTML = tasksHtml() + (l.length ? `<div class="bugh">Сделано на телефоне</div>` + l.map(x => `<div class="it"><div class="bd" data-open="${esc(x.id)}"><b>${esc(x.title)}</b><small>${esc(whenText(new Date(x.ts)))} · ${Math.max(1, Math.round(x.size / 1024))} КБ · нажмите, чтобы открыть</small></div><button class="x" data-id="${esc(x.id)}">${X_SVG}</button></div>`).join("")
@@ -2980,6 +3076,7 @@ function renderSettings() {
         : `<p class="hint" style="margin:0 0 10px">Пишите и присылайте голосовые боту Dewiar в Telegram — ассистент ответит, даже когда телефон убран: поставит напоминание, запишет заметку, ответит голосом.</p><button class="btn p w" id="tg-go">Подключить Telegram</button>`}<div class="res" id="tg-res"></div></div>
       <h3>Умный дом Яндекса</h3><div class="card">${S.home.token ? `<div class="row2"><span class="res ok" style="flex:1" id="home-st">Подключён</span><button class="btn" id="home-off">Отключить</button></div>` :
       `<p class="hint" style="margin-top:0">Тот же дом, что у Алисы: «включи свет в спальне», «кондиционер на 22».</p>
+      <p class="hint">Уже подключён на компьютере? Студия → «Подключение» → «Умный дом Яндекса» → «На телефон» — и скажите здесь «отсканируй код».</p>
       <p class="hint"><b>1.</b> «Получить ключ» → войдите в Яндекс тем же аккаунтом, что в «Доме с Алисой» → «Разрешить».<br><b>2.</b> Скопируйте ключ, который покажет Яндекс (начинается с y0_), и вставьте сюда.</p>
       <button class="btn w" id="home-auth" style="margin-bottom:10px">Получить ключ</button>
       <label class="f"><span>Ключ от Яндекса</span><input id="home-tok" type="password" placeholder="y0_…"></label><button class="btn p w" id="home-go">Подключить</button>`}<div class="res" id="home-res"></div></div>
@@ -3307,8 +3404,10 @@ function syncApply(it) {
     if (d.paused) { if (exists) D.alarmCancel(it.id); return true; }
     D.alarmSet(JSON.stringify({ id: it.id, title: d.text || "Напоминание", at: +d.at, kind: ["alarm", "timer"].includes(d.kind) ? d.kind : "reminder", repeat: repFromDict(d.repeat) }));
   } else if (it.kind === "note") {
+    const old = notes().find(x => x.id === it.id);
     let n = notes().filter(x => x.id !== it.id);
-    if (!del) n.push({ id: it.id, title: d.title || "Заметка", text: d.text || "", folder: d.folder || "", time: it.updated || Date.now() });
+    if (!del) n.push(Object.assign({ id: it.id, title: d.title || "Заметка", text: d.text || "", folder: d.folder || "", time: it.updated || Date.now() }, old && old.att ? { att: old.att } : {}));   // вложения — только на телефоне, не терять
+    else if (old) (old.att || []).forEach(a => fileSave("natt-" + a.id, ""));
     fileSave("notes.json", JSON.stringify(n));
   } else if (it.kind === "money") {
     let m = money().filter(x => x.id !== it.id);
@@ -4102,6 +4201,11 @@ function handleIntent(e) {
     try {
       let c = (/[?&]c=([^&]+)/.exec(e.url) || [])[1] || ""; c = c.replace(/-/g, "+").replace(/_/g, "/"); while (c.length % 4) c += "=";
       const m = JSON.parse(decodeURIComponent(escape(atob(c))));
+      if (!m.llm && m.home && m.home.token) {                                      // только умный дом с компьютера
+        if (!confirm("Подключить на телефоне умный дом Яндекса — тот же, что на компьютере? Мозг и голос телефона не изменятся.")) return;
+        S.home.token = String(m.home.token); saveS(); homeInfo = null;
+        showBot("Готово — умный дом подключён. Скажите: «включи свет в спальне»."); say("Готово! Умный дом подключён."); return;
+      }
       if (!cfgAsk(m)) return;
       applyConfig(m, ""); if (m.home && m.home.token) { S.home.token = m.home.token; saveS(); }
       showBot(`Готово — настройки с компьютера перенесены. Мозг: ${brainName()}. Нажмите микрофон и спросите что-нибудь.`); say("Готово! Настройки перенесены.");

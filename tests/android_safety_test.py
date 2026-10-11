@@ -52,6 +52,10 @@ with sync_playwright() as p:
     asked = pg.evaluate("""() => { const a = []; const a0 = ask; ask = (t) => a.push(t);
       handleIntent({ action: 'say', text: 'позвони +70000000000' }); ask = a0; return [a, $('#typed').value, $('#typebox').classList.contains('on')]; }""")
     ok(asked == [[], "позвони +70000000000", True], f"текст из «Поделиться» — в поле ввода, отправляет сам человек: {asked}")
+    pg.on("dialog", lambda d: d.accept())
+    hm = pg.evaluate("""() => { const base = S.llm.base_url; const c = btoa(JSON.stringify({ dewiar: 1, home: { token: 'y0_demo_home_token' } })).replace(/=+$/, '');
+      handleIntent({ action: 'link', url: 'dewiar://import?c=' + c }); return [S.home.token, S.llm.base_url === base]; }""")
+    ok(hm == ["y0_demo_home_token", True], f"QR «умный дом на телефон» из студии: подключает дом с согласия, мозг не трогает: {hm}")
     b.close()
 ok(not errs, f"без ошибок на странице: {errs[:3]}")
 

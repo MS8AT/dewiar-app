@@ -226,6 +226,33 @@ class Workspace:
         st = p.stat()
         return {"path": rel, "size": st.st_size, "mtime": st.st_mtime}
 
+    def notes(self, q="", limit=400):
+        """Все заметки (Заметки/**/*.md, и с телефона тоже) — новые сверху; q — слова через пробел, все должны найтись в
+        названии или тексте (без учёта регистра и «ё»). -> [{path, title, folder, mtime, size, snippet}] для студии."""
+        base = self.safe("Заметки")
+        if not base.is_dir():
+            return []
+        norm = lambda t: str(t or "").lower().replace("ё", "е")
+        words = [w for w in norm(q).split() if w]
+        out = []
+        for f in base.rglob("*.md"):
+            try:
+                st = f.stat()
+                text = f.read_text(encoding="utf-8", errors="replace")[:200_000]
+            except OSError:
+                continue
+            body = re.sub(r"^\s*#[^\n]*\n+(\*[^\n]*\*\n+)?", "", text).strip()     # без заголовка и даты
+            folder = "/".join(f.relative_to(base).parts[:-1])
+            hay = norm(f.stem + "\n" + body + "\n" + folder)
+            if words and not all(w in hay for w in words):
+                continue
+            at = hay.find(words[0]) - len(f.stem) - 1 if words else -1
+            snip = body[max(0, at - 50): max(0, at - 50) + 180] if at > 50 else body[:180]
+            out.append({"path": f.relative_to(self.root).as_posix(), "title": f.stem, "mtime": st.st_mtime, "size": st.st_size,
+                        "folder": folder, "snippet": re.sub(r"\s+", " ", snip).strip()})
+        out.sort(key=lambda x: -x["mtime"])
+        return out[:limit]
+
     def new_note(self, title, folder="Заметки", text=""):
         """Новая заметка из студии: в главной папке или внутри «Заметок», со свободным именем. -> путь."""
         folder = folder if folder in FOLDERS or str(folder).startswith("Заметки") else "Заметки"

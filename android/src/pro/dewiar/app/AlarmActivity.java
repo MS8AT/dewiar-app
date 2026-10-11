@@ -111,8 +111,24 @@ public class AlarmActivity extends Activity {
 
     private int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density + 0.5f); }
 
-    @SuppressWarnings("deprecation")
+    /** Сначала несколько секунд звучит само уведомление (оно же уходит на часы: Honor/Huawei Health пересылают только
+     *  уведомление, которое живёт в шторке, а не снятое через долю секунды), потом окно берёт звук на себя — по кругу и
+     *  нарастая, а уведомление тихо обновляется (не снимается: на часах остаётся с кнопками). Открыли окно позже
+     *  (нажали уведомление) — звук сразу. */
     private void start() {
+        long fired = getIntent().getLongExtra("fired", 0);
+        long wait = fired > 0 ? Math.max(0, SOUND_DELAY_MS - (System.currentTimeMillis() - fired)) : 0;
+        try {
+            vib = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (vib != null) vib.vibrate(new long[]{0, 400, 900, 400, 2400}, 0);   // два мягких толчка и пауза, по кругу
+        } catch (Throwable ignored) { }
+        h.postDelayed(new Runnable() { @Override public void run() { if (!isFinishing()) startSound(); } }, wait);
+    }
+
+    static final long SOUND_DELAY_MS = 4500;
+
+    @SuppressWarnings("deprecation")
+    private void startSound() {
         AlarmReceiver.quiet(this, id, title == null ? "" : title, kind == null ? "reminder" : kind,
                 getIntent().getStringExtra("who") == null ? "" : getIntent().getStringExtra("who"));
         player = Sounds.play(this, Sounds.current(this), true, vol);
@@ -134,10 +150,6 @@ public class AlarmActivity extends Activity {
                 }
                 ring.play();
             }
-        } catch (Throwable ignored) { }
-        try {
-            vib = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-            if (vib != null) vib.vibrate(new long[]{0, 400, 900, 400, 2400}, 0);   // два мягких толчка и пауза, по кругу
         } catch (Throwable ignored) { }
     }
 

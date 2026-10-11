@@ -899,3 +899,15 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .cl-qr.seal { background: none; padding: 0; border-radius: 7%; box-shadow: 0 18px 40px -18px rgba(0,0,0,.6); }   /* печать — сама белая скруглённая плашка с рамкой */
 .hguide { margin-top: 18px; } .hguide a { color: var(--accent); font-weight: 600; text-decoration: none; }     /* справка «?» → руководство на сайте */
 .dw-refnet { max-width: 440px; margin: 4px 0 12px; }     /* «Моё созвездие» приглашённых (assets/refnet.js) */
+/* «Календарь» → «Заметки» */
+.nt-bar { display: flex; gap: 10px; margin: 6px 0 14px; } .nt-bar input { flex: 1; }
+.nt-cols { display: grid; grid-template-columns: minmax(240px, 340px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.nt-list { display: flex; flex-direction: column; gap: 6px; max-height: 72vh; overflow: auto; padding-right: 4px; }
+.nt-row { border: 0; text-align: left; padding: 11px 14px; border-radius: 14px; background: var(--glass2); color: inherit; cursor: pointer; font: inherit; }
+.nt-row b { display: block; font-size: 14.5px; font-weight: 600; } .nt-row small { display: block; color: var(--muted); font-size: 12px; margin: 2px 0 4px; }
+.nt-row span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; color: var(--muted); }
+.nt-row.cur { background: var(--brand); color: #fff; } .nt-row.cur small, .nt-row.cur span { color: rgba(255,255,255,.78); }
+.nt-row mark, .nt-view mark { background: rgba(255,200,90,.38); color: inherit; border-radius: 3px; padding: 0 1px; }
+.nt-head b { display: block; font-size: 18px; } .nt-head small { color: var(--muted); font-size: 12px; }
+.nt-view textarea { width: 100%; min-height: 54vh; margin: 10px 0; resize: vertical; line-height: 1.55; font-size: 14.5px; }
+@media (max-width: 900px) { .nt-cols { grid-template-columns: 1fr; } .nt-list { max-height: 40vh; } }

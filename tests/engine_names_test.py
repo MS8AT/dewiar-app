@@ -39,5 +39,19 @@ clash = {a: (sorted(attrs[a]), methods[a]) for a in attrs if a in methods}
 ok(not clash, f"данные в self не затирают методы ядра ({len(attrs)} полей, {len(methods)} методов): {clash}")
 dup = {m: w for m, w in methods.items() if len({x.split(':')[1] for x in w}) > 1 and m not in ("__init__",)}
 ok(not dup, f"метод с одним именем — только в одной примеси: {dup}")
+# студия: все ui/studio/*.js — общие глобальные имена; вторая function с тем же именем молча заменяет первую
+# (так «Заметки» в «Календаре» звали загрузку «Папки», 0.38.8)
+seen = {}
+for f in sorted((ROOT / "ui/studio").glob("*.js")):
+    for m in re.finditer(r"^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(", f.read_text(encoding="utf-8"), re.M):
+        seen.setdefault(m.group(1), []).append(f.name)
+twice = {k: v for k, v in seen.items() if len(v) > 1}
+ok(not twice, f"студия: глобальные функции не повторяются в разных файлах ({len(seen)}): {twice}")
+seen = {}
+for f in [*sorted((ROOT / "android/assets/www").glob("*.js")), *(ROOT / "ui/assets" / n for n in ("codes.js", "call.js", "refnet.js", "closecrypto.js", "privacy.js"))]:
+    for m in re.finditer(r"^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(", f.read_text(encoding="utf-8"), re.M):
+        seen.setdefault(m.group(1), []).append(f.name)
+twice = {k: v for k, v in seen.items() if len(v) > 1}
+ok(not twice, f"телефон: глобальные функции не повторяются ({len(seen)}): {twice}")
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)

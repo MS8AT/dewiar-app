@@ -868,6 +868,8 @@ class CommandsMixin:
                 raise ValueError(str(e)) from e
             except Exception as e:  # noqa: BLE001 — защита корзины
                 raise ValueError(str(e)) from e
+        if cmd == "notes_list":                                 # «Календарь» → «Заметки»: все заметки и поиск
+            return self.workspace.notes(a.get("q", ""))
         if cmd == "ws_read":
             try:
                 return self.workspace.read(a.get("path", ""))
@@ -1047,6 +1049,12 @@ class CommandsMixin:
                 box["answer"] = bool(a.get("ok"))
                 box["event"].set()
             return True
+        if cmd == "phone_home":                   # только умный дом — на телефон (QR в студии; ключ не уходит на сервер)
+            import base64
+            if not self.home.connected():
+                raise ValueError("умный дом не подключён")
+            raw = json.dumps({"dewiar": 1, "home": {"token": self.home.data.get("token", "")}}, separators=(",", ":")).encode("utf-8")
+            return {"url": "dewiar://import?c=" + base64.urlsafe_b64encode(raw).decode().rstrip("=")}
         if cmd == "phone_config":                 # QR для телефона: мозг, слух, голос, умный дом — одним снимком камеры
             # безопасность: в ссылке открытым текстом ключи API и токен умного дома — QR показывать только владельцу;
             # формат dewiar://import?c=<base64url JSON без «=»> разбирает приложение (android/: MainActivity.java, app.js)

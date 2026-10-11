@@ -62,6 +62,8 @@ run "телефон: чужой код и чужие ссылки" $PY "$T/andro
 run "голос с сервера: клиент" $PY "$T/tts_client_test.py"
 run "ядро: данные не затирают методы" $PY "$T/engine_names_test.py"
 run "телефон: длинная диктовка" $PY "$T/android_dictation_test.py"
+run "телефон: заметки, фото и файлы" $PY "$T/android_notes_test.py"
+run "студия: заметки и поиск" $PY "$T/studio_notes_test.py"
 run "короткие фразы: спасибо, ослышанное имя" $PY "$T/voice_short_test.py"
 run "сервер: dewiar-server setup"   $PY "$T/server_setup_test.py"
 run "персонажи: переименование"     $PY "$T/personas_rename_test.py"
