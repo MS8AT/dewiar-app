@@ -944,8 +944,8 @@ function sttServerUrl(u) { return u.replace(/\/+$/, "") + (/(transcriptions)$/.t
 async function listen() {
   stopVoice();
   if (!(await needPerm(MIC))) { showBot("Без микрофона я вас не услышу. Разрешите микрофон — или напишите текстом.", "err"); return; }
-  heardPartial = ""; showYou(""); showBot(""); clearCard();
-  setState("listening"); sttActive = true; sttStarted = false; D.vibrate(18);
+  heardPartial = ""; sttUserStop = false; showYou(dict ? dict + " …" : ""); showBot(""); clearCard();
+  setState("listening"); sttActive = true; sttStarted = false; if (!dict) D.vibrate(18);
   let server = S.stt.engine === "server" && S.stt.url ? { url: S.stt.url, key: S.stt.key || "", model: S.stt.model || "" } : null;
   if (!server && (!D.recognizer() || sttOnce)) { const c = sttOnce || cloudEars(); sttOnce = null; if (c) server = { url: c.url, key: c.key, model: "gigaam" }; }
   if (!server && !D.recognizer()) {
@@ -959,6 +959,19 @@ async function listen() {
   else D.listen(sttGen);
   sttGuard(server ? 20000 : 4000, "start");
 }
+/* Длинная диктовка: распознаватель телефона сам заканчивает примерно через минуту, запись для сервера — через 15 с.
+   Оборвалось на лимите, а не на паузе, — копим сказанное в dict и тихо слушаем дальше; всё вместе уходит, когда человек
+   замолчит по-настоящему (или следующий отрезок окажется пустым). */
+let dict = "", sttUserStop = false;
+function dictMore(t, cut) {
+  const dur = Date.now() - sttT0, user = sttUserStop; sttUserStop = false;
+  if (user || !t || !(cut || (sttVia === "system" && dur >= 45000)) || dict.length > 12000) return false;
+  dict = (dict ? dict + " " : "") + t;
+  plog("info", `длинная диктовка: ${dict.length} зн., слушаю дальше`);
+  showYou(dict + " …"); setTimeout(() => listen(), 60);
+  return true;
+}
+const dictTake = (t) => { const all = ((dict ? dict + " " : "") + (t || "")).trim(); dict = ""; return all; };
 function sttStall(why) {
   if (!sttActive) return;
   sttActive = false; D.cancelListen(); sttGen++;
@@ -980,20 +993,22 @@ function sttStall(why) {
     showBot("Распознавание речи этого устройства не отвечает. Войдите аккаунтом dewiar.pro (Настройки → Мозг) — слушать будет сервер Dewiar. Или напишите текстом.", "err");
     return;
   }
-  if (heardPartial) { ask(heardPartial); return; }
+  if (heardPartial || dict) { if (dictMore(heardPartial, false)) return; ask(dictTake(heardPartial)); return; }
   setState("idle"); showYou("");
 }
 const sttAlive = () => { sttStarted = true; if (sttVia === "system" && S.stt.sysFails) { S.stt.sysFails = 0; saveS(); } if (sttActive) sttGuard(15000, "silent"); };
 N.on("stt_start", e => { if (sttMine(e)) sttAlive(); });
 N.on("stt_end", e => { if (sttMine(e) && sttActive) sttGuard(sttVia === "server" ? 30000 : 8000, "end"); });
 N.on("stt_level", e => { if (!sttMine(e)) return; if (orb && state === "listening") orb.set({ level: e.v }); if (!sttStarted) sttAlive(); });
-N.on("stt_partial", e => { if (!sttMine(e)) return; heardPartial = e.text; showYou(e.text); sttAlive(); });
+N.on("stt_partial", e => { if (!sttMine(e)) return; heardPartial = e.text; showYou((dict ? dict + " " : "") + e.text); sttAlive(); });
 N.on("stt_result", e => {
   if (!sttMine(e)) return;
   sttGuard(0);
   if (!sttActive) return; sttActive = false;
   let t = (e.text || heardPartial || "").trim();
   plog("info", `📝 ${t ? clip(t) : "(пусто)"} (${sttVia === "server" ? "сервер" : "телефон"}, ${((Date.now() - sttT0) / 1000).toFixed(1)} с)`);
+  if (dictMore(t, !!e.cut)) return;
+  t = dictTake(t);
   if (t && pausePrefix && Date.now() - pausePrefix.at < 30000) t = pausePrefix.text + " " + t;   // договорил после обрыва — один вопрос
   pausePrefix = null;
   if (t) { lastStt = { at: Date.now(), text: t, cut: false }; ask(t); } else { setState("idle"); showYou(""); }
@@ -1005,12 +1020,12 @@ N.on("stt_error", e => {
   plog([6, 7, 5].includes(e.code) ? "info" : "warn", `распознавание (${sttVia}): ${e.code === 6 ? "речи не было" : e.code === 7 ? "не расслышал" : "ошибка " + (e.code ?? "") + " " + (e.msg || "")}`);
   // распознаватель телефона сломался, не начав слушать (не запустился, нет сервиса, сеть) — слушает сервер Dewiar
   if (sttVia === "system" && !sttStarted && ![6, 7].includes(e.code) && cloudEars()) { sttActive = true; sttStall("start"); return; }
-  if (heardPartial) { ask(heardPartial); return; }
+  if (heardPartial || dict) { if (dictMore(heardPartial, false)) return; ask(dictTake(heardPartial)); return; }
   setState("idle"); showYou("");
   // молча (коды SpeechRecognizer, Speech.java): 6 — речи не было, 7 — не расслышал, 5 — отменено, 11 — распознаватель отключился
   if (![6, 7, 5, 11].includes(e.code)) showBot("Не получилось услышать: " + (e.msg || e.code), "err");
 });
-function stopListen() { sttGuard(0); sttGen++; if (sttActive) { sttActive = false; D.cancelListen(); } }
+function stopListen() { sttGuard(0); sttGen++; dict = ""; if (sttActive) { sttActive = false; D.cancelListen(); } }
 
 /* ---------- голос: фразы по очереди (Tts.java) — голос телефона или сервера (/v1/audio/speech) ----------
    sayLeft — сколько фраз ещё не отзвучало: tts_done приходит на каждую (и при ошибке), на нуле ход заканчивается. */
@@ -4020,7 +4035,7 @@ $("#mic").onclick = () => {
   if (state === "thinking") pauseCut();
   if (state === "listening") {                    // «хватит слушать»: запись кончается сразу (stt_end продлит ожидание на распознавание); ни звука 2 с — заканчиваем сами
     if (!sttActive) { setState("idle"); return; }
-    D.stopListen(); sttGuard(2000, "stop"); return;
+    sttUserStop = true; D.stopListen(); sttGuard(2000, "stop"); return;            // сам закончил — длинная диктовка не продолжается
   }
   if (state !== "idle") interrupt(true); listen(); };
 $("#orbwrap").onclick = () => $("#mic").onclick();

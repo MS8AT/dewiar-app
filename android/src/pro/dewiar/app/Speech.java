@@ -187,7 +187,7 @@ public final class Speech {
                     String r = Net.postMultipart(url, key, wav, "speech.wav", "audio/wav", f);
                     String text;
                     try { text = new JSONObject(r).optString("text", r); } catch (Exception e) { text = r; }   // {"text": …} или просто текст
-                    ev(g, "stt_result", o().put("text", text.trim()));
+                    ev(g, "stt_result", o().put("text", text.trim()).put("cut", frames > 300));   // cut — оборвали по лимиту, человек ещё говорит
                 } catch (Throwable e) {
                     try { ev(g, "stt_error", o().put("code", -2).put("msg", String.valueOf(e.getMessage()))); } catch (Exception ignored) { }
                 } finally {

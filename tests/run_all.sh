@@ -139,6 +139,7 @@ run "«Близкие»: чужие данные и брошенный звон�
 run "телефон: чужой код и чужие ссылки" $PY "$T/android_safety_test.py"
 run "голос с сервера: клиент" $PY "$T/tts_client_test.py"
 run "ядро: данные не затирают методы" $PY "$T/engine_names_test.py"
+run "телефон: длинная диктовка" $PY "$T/android_dictation_test.py"
 run "короткие фразы: спасибо, ослышанное имя" $PY "$T/voice_short_test.py"
 run "результат задачи: скачать HTML, PDF" $PY "$T/export_test.py"
 run "дневник ассистента: ночная запись, выводы на завтра" $PY "$T/diary_test.py"
