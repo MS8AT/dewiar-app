@@ -4,7 +4,8 @@
 (чистый цикл Python), и синтезирует так же. Проверяем:
 - пока голоса грузятся, поток ядра тикает без задержек (раньше — замирал на всё время загрузки);
 - синтез работает (речь — PCM int16), дикторы, скорость доходят до библиотеки;
-- словарь ударений после первого разбора берётся из кэша (второй запуск его не читает);
+- словарь ударений — на диске (dewiar-dic.sqlite), процесс не держит его в памяти (отчёт 11.10: 1,6 ГБ), вариант
+  с наибольшей вероятностью — как у vosk_tts; второй запуск словарь не собирает заново;
 - процесс голосов упал — следующая фраза поднимает его сама; ошибка синтеза — исключение, а не зависание."""
 import json, os, sys, tempfile, threading, time
 from pathlib import Path
@@ -75,16 +76,51 @@ ok(max(gaps) < 0.5, f"пока голоса грузились, ядро не з
 ok(len(v.speakers) == 12 and all("gender" in s for s in v.speakers), f"дикторы определены: {len(v.speakers)}")
 rate, pcm = next(v.synth("Привет, мир", {"vosk": 1}, speed=1.0))
 ok(rate == 22050 and len(pcm) == 2 * (2205 * 2 + 5000), f"синтез через процесс: {len(pcm)} байт")
-ok((model / "dewiar-dic.pickle").exists(), "словарь ударений сохранён в кэш")
+ok((model / "dewiar-dic.sqlite").exists() and not (model / "dewiar-dic.pickle").exists(), "словарь ударений — на диске (sqlite), не в памяти")
 reads1 = (model / "reads.log").read_text().split()
+built = (model / "dewiar-dic.sqlite").stat().st_mtime
 v.synth_.close()
 v2 = tts.VoskTTS(tmp)
 (model / "dewiar-speakers.json").unlink()
 v2._load(model)
 reads2 = (model / "reads.log").read_text().split()
 rate, pcm = next(v2.synth("Ещё раз", {"vosk": 0}))
-ok(reads2[-1] == "0" and reads1[-1] == "5000" and len(pcm) == 2 * (2205 + 5000),
-   f"второй запуск — словарь из кэша, не разбирается заново (строк прочитано: {reads1[-1]} → {reads2[-1]}), слова на месте")
+ok(reads2[-1] == "0" and reads1[-1] == "0" and len(pcm) == 2 * (2205 + 5000) and (model / "dewiar-dic.sqlite").stat().st_mtime == built,
+   f"модель словарь не разбирает, второй запуск не собирает его заново (строк прочитано моделью: {reads1[-1]} → {reads2[-1]}), слова на месте")
+# как vosk_tts: у слова — вариант с наибольшей вероятностью; «in» и [] работают; нет слова — KeyError
+import tts_worker as TW  # noqa: E402
+d2 = tmp / "d2"; d2.mkdir()
+(d2 / "dictionary").write_text("дом 0.3 d o m1\nдом 0.9 d o m2\nдом 0.5 d o m3\nкот 1.0 k o t\n", encoding="utf-8")
+TW.build_dic(d2 / "dictionary", d2 / "x.sqlite", [1, 2])
+sd = TW.SqlDic(d2 / "x.sqlite")
+try:
+    sd["пёс"]; miss = False
+except KeyError:
+    miss = True
+ok(sd["дом"].strip() == "d o m2" and "кот" in sd and "пёс" not in sd and miss and len(sd) == 2, "словарь на диске: лучший вариант, in, [], KeyError")
+# память процесса голосов: словарь на 400 тыс. слов в памяти и на диске
+big = tmp / "vosk-model-tts-big"; big.mkdir()
+(big / "model.onnx").write_bytes(b"x")
+(big / "dictionary").write_text("".join(f"словоформа{i} 1.0 s l o v o f o r m a {i}\n" for i in range(400000)), encoding="utf-8")
+os.environ["FAKE_LOAD"] = "0"
+
+
+def worker_rss(mode):
+    os.environ["DEWIAR_TTS_DIC"] = mode
+    for f in big.glob("dewiar-*"):
+        f.unlink()
+    w = tts.VoskTTS(tmp); w._load(big)
+    next(w.synth("Привет", {"vosk": 0}))
+    rss = int(re.search(r"VmRSS:\s+(\d+)", Path(f"/proc/{w.synth_.p.pid}/status").read_text()).group(1)) // 1024
+    w.synth_.close()
+    return rss
+
+
+import re  # noqa: E402
+if Path("/proc/self/status").exists():
+    mem, disk = worker_rss("memory"), worker_rss("disk")
+    ok(disk < mem - 40, f"процесс голосов: словарь на диске — {disk} МБ вместо {mem} МБ")
+os.environ.pop("DEWIAR_TTS_DIC", None)
 try:
     v2.synth_.synth_audio("сломайся"); ok(False, "ошибка синтеза — исключение")
 except RuntimeError as e:

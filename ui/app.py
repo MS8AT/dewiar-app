@@ -573,11 +573,27 @@ class Api:
         return p
 
     def auto_back(self):
-        """Карточку раскрыли ради «Да/Нет» — через 2,5 с вернуться в значок."""
+        """Карточку раскрыли ради «Да/Нет» — через 2,5 с вернуться в значок. Пришёл следующий вопрос раньше — остаёмся
+        (cancel_back; отчёт 11.10: задача спросила второй раз, а виджет свернулся в шарик посреди вопроса)."""
         if self.auto:
-            self.auto = False
             import threading
-            threading.Timer(2.5, lambda: self.set_mode("mini")).start()
+            t = getattr(self, "_back_t", None)
+            if t:
+                t.cancel()
+
+            def back():
+                if self.auto and getattr(self, "_back_t", None) is me:
+                    self.auto = False
+                    self.set_mode("mini")
+            me = self._back_t = threading.Timer(2.5, back)
+            me.start()
+
+    def cancel_back(self):
+        """Новый вопрос «Да/Нет», пока карточка ещё раскрыта ради прошлого, — не сворачиваться."""
+        t = getattr(self, "_back_t", None)
+        if t:
+            t.cancel()
+        self._back_t = None
 
     def show(self):
         """Показать виджет. Если он в трее — ненадолго: после разговора спрячется обратно (tray_back)."""

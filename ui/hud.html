@@ -195,6 +195,7 @@
   .ab.send { width: 30px; height: 30px; border-radius: 50%; color: rgba(255,255,255,.45); background: rgba(255,255,255,.07); transition: background .2s, color .2s; }
   .askbox.has .ab.send { background: var(--brand); color: #fff; }
   .ab.send svg { width: 15px; height: 15px; }
+  #card.crowd #orb { width: 104px; height: 104px; }      /* тесно (fitCap): карточки и кнопки важнее большого облика */
   #card.long #orb { width: 84px; height: 84px; }          /* длинный текст — сфера уступает место полю */
   #card.long #bubble, #card.long #note, #card.long #cap { display: none; }
   .ab { flex: none; width: 32px; height: 32px; border: 0; border-radius: 10px; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
@@ -270,10 +271,20 @@
   body.mini #grow { display: grid; }
   body.mini:hover #grow { opacity: 1; }
   /* «Открыть целиком»: ответ полностью (код — с кнопкой «Копировать») и ход работы — что ассистент делал */
-  #more { display: none; flex: none; align-self: center; margin-top: -2px; border: 0; background: rgba(255,255,255,.08); color: #DCDCFF; font: inherit; font-size: 12px;
-          padding: 5px 11px; border-radius: 999px; cursor: pointer; }
+  /* «Ход работы (3) и ответ» — строкой внутри карточки ответа, справа, а не отдельной плашкой между карточками (отзыв
+     11.10: на тесном виджете карточка, плашка и задача наезжали друг на друга) */
+  #more { display: none; flex: none; align-self: flex-end; margin: 4px -2px -2px 0; border: 0; background: none; color: var(--muted, rgba(255,255,255,.62));
+          font: inherit; font-size: 12px; padding: 2px 4px; border-radius: 8px; cursor: pointer; }
+  #more::after { content: " ›"; }
   #more.on { display: inline-block; }
-  #more:hover { background: rgba(255,255,255,.14); }
+  #more:hover { color: var(--ink, #fff); background: rgba(255,255,255,.08); }
+  /* тесно (fitCap): вопрос — одной строкой, «…— готово» прячется (о задаче и так говорит карточка задачи), ещё теснее —
+     без вопроса; ответ не сжимается в ноль — хотя бы две строки и прокрутка */
+  #cap .bot:not(:empty):not(.wait) { min-height: 2.84em; }
+  #cap.tight { padding: 8px 12px; }
+  #cap.tight .you { -webkit-line-clamp: 1; margin-bottom: 2px; }
+  #cap.tight #act.fin { display: none; }
+  #cap.tight2 .you { display: none; }
   #act { cursor: pointer; }
   #reader { position: absolute; inset: 0; z-index: 30; display: none; flex-direction: column; padding: 12px 10px 10px 14px;
             background: radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--persona) 12%, transparent) 0%, transparent 55%), #0d0d12; }
@@ -314,8 +325,7 @@
   <div id="orb"><canvas id="cv"></canvas></div>
   <div id="bubble"><span id="say">Подключаюсь…</span></div>
   <div id="mid">
-    <div id="cap"><div class="you" id="you"></div><div id="act" title="Ход работы"></div><div class="bot" id="bot"></div><div id="media"></div></div>
-    <button id="more">Открыть целиком</button>
+    <div id="cap"><div class="you" id="you"></div><div id="act" title="Ход работы"></div><div class="bot" id="bot"></div><div id="media"></div><button id="more">Открыть целиком</button></div>
     <div id="yn"><button class="yes" id="y">Да</button><button id="n">Нет</button></div>
     <div id="note"></div><div id="ldbar"><i></i></div>
     <div id="health" title="Что сейчас с ассистентом"></div>
@@ -470,16 +480,33 @@ function showCap(you, bot, err) {
   requestAnimationFrame(capFade);
   $("cap").classList.toggle("err", !!err);
   $("cap").classList.add("show");
+  requestAnimationFrame(fitCap);
   clearTimeout(capTimer);
 }
 /* Пока ответ читают (мышь над ним или его прокрутили) — не прячем; ушли — спрячем чуть позже. */
 let capHover = false, capHideMs = 0, capScrolled = false;
 function hideCapLater(ms) {
   clearTimeout(capTimer); capHideMs = ms;
-  capTimer = setTimeout(() => { if (capHover && ms > 1000) return; $("cap").classList.remove("show"); capScrolled = false; }, ms);
+  capTimer = setTimeout(() => { if (capHover && ms > 1000) return; $("cap").classList.remove("show"); capScrolled = false; requestAnimationFrame(fitCap); }, ms);
 }
 $("cap").addEventListener("mouseenter", () => { capHover = true; });
 $("cap").addEventListener("mouseleave", () => { capHover = false; if (capHideMs > 1000 && $("cap").classList.contains("show")) hideCapLater(Math.max(capHideMs, 8000)); });
+/* Карточка ответа на тесном виджете: не обрезать строку посередине и не сжимать ответ в ноль — сначала вопрос в одну
+   строку и без «…— готово», потом без вопроса. Пересчёт — при каждом показе и изменении размеров (fitCap). */
+function fitCap() {
+  const cap = $("cap"), card = $("card"), mid = $("mid"), orb = $("orb"), bot = $("bot");
+  orb.style.transition = "none";                     // меряем сразу итоговый размер облика, без анимации
+  card.classList.remove("crowd"); cap.classList.remove("tight", "tight2");
+  const shown = cap.classList.contains("show"), has = shown && bot.textContent.trim() && !bot.classList.contains("wait");
+  const over = () => mid.scrollHeight > mid.clientHeight + 1 || (shown && (cap.scrollHeight > cap.clientHeight + 1 || (has && bot.clientHeight < 34)));
+  // тесно: сначала облик меньше (карточка задачи с кнопками, «Да/Нет» не уезжают на панель), потом карточка ответа короче
+  if (over()) card.classList.add("crowd");
+  if (over() && shown) cap.classList.add("tight");
+  if (over() && has) cap.classList.add("tight2");
+  requestAnimationFrame(() => { orb.style.transition = ""; });
+}
+{ const ro = new ResizeObserver(() => requestAnimationFrame(fitCap));
+  ["mid", "task", "yn", "rem", "upd", "note"].forEach(id => { const el = document.getElementById(id); if (el) ro.observe(el); }); }
 function capFade() { const c = $("bot"); c.classList.toggle("ft", c.scrollTop > 2); c.classList.toggle("fb", c.scrollTop + c.clientHeight < c.scrollHeight - 2); }
 $("bot").addEventListener("scroll", () => { capScrolled = true; capFade(); }, { passive: true });
 new ResizeObserver(capFade).observe($("bot"));
@@ -622,10 +649,11 @@ core.on("hello", d => {
   const a = $("act"); a.className = "on " + (e.status === "run" ? "run" : e.status === "error" ? "bad" : "");
   a.textContent = e.status === "run" ? `${e.title}…` : e.status === "done" ? `${e.title} — готово` :
                   e.status === "declined" ? `${e.title} — отменено` : `${e.title}: ${e.error || "не получилось"}`;
+  a.classList.toggle("fin", e.status === "done" || e.status === "declined");
   showCap(null, null);
 })
-.on("confirm", e => { showCap(null, e.text); $("yn").classList.add("on"); $("y").focus(); })
-.on("confirm_done", () => $("yn").classList.remove("on"))
+.on("confirm", e => { showCap(null, e.text); $("yn").classList.add("on"); $("y").focus(); requestAnimationFrame(fitCap); })
+.on("confirm_done", () => { $("yn").classList.remove("on"); requestAnimationFrame(fitCap); })
 .on("handoff", e => { $("act").className = "on"; $("act").textContent = `Отвечает ${e.name}${e.role ? " · " + e.role.toLowerCase() : ""}`; })
 .on("note_saved", e => {
   $("rem-ico").textContent = { list: "🛒", fact: "🧠" }[e.kind] || "📝";
@@ -814,7 +842,8 @@ function renderDone(el, t) {
     finally { b.disabled = false; b.textContent = was; }
   });
 }
-function renderTask() {
+function renderTask() { renderTask_(); requestAnimationFrame(fitCap); }
+function renderTask_() {
   const act = Object.values(tasks).filter(t => ["running", "waiting"].includes(t.status));
   let t = act.find(x => x.status === "waiting") || act[0];
   const el = $("task");
@@ -866,7 +895,7 @@ $("b-mini").onclick = () => setMode("mini");
 $("b-team").onclick = (e) => { e.stopPropagation(); $("team").classList.toggle("show"); };
 document.addEventListener("click", (e) => { if (!e.target.closest("#team")) $("team").classList.remove("show"); });
 $("grow").onclick = () => setMode("card");
-core.on("confirm", () => { if (mode === "mini") setMode("card", true); })                                   // «Да/Нет» нужно видеть
+core.on("confirm", () => { const a = api(); if (mode === "mini") setMode("card", true); else if (a && a.cancel_back) a.cancel_back(); })   // «Да/Нет» нужно видеть
     .on("confirm_done", () => { const a = api(); if (a && mode === "card") a.auto_back(); })
     .on("wake", () => popUp());                                                                      // спрятанный виджет возвращается на имя
 
@@ -1009,6 +1038,7 @@ function moreBtn() {
   const n = TL.steps.length;
   $("more").textContent = n ? `Ход работы (${n}) и ответ` : "Открыть целиком";
   $("more").classList.toggle("on", long || n > 0);
+  requestAnimationFrame(fitCap);
   if ($("reader").classList.contains("on")) renderReader();
 }
 function renderReader() {

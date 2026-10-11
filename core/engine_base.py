@@ -84,6 +84,10 @@ def find_name(text, aliases_by_pid, strict=False):
                     a = _norm(a).replace(" ", "").replace("-", "")
                     if strict and len(a) <= 4:
                         r = 1.0 if w == a else 0.0
+                    elif len(a) <= 4 and w != a and w[:1] != a[:1] and w != a[1:]:
+                        # короткое имя: одна буква решает всё — «мира», «пира», «тира» не «Лира» (отчёт 11.10: «открылась
+                        # для мира» из видео будила Лиру). Свои формы («лиру», «лирой») и потерянная первая («ира») — можно
+                        r = 0.0
                     else:
                         r = difflib.SequenceMatcher(None, w, a).ratio()
                         if joined and r < 0.9 and strict:
