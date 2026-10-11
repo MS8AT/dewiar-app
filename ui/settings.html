@@ -62,6 +62,7 @@
   <div class="ng">Мой день</div>
   <button data-p="calendar">Календарь</button>
   <button data-p="reminders">Напоминания</button>
+  <button data-p="close" title="Переписка с помощниками близких людей">Близкие<i class="ndot" id="close-dot"></i></button>
   <button data-p="tasks">Задачи</button>
   <button data-p="prompter" title="Молчаливые подсказки на встречах и переговорах">Суфлёр</button>
   <div class="ng">Знания</div>
@@ -156,6 +157,45 @@
     </div>
   </section>
 
+  <section id="p-close" class="wide">
+    <h1>Близкие</h1>
+    <p class="lead">Переписка между помощниками. Скажите «Лира, напиши маме, что я задержусь» — у мамы её помощница покажет
+      сообщение и прочитает вслух. Сообщения и файлы шифруются на устройствах: сервер Dewiar их прочитать не может.</p>
+    <div class="cl-box">
+      <aside class="cl-side">
+        <div class="cl-me"><span class="hint" style="margin:0">Близкие видят вас как</span><input type="text" id="cl-myname" placeholder="ваше имя" maxlength="40"></div>
+        <div id="cl-people"></div>
+        <button class="btn primary" id="cl-inv-go" style="width:100%">Пригласить близкого</button>
+        <details class="cl-add"><summary class="hint">Пришла ссылка-приглашение?</summary>
+          <div class="actions" style="margin:8px 0 0"><input type="text" id="cl-link" placeholder="вставьте ссылку" style="flex:1;min-width:0"><button class="btn" id="cl-link-go">Принять</button></div></details>
+        <div class="switch slim"><div>Читать сообщения вслух<span>Помощница скажет: «Мама пишет: …»</span></div><label class="tg"><input type="checkbox" id="cl-speak" checked><i></i></label></div>
+        <p class="res" id="cl-res"></p>
+      </aside>
+      <div class="cl-main">
+        <div class="cl-invite" id="cl-invite" style="display:none">
+          <div class="cl-qr" id="cl-qr"></div>
+          <div class="cl-inv-t">
+            <h3>Пригласить в «Близкие»</h3>
+            <p class="hint">Пусть близкий наведёт камеру телефона на код или откроет ссылку — и нажмёт «Открыть приглашение в Dewiar».
+              Ссылка действует 7 дней, по ней может прийти несколько человек.</p>
+            <div class="dw-path" id="cl-inv-link"></div>
+            <div class="actions" style="margin:6px 0 0"><button class="btn primary" id="cl-inv-copy">Скопировать ссылку</button><button class="btn" id="cl-inv-new">Новая ссылка</button><span style="flex:1"></span><button class="btn" id="cl-inv-x">Закрыть</button></div>
+          </div>
+        </div>
+        <div class="cl-chat" id="cl-chat">
+          <div class="cl-empty" id="cl-empty"><b>Здесь будет переписка</b><span>Пригласите близкого — когда он примет приглашение, можно писать прямо отсюда или голосом.</span></div>
+          <div class="cl-head" id="cl-head" style="display:none"><i class="cl-ava" id="cl-ava"></i><div><b id="cl-who"></b><span id="cl-devs"></span></div><span style="flex:1"></span><button class="btn small" id="cl-call" title="Позвонить — окно звонка откроется в браузере">Позвонить</button><button class="btn small" id="cl-vcall" title="Видеозвонок">Видео</button><button class="btn small danger" id="cl-del">Убрать из близких</button></div>
+          <div class="cl-msgs" id="cl-msgs"></div>
+          <div class="cl-send" id="cl-send" style="display:none">
+            <label class="btn icon" title="Прикрепить файл (до 10 МБ)"><input type="file" id="cl-file" hidden multiple><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11.5-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l8-8"/></svg></label>
+            <textarea id="cl-text" rows="1" placeholder="Сообщение…"></textarea>
+            <button class="btn primary" id="cl-go">Отправить</button>
+          </div>
+          <div class="cl-files" id="cl-files"></div>
+        </div>
+      </div>
+    </div>
+  </section>
   <section id="p-reminders" class="wide">
     <h1>Напоминания</h1>
     <p class="lead">Скажите «Агент, напомни завтра в 9 позвонить маме», «напоминай каждый день в 8 выпить таблетки» или «таймер на 10 минут» — или напишите здесь. В нужный момент по центру экрана появится будильник со звонком; ответить можно кнопкой или голосом: «понял», «отложи на 10 минут».
@@ -1250,5 +1290,6 @@
 <script src="studio/connect.js"></script>
 <script src="studio/dewiar.js"></script>
 <script src="studio/look.js"></script>
+<script src="studio/close.js"></script>
 </body>
 </html>

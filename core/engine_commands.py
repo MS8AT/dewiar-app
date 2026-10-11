@@ -723,6 +723,58 @@ class CommandsMixin:
                 return r
             except CloudError as e:
                 raise ValueError(str(e)) from e
+        if cmd in ("call_info", "call_sig", "call_ice", "call_fast", "call_done"):    # страница звонка (ui/call.html)
+            from close import CloseError
+            try:
+                return self.close.call_cmd(cmd, a)
+            except CloseError as e:
+                raise ValueError(str(e)) from e
+        if cmd.startswith("close_"):                   # «Близкие» (close.py): студия
+            from close import CloseError
+            c = self.close
+            try:
+                if cmd == "close_state":
+                    if a.get("hello") or not c.st.get("me"):
+                        try:
+                            c.hello()
+                        except CloseError as e:
+                            c.error = str(e)
+                    return c.state()
+                if cmd == "close_invite":
+                    return c.invite(bool(a.get("renew")))
+                if cmd == "close_peek":
+                    return c.peek(a.get("link", ""))
+                if cmd == "close_accept":
+                    return c.accept(a.get("link", ""))
+                if cmd == "close_remove":
+                    return c.remove(a.get("pid", ""))
+                if cmd == "close_history":
+                    return c.history(a.get("pid", ""))
+                if cmd == "close_send":
+                    files = list(a.get("files") or [])
+                    if a.get("files_b64"):                # студия: файл, выбранный в окне, — во временную папку и отправить
+                        import base64 as _b64
+                        import re as _re
+                        out = STATE_DIR / "close_out" / str(int(time.time() * 1000))
+                        out.mkdir(parents=True, exist_ok=True)
+                        for f in a["files_b64"][:5]:
+                            name = _re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", str(f.get("name") or "файл"))[:120] or "файл"
+                            (out / name).write_bytes(_b64.b64decode(f.get("b64") or ""))
+                            files.append(str(out / name))
+                    return c.send(a.get("pid", ""), a.get("text", ""), files)
+                if cmd == "close_call":
+                    return c.call(a.get("pid", ""), bool(a.get("video")))
+                if cmd == "close_name":
+                    return c.set_name(a.get("name", ""))
+                if cmd == "close_speak":
+                    self.s.update({"close": {"speak": bool(a.get("on"))}})
+                    return {"speak": bool(a.get("on"))}
+                if cmd == "close_poll":
+                    c.soon.set()
+                    return {"ok": True}
+            except CloseError as e:
+                raise ValueError(str(e)) from e
+            raise ValueError("неизвестная команда «Близких»")
         if cmd in ("ref_info", "ref_use"):              # приглашения друзей (cloud.php ?p=/ref): мой код, кто пришёл, чужой код
             from cloud import CloudError, fetch
             token, _, base = self.credentials()

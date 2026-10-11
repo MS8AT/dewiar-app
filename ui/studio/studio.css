@@ -853,3 +853,45 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .lk-prev.skin-neon .pl { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
 .lk-group { margin: 6px 0 10px; font-size: 13px; color: var(--muted); }
 #lk-skins .lk-prev { height: 128px; }
+
+/* «Близкие» (studio/close.js): слева — близкие и приглашение, справа — переписка; свои сообщения справа, без рамок */
+.cl-box { display: grid; grid-template-columns: minmax(250px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.cl-side { background: var(--glass); border-radius: 20px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.cl-me { display: flex; flex-direction: column; gap: 4px; padding: 2px 2px 6px; }
+.cl-me input { font-weight: 600; }
+#cl-people { display: flex; flex-direction: column; gap: 4px; }
+.cl-p { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border: 0; border-radius: 14px; background: none; color: var(--ink); cursor: pointer; text-align: left; font: inherit; transition: background .15s; }
+.cl-p:hover { background: rgba(255,255,255,.06); }
+.cl-p.cur { background: rgba(255,255,255,.12); }
+.cl-p span { flex: 1; min-width: 0; } .cl-p b { display: block; font-size: 14px; }
+.cl-p small { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cl-p em { font-style: normal; font-size: 11.5px; font-weight: 700; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; display: grid; place-items: center; background: var(--brand); color: #fff; }
+.cl-ava { flex: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font: 600 15px "Unbounded", sans-serif; font-style: normal;
+  color: #12131c; background: radial-gradient(circle at 35% 30%, #fff, var(--c, #9BD4FF) 70%); box-shadow: 0 6px 16px -8px var(--c, #9BD4FF); }
+.cl-add summary { cursor: pointer; margin: 2px; }
+.cl-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.cl-invite { display: flex; gap: 22px; align-items: center; background: var(--glass); border-radius: 22px; padding: 20px 22px; flex-wrap: wrap; }
+.cl-qr { width: 196px; height: 196px; flex: none; border-radius: 18px; background: #fff; padding: 10px; }
+.cl-qr svg { width: 100%; height: 100%; display: block; }
+.cl-inv-t { flex: 1 1 280px; min-width: 0; } .cl-inv-t h3 { font-size: 16px; margin-bottom: 6px; }
+.cl-chat { background: var(--glass); border-radius: 22px; display: flex; flex-direction: column; height: max(460px, calc(100vh - 260px)); overflow: hidden; }
+.cl-empty { margin: auto; text-align: center; max-width: 360px; display: flex; flex-direction: column; gap: 6px; padding: 30px; }
+.cl-empty b { font: 600 16px "Unbounded", sans-serif; } .cl-empty span { color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+.cl-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; box-shadow: 0 10px 20px -18px rgba(0,0,0,.8); }
+.cl-head b { display: block; font-size: 15px; } .cl-head span { font-size: 12px; color: var(--muted); }
+.cl-msgs { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; scrollbar-width: thin; }
+.cl-m { align-self: flex-start; max-width: min(74%, 560px); padding: 9px 13px 6px; border-radius: 18px 18px 18px 6px; background: rgba(255,255,255,.08); display: flex; flex-direction: column; gap: 6px; }
+.cl-m.out { align-self: flex-end; border-radius: 18px 18px 6px 18px; background: linear-gradient(135deg, rgba(102,126,234,.42), rgba(118,75,162,.42)); }
+.cl-m .tx { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.cl-m time { align-self: flex-end; font-size: 11px; color: var(--dim); }
+.cl-f { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 12px; padding: 8px 10px; background: rgba(0,0,0,.18); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+.cl-f:disabled { cursor: default; opacity: .75; } .cl-f span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cl-f small { color: var(--muted); font-size: 11.5px; }
+.cl-send { display: flex; gap: 8px; align-items: flex-end; padding: 12px 14px; }
+.cl-send textarea { min-height: 42px; max-height: 160px; resize: none; flex: 1; padding: 10px 14px; border-radius: 14px; }
+.cl-send label.btn { width: 42px; height: 42px; padding: 0; display: grid; place-items: center; flex: none; cursor: pointer; }
+.cl-files { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px; }
+.cl-files:empty { display: none; }
+.cl-files span { font-size: 12.5px; padding: 4px 6px 4px 12px; border-radius: 999px; background: rgba(255,255,255,.08); margin-bottom: 10px; }
+.cl-files button { border: 0; background: none; color: var(--muted); cursor: pointer; }
+@media (max-width: 900px) { .cl-box { grid-template-columns: 1fr; } }

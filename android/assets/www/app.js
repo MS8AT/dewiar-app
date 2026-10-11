@@ -47,6 +47,7 @@ const D = window.Dewiar || (() => {
     saveFile: (n, t) => { files[n] = t; try { localStorage.setItem("f_" + n, t); } catch (e) {} return true; },
     saveDownload: (n, m, t) => { (window._downloads = window._downloads || []).push([n, t]); return "Загрузки/Dewiar/" + n; },
     copy: (t) => { window._copied = t; return true; }, bars: (c, l) => { window._bars = [c, l]; },
+    closeWatch: (j) => { window._closeWatch = j; },
     alarmSound: () => JSON.stringify({ id: store.alarm_sound || "chime", custom: store.alarm_custom_name || "" }),
     alarmSoundSet: (id) => { if (id === "custom" && !store.alarm_custom_name) return false; store.alarm_sound = id; return true; },
     alarmSoundTry: (id) => { const on = window._trying !== id; window._trying = on ? id : ""; return on; },
@@ -1180,6 +1181,7 @@ function systemPrompt() {
   const mp = mindPrompt(); if (mp) parts.push(mp.trim());
   try { const rp = recentPrompt(); if (rp) parts.push(rp); } catch (e) { }
   if (S.sync.on && syncCred() && pcSeen()) parts.push("Большую задачу (исследование с отчётом, документ, презентация, работа с файлами или кодом) не делай в разговоре — передай компьютеру пользователя (start_task) и скажи, что взялся: ход и итог появятся здесь, в «Мой день» → «Сделанное».");
+  try { parts.push(clPrompt()); } catch (e) { }
   parts.push(convPrompt());
   return parts.filter(Boolean).join("\n\n");
 }
@@ -2139,6 +2141,10 @@ function toolSpecs() {
     { name: "call_persona", description: "Позвать другого персонажа команды по имени (он ответит своим голосом).", parameters: O({ name: STR }, ["name"]) },
     { name: "make_app", description: "Сделать мини-программу или страницу прямо на телефоне: калькулятор, игра, таймер, конвертер, викторина, шпаргалка, открытка, презентация (слайды листаются кнопками и свайпом). html — ОДИН самодостаточный HTML-файл: CSS и JS внутри, без внешних файлов и библиотек, компактный код; под экран телефона (крупные кнопки), тёмная тема, по-русски. title — короткое название. Программа сразу откроется на экране и сохранится в «Мой день» → «Сделанное».",
       parameters: O({ title: STR, html: STR }, ["title", "html"]) },
+    ...(clLoad().people.length ? [{ name: "close_send", description: "Написать человеку из «Близких» (переписка между помощниками Dewiar: дойдёт в его приложение, его помощник скажет вслух). Только когда пользователь прямо просит написать, передать или сказать кому-то из близких. to — имя, как сказал пользователь («Андрею», «маме»); text — само сообщение от лица пользователя («Задержусь на полчаса»), без «передай».",
+      parameters: O({ to: STR, text: STR }, ["to", "text"]) },
+      { name: "close_call", description: "Позвонить человеку из «Близких» через Dewiar (аудио или видео — video true). Только когда пользователь прямо просит позвонить кому-то из близких.", parameters: O({ to: STR, video: { type: "boolean" } }, ["to"]) },
+      { name: "close_read", description: "Последние сообщения от близких (и мои им): «что мне писали», «что ответила мама». who — имя или пусто — все.", parameters: O({ who: STR }) }] : []),
     { name: "send_message", description: "Отправить текст через мессенджер: app — max (по умолчанию), telegram, whatsapp, viber, vk; text — готовый текст сообщения. Откроется приложение, получателя выберет пользователь.",
       parameters: O({ app: { type: "string", enum: ["max", "telegram", "whatsapp", "viber", "vk"] }, text: STR }, ["text"]) },
   ];
@@ -2273,6 +2279,9 @@ async function runTool(name, a) {
       return `Записано: ${x.kind === "income" ? "+" : "−"}${x.amount} ${x.currency}, ${x.category}.`;
     }
     case "money_report": return moneyReport(a.period || "month").text;
+    case "close_send": { const it = await clSend(a.to || "", a.text || ""); return `Отправлено ${it.to}. Скажи коротко, что отправила.`; }
+    case "close_read": return clRecent(a.who || "");
+    case "close_call": { const p = await clCall(a.to || "", !!a.video); return `Звоню ${p.name}. Ничего не говори — идёт звонок.`; }
     case "call_persona": {
       const p = findPersona(a.name);
       if (!p) return "Такого персонажа нет.";
@@ -4048,6 +4057,8 @@ function handleIntent(e) {
       showBot(`Готово — настройки с компьютера перенесены. Мозг: ${brainName()}. Нажмите микрофон и спросите что-нибудь.`); say("Готово! Настройки перенесены.");
     } catch (x) { showBot("Код с настройками не подошёл: " + x.message, "err"); }
   }
+  else if (e.action === "close") openClose("");                                     // нажали уведомление «Близких»
+  else if (e.action === "link" && /^dewiar:\/\/close/.test(e.url || "")) clAcceptLink(e.url);    // приглашение в «Близкие»
   else if (e.action === "link" && /^dewiar:\/\/ref/.test(e.url || "")) {            // приглашение друга: …/download.php?ref= → «Открыть в Dewiar»
     S.refPending = ((/[?&]c=([A-Za-z0-9]+)/.exec(e.url) || [])[1] || "").toUpperCase(); saveS();
     if (S.llm.cloud) refPendingUse();
@@ -4055,6 +4066,296 @@ function handleIntent(e) {
   }
   else if (e.action === "link") { const m = /server=([^&]+)/.exec(e.url || ""); if (m) { openSettings("brain"); setTimeout(() => { const d = $(".brainalt"); if (d) d.open = true; $('.tile[data-w="pc"]').click(); $("#w-addr").value = decodeURIComponent(m[1]); }, 300); } }
 }
+/* ---------- «Близкие»: переписка между помощниками разных людей (как core/close.py; сервер — cloud.php ?p=/close/…) ----------
+   Ключи устройства X25519 — в настройках приложения (prefs close_key); сообщения и файлы шифруются здесь же
+   (closecrypto.js — тот же формат, что у компьютера); сервер видит только, кому и когда. Состояние и переписка — файл
+   close.json. Входящие: раз в 15 с, пока приложение открыто и есть близкие (иначе — редко), и при каждом открытии.
+   Пришло — на экране и вслух «Мама пишет: …», в фоне — уведомлением. Лист «Близкие» — список, переписка, приглашение
+   QR-кодом и ссылкой; ссылка dewiar://close?t=… (с download.php?close=…) — «Принять приглашение от …?». */
+const CLH_MAX = 300;
+let CLS = null, clCur = "", clTimer = 0, clBusy = false, clFiles = [], clFast = false;
+const DC = () => window.DewiarCrypto;
+function clLoad() {
+  if (CLS) return CLS;
+  try { CLS = JSON.parse(fileGet("close.json") || "{}") || {}; } catch (e) { CLS = {}; }
+  CLS = Object.assign({ me: {}, people: [], cursor: 0, hist: {}, unread: {}, invite: null, hello: 0 }, CLS);
+  return CLS;
+}
+const clSave = () => fileSave("close.json", JSON.stringify(CLS));
+function clKeys() {
+  let k = null; try { k = JSON.parse(prefGet("close_key") || "null"); } catch (e) { }
+  if (k && k.priv && k.pub && k.dev) return k;
+  const kp = DC().keypair();
+  k = { dev: "ph-" + Array.from(DC().randomBytes(5), x => x.toString(16).padStart(2, "0")).join(""), priv: DC().b64e(kp.priv), pub: DC().b64e(kp.pub) };
+  prefSet("close_key", JSON.stringify(k)); return k;
+}
+const clToken = (s) => { s = String(s || "").trim(); const m = /[?&](?:close|t)=([A-Za-z0-9_-]+)/.exec(s); if (m) s = m[1]; s = s.replace(/[^A-Za-z0-9_-]/g, ""); return s.length >= 8 && s.length <= 64 ? s : ""; };
+async function clReq(method, path, body, query) {
+  const c = syncCred(); if (!c) throw new Error("«Близкие» работают через Dewiar: войдите аккаунтом dewiar.pro или подключите мозг Dewiar.");
+  const h = { Authorization: "Bearer " + c.token, "Content-Type": "application/json" }; if (c.link && c.link !== c.token) h["X-Sync-Link"] = c.link;
+  const r = await http(method, c.base + "?p=" + path + (query || ""), { headers: h, body: body == null ? null : body, timeout: 60000 });
+  let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
+  if (r.status >= 400) throw new Error((d.error && d.error.message) || ("облако ответило " + r.status));
+  return d;
+}
+function clPeople(d) { const st = clLoad(); st.me = d.me || {}; st.people = d.people || []; clSave(); clBadge(); }
+async function clHello() {
+  const k = clKeys();
+  clPeople(await clReq("POST", "/close/hello", { dev: k.dev, pub: k.pub, devname: (clInfo().device || "Телефон"), name: (S.close && S.close.name) || S.user_name || "" }));
+  CLS.hello = Date.now(); clSave(); return CLS;
+}
+const clInfo = () => { try { return JSON.parse(D.info() || "{}"); } catch (e) { return {}; } };
+function clMatch(name, people) {                 // «Андрею», «маме», «Свете» -> человек (по общему началу имени), как match_name в close.py
+  const st = (w) => String(w || "").toLowerCase().replace(/ё/g, "е").replace(/[^а-яa-z]/g, "");
+  const q = st(name); if (!q) return null;
+  let best = null, score = 0, tie = false;
+  for (const p of people) for (const w of [p.name || ""].concat(String(p.name || "").split(/\s+/))) {
+    const n = st(w); if (!n) continue;
+    let k = 0; while (k < Math.min(n.length, q.length) && n[k] === q[k]) k++;
+    const need = n.length <= 4 ? Math.min(n.length, 3) : Math.max(3, n.length - 2);
+    if (k >= need || n === q) { const sc = k + (n === q ? 10 : 0); if (sc > score) { best = p; score = sc; tie = false; } else if (sc === score && best !== p) tie = true; }
+  }
+  return tie ? null : best;
+}
+function clPerson(who) {
+  const st = clLoad(), p = st.people.find(x => x.pid === who) || clMatch(who, st.people);
+  if (!p) throw new Error(`Не нашла «${who}» среди близких (сейчас: ${st.people.map(x => x.name).join(", ") || "пока никого"}). Добавить — «Близкие» → «Пригласить».`);
+  return p;
+}
+function clTargets(p) {
+  const t = {}, add = (devs) => (devs || []).forEach(d => { if (d.pub) t[d.dev] = DC().b64d(d.pub); });
+  add(p.devs); add((CLS.me || {}).devs); const k = clKeys(); t[k.dev] = DC().b64d(k.pub); return t;
+}
+const clStdB64 = (u8) => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+async function clSend(who, text, files, kind, extra) {
+  clLoad(); if (!CLS.me.pid || Date.now() - (CLS.hello || 0) > 600000) await clHello();
+  const p = clPerson(who), k = clKeys();
+  if (!(p.devs || []).length) throw new Error(`У ${p.name} Dewiar ещё не открывался после приглашения — сообщение дойдёт, когда откроет.`);
+  const fl = [];
+  for (const f of files || []) {                // {name, type, bytes: Uint8Array}
+    if (f.bytes.length > 10 * 1024 * 1024) throw new Error(`«${f.name}» больше 10 МБ — такие пока не отправить.`);
+    const fk = DC().randomBytes(32), blob = DC().seal(fk, f.bytes);
+    const d = await clReq("POST", "/close/file", clStdB64(blob), "&b64=1&to=" + encodeURIComponent(p.pid));
+    fl.push({ id: d.id, name: f.name, size: f.bytes.length, type: f.type || "", key: DC().b64e(fk) });
+  }
+  const body = Object.assign({}, extra || {}, { t: String(text || "").trim(), ts: Date.now(), mid: Math.random().toString(36).slice(2, 12) + Date.now().toString(36), name: CLS.me.name || "" });
+  if (fl.length) body.f = fl;
+  if ((kind || "msg") === "msg" && !body.t && !fl.length) throw new Error("пустое сообщение");
+  const env = DC().encryptFor(body, DC().b64d(k.priv), k.dev, clTargets(p));
+  const d = await clReq("POST", "/close/send", { to: p.pid, env, kind: kind || "msg" });
+  if ((kind || "msg") !== "msg") return d;
+  const it = { mid: body.mid, ts: body.ts, out: true, t: body.t, f: fl };
+  clAdd(p.pid, it); plog("info", `💌 близким: ${p.name} ← ${clip(body.t || "файл")}`); return Object.assign({ to: p.name }, it);
+}
+function clAdd(pid, it) {
+  const st = clLoad(), h = st.hist[pid] = st.hist[pid] || [];
+  if (h.some(x => x.mid === it.mid)) return false;
+  h.push(it); h.sort((a, b) => a.ts - b.ts); if (h.length > CLH_MAX) h.splice(0, h.length - CLH_MAX); clSave(); return true;
+}
+function clPubOf(peer, dev, out) {
+  const st = clLoad(), who = out ? st.me : st.people.find(p => p.pid === peer), d = ((who || {}).devs || []).find(x => x.dev === dev);
+  if (d) return DC().b64d(d.pub);
+  const k = clKeys(); return out && dev === k.dev ? DC().b64d(k.pub) : null;
+}
+async function clPoll() {
+  if (clBusy || !syncCred() || !DC()) return 0;
+  clBusy = true;
+  try {
+    const st = clLoad(), k = clKeys();
+    if (!st.me.pid || Date.now() - (st.hello || 0) > 6 * 3600000) await clHello();
+    const d = await clReq("GET", "/close/inbox", null, "&after=" + (+st.cursor || 0));
+    let got = 0, refreshed = false;
+    for (const it of d.items || []) {
+      const env = it.env || {};
+      let pub = clPubOf(it.peer, env.fd, it.out);
+      if (!pub && !refreshed) { refreshed = true; try { await clHello(); } catch (e) { } pub = clPubOf(it.peer, env.fd, it.out); }
+      if (!pub) continue;
+      let body; try { body = DC().decryptFrom(env, DC().b64d(k.priv), k.dev, pub); } catch (e) { plog("warn", "близкие: не открылось — " + e.message); continue; }
+      if (it.kind === "sig") { try { clSig(it.peer, it.name, body.s || {}); } catch (e) { } continue; }
+      const m = { mid: body.mid || String(it.id), ts: +body.ts || it.ts * 1000, out: !!it.out, t: String(body.t || "").slice(0, 20000), f: (body.f || []).filter(x => x && typeof x === "object").slice(0, 10) };
+      if (!clAdd(it.peer, m) || m.out) continue;
+      got++;
+      if (!(clCur === it.peer && $("#sh-close").classList.contains("on"))) { st.unread[it.peer] = (st.unread[it.peer] || 0) + 1; clSave(); }
+      clTell(it.name || "Близкий", m);
+    }
+    st.cursor = Math.max(+st.cursor || 0, +d.last || 0); clSave(); clBadge(); clWatch();
+    if (got && $("#sh-close").classList.contains("on")) clRender();
+    return got;
+  } catch (e) { plog("info", "близкие: " + e.message); return 0; }
+  finally { clBusy = false; }
+}
+function clTell(name, m) {
+  const what = (m.t || "") + ((m.f || []).length ? (m.t ? " " : "") + ((m.f.length === 1) ? `Файл «${m.f[0].name}».` : `Файлов: ${m.f.length}.`) : "");
+  const line = `${name} пишет: ${what}`.trim();
+  if (document.hidden || busy || state !== "idle") { D.notify(`💌 ${name}`, what || "сообщение"); if (document.hidden) return; }
+  if (!busy && state === "idle") { showBot(line); if (!(S.close && S.close.speak === false)) say(line); }
+}
+function clBadge() {
+  const st = clLoad(), n = Object.values(st.unread || {}).reduce((a, x) => a + (+x || 0), 0);
+  const b = $("#b-close"); if (b) b.classList.toggle("has", n > 0);
+}
+/* фоновая проверка, пока приложение закрыто (CloseWatch.java): только если есть близкие; номер прочитанного — чтобы не
+   напоминать о том, что уже показано здесь */
+function clWatch() {
+  if (!D.closeWatch) return;
+  const c = syncCred(), st = clLoad(), j = c && st.people.length ? JSON.stringify({ base: c.base, token: c.token, link: c.link && c.link !== c.token ? c.link : "", cursor: +st.cursor || 0 }) : "";
+  if (j !== clWatch.last) { clWatch.last = j; D.closeWatch(j); }
+}
+const clActive = () => { const st = clLoad(); return st.people.length > 0 || (st.invite && Date.now() / 1000 < (st.invite.expires || 0)); };
+function clSchedule() {
+  clearTimeout(clTimer);
+  clTimer = setTimeout(async () => { if (!document.hidden) await clPoll(); clSchedule(); }, clFast ? 1200 : clActive() ? 6000 : 600000);
+}
+function clPrompt() {
+  const st = clLoad(); if (!st.people.length) return "";
+  return "БЛИЗКИЕ (переписка с их помощниками Dewiar, сообщения шифруются): " + st.people.map(p => p.name).join(", ")
+    + ". «Напиши/передай/скажи Андрею…» кому-то из них — инструмент close_send (дойдёт в его Dewiar, он услышит вслух); «что мне писали», «что ответила мама» — close_read. Другим людям — как обычно, мессенджерами.";
+}
+function clRecent(who, n = 8) {
+  const st = clLoad(), ps = who ? [clPerson(who)] : st.people, out = [];
+  for (const p of ps) { (st.hist[p.pid] || []).slice(-n).forEach(m => out.push([m.ts, `${new Date(m.ts).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} ${m.out ? "вы → " + p.name : p.name}: ${m.t || ""}${(m.f || []).length ? " [файлы: " + m.f.map(x => x.name).join(", ") + "]" : ""}`])); delete st.unread[p.pid]; }
+  clSave(); clBadge(); out.sort((a, b) => a[0] - b[0]);
+  return out.slice(-n * 2).map(x => x[1]).join("\n") || "Сообщений пока нет.";
+}
+async function clInvite(renew) {
+  const d = await clReq("POST", "/close/invite", { renew: !!renew });
+  clLoad().invite = { link: d.link, expires: d.expires }; clSave(); clSchedule(); return d;
+}
+async function clAcceptLink(link) {
+  const t = clToken(link); if (!t) { showBot("Это не ссылка-приглашение в «Близкие».", "err"); return; }
+  if (!syncCred()) { S.closePending = t; saveS(); showBot("Приглашение в «Близкие» сохранено. Подключите Dewiar (Настройки → Мозг → «Подключить бесплатно») — и я его приму.", ""); return; }
+  try {
+    const who = await clReq("GET", "/close/peek", null, "&t=" + encodeURIComponent(t));
+    if (!confirm(`Принять приглашение в «Близкие» от «${who.name}»? Ваши помощники смогут передавать друг другу сообщения.`)) return;
+    clKeys(); if (!clLoad().me.pid) await clHello();
+    const d = await clReq("POST", "/close/accept", { t }); clPeople(d); S.closePending = ""; saveS();
+    const p = d.person || {}; showBot(`Готово — ${p.name || who.name} в ваших близких. Пишите в «Близких» (сердечко вверху) или скажите мне: «напиши» — и имя.`); say("Готово!");
+    clSchedule(); setTimeout(clPoll, 1500);
+  } catch (e) { showBot("Приглашение не принято: " + e.message, "err"); }
+}
+
+/* звонки (assets/call.js): сигналы — зашифрованные сообщения kind sig ({s: сигнал}); во время звонка опрос — раз в секунду */
+function clTransport(p) {
+  return {
+    send: (sig) => clSend(p.pid, "", [], "sig", { s: sig }),
+    ice: async () => (await clReq("GET", "/close/ice")).iceServers || [],
+    fast: (on) => { clFast = !!on; clSchedule(); },
+    done: (info) => {
+      const t = info.secs ? `📞 Звонок · ${String(Math.floor(info.secs / 60)).padStart(2, "0")}:${String(info.secs % 60).padStart(2, "0")}` : "📞 " + (info.reason || "Звонок");
+      clAdd(p.pid, { mid: "call" + Date.now(), ts: Date.now(), out: info.role === "caller", t, call: true });
+      if (info.notify && info.role === "callee" && document.hidden) D.notify("📞 " + p.name, info.reason || "Пропущенный звонок");
+      if ($("#sh-close").classList.contains("on")) clRender();
+    },
+  };
+}
+async function clCall(who, video) {
+  if (!window.DewiarCall) throw new Error("звонки здесь не поддерживаются");
+  const p = clPerson(who);
+  if (!(p.devs || []).length) throw new Error(`У ${p.name} Dewiar ещё не открывался — позвонить пока нельзя.`);
+  if (!(await needPerm("android.permission.RECORD_AUDIO"))) throw new Error("нужен доступ к микрофону");
+  if (video && !(await needPerm("android.permission.CAMERA"))) video = false;
+  clCallPrep();
+  closeSheets();
+  await DewiarCall.start({ role: "caller", peer: { pid: p.pid, name: p.name, color: clCol(p.pid) }, video: !!video, transport: clTransport(p) });
+  return p;
+}
+function clCallPrep() { try { stopListen(); } catch (e) { } try { D.radioPause(); } catch (e) { } try { D.stopSpeak(); } catch (e) { } }
+function clSig(peer, name, s) {
+  if (!window.DewiarCall) return;
+  const p = clLoad().people.find(x => x.pid === peer); if (!p) return;
+  DewiarCall.signal(peer, s, {
+    ring: async (r) => {
+      if (document.hidden) D.notify("📞 " + p.name + (r.video ? " — видеозвонок" : " звонит"), "Откройте Dewiar, чтобы ответить");
+      clCallPrep(); closeSheets();
+      if (r.video && !D.has("android.permission.CAMERA")) await needPerm("android.permission.CAMERA");
+      if (!D.has("android.permission.RECORD_AUDIO")) await needPerm("android.permission.RECORD_AUDIO");
+      DewiarCall.start({ role: "callee", peer: { pid: p.pid, name: p.name, color: clCol(p.pid) }, video: !!r.video, call: r.call, offer: r.sdp, transport: clTransport(p) });
+    },
+    busy: (r) => clSend(peer, "", [], "sig", { s: { type: "busy", call: r.call } }).catch(() => { }),
+  });
+}
+/* лист «Близкие» */
+const clTime = (ts) => { const d = new Date(ts), now = new Date(), hm = pad(d.getHours()) + ":" + pad(d.getMinutes()); return d.toDateString() === now.toDateString() ? hm : d.getDate() + " " + MON[d.getMonth()].slice(0, 3) + ", " + hm; };
+const CL_COL = ["#9BD4FF", "#FFB547", "#3DF5C8", "#FF7AB6", "#B78CFF", "#9BE15D", "#7C8CFF", "#FF6B5A"];
+const clCol = (pid) => CL_COL[[...String(pid)].reduce((a, c) => a + c.charCodeAt(0), 0) % CL_COL.length];
+const clKb = (n) => n > 1048576 ? (n / 1048576).toFixed(1).replace(".", ",") + " МБ" : Math.max(1, Math.round(n / 1024)) + " КБ";
+function openClose(pid) { clCur = pid || ""; openSheet("#sh-close"); clRender(); if (syncCred()) clHello().then(() => clRender()).catch(() => { }); }
+function clRender() {
+  const st = clLoad(), box = $("#close-body"), p = clCur && st.people.find(x => x.pid === clCur);
+  $("#cl-h").firstChild.textContent = p ? "" : "Близкие";
+  $("#cl-inv").style.display = p ? "none" : "";
+  if (!syncCred()) { box.innerHTML = `<div class="card"><b>Нужен Dewiar</b><p class="hint" style="margin:6px 0 10px">«Близкие» работают через облако Dewiar: подключите мозг бесплатно или войдите аккаунтом dewiar.pro.</p><button class="btn p w" id="cl-brain">Подключить</button></div>`;
+    $("#cl-brain").onclick = () => openSettings("brain"); return; }
+  if (p) {
+    delete st.unread[p.pid]; clSave(); clBadge();
+    const h = st.hist[p.pid] || [];
+    box.innerHTML = `<div class="clh"><button class="ib soft" id="cl-back"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button><i class="clava" style="--c:${clCol(p.pid)}">${esc((p.name || "?")[0].toUpperCase())}</i>
+        <div style="flex:1;min-width:0"><b>${esc(p.name)}</b><small>${(p.devs || []).length ? "сообщения шифруются" : "ещё не открывал Dewiar"}</small></div>
+        ${(p.devs || []).length && window.DewiarCall ? `<button class="ib soft" id="cl-call" title="Позвонить"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg></button>
+          <button class="ib soft" id="cl-vcall" title="Видеозвонок"><svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="13" height="11" rx="2.5"/><path d="m15.5 10.5 6-3.5v10l-6-3.5"/></svg></button>` : ""}</div>
+      <div class="clmsgs" id="cl-msgs">${h.map((m, i) => `<div class="clm ${m.out ? "out" : ""}">${m.t ? `<div>${esc(m.t)}</div>` : ""}${(m.f || []).map((f, j) => `<button class="clf" data-i="${i}" data-j="${j}"><svg viewBox="0 0 24 24"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg><span>${esc(f.name)}</span><small>${f.saved ? "сохранён" : clKb(f.size || 0)}</small></button>`).join("")}<time>${clTime(m.ts)}</time></div>`).join("")
+        || `<p class="hint" style="text-align:center;margin:24px 8px">Напишите первое сообщение — или скажите: «Напиши ${esc(p.name)}, …»</p>`}</div>
+      <div class="clatts" id="cl-atts">${clFiles.map((f, i) => `<span>${esc(f.name)} <button data-i="${i}">✕</button></span>`).join("")}</div>
+      <div class="clsend"><label class="ib att"><input type="file" id="cl-file" multiple hidden><svg viewBox="0 0 24 24"><path d="M20.5 11.5 12.6 19.4a5 5 0 0 1-7.1-7.1l8.3-8.3a3.4 3.4 0 0 1 4.8 4.8l-8.3 8.3a1.7 1.7 0 0 1-2.4-2.4l7.6-7.6"/></svg></label>
+        <textarea id="cl-text" rows="1" placeholder="Сообщение…"></textarea><button class="ib" id="cl-go"><svg viewBox="0 0 24 24"><path d="M4 12 20 4l-6 16-2.5-6.5z"/></svg></button></div>`;
+    const msgs = $("#cl-msgs"); msgs.scrollTop = msgs.scrollHeight;
+    $("#cl-back").onclick = () => { clCur = ""; clRender(); };
+    if ($("#cl-call")) { $("#cl-call").onclick = () => clCall(p.pid, false).catch(e => toast(e.message, 4000)); $("#cl-vcall").onclick = () => clCall(p.pid, true).catch(e => toast(e.message, 4000)); }
+    $$("#cl-atts button").forEach(b => b.onclick = () => { clFiles.splice(+b.dataset.i, 1); clRender(); });
+    $$(".clf").forEach(b => b.onclick = () => clSaveFile(p, h[+b.dataset.i], +b.dataset.j));
+    $("#cl-file").onchange = () => { [...$("#cl-file").files].forEach(f => { if (f.size > 10 * 1024 * 1024) { toast(`«${f.name}» больше 10 МБ`); return; }
+      const fr = new FileReader(); fr.onload = () => { clFiles.push({ name: f.name, type: f.type, bytes: new Uint8Array(fr.result) }); clRender(); }; fr.readAsArrayBuffer(f); }); };
+    const go = async () => { const t = $("#cl-text").value.trim(); if (!t && !clFiles.length) return; const b = $("#cl-go"); b.disabled = true;
+      try { await clSend(p.pid, t, clFiles); clFiles = []; clRender(); } catch (e) { toast(e.message, 4000); b.disabled = false; } };
+    $("#cl-go").onclick = go;
+    return;
+  }
+  const inv = st.invite && Date.now() / 1000 < (st.invite.expires || 0) ? st.invite : null;
+  box.innerHTML = `<p class="hint" style="margin:0 4px 12px">Переписка между помощниками: скажите «напиши маме, что я задержусь» — у мамы её помощница прочитает это вслух. Сообщения шифруются на устройствах.</p>
+    <div id="cl-invbox"></div>
+    ${st.people.length ? st.people.map(x => `<button class="clp" data-pid="${esc(x.pid)}"><i class="clava" style="--c:${clCol(x.pid)}">${esc((x.name || "?")[0].toUpperCase())}</i>
+      <span><b>${esc(x.name)}</b><small>${(() => { const l = (st.hist[x.pid] || []).slice(-1)[0]; return l ? esc((l.out ? "Вы: " : "") + (l.t || "📎 " + ((l.f || [])[0] || {}).name)) : "пока без сообщений"; })()}</small></span>${st.unread[x.pid] ? `<em>${st.unread[x.pid]}</em>` : ""}</button>`).join("")
+      : `<div class="card"><b>Пока никого</b><p class="hint" style="margin:4px 0 0">Нажмите «Пригласить» вверху — и отправьте ссылку близкому или покажите ему QR-код.</p></div>`}
+    <h3>Как вас видят близкие</h3><div class="card"><input id="cl-name" placeholder="ваше имя" maxlength="40" value="${esc(st.me.name && st.me.name !== "Без имени" ? st.me.name : (S.close && S.close.name) || S.user_name || "")}">
+      <div class="sw" style="margin-top:10px"><div>Читать сообщения вслух<small>«Мама пишет: …»</small></div><label class="tg"><input type="checkbox" id="cl-speak" ${S.close && S.close.speak === false ? "" : "checked"}><i></i></label></div></div>
+    <details class="more"><summary>Пришла ссылка-приглашение?</summary><div class="row2" style="margin-top:8px"><input id="cl-link" placeholder="вставьте ссылку" style="flex:1;padding:12px 14px;border-radius:14px;border:0;background:var(--field)"><button class="btn p" id="cl-link-go">Принять</button></div></details>`;
+  $$(".clp").forEach(b => b.onclick = () => { clCur = b.dataset.pid; clRender(); });
+  if (inv) clInvShow(inv);
+  $("#cl-name").onchange = () => { S.close = Object.assign({}, S.close, { name: $("#cl-name").value.trim() }); saveS(); clHello().then(() => toast("Сохранено")).catch(e => toast(e.message)); };
+  $("#cl-speak").onchange = () => { S.close = Object.assign({}, S.close, { speak: $("#cl-speak").checked }); saveS(); };
+  $("#cl-link-go").onclick = () => clAcceptLink($("#cl-link").value);
+}
+function clInvShow(d) {
+  const box = $("#cl-invbox"); if (!box) return;
+  box.innerHTML = `<div class="card clinv"><div class="clqr">${typeof qrcode === "function" ? clQr(d.link) : ""}</div>
+    <p class="hint" style="margin:8px 0">Покажите код близкому — пусть наведёт камеру телефона. Или отправьте ссылку: она действует 7 дней.</p>
+    <div class="row2"><button class="btn p" id="cl-share" style="flex:1">Отправить ссылку</button><button class="btn" id="cl-copy" style="flex:1">Скопировать</button></div></div>`;
+  $("#cl-share").onclick = () => D.share(`Добавь меня в «Близкие» в Dewiar — наши помощники смогут передавать друг другу сообщения: ${d.link}`);
+  $("#cl-copy").onclick = () => { D.copy(d.link); toast("Ссылка скопирована"); };
+}
+function clQr(text) {                             // QR как в студии: скруглённые точки и «глазки» (тёмное на белом)
+  const q = qrcode(0, "M"); q.addData(text); q.make();
+  const n = q.getModuleCount(), m = 1.5, W = n + m * 2, eye = (r, c) => (r < 7 && c < 7) || (r < 7 && c >= n - 7) || (r >= n - 7 && c < 7);
+  let dots = "";
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c) && !eye(r, c)) dots += `<rect x="${(c + m + 0.07).toFixed(2)}" y="${(r + m + 0.07).toFixed(2)}" width=".86" height=".86" rx=".3"/>`;
+  const e = (r, c) => { const x = c + m, y = r + m; return `<rect x="${x + 0.5}" y="${y + 0.5}" width="6" height="6" rx="1.9" fill="none" stroke="#111" stroke-width="1"/><rect x="${x + 2}" y="${y + 2}" width="3" height="3" rx="1"/>`; };
+  return `<svg viewBox="0 0 ${W} ${W}"><rect width="${W}" height="${W}" fill="#fff"/><g fill="#111">${dots}${e(0, 0)}${e(0, n - 7)}${e(n - 7, 0)}</g></svg>`;
+}
+async function clSaveFile(p, m, j) {
+  const f = (m.f || [])[j]; if (!f || m.out) return;
+  try {
+    toast("Скачиваю «" + f.name + "»…");
+    const d = await clReq("GET", "/close/file", null, "&b64=1&id=" + encodeURIComponent(f.id));
+    const bytes = DC().unseal(DC().b64d(f.key), Uint8Array.from(atob(d.b64), c => c.charCodeAt(0)));
+    const where = D.saveDownloadB64 ? D.saveDownloadB64(f.name, f.type || "application/octet-stream", clStdB64(bytes)) : "";
+    f.saved = true; clSave(); clRender(); toast(where ? "Сохранено: " + where : "Сохранено", 4000);
+  } catch (e) { toast("Не скачался: " + e.message, 4000); }
+}
+$("#b-close").onclick = () => openClose("");
+$("#cl-inv").onclick = async () => { try { const d = await clInvite(false); clInvShow(d); } catch (e) { toast(e.message, 4000); } };
+document.addEventListener("visibilitychange", () => { if (!document.hidden && syncCred()) clPoll(); });
+setTimeout(() => { clLoad(); clBadge(); if (S.closePending && syncCred()) clAcceptLink(S.closePending); clPoll(); clSchedule(); }, 4000);
+
 /* ---------- «сам замечает»: открыли приложение после перерыва — коротко о главном (как core/presence.py) ----------
    Перерыв считается от того, когда приложение последний раз было на экране (S.welcome.seen). Первый раз за день после 3 часов —
    короткая сводка дня; после 30 минут — только если есть что сказать: готовые с тех пор задачи, задача ждёт ответа, скоро

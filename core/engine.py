@@ -155,8 +155,11 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.toolbox.hooks["money"] = self.money
         from sync import Sync
         self.sync = Sync(self)                         # телефон ↔ компьютер через облако Dewiar
+        from close import Close
+        self.close = Close(self)                       # «Близкие»: переписка с помощниками других людей (сквозное шифрование)
         self.money.on_change = self.sync.soon.set
         self.toolbox.hooks["engine"] = self
+        self.toolbox.hooks["close"] = self.close
         import guard
         from pc import Power
         guard.WORKSPACE[:] = [self.workspace.root]
@@ -228,6 +231,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         threading.Thread(target=self.obsidian.loop, args=(self.stopping,), name="obsidian", daemon=True).start()
         if self.s.get("sync", "enabled") is not False and not self.wav_input:
             threading.Thread(target=self.sync.loop, args=(self.stopping,), name="sync", daemon=True).start()
+        if not self.wav_input:
+            threading.Thread(target=self.close.loop, args=(self.stopping,), name="close", daemon=True).start()
         threading.Thread(target=self._start_hearing, name="hearing-init", daemon=True).start()
         threading.Timer(4.0, self.probe_tools_bg).start()     # умеет ли модель действия — узнаём заранее
         self.telegram.start()

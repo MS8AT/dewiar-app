@@ -85,6 +85,12 @@ public final class Bridge {
         } });
     }
 
+    /** «Близкие» в фоне (CloseWatch): что спрашивать у облака — {base, token, link, cursor} строкой JSON; "" — выключить. */
+    @JavascriptInterface public void closeWatch(String json) {
+        prefs.edit().putString("close_watch", json == null ? "" : json).apply();
+        CloseWatch.schedule(a, json != null && !json.isEmpty());
+    }
+
     // ---------- звук напоминаний (Sounds) ----------
     private android.media.MediaPlayer trying;
     private String tryingId = "";

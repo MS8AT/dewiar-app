@@ -134,6 +134,7 @@ run "виджет: картинка из буфера обмена"   $PY "$T/hu
 run "сложная просьба — модель думает"  $PY "$T/think_auto_test.py"
 run "оформление: темы и анимация голоса" $PY "$T/look_test.py"
 run "телефон: звук напоминаний" $PY "$T/android_sound_test.py"
+run "«Близкие»: шифрование (Python и JS)" $PY "$T/close_crypto_test.py"
 run "короткие фразы: спасибо, ослышанное имя" $PY "$T/voice_short_test.py"
 run "результат задачи: скачать HTML, PDF" $PY "$T/export_test.py"
 run "дневник ассистента: ночная запись, выводы на завтра" $PY "$T/diary_test.py"

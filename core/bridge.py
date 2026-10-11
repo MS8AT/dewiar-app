@@ -8,7 +8,8 @@
   ядро   → {"type": "state"|"level"|"heard"|"answer"|...}   (рассылка всем)
 
 Токен обязателен: к 127.0.0.1 может подключиться любая программа или страница в браузере на этом компьютере,
-а команды ядра управляют компьютером. Команды выполняются в пуле потоков (handler), рассылка — broadcast()
+а команды ядра управляют компьютером. Страница звонка «Близким» в браузере (ui/call.html) получает свой временный токен
+(allow): ей доступны только команды и события звонка. Команды выполняются в пуле потоков (handler), рассылка — broadcast()
 из любого потока. Ответ на «ping» — без пула, чтобы показать, чем ядро занято, даже когда пул забит.
 """
 
@@ -35,6 +36,14 @@ class Bridge:
         # и остальные кнопки интерфейса ждут.
         self.pool = ThreadPoolExecutor(max_workers=48, thread_name_prefix="cmd")
         self.inflight = {}            # id вызова → (команда, когда начата) — для «ping»: чем ядро занято
+        self.limited = {}             # временный токен → (разрешённые команды, до когда) — страница звонка в браузере
+        self.limited_ws = {}          # подключение с временным токеном → разрешённые команды
+
+    LIMITED_EVENTS = ("close_sig", "call_end")
+
+    def allow(self, token, cmds, seconds=3600):
+        """Временный токен для страницы звонка: только эти команды и события звонка, час."""
+        self.limited[token] = (set(cmds), time.time() + seconds)
 
     def start(self):
         """Запустить сервер в своём потоке со своим циклом asyncio; ждём готовности не дольше 5 секунд."""
@@ -61,10 +70,30 @@ class Bridge:
         Неверный — закрываем с кодом 4001. Каждая команда обрабатывается отдельно, не задерживая следующие."""
         try:
             first = json.loads(await asyncio.wait_for(ws.recv(), 5))
-            if not hmac.compare_digest(str(first.get("token", "")), self.token):
+            tok = str(first.get("token", ""))
+            lim = next((v for k, v in list(self.limited.items()) if hmac.compare_digest(tok, k) and v[1] > time.time()), None)
+            if lim is None and not hmac.compare_digest(tok, self.token):
                 await ws.close(code=4001, reason="bad token")
                 return
         except Exception:  # noqa: BLE001
+            return
+        if lim is not None:                           # страница звонка: без снимка состояния, только своё
+            try:
+                await ws.send(json.dumps({"type": "hello", "data": {"limited": True}}))
+                self.limited_ws[ws] = lim[0]
+                async for raw in ws:
+                    try:
+                        msg = json.loads(raw)
+                    except ValueError:
+                        continue
+                    if msg.get("cmd") not in lim[0]:
+                        await ws.send(json.dumps({"type": "reply", "id": msg.get("id"), "ok": False, "error": "недоступно"}))
+                        continue
+                    asyncio.ensure_future(self._reply(ws, msg))
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                self.limited_ws.pop(ws, None)
             return
         try:
             data = await self._call("hello", {})
@@ -117,12 +146,13 @@ class Bridge:
     def broadcast(self, event: dict):
         """Разослать событие всем интерфейсам. Можно звать из любого потока: отправка уходит в цикл связи.
         Клиент, которому не отправилось, убирается из списка."""
-        if not self.loop or not self.clients:
+        if not self.loop or not (self.clients or self.limited_ws):
             return
         text = json.dumps(event, ensure_ascii=False)
+        extra = list(self.limited_ws) if event.get("type") in self.LIMITED_EVENTS else []
 
         async def send_all():
-            for ws in list(self.clients):
+            for ws in list(self.clients) + extra:
                 try:
                     await ws.send(text)
                 except Exception:  # noqa: BLE001

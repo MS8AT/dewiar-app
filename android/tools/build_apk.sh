@@ -21,6 +21,9 @@ cp -r "$HERE/assets/www/." "$B/assets/www/"
 cp "$ROOT/ui/assets/entities.js" "$B/assets/www/entities.js"
 cp "$ROOT/ui/assets/skins.css" "$ROOT/ui/assets/skins.js" "$B/assets/www/"     # темы оформления — те же, что у виджета
 cp "$ROOT/ui/assets/privacy.js" "$B/assets/www/"                    # «Ваши данные» — тот же текст, что в студии
+cp "$ROOT/ui/assets/closecrypto.js" "$B/assets/www/"                # «Близкие»: шифрование — то же, что у компьютера (core/closecrypto.py)
+cp "$ROOT/ui/assets/qrcode.js" "$B/assets/www/"                     # QR-код приглашения в «Близкие»
+cp "$ROOT/ui/assets/call.js" "$B/assets/www/"                       # звонки «Близким» (WebRTC) — тот же код, что у компьютера
 cp -r "$ROOT/ui/assets/skins" "$B/assets/www/skins"
 cp -r "$ROOT/ui/assets/live" "$B/assets/www/live"                # слои живого лица Эвы (entities.js берёт их из live/)
 python3 "$HERE/tools/personas_json.py" "$ROOT" > "$B/assets/www/personas.js"

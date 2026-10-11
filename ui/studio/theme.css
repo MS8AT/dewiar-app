@@ -214,3 +214,17 @@ html.st-neu:not(.st-light) .switch { border-bottom-color: rgba(255,255,255,.04);
 
 /* закрытая выдвижная панель стоит за правым краем — её тень не должна заходить в окно */
 .drawer:not(.open) { box-shadow: none; }
+
+/* «Близкие» в светлых и неоморфных стилях */
+html.st-light :is(.cl-p:hover, .cl-files span) { background: var(--soft); }
+html.st-light .cl-p.cur { background: rgba(255,255,255,.85); box-shadow: 0 6px 16px -10px rgba(20,30,60,.35); }
+html.st-light .cl-m { background: rgba(255,255,255,.75); box-shadow: 0 4px 12px -8px rgba(20,30,60,.3); }
+html.st-light .cl-m.out { background: linear-gradient(135deg, #3b3560, #2b2540); color: #fff; }
+html.st-light .cl-m.out time { color: rgba(255,255,255,.6); }
+html.st-light .cl-f { background: var(--soft); }
+html.st-light :is(.cl-side, .cl-chat, .cl-invite) { box-shadow: var(--sk-shadow); }
+html.st-neu :is(.cl-side, .cl-chat, .cl-invite) { background: var(--sk-glass); box-shadow: var(--raise); }
+html.st-neu .cl-p.cur { background: var(--sk-glass); box-shadow: var(--press); color: var(--accent); }
+html.st-neu .cl-m { background: var(--sk-glass); box-shadow: var(--raise-s); }
+html.st-neu .cl-m.out { background: var(--brand); color: #fff; }
+html.st-neu .cl-head { box-shadow: 0 8px 14px -12px var(--nd); }

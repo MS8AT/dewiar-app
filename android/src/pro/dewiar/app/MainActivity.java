@@ -59,10 +59,13 @@ public class MainActivity extends Activity implements Net.Sink {
             // само разрешение Android интерфейс спрашивает заранее через Dewiar.perm, здесь не спрашиваем
             @Override public void onPermissionRequest(final android.webkit.PermissionRequest r) {
                 runOnUiThread(new Runnable() { @Override public void run() {
-                    boolean cam = false;
-                    for (String x : r.getResources()) if (android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(x)) cam = true;
-                    if (cam && has(Manifest.permission.CAMERA)) r.grant(new String[]{android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE});
-                    else r.deny();
+                    // камера — для «сфотографируй» и видеозвонков, микрофон — для звонков «Близким»; даём то, на что разрешение уже есть
+                    java.util.ArrayList<String> ok = new java.util.ArrayList<>();
+                    for (String x : r.getResources()) {
+                        if (android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(x) && has(Manifest.permission.CAMERA)) ok.add(x);
+                        if (android.webkit.PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(x) && has(Manifest.permission.RECORD_AUDIO)) ok.add(x);
+                    }
+                    if (ok.isEmpty()) r.deny(); else r.grant(ok.toArray(new String[0]));
                 } });
             }
             @Override public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
@@ -142,6 +145,8 @@ public class MainActivity extends Activity implements Net.Sink {
             String a = i.getAction();
             if ("pro.dewiar.TYPE".equals(a)) {
                 pending = new JSONObject().put("action", "type");
+            } else if ("pro.dewiar.CLOSE".equals(a)) {              // уведомление «Близких» (CloseWatch) — открыть переписку
+                pending = new JSONObject().put("action", "close");
             } else if (Intent.ACTION_ASSIST.equals(a) || "android.intent.action.VOICE_COMMAND".equals(a) || "pro.dewiar.LISTEN".equals(a)) {
                 pending = new JSONObject().put("action", "listen");
             } else if (Intent.ACTION_VIEW.equals(a) && i.getData() != null) {

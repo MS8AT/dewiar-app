@@ -1335,6 +1335,43 @@ def t_money_add(a, ctx):
     return f"Записано: {'доход' if it['kind'] == 'income' else 'расход'} {fmt(it['amount'], it['currency'])}, {it['category']}, {it['date']}."
 
 
+def t_close_send(a, ctx):
+    c = ctx.get("close")
+    if c is None:
+        raise ToolError("«Близкие» недоступны")
+    from close import CloseError
+    try:
+        files = [str(Path(x).expanduser()) for x in (a.get("files") or []) if x]
+        it = c.send(a.get("to") or "", a.get("text") or "", files)
+    except (CloseError, OSError) as e:
+        raise ToolError(str(e)) from e
+    p = c.person(a.get("to") or "")
+    return f"Отправлено {p['name']}" + (f" (файлов: {len(it.get('f') or [])})" if it.get("f") else "") + ". Скажи коротко, что отправила."
+
+
+def t_close_call(a, ctx):
+    c = ctx.get("close")
+    if c is None:
+        raise ToolError("«Близкие» недоступны")
+    from close import CloseError
+    try:
+        r = c.call(a.get("to") or "", bool(a.get("video")))
+    except CloseError as e:
+        raise ToolError(str(e)) from e
+    return f"Открыла окно звонка: звоню {r['name']}. Скажи одной фразой, что звонишь."
+
+
+def t_close_read(a, ctx):
+    c = ctx.get("close")
+    if c is None:
+        raise ToolError("«Близкие» недоступны")
+    from close import CloseError
+    try:
+        return c.recent(a.get("who") or "")
+    except CloseError as e:
+        raise ToolError(str(e)) from e
+
+
 def t_money_report(a, ctx):
     m = ctx.get("money")
     if m is None:
@@ -1766,6 +1803,17 @@ TOOLS = {
                   S({"kind": {"type": "string", "enum": ["expense", "income"]}, "amount": {"type": "number"},
                      "currency": {"type": "string"}, "category": {"type": "string"}, "note": {"type": "string"},
                      "date": {"type": "string"}}, ["kind", "amount"]), "safe", t_money_add, "Деньги: записать"),
+    "close_send": ("Написать человеку из «Близких» (переписка между помощниками Dewiar: дойдёт в его приложение, его помощник "
+                   "скажет вслух). Только когда пользователь прямо просит написать, передать или сказать кому-то из близких. "
+                   "to — имя как сказал пользователь («Андрею», «маме»); text — само сообщение от лица пользователя, как он сказал бы сам "
+                   "(«Задержусь на полчаса»), без «передай»; files — пути файлов (необязательно).",
+                   S({"to": {"type": "string"}, "text": {"type": "string"}, "files": {"type": "array", "items": {"type": "string"}}}, ["to", "text"]),
+                   "safe", t_close_send, "Близкие: написать"),
+    "close_call": ("Позвонить человеку из «Близких» через Dewiar — откроется окно звонка (video true — видеозвонок). Только когда "
+                   "пользователь прямо просит позвонить кому-то из близких.",
+                   S({"to": {"type": "string"}, "video": {"type": "boolean"}}, ["to"]), "safe", t_close_call, "Близкие: позвонить"),
+    "close_read": ("Последние сообщения от близких (и мои им): «что мне писали», «что ответил Андрей». who — имя или пусто — все.",
+                   S({"who": {"type": "string"}}), "safe", t_close_read, "Близкие: прочитать"),
     "money_report": ("Итоги личного бюджета за период: доходы, расходы по категориям, остаток, последние операции. "
                      "from/to — ГГГГ-ММ-ДД (пусто — текущий месяц).",
                      S({"from": {"type": "string"}, "to": {"type": "string"}}), "safe", t_money_report, "Деньги: отчёт"),

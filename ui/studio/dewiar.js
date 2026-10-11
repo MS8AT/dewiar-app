@@ -440,7 +440,7 @@ core.on("hello", d => {
   renderCurrent();
   // раздел, открытый до связи с ядром (по #адресу или кликом), получает свои данные только теперь — кликаем снова
   const curNav = $("nav button.cur");
-  if (curNav && ["skills", "hands", "sound", "about", "folder", "voice", "tasks", "me", "memory", "reminders", "calendar", "safety"].includes(curNav.dataset.p)) curNav.click();
+  if (curNav && ["skills", "hands", "sound", "about", "folder", "voice", "tasks", "me", "memory", "reminders", "calendar", "safety", "close"].includes(curNav.dataset.p)) curNav.click();
   renderUpdate(d.update);
   renderAccount(d.account);
   mlFill(d.mail);
