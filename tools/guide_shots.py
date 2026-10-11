@@ -70,3 +70,32 @@ with sync_playwright() as p:
     pg.click("#cl-inv-go"); pg.wait_for_timeout(600)
     save(pg.locator("#cl-invite").screenshot(), "studio-seal", 1000)
     b.close()
+
+# превью ссылки-приглашения в «Близкие» для мессенджеров (download.php?close=… → og:image): 1200×630
+F = ROOT / "android/assets/www/fonts"
+card = f"""<!doctype html><meta charset=utf-8><style>
+@font-face {{ font-family: U; src: url('{(F / "unbounded-cyrillic-600-normal.woff2").as_uri()}'); }}
+@font-face {{ font-family: U; src: url('{(F / "unbounded-latin-600-normal.woff2").as_uri()}'); }}
+@font-face {{ font-family: M; font-weight: 600; src: url('{(F / "manrope-cyrillic-600-normal.woff2").as_uri()}'); }}
+@font-face {{ font-family: M; font-weight: 400; src: url('{(F / "manrope-cyrillic-400-normal.woff2").as_uri()}'); }}
+body {{ margin: 0; width: 1200px; height: 630px; overflow: hidden; color: #F4F4F6; font-family: M, sans-serif;
+  background: radial-gradient(circle at 18% 85%, rgba(120,119,198,.38), transparent 52%), radial-gradient(circle at 80% 10%, rgba(255,119,198,.30), transparent 50%),
+  linear-gradient(135deg, #0a0a0f, #1a1a2e 55%, #16213e); position: relative; }}
+.t {{ position: absolute; left: 76px; top: 92px; width: 640px; }}
+.b {{ font: 600 22px U, sans-serif; display: flex; align-items: center; gap: 12px; color: rgba(255,255,255,.8); }}
+.b i {{ width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg,#667eea,#764ba2); display: grid; place-items: center; font-style: normal; }}
+h1 {{ font: 600 60px/1.08 U, sans-serif; margin: 40px 0 22px; letter-spacing: -.01em; }}
+p {{ font-size: 26px; line-height: 1.45; color: rgba(255,255,255,.72); margin: 0 0 34px; }}
+.c {{ display: flex; gap: 12px; }} .c span {{ font-weight: 600; font-size: 21px; padding: 12px 20px; border-radius: 999px; background: rgba(255,255,255,.09); }}
+.ph {{ position: absolute; right: 70px; top: 60px; width: 330px; height: 690px; border-radius: 44px; overflow: hidden;
+  box-shadow: 0 0 0 10px rgba(255,255,255,.06), 0 40px 90px -20px rgba(118,75,162,.8); background: url('{(OUT / "guide-phone-close-chat.webp").as_uri()}') top / cover; }}
+</style><div class=t><div class=b><i>💌</i>Dewiar</div><h1>Вас зовут<br>в «Близкие»</h1>
+<p>Помощники пишут и звонят друг другу. Dewiar уже есть — откройте ссылку и добавьтесь.</p>
+<div class=c><span>Сообщения</span><span>Файлы</span><span>Звонки</span></div></div><div class=ph></div>"""
+tmp = Path(tempfile.mkdtemp()) / "og.html"; tmp.write_text(card, encoding="utf-8")
+with sync_playwright() as p:
+    b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1200, "height": 630})
+    pg.goto(tmp.as_uri()); pg.wait_for_timeout(600)
+    Image.open(io.BytesIO(pg.screenshot())).convert("RGB").save(OUT / "dewiar_close.jpg", "JPEG", quality=88, optimize=True, progressive=True)
+    print("dewiar_close.jpg (1200, 630)")
+    b.close()

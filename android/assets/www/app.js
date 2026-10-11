@@ -4433,12 +4433,13 @@ function clRender() {
 }
 function clInvShow(d) {
   const box = $("#cl-invbox"); if (!box) return;
-  const seal = window.DewiarCodes && window.ZXing ? DewiarCodes.seal(d.link) : "";
-  box.innerHTML = `<div class="card clinv"><div class="clqr ${seal ? "seal" : ""}" id="cl-code">${seal || (typeof qrcode === "function" ? clQr(d.link) : "")}</div>
+  const code = String(d.link || "").split("&from=")[0];          // в коде — короткая ссылка (без имени): код чище и легче читается
+  const seal = window.DewiarCodes && window.ZXing ? DewiarCodes.seal(code) : "";
+  box.innerHTML = `<div class="card clinv"><div class="clqr ${seal ? "seal" : ""}" id="cl-code">${seal || (typeof qrcode === "function" ? clQr(code) : "")}</div>
     <p class="hint" style="margin:8px 0">Покажите печать близкому: в Dewiar — «Сканер» в «Близких», без Dewiar — Google Lens. Или отправьте ссылку. Одна ссылка — для всех, кого зовёте, 7 дней; поэтому отправляйте её только своим.</p><p class="hint cllinks">${seal ? `<a href="#" id="cl-code-qr">Обычный QR</a>` : ""}<a href="#" id="cl-renew">Новая ссылка</a></p>
     <div class="row2"><button class="btn p" id="cl-share" style="flex:1">Отправить ссылку</button><button class="btn" id="cl-copy" style="flex:1">Скопировать</button></div></div>`;
   if ($("#cl-code-qr")) $("#cl-code-qr").onclick = (e) => { e.preventDefault(); const c = $("#cl-code"), isSeal = c.classList.contains("seal");
-    c.innerHTML = isSeal ? clQr(d.link) : seal; c.classList.toggle("seal", !isSeal); e.target.textContent = isSeal ? "Печать Dewiar" : "Обычный QR"; };
+    c.innerHTML = isSeal ? clQr(code) : seal; c.classList.toggle("seal", !isSeal); e.target.textContent = isSeal ? "Печать Dewiar" : "Обычный QR"; };
   $("#cl-share").onclick = () => D.share(`Добавь меня в «Близкие» в Dewiar — наши помощники смогут передавать друг другу сообщения: ${d.link}`);
   $("#cl-copy").onclick = () => { D.copy(d.link); toast("Ссылка скопирована"); };
   $("#cl-renew").onclick = (e) => { e.preventDefault();                        // попала не туда — прежняя перестаёт действовать

@@ -81,11 +81,12 @@ async function clInvite(renew) {
   const r = $("#cl-res");
   try {
     const d = await core.call("close_invite", { renew: !!renew });
-    const seal = window.DewiarCodes ? DewiarCodes.seal(d.link) : "";
-    $("#cl-invite").style.display = ""; $("#cl-qr").innerHTML = seal || qrSvg(d.link); $("#cl-qr").classList.toggle("seal", !!seal); $("#cl-inv-link").textContent = d.link;
+    const code = String(d.link || "").split("&from=")[0];        // в коде — короткая ссылка (без имени)
+    const seal = window.DewiarCodes ? DewiarCodes.seal(code) : "";
+    $("#cl-invite").style.display = ""; $("#cl-qr").innerHTML = seal || qrSvg(code); $("#cl-qr").classList.toggle("seal", !!seal); $("#cl-inv-link").textContent = d.link;
     $("#cl-inv-qr").textContent = seal ? "Показать обычный QR" : "";
     $("#cl-inv-qr").onclick = (e) => { e.preventDefault(); const isSeal = $("#cl-qr").classList.contains("seal");
-      $("#cl-qr").innerHTML = isSeal ? qrSvg(d.link) : seal; $("#cl-qr").classList.toggle("seal", !isSeal); $("#cl-inv-qr").textContent = isSeal ? "Показать печать Dewiar" : "Показать обычный QR"; };
+      $("#cl-qr").innerHTML = isSeal ? qrSvg(code) : seal; $("#cl-qr").classList.toggle("seal", !isSeal); $("#cl-inv-qr").textContent = isSeal ? "Показать печать Dewiar" : "Показать обычный QR"; };
     $("#cl-inv-copy").onclick = () => navigator.clipboard.writeText(`Добавь меня в «Близкие» в Dewiar — наши помощники смогут передавать друг другу сообщения: ${d.link}`)
       .then(() => toast("Ссылка скопирована"), () => toast(d.link));
     r.className = "res"; r.textContent = "";
