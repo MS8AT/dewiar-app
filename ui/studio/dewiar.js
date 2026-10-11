@@ -257,6 +257,7 @@ function cloudFill(c) {
       : `Общий счёт с сайтом dewiar.pro: на нём ${bal}` + (c.turns ? ` — примерно на ${c.turns.toLocaleString("ru-RU")} ${turnsWord(c.turns)}` : ""))
     : c.frozen ? "Ключ приостановлен — напишите администратору." : c.empty ? "Заряд закончился — пополните, и ассистент снова будет отвечать."
     : `Хватит примерно на ${c.turns.toLocaleString("ru-RU")} ${turnsWord(c.turns)}` + (c.low ? " — скоро понадобится пополнить" : "");
+  if (c.error && !err) $("#cc-turns").textContent += ` · сейчас не обновилось: ${c.error}`;   // показано последнее известное — честно говорим
   topupText(c.topup || "");
   $("#cc-use").style.display = c.active ? "none" : "";
   // по аккаунту ключа нет — «Убрать ключ» только у своего ключа dw-
@@ -343,7 +344,8 @@ async function ccOpts() {
 $("#cc-model").onchange = () => core.call("cloud_model", { id: $("#cc-model").value }).then(() => toast("Модель облака: " + $("#cc-model").selectedOptions[0].textContent)).catch(e => toast(e.message));
 $("#cc-fb").onchange = () => core.call("cloud_fallback", { id: $("#cc-fb").value }).then(() => toast($("#cc-fb").value ? "Запасной мозг выбран" : "Без запасного мозга")).catch(e => toast(e.message));
 $("#cc-stt").onchange = (e) => core.call("cloud_stt", { on: e.target.checked }).then(() => toast(e.target.checked ? "Речь распознаёт облако" : "Речь распознаёт этот компьютер")).catch(x => { toast(x.message); e.target.checked = !e.target.checked; });
-$("#cc-ref").onclick = () => core.call("cloud_status", { refresh: true }).then(cloudFill).catch(e => toast(e.message));
+$("#cc-ref").onclick = () => core.call("cloud_status", { refresh: true }).then(c => { cloudFill(c);       // «Обновить» — заметно, что сейчас на счёте
+  toast(c.error ? "Не обновилось: " + c.error : "Обновлено: " + (c.site ? (c.balance_text || c.balance + " тал.") + " на счёте dewiar.pro" : "заряд " + (c.percent ?? 0) + "%")); }).catch(e => toast(e.message));
 $("#cc-off").onclick = () => { if (confirm("Убрать ключ Dewiar Облака с этого компьютера? Баланс на сервере сохранится — ключ можно вставить снова.")) core.call("cloud_forget").then(c => { cloudFill(c); renderProfiles(); }).catch(e => toast(e.message)); };
 // «Пусть отвечает облако»: переподключение сохранённым ключом снова делает профиль облака активным
 // своим ключом dw-… или входом аккаунтом — ядро знает, чем (cloud_connect use); профиль облака снова активный

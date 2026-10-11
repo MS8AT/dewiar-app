@@ -3339,7 +3339,9 @@ function wireSettings(info) {
       if (g("cl-forget")) g("cl-forget").onclick = async () => {
         if (!confirm(loggedIn() ? "Забыть ключ Dewiar? Думать буду по аккаунту " + (S.account.login || "") + "." : "Забыть ключ Dewiar? Мозг нужно будет подключить заново.")) return;
         await forgetKey(); toast("Ключ забыт"); renderSettings(); };
-      g("cl-ref").onclick = () => cloudBalance(true).then(cloudFill).catch(e => toast(e.message));
+      // «Обновить» — заметно: что сейчас на счёте (раньше нажатие выглядело так, будто ничего не произошло)
+      g("cl-ref").onclick = () => cloudBalance(true).then(c => { cloudFill(c); cloudUsage && cloudUsage();
+        toast("Обновлено: " + (c.site ? (c.balance_text || c.balance + " тал.") + " на счёте dewiar.pro" : "заряд " + (c.percent ?? 0) + "%")); }).catch(e => toast(e.message));
       g("cl-how").onclick = () => { const t = g("cl-pay"), open = t.style.display === "none"; t.style.display = open ? "" : "none"; if (open) clPayLoad(); };
       cloudUsage();
       let img = "";
