@@ -14,13 +14,13 @@ import java.util.List;
 
 /** Звук напоминаний и будильников. Выбор — в настройках интерфейса («Ещё» → «Звук напоминаний», Bridge.alarmSound*),
  *  хранится в SharedPreferences "dewiar" под ключом alarm_sound:
- *    chime | marimba | harp | dawn — свои мягкие мелодии (res/raw/alarm_*.ogg, синтез — tools/alarm_sounds.py);
+ *    signature (фирменный мотив Dewiar) | drops | orbit | chime | marimba | harp | dawn — свои мелодии (res/raw/alarm_*.ogg, синтез — tools/alarm_sounds.py);
  *    system — системный звук будильника; custom — свой файл (files/alarm_custom, отдаёт SoundProvider).
  *  Канал уведомлений Android запоминает звук при создании, поэтому у каждого звука свой канал alarm_<звук> (у своего
  *  файла — ещё и с отметкой времени файла); при смене прежний канал удаляется. Уведомление играет мелодию один раз,
  *  окно будильника (AlarmActivity) — по кругу, начиная тихо и плавно прибавляя громкость. */
 final class Sounds {
-    static final String DEFAULT = "chime";
+    static final String DEFAULT = "signature";
     static final String QUIET = "alarm_quiet";        // окно будильника открыто: уведомление остаётся, но молчит
     private Sounds() { }
 
@@ -42,6 +42,9 @@ final class Sounds {
 
     static int res(String id) {
         switch (id == null ? "" : id) {
+            case "signature": return R.raw.alarm_signature;
+            case "drops": return R.raw.alarm_drops;
+            case "orbit": return R.raw.alarm_orbit;
             case "chime": return R.raw.alarm_chime;
             case "marimba": return R.raw.alarm_marimba;
             case "harp": return R.raw.alarm_harp;
@@ -52,6 +55,9 @@ final class Sounds {
 
     static String label(String id) {
         switch (id) {
+            case "signature": return "Фирменный";
+            case "drops": return "Капли";
+            case "orbit": return "Орбита";
             case "chime": return "Колокольчики";
             case "marimba": return "Маримба";
             case "harp": return "Арфа";

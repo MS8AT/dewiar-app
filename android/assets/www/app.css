@@ -539,3 +539,8 @@ body.light .clf { background: var(--soft); }
 body.neu .clp, body.neu .clm { background: var(--glass); box-shadow: var(--raise-s); }
 body.neu .clm.out { background: var(--brand); color: #fff; }
 body.neu .clsend textarea, body.neu #cl-name { background: var(--glass); box-shadow: var(--press); }
+.clinv .clqr.seal { background: none; padding: 0; border-radius: 7%; box-shadow: 0 18px 40px -16px rgba(0,0,0,.7); }
+.clinv .clqr.seal svg { stroke: none; }
+.clinv .hint a { color: var(--accent); text-decoration: none; white-space: nowrap; }
+.clscan { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px; }
+.clscan svg { width: 20px; height: 20px; }

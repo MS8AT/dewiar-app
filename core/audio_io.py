@@ -526,8 +526,53 @@ class _PulseOut:
             s.close()           # незвучавший хвост сбрасывается сервером
 
 
+def _fm_note(out, rate, start, f, dur, amp, ratio=3.5, index=2.2, decay=0.55, glide=0.0):
+    """FM-колокол (как в tools/alarm_sounds.py): стеклянно-металлический тембр фирменного мотива."""
+    i0 = int(rate * start)
+    n = min(int(rate * dur), len(out) - i0)
+    if n <= 0:
+        return
+    t = np.arange(n) / rate
+    env = np.minimum(1, t / 0.003) * np.exp(-t / decay)
+    ff = f * (1 - glide * np.exp(-t / 0.035))
+    ph = 2 * math.pi * np.cumsum(ff) / rate
+    out[i0:i0 + n] += (amp * env * np.sin(ph + index * np.exp(-t / (decay * 0.35)) * np.sin(ph * ratio))).astype(np.float32)
+
+
+def _room(x, rate, seconds=1.4, decay=0.5, wet=0.24):
+    """Мягкий «зал» без scipy: свёртка с затухающим шумом через FFT."""
+    n = int(rate * seconds)
+    rng = np.random.default_rng(7)
+    ir = rng.standard_normal(n) * np.exp(-np.arange(n) / rate / decay)
+    ir = np.convolve(ir, np.ones(4) / 4, mode="same")              # чуть темнее
+    ir /= np.sqrt(np.sum(ir ** 2))
+    size = 1 << int(np.ceil(np.log2(len(x) + n)))
+    y = np.fft.irfft(np.fft.rfft(x, size) * np.fft.rfft(ir, size), size)[: len(x)]
+    return ((1 - wet) * x + wet * 0.9 * y).astype(np.float32)
+
+
+def signature_tone(rate=22050):
+    """«Фирменный» звонок Dewiar — тот же мотив, что на телефоне (android/res/raw/alarm_signature.ogg):
+    вверх на квинту, мягко вниз на терцию, искра; затем ответ выше."""
+    hz = {"G5": 783.99, "D6": 1174.66, "B5": 987.77, "D7": 2349.32, "G6": 1567.98}
+    out = np.zeros(int(rate * 3.4), dtype=np.float32)
+    for st, nt, a, g in [(0.04, "G5", 0.7, 0.03), (0.2, "D6", 0.75, 0.02), (0.42, "B5", 0.65, 0.0)]:
+        _fm_note(out, rate, st, hz[nt], 1.8, a, glide=g)
+    _fm_note(out, rate, 0.62, hz["D7"], 1.0, 0.18, ratio=2.0, index=1.2, decay=0.35)
+    for st, nt, a, g in [(1.55, "G5", 0.5, 0.03), (1.71, "D6", 0.55, 0.02), (1.93, "G6", 0.5, 0.0)]:
+        _fm_note(out, rate, st, hz[nt], 1.4, a, glide=g)
+    out = _room(out, rate)
+    f = int(rate * 0.25)
+    out[-f:] *= np.linspace(1, 0, f) ** 2
+    out = out / max(1e-6, float(np.max(np.abs(out)))) * 0.6
+    return (out * 32767).astype(np.int16).tobytes()
+
+
 def alarm_tone(style="bells", rate=22050) -> bytes:
-    """Звонок будильника (~2,4 с): колокольчики — арпеджио с затуханием и обертонами, заметно, но не резко."""
+    """Звонок будильника (~2,4 с): колокольчики — арпеджио с затуханием и обертонами, заметно, но не резко;
+    signature — фирменный мотив Dewiar (signature_tone)."""
+    if style == "signature":
+        return signature_tone(rate)
     pats = {"bells": [(1046.5, 0.0), (1318.5, 0.18), (1568.0, 0.36), (2093.0, 0.54), (1568.0, 1.2), (2093.0, 1.38)],
             "soft": [(659.3, 0.0), (783.99, 0.3), (987.8, 0.6), (783.99, 1.2), (987.8, 1.5)],
             "classic": [(1760.0, x * 0.12) for x in range(8)] + [(1760.0, 1.2 + x * 0.12) for x in range(8)]}

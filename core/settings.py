@@ -127,7 +127,7 @@ DEFAULTS = {
            "welcome": "",                   # «Первые шаги»: "" — показать, "later" — кнопкой в меню, "done" — всё
            "intro": ""},                    # знакомство голосом (engine_intro.py): "" — ещё не было, "done" — было
     "reminders": {"ring_minutes": 2,    # сколько звенит, если никто не ответил (потом — «пропущено» в окне)
-                  "sound": "bells",     # bells | soft | classic
+                  "sound": "signature",  # signature (фирменный мотив) | bells | soft | classic
                   "window": True,       # окно-будильник по центру экрана
                   "speak": True},       # произнести текст напоминания голосом
     "tools": {"enabled": {}, "confirm": {}, "search_url": ""},   # пусто = как задумано по умолчанию

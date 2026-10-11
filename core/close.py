@@ -466,6 +466,8 @@ class Close:
             except TypeError:
                 self.host.push(f"📞 {p['name']}", "звонит")
             self.host.emit("close_ring", pid=peer, name=p["name"], video=c["video"])
+            if self.host.s.get("close", "speak") is not False:     # окно звонка в браузере может не сыграть звонок само
+                self.host.announce(f"{p['name']} звонит{' по видео' if c['video'] else ''}. Окно звонка открыто.")
             return
         self.host.emit("close_sig", peer=peer, name=name, sig=body)
 

@@ -48,7 +48,7 @@ const D = window.Dewiar || (() => {
     saveDownload: (n, m, t) => { (window._downloads = window._downloads || []).push([n, t]); return "Загрузки/Dewiar/" + n; },
     copy: (t) => { window._copied = t; return true; }, bars: (c, l) => { window._bars = [c, l]; },
     closeWatch: (j) => { window._closeWatch = j; },
-    alarmSound: () => JSON.stringify({ id: store.alarm_sound || "chime", custom: store.alarm_custom_name || "" }),
+    alarmSound: () => JSON.stringify({ id: store.alarm_sound || "signature", custom: store.alarm_custom_name || "" }),
     alarmSoundSet: (id) => { if (id === "custom" && !store.alarm_custom_name) return false; store.alarm_sound = id; return true; },
     alarmSoundTry: (id) => { const on = window._trying !== id; window._trying = on ? id : ""; return on; },
     alarmSoundCustom: (b64, name) => { if (!b64) return "пустой файл"; store.alarm_custom_name = name; store.alarm_sound = "custom"; return ""; },
@@ -793,7 +793,8 @@ function miniOrb(p) {          // значок персонажа без фот�
 const PHONE_SKINS = (window.DEWIAR_SKINS || []).slice();
 const SKINS = PHONE_SKINS.length ? PHONE_SKINS.map(x => x.id) : ["brand"];
 const lookSkin = () => (SKINS.includes(S.skin) ? S.skin : SKINS[0]);
-const ALARM_SOUNDS = [["chime", "Колокольчики", "Стеклянные, вверх и обратно"], ["marimba", "Маримба", "Тёплое дерево, напев"],
+const ALARM_SOUNDS = [["signature", "Фирменный", "Мотив Dewiar — узнаётся с первых нот"], ["drops", "Капли", "Мелодия из капель воды"],
+  ["orbit", "Орбита", "Мягкий взлёт и пузырьки с эхом"], ["chime", "Колокольчики", "Стеклянные, вверх и обратно"], ["marimba", "Маримба", "Тёплое дерево, напев"],
   ["harp", "Арфа", "Перебор струн"], ["dawn", "Рассвет", "Аккорд нарастает, сверху — искры"], ["system", "Системный", "Звук будильника телефона"]];
 const PLAY_SVG = '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor" stroke="none"/></svg>';
 const LOOK_BAR = { glass: "#FCD6E3", snow: "#F8F9FB" };      // верх фона светлых тем без сплошного цвета
@@ -1781,6 +1782,10 @@ async function quick(text) {
   { const bq = await bugQuick(text.replace(/^[А-ЯЁA-Z][а-яёa-z-]+\s*,\s*(?=\S)/, (m) => findPersona(m.replace(/[\s,]/g, ""), true) ? "" : m)); if (bq) return bq; }
   const t = text.toLowerCase().replace(/ё/g, "е").replace(/[.!?,]+$/g, "").replace(/\s+/g, " ").trim();
   if (NEW_CONV_RX.test(t) || NEW_CONV_RX.test(t.replace(/^\S+\s+/, ""))) { convReset(); return { say: "Хорошо, начинаем с чистого листа." }; }
+  // «отсканируй код», «открой сканер», «сканер qr» — сразу сканер, без модели
+  const SCAN_OBJ = "(?:код|qr|кьюар|ку ар|qr[- ]?код|кьюар[- ]?код|ацтек|aztec|штрих[- ]?код|дата ?матрикс|data ?matrix|датаматрикс|товар|этикетку|упаковку|маркировку|честный знак|ценник)";
+  if (new RegExp(`^(?:(?:открой|запусти|включи|покажи)\\s+)?(?:сканер|сканирование)(?:\\s+(?:кодов|${SCAN_OBJ}))?$|^(?:от|про)?сканируй(?:\\s+(?:мне\\s+)?(?:этот\\s+|эту\\s+)?${SCAN_OBJ})?$|^(?:считай|прочитай|проверь)\\s+(?:этот\\s+|эту\\s+)?${SCAN_OBJ}$`).test(t))
+    { setTimeout(() => scanCode(), 300); return { say: "Наведите камеру на код." }; }
   // «спасибо», «спасибо большое», «ладно, благодарю» — коротко и вежливо, без модели (как на компьютере, отзыв 11.10)
   if (/^(?:(?:ну|ладно|хорошо|окей|ок|отлично|супер)[\s,]+)?(?:спасибо|благодарю|спс)(?:[\s,]+(?:большое|огромное|тебе|вам|за помощь|за все|очень))*$/.test(t))
     return { say: ["Пожалуйста!", "Обращайтесь!", "Пожалуйста, обращайтесь!"][Math.floor(Math.random() * 3)] };
@@ -2145,6 +2150,7 @@ function toolSpecs() {
       parameters: O({ to: STR, text: STR }, ["to", "text"]) },
       { name: "close_call", description: "Позвонить человеку из «Близких» через Dewiar (аудио или видео — video true). Только когда пользователь прямо просит позвонить кому-то из близких.", parameters: O({ to: STR, video: { type: "boolean" } }, ["to"]) },
       { name: "close_read", description: "Последние сообщения от близких (и мои им): «что мне писали», «что ответила мама». who — имя или пусто — все.", parameters: O({ who: STR }) }] : []),
+    { name: "scan_code", description: "Открыть сканер кодов камерой: QR, Aztec, печать Dewiar, штрихкоды и Data Matrix товаров. «Отсканируй код», «прочитай QR», «проверь честный знак». Результат обработается сам.", parameters: O({}) },
     { name: "send_message", description: "Отправить текст через мессенджер: app — max (по умолчанию), telegram, whatsapp, viber, vk; text — готовый текст сообщения. Откроется приложение, получателя выберет пользователь.",
       parameters: O({ app: { type: "string", enum: ["max", "telegram", "whatsapp", "viber", "vk"] }, text: STR }, ["text"]) },
   ];
@@ -2281,6 +2287,7 @@ async function runTool(name, a) {
     case "money_report": return moneyReport(a.period || "month").text;
     case "close_send": { const it = await clSend(a.to || "", a.text || ""); return `Отправлено ${it.to}. Скажи коротко, что отправила.`; }
     case "close_read": return clRecent(a.who || "");
+    case "scan_code": scanCode(); return "Сканер открыт. Скажи коротко: «Наведите камеру на код».";
     case "close_call": { const p = await clCall(a.to || "", !!a.video); return `Звоню ${p.name}. Ничего не говори — идёт звонок.`; }
     case "call_persona": {
       const p = findPersona(a.name);
@@ -2922,7 +2929,7 @@ function renderSettings() {
     // звук напоминаний: свои мягкие мелодии (Sounds.java, res/raw), системный или свой файл; ▶ — послушать
     const snd = (() => { try { return JSON.parse(D.alarmSound ? D.alarmSound() : "{}"); } catch (e) { return {}; } })();
     h.push(`<h3>Звук напоминаний</h3><div class="card"><p class="hint" style="margin-top:0">Мягко и сначала тихо — громкость прибавляется за 20 секунд.</p>
-      <div class="snds">${ALARM_SOUNDS.map(([id, n, sub]) => `<button class="snd ${id === (snd.id || "chime") ? "on" : ""}" data-snd="${id}"><i>${PLAY_SVG}</i><span><b>${n}</b><small>${sub}</small></span></button>`).join("")}
+      <div class="snds">${ALARM_SOUNDS.map(([id, n, sub]) => `<button class="snd ${id === (snd.id || "signature") ? "on" : ""}" data-snd="${id}"><i>${PLAY_SVG}</i><span><b>${n}</b><small>${sub}</small></span></button>`).join("")}
         <button class="snd ${snd.id === "custom" ? "on" : ""} ${snd.custom ? "" : "nofile"}" data-snd="custom"><i>${PLAY_SVG}</i><span><b>Свой звук</b><small id="snd-name">${snd.custom ? esc(snd.custom) : "Любая мелодия с телефона"}</small></span></button></div>
       <label class="btn w" id="snd-pick"><input type="file" id="snd-file" accept="audio/*" hidden>${snd.custom ? "Выбрать другой файл" : "Выбрать файл…"}</label><div class="res" id="snd-res"></div></div>`);
     if (window.DEWIAR_PRIVACY) h.push(`<h3>${esc(DEWIAR_PRIVACY.title)}</h3><div class="card priv">${DEWIAR_PRIVACY.items.map(([t, x]) => `<p><b>${esc(t)}.</b> ${esc(x)}</p>`).join("")}</div>`);
@@ -4274,6 +4281,56 @@ function clSig(peer, name, s) {
     busy: (r) => clSend(peer, "", [], "sig", { s: { type: "busy", call: r.call } }).catch(() => { }),
   });
 }
+/* сканер кодов (assets/codes.js): QR, Aztec и печать Dewiar. Нашёлся код — фирменный звук, дальше по смыслу:
+   приглашение в «Близкие» или от друга, ссылка dewiar:// (настройки с компьютера), обычная ссылка — открыть, текст — показать. */
+function scanChime() {                            // «нашёл!»: искра вверх — две стеклянные ноты и мерцание
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext, c = new AC(), t0 = c.currentTime + 0.02;
+    const note = (f, t, d, v, type) => { const o = c.createOscillator(), g = c.createGain(); o.type = type || "sine"; o.frequency.setValueAtTime(f, t);
+      o.frequency.exponentialRampToValueAtTime(f * 1.012, t + d); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0005, t + d); o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + d + 0.02); };
+    const sw = c.createOscillator(), sg = c.createGain(); sw.type = "triangle"; sw.frequency.setValueAtTime(600, t0); sw.frequency.exponentialRampToValueAtTime(2400, t0 + 0.09);
+    sg.gain.setValueAtTime(0.0001, t0); sg.gain.exponentialRampToValueAtTime(0.05, t0 + 0.03); sg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1); sw.connect(sg); sg.connect(c.destination); sw.start(t0); sw.stop(t0 + 0.12);
+    note(1318.5, t0 + 0.08, 0.5, 0.16); note(1975.5, t0 + 0.17, 0.7, 0.14); note(2637, t0 + 0.17, 0.5, 0.04);
+    [3520, 4186, 3951].forEach((f, i) => note(f, t0 + 0.28 + i * 0.05, 0.18, 0.025));
+    setTimeout(() => c.close().catch(() => { }), 1500);
+  } catch (e) { }
+  try { D.vibrate(25); } catch (e) { }
+}
+async function scanCode() {
+  if (!window.DewiarCodes || !window.ZXing) { toast("Сканер здесь недоступен"); return; }
+  if (!(await needPerm("android.permission.CAMERA"))) { showBot("Для сканера нужен доступ к камере.", "err"); return; }
+  closeSheets(); try { stopListen(); } catch (e) { }
+  DewiarCodes.scan({ title: "Наведите на код", sub: "QR, штрихкод, Data Matrix, печать Dewiar", onError: (m) => showBot("Сканер: " + m, "err"),
+    onResult: (txt, fmt) => { scanChime(); scanResult(txt, fmt); } });
+}
+function scanResult(txt, format) {
+  const t = String(txt || "").trim();
+  plog("info", "📷 код (" + (format || "?") + "): " + clip(t, 80));
+  if (/^dewiar:\/\/close|[?&]close=/.test(t)) return clAcceptLink(t);
+  if (/^dewiar:\/\/ref|download\.php\?(?:.*&)?ref=/.test(t)) { const c = (/[?&](?:c|ref)=([A-Za-z0-9]+)/.exec(t) || [])[1] || ""; return handleIntent({ action: "link", url: "dewiar://ref?c=" + c }); }
+  if (/^dewiar:/.test(t)) return handleIntent({ action: "link", url: t });
+  if (/^https?:\/\//i.test(t)) {
+    let host = t; try { host = new URL(t).hostname; } catch (e) { }
+    showBot(`В коде ссылка: ${t}`);
+    $("#card").innerHTML = `<div class="start"><button class="btn p" id="sc-open">Открыть ${esc(host)}</button><button class="btn" id="sc-copy">Скопировать</button></div>`;
+    $("#sc-open").onclick = () => D.openUrl(t); $("#sc-copy").onclick = () => { D.copy(t); toast("Скопировано"); };
+    say("В коде ссылка на " + host.replace(/^www\./, ""));
+    return;
+  }
+  // штрихкод или Data Matrix товара — разбирать код здесь не нужно: модель знает, как устроены коды «Честного знака»
+  // (01 — GTIN, 21 — серийный номер…), и сама найдёт товар в интернете по штрихкоду
+  if (/^(ean|upc|datamatrix)/.test(format || "") && /^[\x1d\x20-\x7e]{8,}$/.test(t) && /\d{8}/.test(t)) {
+    showYou("📦 Что за товар?");
+    return ask(`Я отсканировал код на товаре (${format}): ${t.replace(/\x1d/g, "<GS>")}. Разбери его и найди в интернете по штрихкоду, `
+      + `что это за товар — коротко. Не нашлось — так и скажи. Если это код «Честного знака», в конце одной фразой: подлинность `
+      + `и историю упаковки показывает официальное приложение «Честный знак».`, { hidden: true });
+  }
+  showBot("В коде: " + t);
+  $("#card").innerHTML = `<div class="start"><button class="btn" id="sc-copy">Скопировать</button></div>`;
+  $("#sc-copy").onclick = () => { D.copy(t); toast("Скопировано"); };
+  if (t.length < 300) say("В коде написано: " + t);
+}
 /* лист «Близкие» */
 const clTime = (ts) => { const d = new Date(ts), now = new Date(), hm = pad(d.getHours()) + ":" + pad(d.getMinutes()); return d.toDateString() === now.toDateString() ? hm : d.getDate() + " " + MON[d.getMonth()].slice(0, 3) + ", " + hm; };
 const CL_COL = ["#9BD4FF", "#FFB547", "#3DF5C8", "#FF7AB6", "#B78CFF", "#9BE15D", "#7C8CFF", "#FF6B5A"];
@@ -4311,7 +4368,8 @@ function clRender() {
     return;
   }
   const inv = st.invite && Date.now() / 1000 < (st.invite.expires || 0) ? st.invite : null;
-  box.innerHTML = `<p class="hint" style="margin:0 4px 12px">Переписка между помощниками: скажите «напиши маме, что я задержусь» — у мамы её помощница прочитает это вслух. Сообщения шифруются на устройствах.</p>
+  box.innerHTML = `<button class="btn w clscan" id="cl-scan"><svg viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M7 12h10"/></svg>Сканировать приглашение</button>
+    <p class="hint" style="margin:0 4px 12px">Переписка между помощниками: скажите «напиши маме, что я задержусь» — у мамы её помощница прочитает это вслух. Сообщения шифруются на устройствах.</p>
     <div id="cl-invbox"></div>
     ${st.people.length ? st.people.map(x => `<button class="clp" data-pid="${esc(x.pid)}"><i class="clava" style="--c:${clCol(x.pid)}">${esc((x.name || "?")[0].toUpperCase())}</i>
       <span><b>${esc(x.name)}</b><small>${(() => { const l = (st.hist[x.pid] || []).slice(-1)[0]; return l ? esc((l.out ? "Вы: " : "") + (l.t || "📎 " + ((l.f || [])[0] || {}).name)) : "пока без сообщений"; })()}</small></span>${st.unread[x.pid] ? `<em>${st.unread[x.pid]}</em>` : ""}</button>`).join("")
@@ -4320,6 +4378,7 @@ function clRender() {
       <div class="sw" style="margin-top:10px"><div>Читать сообщения вслух<small>«Мама пишет: …»</small></div><label class="tg"><input type="checkbox" id="cl-speak" ${S.close && S.close.speak === false ? "" : "checked"}><i></i></label></div></div>
     <details class="more"><summary>Пришла ссылка-приглашение?</summary><div class="row2" style="margin-top:8px"><input id="cl-link" placeholder="вставьте ссылку" style="flex:1;padding:12px 14px;border-radius:14px;border:0;background:var(--field)"><button class="btn p" id="cl-link-go">Принять</button></div></details>`;
   $$(".clp").forEach(b => b.onclick = () => { clCur = b.dataset.pid; clRender(); });
+  $("#cl-scan").onclick = () => scanCode();
   if (inv) clInvShow(inv);
   $("#cl-name").onchange = () => { S.close = Object.assign({}, S.close, { name: $("#cl-name").value.trim() }); saveS(); clHello().then(() => toast("Сохранено")).catch(e => toast(e.message)); };
   $("#cl-speak").onchange = () => { S.close = Object.assign({}, S.close, { speak: $("#cl-speak").checked }); saveS(); };
@@ -4327,9 +4386,12 @@ function clRender() {
 }
 function clInvShow(d) {
   const box = $("#cl-invbox"); if (!box) return;
-  box.innerHTML = `<div class="card clinv"><div class="clqr">${typeof qrcode === "function" ? clQr(d.link) : ""}</div>
-    <p class="hint" style="margin:8px 0">Покажите код близкому — пусть наведёт камеру телефона. Или отправьте ссылку: она действует 7 дней.</p>
+  const seal = window.DewiarCodes && window.ZXing ? DewiarCodes.seal(d.link) : "";
+  box.innerHTML = `<div class="card clinv"><div class="clqr ${seal ? "seal" : ""}" id="cl-code">${seal || (typeof qrcode === "function" ? clQr(d.link) : "")}</div>
+    <p class="hint" style="margin:8px 0">Покажите печать близкому: в Dewiar — «Сканер» в «Близких», без Dewiar — Google Lens. Или отправьте ссылку: она действует 7 дней.${seal ? ` <a href="#" id="cl-code-qr">Обычный QR</a>` : ""}</p>
     <div class="row2"><button class="btn p" id="cl-share" style="flex:1">Отправить ссылку</button><button class="btn" id="cl-copy" style="flex:1">Скопировать</button></div></div>`;
+  if ($("#cl-code-qr")) $("#cl-code-qr").onclick = (e) => { e.preventDefault(); const c = $("#cl-code"), isSeal = c.classList.contains("seal");
+    c.innerHTML = isSeal ? clQr(d.link) : seal; c.classList.toggle("seal", !isSeal); e.target.textContent = isSeal ? "Печать Dewiar" : "Обычный QR"; };
   $("#cl-share").onclick = () => D.share(`Добавь меня в «Близкие» в Dewiar — наши помощники смогут передавать друг другу сообщения: ${d.link}`);
   $("#cl-copy").onclick = () => { D.copy(d.link); toast("Ссылка скопирована"); };
 }

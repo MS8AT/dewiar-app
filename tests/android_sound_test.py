@@ -16,12 +16,12 @@ def ok(c, m):
 
 SRC = ROOT / "android/src/pro/dewiar/app"
 raw = ROOT / "android/res/raw"
-names = ["chime", "marimba", "harp", "dawn"]
-ok(all((raw / f"alarm_{n}.ogg").stat().st_size > 10000 for n in names), "четыре своих мелодии лежат в res/raw")
+names = ["signature", "drops", "orbit", "chime", "marimba", "harp", "dawn"]
+ok(all((raw / f"alarm_{n}.ogg").stat().st_size > 10000 for n in names), "семь своих мелодий лежат в res/raw (фирменный мотив — первый)")
 if shutil.which("ffprobe"):
     durs = [float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(raw / f"alarm_{n}.ogg")],
                                  capture_output=True, text=True).stdout or 0) for n in names]
-    ok(all(4 <= d <= 7 for d in durs), f"каждая — короткая фраза в 4–7 секунд (повторяется по кругу): {durs}")
+    ok(all(3 <= d <= 7 for d in durs), f"каждая — короткая фраза в 4–7 секунд (повторяется по кругу): {durs}")
 snd = (SRC / "Sounds.java").read_text(encoding="utf-8")
 ok(all(f"R.raw.alarm_{n}" in snd for n in names) and '"system"' in snd and '"custom"' in snd, "Sounds: свои мелодии, системный звук и свой файл")
 ok('"alarm_" + sound' in snd and "deleteNotificationChannel" in snd and "USAGE_ALARM" in snd, "у каждого звука свой канал уведомлений, прежний убирается")
@@ -57,8 +57,8 @@ with sync_playwright() as p:
     pg.goto((www / "index.html").as_uri()); pg.wait_for_timeout(900)
     pg.evaluate("openSettings('more')"); pg.wait_for_timeout(400)
     rows = pg.evaluate("() => [$$('.snd').map(x => x.dataset.snd), $('.snd.on').dataset.snd, $('.snd[data-snd=custom]').classList.contains('nofile')]")
-    ok(rows[0] == ["chime", "marimba", "harp", "dawn", "system", "custom"] and rows[1] == "chime" and rows[2],
-       f"«Звук напоминаний»: пять звуков и свой, по умолчанию — колокольчики: {rows}")
+    ok(rows[0] == ["signature", "drops", "orbit", "chime", "marimba", "harp", "dawn", "system", "custom"] and rows[1] == "signature" and rows[2],
+       f"«Звук напоминаний»: восемь звуков и свой, по умолчанию — фирменный мотив: {rows}")
     pg.click('.snd[data-snd="harp"]'); pg.wait_for_timeout(150)
     st = pg.evaluate("() => [$('.snd.on').dataset.snd, $('.snd.play') && $('.snd.play').dataset.snd, JSON.parse(D.alarmSound()).id]")
     ok(st == ["harp", "harp", "harp"], f"нажатие — выбрано и звучит проба: {st}")

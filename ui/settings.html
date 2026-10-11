@@ -180,6 +180,7 @@
               Ссылка действует 7 дней, по ней может прийти несколько человек.</p>
             <div class="dw-path" id="cl-inv-link"></div>
             <div class="actions" style="margin:6px 0 0"><button class="btn primary" id="cl-inv-copy">Скопировать ссылку</button><button class="btn" id="cl-inv-new">Новая ссылка</button><span style="flex:1"></span><button class="btn" id="cl-inv-x">Закрыть</button></div>
+            <p class="hint" style="margin:8px 0 0">Печать Dewiar читают сам Dewiar и Google Lens. Камера не узнаёт? <a href="#" id="cl-inv-qr">Показать обычный QR</a></p>
           </div>
         </div>
         <div class="cl-chat" id="cl-chat">
@@ -212,7 +213,7 @@
     <div class="jpre" id="j-pre"></div>
     <h2>Будильник</h2>
     <div class="row">
-      <label class="f">Звонок<span style="display:flex;gap:8px"><select data-k="reminders.sound" id="r-sound"><option value="bells">Колокольчики</option><option value="soft">Мягкий</option><option value="classic">Классический будильник</option></select><button class="btn" id="r-listen">Послушать</button></span></label>
+      <label class="f">Звонок<span style="display:flex;gap:8px"><select data-k="reminders.sound" id="r-sound"><option value="signature">Фирменный Dewiar</option><option value="bells">Колокольчики</option><option value="soft">Мягкий</option><option value="classic">Классический будильник</option></select><button class="btn" id="r-listen">Послушать</button></span></label>
       <label class="f">Звенит, пока не ответите<select data-k="reminders.ring_minutes"><option value="1">1 минуту</option><option value="2">2 минуты</option><option value="5">5 минут</option><option value="10">10 минут</option></select></label>
     </div>
     <div class="switch"><div>Окно по центру экрана<span>Большая карточка поверх всех окон с кнопками «Готово» и «Отложить». Выключено — только звонок, голос и уведомление.</span></div><label class="tg"><input type="checkbox" data-k="reminders.window"><i></i></label></div>
@@ -1273,6 +1274,8 @@
 <script src="assets/skins.js"></script>
 <script src="studio/theme.js"></script>
 <script src="assets/privacy.js"></script>
+<script src="assets/vendor/zxing.min.js"></script>
+<script src="assets/codes.js"></script>
 <script src="assets/dewiar.js"></script>
 <script src="assets/qrcode.js"></script>
 <script src="assets/help.js"></script>

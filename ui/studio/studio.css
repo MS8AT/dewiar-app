@@ -895,3 +895,4 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .cl-files span { font-size: 12.5px; padding: 4px 6px 4px 12px; border-radius: 999px; background: rgba(255,255,255,.08); margin-bottom: 10px; }
 .cl-files button { border: 0; background: none; color: var(--muted); cursor: pointer; }
 @media (max-width: 900px) { .cl-box { grid-template-columns: 1fr; } }
+.cl-qr.seal { background: none; padding: 0; border-radius: 7%; box-shadow: 0 18px 40px -18px rgba(0,0,0,.6); }   /* печать — сама белая скруглённая плашка с рамкой */

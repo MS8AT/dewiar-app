@@ -1,5 +1,6 @@
 """Звуки напоминаний телефона (android/res/raw/alarm_*.ogg) — синтез, без чужих записей и мелодий.
-Каждый — короткая мягкая фраза с «воздухом» (искусственный зал) и паузой в конце: AlarmActivity повторяет её по кругу,
+«Фирменный» (signature) — мотив Dewiar на FM-колоколе: его узнают с первых нот (по умолчанию); «Капли» (drops) —
+мелодия из капель воды; «Орбита» (orbit) — мягкий взлёт и пузырьки с эхом. Каждый — короткая мягкая фраза с «воздухом» (искусственный зал) и паузой в конце: AlarmActivity повторяет её по кругу,
 плавно прибавляя громкость, а уведомление играет её один раз. Мотивы — свои, в пентатонике: приятно, без «подъёма на работу».
   chime  — «Колокольчики»: стеклянные колокольчики, вверх и обратно;
   marimba — «Маримба»: тёплые деревянные пластины, напев;
@@ -146,7 +147,58 @@ def dawn():
     return finish(room(out, wet=0.35, decay=0.7), fade=0.4)
 
 
-SOUNDS = {"chime": chime, "marimba": marimba, "harp": harp, "dawn": dawn}
+def fm(out, start, f, dur=1.6, amp=1.0, ratio=3.5, index=2.2, decay=0.55, glide=0.0):
+    """FM-колокол (несущая + модулятор с нецелым отношением): стеклянно-металлический, узнаваемый тембр.
+    glide — лёгкий «подъезд» высоты в начале ноты (доля частоты)."""
+    i0 = int(SR * start)
+    n = min(int(SR * dur), len(out) - i0)
+    t = np.arange(n) / SR
+    env = np.minimum(1, t / 0.003) * np.exp(-t / decay)
+    menv = index * np.exp(-t / (decay * 0.35))                    # яркость быстро уходит — остаётся чистый тон
+    ff = f * (1 - glide * np.exp(-t / 0.035))
+    ph = 2 * math.pi * np.cumsum(ff) / SR
+    out[i0:i0 + n] += amp * env * np.sin(ph + menv * np.sin(ph * ratio))
+
+
+def signature():
+    """«Фирменный»: мотив Dewiar — вверх на квинту, мягко вниз на терцию и искра октавой выше. Короткий и узнаваемый."""
+    out = np.zeros(int(SR * 3.6))
+    for st, nt, a, g in [(0.04, "G5", 0.7, 0.03), (0.2, "D6", 0.75, 0.02), (0.42, "B5", 0.65, 0.0)]:
+        fm(out, st, hz(nt), dur=1.8, amp=a, glide=g)
+    fm(out, 0.62, hz("D7"), dur=1.0, amp=0.18, ratio=2.0, index=1.2, decay=0.35)
+    for st, nt, a, g in [(1.55, "G5", 0.5, 0.03), (1.71, "D6", 0.55, 0.02), (1.93, "G6", 0.5, 0.0)]:     # ответ — выше и светлее
+        fm(out, st, hz(nt), dur=1.5, amp=a, glide=g)
+    return finish(room(out, wet=0.26, decay=0.5))
+
+
+def drops():
+    """«Капли»: капли воды — короткие тоны с быстрым подъёмом высоты, складываются в мелодию."""
+    out = np.zeros(int(SR * 3.4))
+    def drop(st, f, a):
+        i0 = int(SR * st); n = int(SR * 0.35); t = np.arange(n) / SR
+        ff = f * (0.55 + 0.45 * (1 - np.exp(-t / 0.018)))          # «блоп»: высота быстро взлетает
+        ph = 2 * math.pi * np.cumsum(ff) / SR
+        out[i0:i0 + n] += a * np.sin(ph) * np.minimum(1, t / 0.006) ** 2 * np.exp(-t / 0.075)
+    for st, nt in [(0.05, "E6"), (0.2, "G6"), (0.35, "B6"), (0.62, "A6"), (0.8, "E6"), (1.2, "D6"), (1.35, "E6"), (1.5, "G6"), (1.68, "B6"), (1.86, "E7")]:
+        drop(st, hz(nt), 0.8)
+    return finish(room(out, wet=0.34, decay=0.55))
+
+
+def orbit():
+    """«Орбита»: мягкий взлёт и пузырьки-арпеджио с эхом — футуристично, но не резко."""
+    dur = 4.2
+    out = np.zeros(int(SR * dur))
+    n = int(SR * 0.6); t = np.arange(n) / SR
+    f = 220 * (2 ** (t / 0.6 * 2.5))
+    out[:n] += 0.12 * np.sin(2 * math.pi * np.cumsum(f) / SR) * np.sin(np.pi * t / 0.6) ** 2
+    seq = ["C6", "G6", "D7", "G6", "E7", "D7"]
+    for i, nt in enumerate(seq):
+        for rep, gain in ((0, 1.0), (0.21, 0.45), (0.42, 0.2)):     # эхо
+            fm(out, 0.55 + i * 0.13 + rep, hz(nt), dur=0.9, amp=0.45 * gain, ratio=2.0, index=1.6, decay=0.22)
+    return finish(room(out, wet=0.38, decay=0.65))
+
+
+SOUNDS = {"signature": signature, "drops": drops, "orbit": orbit, "chime": chime, "marimba": marimba, "harp": harp, "dawn": dawn}
 
 
 def main():
