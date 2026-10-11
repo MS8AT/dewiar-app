@@ -971,6 +971,9 @@ function dictMore(t, cut) {
   showYou(dict + " …"); setTimeout(() => listen(), 60);
   return true;
 }
+/* Сказанное голосом — с тем, что прикреплено в поле ввода (фото, файл): прикрепили скриншот и сказали «сохрани в
+   заметки …» — он уходит вместе с фразой и попадает в заметку (отзыв 11.10: фото так и висело над полем). */
+function askHeard(t) { const att = attached; attached = []; renderAtts(); return ask(t, att.length ? { attach: att } : {}); }
 const dictTake = (t) => { const all = ((dict ? dict + " " : "") + (t || "")).trim(); dict = ""; return all; };
 function sttStall(why) {
   if (!sttActive) return;
@@ -993,7 +996,7 @@ function sttStall(why) {
     showBot("Распознавание речи этого устройства не отвечает. Войдите аккаунтом dewiar.pro (Настройки → Мозг) — слушать будет сервер Dewiar. Или напишите текстом.", "err");
     return;
   }
-  if (heardPartial || dict) { if (dictMore(heardPartial, false)) return; ask(dictTake(heardPartial)); return; }
+  if (heardPartial || dict) { if (dictMore(heardPartial, false)) return; askHeard(dictTake(heardPartial)); return; }
   setState("idle"); showYou("");
 }
 const sttAlive = () => { sttStarted = true; if (sttVia === "system" && S.stt.sysFails) { S.stt.sysFails = 0; saveS(); } if (sttActive) sttGuard(15000, "silent"); };
@@ -1011,7 +1014,7 @@ N.on("stt_result", e => {
   t = dictTake(t);
   if (t && pausePrefix && Date.now() - pausePrefix.at < 30000) t = pausePrefix.text + " " + t;   // договорил после обрыва — один вопрос
   pausePrefix = null;
-  if (t) { lastStt = { at: Date.now(), text: t, cut: false }; ask(t); } else { setState("idle"); showYou(""); }
+  if (t) { lastStt = { at: Date.now(), text: t, cut: false }; askHeard(t); } else { setState("idle"); showYou(""); }
 });
 N.on("stt_error", e => {
   if (!sttMine(e)) return;
@@ -1020,7 +1023,7 @@ N.on("stt_error", e => {
   plog([6, 7, 5].includes(e.code) ? "info" : "warn", `распознавание (${sttVia}): ${e.code === 6 ? "речи не было" : e.code === 7 ? "не расслышал" : "ошибка " + (e.code ?? "") + " " + (e.msg || "")}`);
   // распознаватель телефона сломался, не начав слушать (не запустился, нет сервиса, сеть) — слушает сервер Dewiar
   if (sttVia === "system" && !sttStarted && ![6, 7].includes(e.code) && cloudEars()) { sttActive = true; sttStall("start"); return; }
-  if (heardPartial || dict) { if (dictMore(heardPartial, false)) return; ask(dictTake(heardPartial)); return; }
+  if (heardPartial || dict) { if (dictMore(heardPartial, false)) return; askHeard(dictTake(heardPartial)); return; }
   setState("idle"); showYou("");
   // молча (коды SpeechRecognizer, Speech.java): 6 — речи не было, 7 — не расслышал, 5 — отменено, 11 — распознаватель отключился
   if (![6, 7, 5, 11].includes(e.code)) showBot("Не получилось услышать: " + (e.msg || e.code), "err");
@@ -2487,7 +2490,9 @@ function noteQuick(text, att) {
   const n = notes(); n.push(Object.assign({ id: "n" + Date.now(), title, text: body, time: Date.now() }, files.length ? { att: files } : {})); saveNotes(n);
   plog("info", "📝 заметка без модели: " + clip(title, 60) + (files.length ? ` + вложений ${files.length}` : ""));
   if (SANDBOX) SANDBOX.dev.push({ name: "save_note", args: title, t: Date.now() });      // экзамен: действие видно, как фонарик
-  return `${persona().gender === "female" ? "Записала" : "Записал"} в заметки: «${title}»` + (files.length ? (files.length === 1 ? " — с вложением." : ` — вложений: ${files.length}.`) : ".");
+  // без пересказа: название обрезано («…»), и вслух это звучало как оборванная фраза (отзыв 11.10)
+  const pics = files.filter(f => f.type === "image").length;
+  return `${persona().gender === "female" ? "Записала" : "Записал"} в заметки` + (!files.length ? "." : files.length === 1 ? (pics ? " вместе с фото." : " вместе с файлом.") : ` — вложений: ${files.length}.`);
 }
 /* ---------- заметка целиком: открыть, поправить, фото и файлы (лист #sh-note) ----------
    Вложения — файлы natt-<id> во внутренней памяти (data: URL; фото сжаты shrinkImage), в заметке — только их список att.

@@ -34,9 +34,9 @@ with sync_playwright() as p:
     pg.goto((www / "index.html").as_uri()); pg.wait_for_timeout(900)
     r = pg.evaluate("""async () => { fileSave('notes.json', '[]'); await ask('Лира, запиши в заметки настроенный умный дом с компьютера не синхронизируется с телефоном');
       await new Promise(r => setTimeout(r, 200)); return [notes().map(x => [x.title, x.text]), document.querySelector('#bot').textContent]; }""")
-    ok(len(r[0]) == 1 and r[0][0][1].startswith("Настроенный умный дом") and "Записала в заметки" in r[1], f"«запиши в заметки …» — сразу и без модели: {r}")
-    r = pg.evaluate("() => [noteQuick('что у меня в заметках'), noteQuick('запиши расход 450'), noteQuick('заметка: позвонить Ольге в пять'), notes().length]")
-    ok(r[0] == "" and r[1] == "" and "Позвонить Ольге" in r[2] and r[3] == 2, f"вопрос о заметках и расход — не заметка; «заметка: …» — заметка: {r}")
+    ok(len(r[0]) == 1 and r[0][0][1].startswith("Настроенный умный дом") and r[1].strip() == "Записала в заметки.", f"«запиши в заметки …» — сразу и без модели; вслух — без оборванного пересказа: {r}")
+    r = pg.evaluate("() => [noteQuick('что у меня в заметках'), noteQuick('запиши расход 450'), noteQuick('заметка: позвонить Ольге в пять'), notes().length, notes().slice(-1)[0].text]")
+    ok(r[0] == "" and r[1] == "" and r[2] == "Записала в заметки." and r[3] == 2 and r[4].startswith("Позвонить Ольге"), f"вопрос о заметках и расход — не заметка; «заметка: …» — заметка: {r}")
     r = pg.evaluate("""() => [!!claimedAction('Записала.', new Set(), 'запиши это в заметки'), !!claimedAction('Записала.', new Set(['save_note']), 'запиши в заметки'),
       !!claimedAction('Записала.', new Set(), 'запиши расход 450 на продукты')]""")
     ok(r == [True, False, False], f"«Записала.» без save_note после просьбы о заметке — ловится (и только тогда): {r}")
@@ -44,7 +44,13 @@ with sync_playwright() as p:
     r = pg.evaluate(f"""async () => {{ await ask('Сохрани в заметки чек из магазина', {{ attach: [{{ kind: 'image', name: 'чек.jpg', url: '{PIX}' }}] }});
       await new Promise(r => setTimeout(r, 200)); const x = notes().find(n => /чек/i.test(n.title));
       return [x && (x.att || []).length, x && fileGet('natt-' + x.att[0].id).slice(0, 15), document.querySelector('#bot').textContent]; }}""")
-    ok(r[0] == 1 and r[1] == "data:image/png;" and "вложением" in r[2], f"фото из чата с «сохрани в заметки» — в заметке: {r}")
+    ok(r[0] == 1 and r[1] == "data:image/png;" and "вместе с фото" in r[2], f"фото из чата с «сохрани в заметки» — в заметке: {r}")
+    # фото прикреплено в поле ввода, а просьба — голосом (отзыв 11.10: фото осталось висеть над полем)
+    r = pg.evaluate(f"""async () => {{ attached = [{{ kind: 'image', name: 'скриншот.png', url: '{PIX}' }}]; renderAtts();
+      sttActive = true; N.ev({{ type: 'stt_result', text: 'Сохрани заметку сканер не открывается' }});
+      await new Promise(r => setTimeout(r, 300)); const x = notes().find(n => /сканер/i.test(n.text));
+      return [x && (x.att || []).length, attached.length, document.querySelectorAll('#atts .at').length, document.querySelector('#bot').textContent]; }}""")
+    ok(r[:3] == [1, 0, 0] and "вместе с фото" in r[3], f"фото из поля ввода + просьба голосом — фото в заметке, поле очищено: {r}")
     r = pg.evaluate(f"""async () => {{ turnAtt = [{{ kind: 'image', name: 'доска.jpg', url: '{PIX}' }}]; const t = await runTool('save_note', {{ title: 'Доска', text: 'схема' }});
       return [t, (notes().find(n => n.title === 'Доска').att || []).length]; }}""")
     ok("вложений: 1" in r[0] and r[1] == 1, f"модель записала заметку — фото этого хода с ней: {r}")
