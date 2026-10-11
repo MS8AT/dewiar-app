@@ -30,6 +30,8 @@ ok("Sounds.play(this, Sounds.current(this), true, vol)" in act and "vol + 0.0375
    "окно будильника: выбранный звук по кругу, громкость нарастает, уведомление смолкает")
 rcv = (SRC / "AlarmReceiver.java").read_text(encoding="utf-8")
 ok("Sounds.channel(c)" in rcv and "Sounds.quietChannel(c)" in rcv and "Compat.CH_ALARM" not in rcv, "уведомление — в канал выбранного звука")
+ok("addAction(action(c, DONE" in rcv and "SNOOZE" in rcv and "AlarmActivity.closeIfOpen(id)" in rcv and "4 /* IMPORTANCE_HIGH */" in snd and "QUIET = \"alarm_watch\"" in snd,
+   "напоминание видно на часах: тихое уведомление остаётся важным, кнопки «Понял» и «Через 10 минут» работают и с часов")
 man = (ROOT / "android/AndroidManifest.xml").read_text(encoding="utf-8")
 prov = (SRC / "SoundProvider.java").read_text(encoding="utf-8")
 ok('android:name=".SoundProvider"' in man and '"/custom".equals(uri.getPath())' in prov and "MODE_READ_ONLY" in prov,

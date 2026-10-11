@@ -21,7 +21,7 @@ import java.util.List;
  *  окно будильника (AlarmActivity) — по кругу, начиная тихо и плавно прибавляя громкость. */
 final class Sounds {
     static final String DEFAULT = "signature";
-    static final String QUIET = "alarm_quiet";        // окно будильника открыто: уведомление остаётся, но молчит
+    static final String QUIET = "alarm_watch";        // окно будильника открыто: уведомление остаётся (и на часах), но молчит
     private Sounds() { }
 
     private static SharedPreferences prefs(Context c) { return c.getSharedPreferences("dewiar", Context.MODE_PRIVATE); }
@@ -112,8 +112,10 @@ final class Sounds {
             NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
             if (NotificationManager.class.getMethod("getNotificationChannel", String.class).invoke(nm, QUIET) == null) {
                 Class<?> chc = Class.forName("android.app.NotificationChannel");
-                Object ch = chc.getConstructor(String.class, CharSequence.class, int.class).newInstance(QUIET, "Напоминание на экране", 2 /* IMPORTANCE_LOW */);
+                // важный, но без звука и вибрации телефона: звучит само окно, а часы показывают только важные уведомления
+                Object ch = chc.getConstructor(String.class, CharSequence.class, int.class).newInstance(QUIET, "Напоминание на экране и на часах", 4 /* IMPORTANCE_HIGH */);
                 chc.getMethod("setSound", Uri.class, AudioAttributes.class).invoke(ch, null, null);
+                chc.getMethod("enableVibration", boolean.class).invoke(ch, false);
                 NotificationManager.class.getMethod("createNotificationChannel", chc).invoke(nm, ch);
             }
         } catch (Throwable ignored) { }

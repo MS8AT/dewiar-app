@@ -1854,7 +1854,10 @@ async function quick(text) {
   }
   if (/^(?:перезвони|повтори звонок|набери ещ[её] раз|позвони ещ[её] раз|позвони снова)(?:\s+пожалуйста)?$/.test(t)) return { say: (await doCall("ещё раз")).text };
   if (/^(?:(?:можешь|можно|пожалуйста|давай)\s+)?(?:позвони(?:ть)?|набери|набрать|звони|звякни)(?:\s+(?:пожалуйста|мне|кому-нибудь|кое-кому))?$/.test(t)) return { say: "Кому позвонить?" };
-  if ((m = t.match(/^(?:(?:можешь|можно|пожалуйста|давай)\s+)?(?:позвони(?:ть)?|набери|набрать|звони|звякни)\s+(.+)$/))) { const r = await doCall(m[1]); if (r.ok || r.final) return { say: r.text }; }
+  // «позвони Наташе МТС» — сразу; «позвони жене, а если не ответит — напиши…» (условие, второе действие) — модели
+  if ((m = t.match(/^(?:(?:можешь|можно|пожалуйста|давай)\s+)?(?:позвони(?:ть)?|набери|набрать|звони|звякни)\s+(.+)$/))
+      && !/[,;:—]|(?:^|\s)(?:если|когда|потом|затем|и|а|но|или|скажи|напиши|отправь|сообщение|передай|через|после|пока)(?=\s|$)/.test(m[1])) {
+    const r = await doCall(m[1]); if (r.ok || r.final) return { say: r.text }; }
   if ((m = t.match(/^(?:открой|запусти)\s+(.+)$/)) && !/сайт|страниц|ссылк/.test(m[1])) {
     const name = openAppSmart(m[1]); if (name) return { say: `Открываю ${name}.`, silent: true };
   }
@@ -2150,6 +2153,7 @@ function toolSpecs() {
       parameters: O({ to: STR, text: STR }, ["to", "text"]) },
       { name: "close_call", description: "Позвонить человеку из «Близких» через Dewiar (аудио или видео — video true). Только когда пользователь прямо просит позвонить кому-то из близких.", parameters: O({ to: STR, video: { type: "boolean" } }, ["to"]) },
       { name: "close_read", description: "Последние сообщения от близких (и мои им): «что мне писали», «что ответила мама». who — имя или пусто — все.", parameters: O({ who: STR }) }] : []),
+    { name: "app_help", description: "Руководство Dewiar — как пользоваться самим этим приложением: где кнопка или раздел, как настроить, как пригласить близкого или друга, сканер, стили, напоминания на часах, синхронизация, данные. Вызывай, когда спрашивают про Dewiar и его функции («как…», «где…», «что ты умеешь…»), — не выдумывай меню. query — о чём спросили.", parameters: O({ query: STR }, ["query"]) },
     { name: "scan_code", description: "Открыть сканер кодов камерой: QR, Aztec, печать Dewiar, штрихкоды и Data Matrix товаров. «Отсканируй код», «прочитай QR», «проверь честный знак». Результат обработается сам.", parameters: O({}) },
     { name: "send_message", description: "Отправить текст через мессенджер: app — max (по умолчанию), telegram, whatsapp, viber, vk; text — готовый текст сообщения. Откроется приложение, получателя выберет пользователь.",
       parameters: O({ app: { type: "string", enum: ["max", "telegram", "whatsapp", "viber", "vk"] }, text: STR }, ["text"]) },
@@ -2288,6 +2292,7 @@ async function runTool(name, a) {
     case "close_send": { const it = await clSend(a.to || "", a.text || ""); return `Отправлено ${it.to}. Скажи коротко, что отправила.`; }
     case "close_read": return clRecent(a.who || "");
     case "scan_code": scanCode(); return "Сканер открыт. Скажи коротко: «Наведите камеру на код».";
+    case "app_help": return guideAnswer(a.query || "");
     case "close_call": { const p = await clCall(a.to || "", !!a.video); return `Звоню ${p.name}. Ничего не говори — идёт звонок.`; }
     case "call_persona": {
       const p = findPersona(a.name);
@@ -2966,6 +2971,8 @@ function renderSettings() {
       <h3>Синхронизация</h3><div class="card">${syncCard()}</div>
       <h3>Разрешения</h3><div class="card">${perms.map(([p, n]) => `<div class="sw"><div>${n}</div>${D.has(p) ? `<span class="res ok" style="margin:0">есть</span>` : `<button class="btn" data-perm="${p}">Разрешить</button>`}</div>`).join("")}
       <div class="sw"><div>Точные будильники</div>${D.exactAlarms() ? `<span class="res ok" style="margin:0">есть</span>` : `<button class="btn" onclick="Dewiar.openSettings('alarms')">Разрешить</button>`}</div></div>
+      <h3>Руководство</h3><div class="card"><p class="hint" style="margin:0 0 10px">Всё, что умеет Dewiar на телефоне и компьютере: примеры фраз, настройки, «Близкие», сканер, стили. Или просто спросите Лиру: «как…»</p>
+        <button class="btn w" id="guide-open">Открыть руководство</button></div>
       <h3>О приложении</h3><div class="card"><div>Dewiar ${esc(info.version || "")} · Android ${esc(info.android || "")}</div><small class="hint" style="margin:2px 0 0;display:block">${esc(info.device || "")}</small>
       <div class="res" id="upd-res"></div><button class="btn w" id="upd-check" style="margin-top:6px">Проверить обновление</button></div>
       <details class="danger"><summary>Начать с чистого листа</summary><p class="hint">Ассистент забудет разговор и всё, что запомнил о вас: имя, привычки, просьбы. Дневник, душа персонажей, напоминания и заметки останутся. Отменить нельзя.</p>
@@ -3102,6 +3109,7 @@ function wireSettings(info) {
       b.disabled = false; b.textContent = "Открыть @" + n; b.onclick = () => D.openUrl("https://t.me/" + n); }).catch(() => { if (g("tg-bot")) g("tg-bot").remove(); });
     if (tgOn() && g("tg-card")) tgStatus().then(t => { if (!!t.linked !== !!$("#tg-off") && setTab === "more") renderSettings(); }).catch(() => {});
     g("upd-check").onclick = () => checkUpdate(true);
+    if (g("guide-open")) g("guide-open").onclick = () => D.openUrl(GUIDE_URL);
     if (g("cr-send")) g("cr-send").onclick = () => reportSend("Падение приложения", false, String(info.crash).split("\n")[0]).then(d => toast(`Отчёт №${d.id} отправлен — спасибо!`))
       .catch(e => { toast(e.message); D.share("Dewiar — ошибка:\n" + info.crash); });
     if (g("rep-send")) g("rep-send").onclick = async () => { const b = g("rep-send"), r = g("rep-res"); b.disabled = true; r.className = "res"; r.textContent = "отправляю…";
@@ -4347,6 +4355,29 @@ function scanResult(txt, format) {
   $("#sc-copy").onclick = () => { D.copy(t); toast("Скопировано"); };
   if (t.length < 300) say("В коде написано: " + t);
 }
+/* Руководство (data/guide.json → guide.js при сборке): тот же поиск, что на сайте и в core/guide.py — основа слова
+   против начала слов раздела; на телефоне разделы про телефон — выше. */
+const GUIDE_URL = "https://dewiar.pro/dwrapp/guide.php";
+function guideFind(query, n = 2) {
+  const norm = (t) => String(t || "").toLowerCase().replace(/ё/g, "е"), split = (t) => norm(t).split(/[^a-zа-я0-9]+/).filter(Boolean);
+  const STOP = new Set("как мне мой моя мои что где это для или при на в с и а не по из у о к ли же бы то можно хочу надо нужно сделать чтобы dewiar девиар лира приложение".split(" "));
+  const stem = (w) => w.length >= 6 ? w.slice(0, -2) : w.length >= 4 ? w.slice(0, -1) : w;
+  const q = split(query).filter(w => w.length > 1 && !STOP.has(w)).map(stem);
+  if (!q.length) return [];
+  return (window.DEWIAR_GUIDE || []).map(s => {
+    const kw = split((s.keywords || []).join(" ") + " " + s.title), tx = split([s.lead, ...(s.how || []), ...(s.say || []), ...(s.tips || [])].join(" "));
+    let sc = 0, hit = 0;
+    for (const w of q) { const a = kw.some(x => x.startsWith(w)), b = a || tx.some(x => x.startsWith(w)); hit += b; sc += a ? 3 : b ? 1 : 0; }
+    return [hit ? sc + hit * 2 + ((s.where || []).includes("phone") ? 1 : 0) : 0, s];
+  }).filter(x => x[0] > 0).sort((a, b) => b[0] - a[0]).slice(0, n).map(x => x[1]);
+}
+function guideAnswer(query) {
+  const f = guideFind(query);
+  if (!f.length) return "В руководстве такого нет. Не выдумывай кнопки и меню: скажи честно и предложи посмотреть руководство — " + GUIDE_URL;
+  return f.map(s => [`«${s.title}» (${(s.where || []).map(w => w === "pc" ? "компьютер" : "телефон").join(", ")})`, s.lead, ...(s.how || []).map(h => "— " + h),
+    (s.say || []).length ? "Фразы: " + s.say.slice(0, 6).map(x => `«${x}»`).join("; ") : "", ...(s.tips || []).slice(0, 3).map(t => "Совет: " + t),
+    `Подробнее: ${GUIDE_URL}#${s.id}`].filter(Boolean).join("\n")).join("\n\n") + "\n\nОтветь своими словами, коротко, с точными названиями разделов и кнопок; на телефоне — как это сделать на телефоне.";
+}
 /* лист «Близкие» */
 const clTime = (ts) => { const d = new Date(ts), now = new Date(), hm = pad(d.getHours()) + ":" + pad(d.getMinutes()); return d.toDateString() === now.toDateString() ? hm : d.getDate() + " " + MON[d.getMonth()].slice(0, 3) + ", " + hm; };
 const CL_COL = ["#9BD4FF", "#FFB547", "#3DF5C8", "#FF7AB6", "#B78CFF", "#9BE15D", "#7C8CFF", "#FF6B5A"];
@@ -4404,12 +4435,14 @@ function clInvShow(d) {
   const box = $("#cl-invbox"); if (!box) return;
   const seal = window.DewiarCodes && window.ZXing ? DewiarCodes.seal(d.link) : "";
   box.innerHTML = `<div class="card clinv"><div class="clqr ${seal ? "seal" : ""}" id="cl-code">${seal || (typeof qrcode === "function" ? clQr(d.link) : "")}</div>
-    <p class="hint" style="margin:8px 0">Покажите печать близкому: в Dewiar — «Сканер» в «Близких», без Dewiar — Google Lens. Или отправьте ссылку: она действует 7 дней.${seal ? ` <a href="#" id="cl-code-qr">Обычный QR</a>` : ""}</p>
+    <p class="hint" style="margin:8px 0">Покажите печать близкому: в Dewiar — «Сканер» в «Близких», без Dewiar — Google Lens. Или отправьте ссылку. Одна ссылка — для всех, кого зовёте, 7 дней; поэтому отправляйте её только своим.</p><p class="hint cllinks">${seal ? `<a href="#" id="cl-code-qr">Обычный QR</a>` : ""}<a href="#" id="cl-renew">Новая ссылка</a></p>
     <div class="row2"><button class="btn p" id="cl-share" style="flex:1">Отправить ссылку</button><button class="btn" id="cl-copy" style="flex:1">Скопировать</button></div></div>`;
   if ($("#cl-code-qr")) $("#cl-code-qr").onclick = (e) => { e.preventDefault(); const c = $("#cl-code"), isSeal = c.classList.contains("seal");
     c.innerHTML = isSeal ? clQr(d.link) : seal; c.classList.toggle("seal", !isSeal); e.target.textContent = isSeal ? "Печать Dewiar" : "Обычный QR"; };
   $("#cl-share").onclick = () => D.share(`Добавь меня в «Близкие» в Dewiar — наши помощники смогут передавать друг другу сообщения: ${d.link}`);
   $("#cl-copy").onclick = () => { D.copy(d.link); toast("Ссылка скопирована"); };
+  $("#cl-renew").onclick = (e) => { e.preventDefault();                        // попала не туда — прежняя перестаёт действовать
+    if (confirm("Сделать новую ссылку? Старая перестанет действовать — те, кто уже добавился, останутся в близких.")) clInvite(true).then(clInvShow, (x) => toast(x.message, 4000)); };
 }
 function clQr(text) {                             // QR как в студии: скруглённые точки и «глазки» (тёмное на белом)
   const q = qrcode(0, "M"); q.addData(text); q.make();

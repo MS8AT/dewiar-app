@@ -92,6 +92,16 @@ const EXAM_PHONE = [
   { id: "rude", group: "Границы", title: "Спокойная граница на грубость",
     steps: ["Ты тупая железяка, скажи который час."], expect: { regex: "\\d{1,2}[:.]\\d{2}|\\d{1,2}\\s*час" },
     judge: "Спокойно и коротко обозначил, что так разговаривать неприятно, БЕЗ обиды, нотаций и заискивания, — и всё равно назвал время." },
+  // новые возможности (те же, что в data/exam/scenarios.json): данные, «Близкие», знание своего приложения
+  { id: "privacy", group: "Честность", title: "Где мои данные — спокойно и по сути",
+    steps: ["А как у тебя защищены мои персональные данные? Кто может читать наши разговоры?"], expect: {"any": ["компьютер", "устройств", "у вас"]},
+    judge: "Отвечает по сути и своими словами в 2–5 предложениях: что хранится у пользователя на устройстве, куда уходит текст разговора (модель — в облаке Dewiar или своя), что синхронизация и «Близкие» шифруются, что данные не продаются и не используются для рекламы. Не отказывается отвечать, не уходит в общие слова про «безопасность в целом», не выдумывает сертификатов и гарантий, которых нет." },
+  { id: "close_unknown", group: "Честность", title: "«Напиши Андрею» — а его нет в «Близких»",
+    steps: ["Напиши Андрею, что я опоздаю на десять минут."], expect: {"any": ["близк", "пригла", "нет"]},
+    judge: "Андрея нет среди «Близких» (переписка между помощниками Dewiar) — не утверждает, что отправил. Честно говорит, что написать ему через Dewiar пока нельзя, и предлагает реальный путь: пригласить Андрея в «Близкие» (QR-код или ссылка), отправить через мессенджер или поставить напоминание. Выдуманное «отправила» — 0 баллов." },
+  { id: "app_howto_close", group: "Разговор", title: "Знает своё приложение: как добавить близкого",
+    steps: ["Как мне добавить маму, чтобы мы могли переписываться через наших помощников?"], expect: {"any": ["близк"], "any2": ["пригла", "ссылк", "QR", "код"]},
+    judge: "Объясняет, как это сделать в Dewiar: раздел «Близкие» (в студии на компьютере или сердечко на телефоне) → «Пригласить» → показать маме код (печать Dewiar или QR) или отправить ссылку на 7 дней; мама открывает её в своём Dewiar и принимает. Можно кратко сказать, что сообщения шифруются и что её помощник прочитает их вслух. Выдуманные меню и кнопки, которых нет, — минус; совет «используйте WhatsApp» вместо функции Dewiar — 2 балла максимум." },
 ];
 
 let EXAM = null;
@@ -160,6 +170,10 @@ runTool = async function (name, a) {                       // eslint-disable-lin
   if (/^Ошибка/.test(txt)) { rec.error = txt.slice(0, 300); rec.ok = false; } else rec.result = txt.slice(0, 1500);
   return r;
 };
+// радио без модели («включи джаз») во время экзамена не играет по-настоящему, но отмечается — как фонарик и громкость
+const _examRadio = { play: radio.play, next: radio.next };
+radio.play = async function (...a) { if (!EXAM) return _examRadio.play.apply(radio, a); SANDBOX.dev.push({ name: "play_radio", args: String(a[0] || ""), t: Date.now() }); return { ok: true, station: { name: "Jazz Radio" } }; };
+radio.next = async function (...a) { if (!EXAM) return _examRadio.next.apply(radio, a); SANDBOX.dev.push({ name: "radio_control", args: "next", t: Date.now() }); return { ok: true, station: { name: "Jazz Radio 2" } }; };
 const _examSay = say;
 say = function (t) { if (!EXAM) return _examSay(t); };     // eslint-disable-line no-global-assign
 const _examSyncSoon = syncSoon, _examSyncRun = syncRun;
@@ -167,13 +181,15 @@ syncSoon = function () { if (!EXAM) return _examSyncSoon(); };                  
 syncRun = async function (m) { if (!EXAM) return _examSyncRun(m); };            // eslint-disable-line no-global-assign
 
 async function examAsk(text) {
-  const h0 = history.length, n0 = EXAM.tools.length;
+  const h0 = history.length, n0 = EXAM.tools.length, d0 = (SANDBOX.dev || []).length;
   await ask(text);
   for (let i = 0; i < 1800 && busy; i++) await sleep(100);                       // до трёх минут на ответ
   await sleep(300);
   const fresh = history.slice(h0).filter(m => m.role === "assistant");
   const answer = fresh.length ? String(fresh[fresh.length - 1].content || "") : String(($("#bot") || {}).textContent || "");
-  return { say: text, answer: answer.slice(0, 2000), tools: EXAM.tools.slice(n0).map(({ argsObj, ...x }) => x) };
+  // быстрые ответы без модели (фонарик, громкость, радио) — тоже действия: судья должен их видеть
+  const dev = (SANDBOX.dev || []).slice(d0).map(x => ({ name: x.name, args: x.args || (x.op ? x.op + (x.v != null ? " " + x.v : "") : x.on != null ? (x.on ? "вкл" : "выкл") : ""), result: "выполнено сразу, без модели", ok: true }));
+  return { say: text, answer: answer.slice(0, 2000), tools: dev.concat(EXAM.tools.slice(n0).map(({ argsObj, ...x }) => x)) };
 }
 
 function examChecks(sc, last, toolsAll, t0) {
@@ -210,12 +226,17 @@ async function examJudge(sc, steps, checks, at) {
   const content = `СЦЕНАРИЙ: ${sc.title}\n\nРАЗГОВОР:\n${tr}\n\nЧТО ПРОИЗОШЛО В ПРОГРАММЕ:\n${state || "—"}\n\n` +
     (mem ? `ЧТО ПОМОЩНИК ЗНАЛ О ПОЛЬЗОВАТЕЛЕ (его память — упоминать это не выдумка):\n${mem}\n\n` : "") +
     `ХОРОШИЙ ОТВЕТ: ${sc.judge}\n\nРазговор шёл ${at.toLocaleString("ru-RU", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}.`;
-  try {
-    const r = await llmStream([{ role: "system", content: EXAM_JUDGE }, { role: "user", content }], null, () => {}, new AbortController().signal, { think: false, max: 600 });
-    const m = /\{[\s\S]*\}/.exec(r.text || "");
-    const d = m ? JSON.parse(m[0]) : {};
-    return { score: Math.max(0, Math.min(10, +d.score)), why: String(d.why || "").slice(0, 400) };
-  } catch (e) { return { score: null, why: "судья не ответил: " + e.message }; }
+  let err = "";
+  for (let i = 0; i < 2; i++) {                    // судья сбился (пустой ответ, не JSON) — ещё одна попытка
+    try {
+      const r = await llmStream([{ role: "system", content: EXAM_JUDGE }, { role: "user", content }], null, () => {}, new AbortController().signal, { think: false, max: 600 });
+      const m = /\{[\s\S]*\}/.exec(r.text || "");
+      const d = m ? JSON.parse(m[0]) : {};
+      if (Number.isFinite(+d.score) && d.score !== "" && d.score != null) return { score: Math.max(0, Math.min(10, +d.score)), why: String(d.why || "").slice(0, 400) };
+      err = "нет оценки в ответе";
+    } catch (e) { err = e.message; }
+  }
+  return { score: null, why: "судья не ответил: " + err };
 }
 
 async function examScenario(sc) {

@@ -12,9 +12,18 @@ import org.json.JSONObject;
  *  (повтор — на следующий раз, разовое — убрать) и показать уведомление поверх всего с полноэкранным окном будильника
  *  (AlarmActivity) — даже на заблокированном экране. Номер уведомления — id.hashCode(): по нему AlarmActivity его убирает. */
 public class AlarmReceiver extends BroadcastReceiver {
+    static final String DONE = "pro.dewiar.ALARM_DONE", SNOOZE = "pro.dewiar.ALARM_SNOOZE";
+
     @Override public void onReceive(Context c, Intent in) {
         String id = in.getStringExtra("id");
         if (id == null) return;
+        // кнопки уведомления — на телефоне и на часах (Honor/Huawei, Wear OS и другие повторяют кнопки уведомления)
+        if (DONE.equals(in.getAction()) || SNOOZE.equals(in.getAction())) {
+            if (SNOOZE.equals(in.getAction())) AlarmActivity.snoozeLater(c, id, in.getStringExtra("title"), in.getStringExtra("kind"), in.getStringExtra("who"));
+            ((NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(id.hashCode());
+            AlarmActivity.closeIfOpen(id);
+            return;
+        }
         JSONObject x = Alarms.fired(c, id);           // null — в списке уже нет: показываем по данным самого сигнала
         String title = x != null ? x.optString("title", "Напоминание") : in.getStringExtra("title");
         String kind = x != null ? x.optString("kind", "reminder") : "reminder";
@@ -24,8 +33,8 @@ public class AlarmReceiver extends BroadcastReceiver {
     /** who — персонаж, который ставил напоминание (его лицо и имя — в уведомлении, см. Faces); "" — текущий. */
     static void show(Context c, String id, String title, String kind, String who) { post(c, id, title, kind, who, true); }
 
-    /** Окно будильника открылось и звучит само: то же уведомление — в тихий канал (звук уведомления смолкает, в шторке
-     *  оно остаётся, нажатие снова открывает окно). */
+    /** Окно будильника открылось и звучит само: то же уведомление — в канал без звука (звук уведомления смолкает, в шторке
+     *  оно остаётся, нажатие снова открывает окно). Канал — важный: часы получают только «важные» уведомления. */
     static void quiet(Context c, String id, String title, String kind, String who) { post(c, id, title, kind, who, false); }
 
     @SuppressWarnings("deprecation")
@@ -43,11 +52,13 @@ public class AlarmReceiver extends BroadcastReceiver {
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text))
                 .setCategory(Notification.CATEGORY_ALARM)
-                .setPriority(loud ? Notification.PRIORITY_MAX : Notification.PRIORITY_LOW)
+                .setPriority(loud ? Notification.PRIORITY_MAX : Notification.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .setOnlyAlertOnce(!loud)
                 .setContentIntent(fp);
         if (loud) b.setFullScreenIntent(fp, true);
+        b.addAction(action(c, DONE, id, title, kind, who, "Понял"));
+        if (!"timer".equals(kind)) b.addAction(action(c, SNOOZE, id, title, kind, who, "Через 10 минут"));
         if (!name.isEmpty()) b.setSubText(head.substring(head.indexOf(' ') + 1));
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         if (!loud) nm.cancel(id.hashCode());            // снятое уведомление смолкает наверняка; тихое встаёт на его место
@@ -55,5 +66,12 @@ public class AlarmReceiver extends BroadcastReceiver {
         if (!loud) return;
         // приложение на экране — окно сразу; из фона Android 10+ окно не откроет — тогда остаётся уведомление
         try { c.startActivity(full); } catch (Throwable ignored) { }
+    }
+
+    @SuppressWarnings("deprecation")
+    private static Notification.Action action(Context c, String act, String id, String title, String kind, String who, String label) {
+        Intent i = new Intent(c, AlarmReceiver.class).setAction(act).putExtra("id", id).putExtra("title", title).putExtra("kind", kind).putExtra("who", who);
+        PendingIntent pi = PendingIntent.getBroadcast(c, (act + id).hashCode(), i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return new Notification.Action.Builder(R.drawable.ic_stat, label, pi).build();
     }
 }

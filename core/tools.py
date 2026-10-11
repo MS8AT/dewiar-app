@@ -1372,6 +1372,11 @@ def t_close_read(a, ctx):
         raise ToolError(str(e)) from e
 
 
+def t_app_help(a, ctx):
+    import guide
+    return guide.answer(a.get("query") or "", a.get("where") or "")
+
+
 def t_money_report(a, ctx):
     m = ctx.get("money")
     if m is None:
@@ -1814,6 +1819,11 @@ TOOLS = {
                    S({"to": {"type": "string"}, "video": {"type": "boolean"}}, ["to"]), "safe", t_close_call, "Близкие: позвонить"),
     "close_read": ("Последние сообщения от близких (и мои им): «что мне писали», «что ответил Андрей». who — имя или пусто — все.",
                    S({"who": {"type": "string"}}), "safe", t_close_read, "Близкие: прочитать"),
+    "app_help": ("Руководство Dewiar — как пользоваться самим этим приложением: где кнопка или раздел, как настроить, как пригласить "
+                 "близкого или друга, сканер, стили, напоминания на часах, синхронизация, данные и т. п. Вызывай, когда спрашивают про "
+                 "Dewiar и его функции («как…», «где…», «что ты умеешь…»), — не выдумывай меню и кнопки. query — о чём спросили; "
+                 "where — pc|phone, если ясно, про какое устройство.",
+                 S({"query": {"type": "string"}, "where": {"type": "string", "enum": ["pc", "phone"]}}, ["query"]), "safe", t_app_help, "Руководство"),
     "money_report": ("Итоги личного бюджета за период: доходы, расходы по категориям, остаток, последние операции. "
                      "from/to — ГГГГ-ММ-ДД (пусто — текущий месяц).",
                      S({"from": {"type": "string"}, "to": {"type": "string"}}), "safe", t_money_report, "Деньги: отчёт"),

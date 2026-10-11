@@ -542,5 +542,6 @@ body.neu .clsend textarea, body.neu #cl-name { background: var(--glass); box-sha
 .clinv .clqr.seal { background: none; padding: 0; border-radius: 7%; box-shadow: 0 18px 40px -16px rgba(0,0,0,.7); }
 .clinv .clqr.seal svg { stroke: none; }
 .clinv .hint a { color: var(--accent); text-decoration: none; white-space: nowrap; }
+.clinv .cllinks { display: flex; gap: 18px; margin: -2px 0 10px; } .clinv .row2 { flex-wrap: wrap; } .clinv .row2 .btn { flex: 1 1 140px !important; min-width: 0; }   /* узкий экран — кнопки в две строки, а не за край */
 .clscan { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px; }
 .clscan svg { width: 20px; height: 20px; }

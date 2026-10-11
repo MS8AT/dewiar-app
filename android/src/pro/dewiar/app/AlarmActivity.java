@@ -155,14 +155,29 @@ public class AlarmActivity extends Activity {
     }
 
     private void snooze() {
-        try {
-            JSONObject x = new JSONObject().put("id", id + "-s" + (System.currentTimeMillis() / 1000)).put("title", title)
-                    .put("kind", kind).put("repeat", "").put("at", System.currentTimeMillis() + 10 * 60000L)
-                    .put("who", String.valueOf(getIntent().getStringExtra("who") == null ? "" : getIntent().getStringExtra("who")));
-            Alarms.put(this, x);
-        } catch (Exception ignored) { }
+        snoozeLater(this, id, title, kind, getIntent().getStringExtra("who"));
         done();
     }
 
-    @Override protected void onDestroy() { stopSound(); h.removeCallbacksAndMessages(null); super.onDestroy(); }
+    /** «Отложить на 10 минут» — из окна и из кнопки уведомления (в том числе на часах). */
+    static void snoozeLater(Context c, String id, String title, String kind, String who) {
+        try {
+            JSONObject x = new JSONObject().put("id", id + "-s" + (System.currentTimeMillis() / 1000)).put("title", title == null ? "Напоминание" : title)
+                    .put("kind", kind == null ? "reminder" : kind).put("repeat", "").put("at", System.currentTimeMillis() + 10 * 60000L)
+                    .put("who", who == null ? "" : who);
+            Alarms.put(c, x);
+        } catch (Exception ignored) { }
+    }
+
+    // открытое окно — чтобы кнопка уведомления (с часов) могла его закрыть
+    private static java.lang.ref.WeakReference<AlarmActivity> open = new java.lang.ref.WeakReference<>(null);
+
+    static void closeIfOpen(final String id) {
+        final AlarmActivity a = open.get();
+        if (a != null && id.equals(a.id)) a.runOnUiThread(new Runnable() { @Override public void run() { a.stopSound(); a.finish(); } });
+    }
+
+    @Override protected void onResume() { super.onResume(); open = new java.lang.ref.WeakReference<>(this); }
+
+    @Override protected void onDestroy() { stopSound(); h.removeCallbacksAndMessages(null); if (open.get() == this) open.clear(); super.onDestroy(); }
 }

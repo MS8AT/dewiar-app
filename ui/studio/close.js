@@ -114,7 +114,7 @@ $("#cl-file").onchange = () => {
   $("#cl-file").value = "";
 };
 $("#cl-inv-go").onclick = () => clInvite(false);
-$("#cl-inv-new").onclick = () => { if (confirm("Сделать новую ссылку? Старая перестанет действовать.")) clInvite(true); };
+$("#cl-inv-new").onclick = () => { if (confirm("Сделать новую ссылку? Старая перестанет действовать — те, кто уже добавился, останутся в близких.")) clInvite(true); };
 $("#cl-inv-x").onclick = () => { $("#cl-invite").style.display = "none"; clHead(); };
 $("#cl-link-go").onclick = clAccept;
 $("#cl-myname").onchange = () => core.call("close_name", { name: $("#cl-myname").value }).then(st => { CL.st = st; toast("Сохранено"); }).catch(e => toast(e.message));

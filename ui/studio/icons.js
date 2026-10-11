@@ -35,6 +35,11 @@ $$("nav button[data-p]").forEach(b => { const i = b.dataset.p === "diary" ? ICON
 // заголовок с id переписывается кодом целиком (textContent) — значок в нём не выжил бы, такие пропускаем
 $$("main section[id^='p-']").forEach(s => { const i = ICONS[s.id.slice(2)], h = s.querySelector("h1"); if (i && h && !h.id) h.insertAdjacentHTML("afterbegin", `<svg class="hi" viewBox="0 0 24 24">${i}</svg>`); });
 /* «?» у заголовка каждого раздела — как он работает, как настроить, что сказать голосом */
+// раздел студии → раздел руководства на сайте (server/dwrapp/guide.php, текст — data/guide.json)
+const GUIDE_URL = "https://dewiar.pro/dwrapp/guide.php";
+const GUIDE_OF = { personas: "personas", memory: "notes-memory", calendar: "calendar-money", close: "close", reminders: "reminders", tasks: "tasks",
+  me: "notes-memory", folder: "folder-docs", dw: "brain-account", connect: "install", brain: "brain-account", ears: "talk", voice: "voices",
+  hands: "hands", skills: "skills-mcp-servers", sound: "talk", servers: "skills-mcp-servers", safety: "privacy", prompter: "prompter", about: "troubleshooting" };
 function showHelp(k) {
   const H = (window.DEWIAR_HELP || {})[k]; if (!H) return;
   const li = (a) => (a || []).map(x => `<li>${escH(x)}</li>`).join("");
@@ -44,7 +49,8 @@ function showHelp(k) {
     (H.how && H.how.length ? `<h4>Как пользоваться</h4><ul>${li(H.how)}</ul>` : "") +
     (tries ? `<h4>Попробуйте</h4><p class="hint" style="margin:-2px 0 8px">Скажите голосом или нажмите ▶ — фраза уйдёт ассистенту.</p>${tries}` : "") +
     (H.say && H.say.length ? `<h4>Скажите голосом</h4><ul class="say">${li(H.say)}</ul>` : "") +
-    (H.tips && H.tips.length ? `<h4>Советы</h4><ul>${li(H.tips)}</ul>` : "");
+    (H.tips && H.tips.length ? `<h4>Советы</h4><ul>${li(H.tips)}</ul>` : "") +
+    `<p class="hguide"><a href="${GUIDE_URL}#${GUIDE_OF[k] || ""}" target="_blank" rel="noopener">Подробное руководство с примерами и снимками экрана</a></p>`;
   $$("#help-body .tplay").forEach(b => b.onclick = async () => {
     const x = H.try[+b.dataset.i]; b.disabled = true;
     try { await core.call("say", { text: x.say }); toast("Отправил ассистенту — смотрите виджет"); } catch (e) { toast(e.message); }

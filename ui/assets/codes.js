@@ -75,7 +75,7 @@
   }
 
   const CSS = `.dwq{position:fixed;inset:0;z-index:9998;background:#000;color:#fff;display:flex;flex-direction:column;font:15px/1.4 "Manrope",system-ui,sans-serif}
-  .dwq video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  .dwq video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s}.dwq video.on{opacity:1}
   .dwq .fr{position:absolute;left:50%;top:44%;width:min(70vw,300px);aspect-ratio:1;transform:translate(-50%,-50%);border-radius:36px;
     box-shadow:0 0 0 100vmax rgba(5,6,12,.55);transition:box-shadow .2s}
   .dwq .fr::before{content:"";position:absolute;inset:-3px;border-radius:38px;padding:3px;background:conic-gradient(from 0deg,#9BD4FF,#B78CFF,#FF7AB6,#9BD4FF);
@@ -92,7 +92,8 @@
     o = o || {};
     if (!document.getElementById("dwq-css")) { const s = document.createElement("style"); s.id = "dwq-css"; s.textContent = CSS; document.head.appendChild(s); }
     const el = document.createElement("div"); el.className = "dwq";
-    el.innerHTML = `<video playsinline muted autoplay></video><div class="fr"></div>
+    // poster — прозрачная точка: иначе Android WebView до первого кадра камеры рисует свою серую кнопку «play» на весь экран
+    el.innerHTML = `<video playsinline muted autoplay poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></video><div class="fr"></div>
       <div class="hd"><b>${o.title || "Наведите на код"}</b><span>${o.sub || "QR, Aztec и печати Dewiar"}</span></div>
       <button class="x" title="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
     document.body.appendChild(el);
@@ -124,6 +125,7 @@
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false });
         if (done) { stream.getTracks().forEach(t => t.stop()); return; }
+        v.addEventListener("playing", () => v.classList.add("on"), { once: true });   // показываем, когда пошли кадры
         v.srcObject = stream; await v.play().catch(() => { }); tick();
       } catch (e) { close(null); o.onError && o.onError("нет доступа к камере"); }
     })();
