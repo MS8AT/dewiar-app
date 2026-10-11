@@ -156,7 +156,7 @@ class Cloud:
         llm = {"profiles": profiles}
         if activate:
             llm["active"] = PROFILE_ID
-        self.s.update({"llm": llm, "cloud": {"key": key, "url": base_of(url), "account": bool(account), "stt_ok": bool(md.get("stt"))}})
+        self.s.update({"llm": llm, "cloud": {"key": key, "url": base_of(url), "account": bool(account), "stt_ok": bool(md.get("stt")), "tts_ok": bool(md.get("tts"))}})
         self._set(info)
         log.info("☁ Подключён ключ Dewiar Облака …%s (%s): заряд %s%%", key[-4:], info.get("label"), info.get("percent"))
         return dict(self.status(), model=m["id"], title=prof["title"], profile=PROFILE_ID)
@@ -239,6 +239,21 @@ class Cloud:
         else:
             self.s.update({"stt": {"engine": "gigaam", "remote": {"cloud": False}}})
         return self.s.get("stt")
+
+    def set_tts(self, on, local="vosk"):
+        """«Голос Dewiar»: говорит облако — те же голоса, что у телефона («Голос Dewiar»), у каждого персонажа свой
+        (voice.remote: serena, aiden…). Облако отдаёт WAV целиком (cloud.php proxy_tts), поэтому extra — wav без потока.
+        Выключить — снова свой голос (local)."""
+        if on:
+            if not self.key:
+                raise CloudError("сначала подключите ключ Dewiar или войдите аккаунтом")
+            self.s.update({"tts": {"engine": "remote", "remote": {"base_url": api_base(self.url), "api_key": self.key, "model": "tts-1",
+                                                                  "sample_rate": 24000, "voice_f": "", "voice_m": "",
+                                                                  "extra": {"response_format": "wav", "stream": False},
+                                                                  "cloud": True, "from_account": True}}})
+        else:
+            self.s.update({"tts": {"engine": local, "remote": {"cloud": False, "from_account": False, "extra": {}}}})
+        return self.s.get("tts")
 
     def refresh(self):
         """Узнать заряд сейчас -> status(). Ключ dw- больше не действует (и вход не по аккаунту) — on_key_gone

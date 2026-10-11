@@ -128,7 +128,8 @@ class BrainMixin:
         remote = stt.get("engine") == "remote" and (stt.get("remote") or {}).get("base_url")
         d.update(light=bool(self.s.get("device", "light")), stt=stt.get("engine"), tts=tts.get("engine"),
                  stt_server=bool(remote), logged_in=self.account.logged_in(), cloud=bool(self.s.get("cloud", "key")),
-                 cloud_stt=self._cloud_stt_ok(), account_stt=bool(self.account.service_url("stt")))
+                 cloud_stt=self._cloud_stt_ok(), account_stt=bool(self.account.service_url("stt")),
+                 cloud_tts=bool(self.s.get("cloud", "key") and self.s.get("cloud", "tts_ok")), account_tts=bool(self.account.service_url("tts")))
         d["advice"] = self._device_advice(d)
         m = getattr(self, "mem", None) or {}
         d["mem"] = {"tight": bool(m.get("tight")), "free": m.get("free"), "total": m.get("total"), "swap": m.get("swap"),
@@ -402,8 +403,8 @@ class BrainMixin:
             if self.s.get("cloud", "key"):
                 try:
                     md = fetch(self.cloud.url, self.cloud.key, "/models")
-                    if bool(md.get("stt")) != bool(self.s.get("cloud", "stt_ok")):
-                        self.s.update({"cloud": {"stt_ok": bool(md.get("stt"))}})
+                    if bool(md.get("stt")) != bool(self.s.get("cloud", "stt_ok")) or bool(md.get("tts")) != bool(self.s.get("cloud", "tts_ok")):
+                        self.s.update({"cloud": {"stt_ok": bool(md.get("stt")), "tts_ok": bool(md.get("tts"))}})
                 except CloudError:
                     pass
             st = self.s.get("stt") or {}

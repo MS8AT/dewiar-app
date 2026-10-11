@@ -30,6 +30,7 @@ from settings import CONFIG_DIR, STATE_DIR
 log = logging.getLogger("dewiar.close")
 HIST_MAX = 300
 FILE_MAX = 10 * 1024 * 1024
+NATT_WAIT = 7 * 86400                 # вложения заметки с телефона ждут саму заметку (синхронизацию) не дольше недели
 
 
 def _int(v):
@@ -289,6 +290,74 @@ class Close:
         except Exception as e:  # noqa: BLE001 — нет связи: дойдёт со следующим изменением или новым устройством
             log.info("свои устройства: не отправилось: %s", e)
 
+    # ---------- вложения заметок со своего телефона ----------
+    # Телефон кладёт фото и файлы заметки зашифрованными в /close/file (себе) и шлёт своим устройствам конверт «own»
+    # {natt: {note, title, files: [{id, key, name, type, size, aid}]}}. Сама заметка (текст) приходит синхронизацией
+    # (sync.py, «note:<id>») — может позже конверта, поэтому вложения ждут её в st["natt"] до NATT_WAIT; файл кладём
+    # рядом с заметкой (workspace.note_attach), строку-ссылку — в конец её текста. Уже положенные — по aid в natt_done.
+    def _natt_add(self, natt):
+        files = [f for f in natt.get("files") or [] if isinstance(f, dict) and f.get("id") and f.get("key")][:12]
+        if not files or not str(natt.get("note") or ""):
+            return
+        with self._lock:
+            q = self.st.setdefault("natt", [])
+            q[:] = [x for x in q if x.get("note") != natt["note"]] + [{"note": str(natt["note"]), "title": str(natt.get("title") or "")[:120],
+                                                                          "files": files, "at": time.time()}]
+            del q[:-50]
+            self._save()
+        self._natt_kick()
+
+    def _natt_kick(self):
+        if not getattr(self, "_natt_busy", False):
+            self._natt_busy = True
+            threading.Thread(target=self._natt_run, daemon=True).start()
+
+    def _natt_run(self):
+        try:
+            for job in list(self.st.get("natt") or []):
+                try:
+                    if self._natt_one(job) or time.time() - float(job.get("at") or 0) > NATT_WAIT:
+                        with self._lock:
+                            self.st["natt"] = [x for x in self.st.get("natt") or [] if x is not job]
+                            self._save()
+                except Exception as e:  # noqa: BLE001 — нет связи: попробуем со следующей проверкой ящика
+                    log.info("вложения заметки с телефона: пока не получилось: %s", e)
+        finally:
+            self._natt_busy = False
+
+    def _natt_one(self, job):
+        """-> True — всё положено (или класть некуда насовсем); False — заметка ещё не пришла синхронизацией."""
+        rel = getattr(self.host, "note_rel_of", lambda nid: None)(job["note"])
+        if not rel:
+            return False
+        ws = self.host.workspace
+        p = ws.safe(rel)
+        done = self.st.setdefault("natt_done", [])
+        lines = []
+        for f in job["files"]:
+            aid = str(f.get("aid") or f["id"])
+            if aid in done:
+                continue
+            r = self._req("GET", "/close/file", params={"id": f["id"]}, timeout=120)
+            data = CC.unseal(CC.b64d(f["key"]), r.content)
+            name = str(f.get("name") or "файл")
+            if not Path(name).suffix:                      # «фото» с телефона — без расширения: по типу
+                name += mimetypes.guess_extension(str(f.get("type") or "")) or (".jpg" if f.get("type") == "image" else "")
+            lines.append(ws.note_attach(rel, name, data)["line"])
+            with self._lock:
+                done.append(aid)
+                del done[:-2000]
+                self._save()
+        if lines:
+            text = p.read_text(encoding="utf-8").rstrip("\n")
+            p.write_text(text + "\n\n" + "\n".join(lines) + "\n", encoding="utf-8")
+            log.info("📎 к заметке «%s» с телефона: вложений %d", job.get("title") or p.stem, len(lines))
+            sy = getattr(self.host, "sync", None)
+            if sy is not None:
+                sy.soon.set()
+            self.host.emit("notes_changed")
+        return True
+
     # ---------- «Рефералы»: свой первый уровень — в «Близкие» с согласия ----------
     def ref_map(self, rids):
         """Знаки связи из ref_info -> {rid: {pid} — уже близкий | {offered} — позвали, ждём ответа}."""
@@ -399,6 +468,8 @@ class Close:
         with self._lock:
             self.st["cursor"] = max(int(self.st["cursor"]), int(d.get("last") or 0))
             self._save()
+        if self.st.get("natt"):
+            self._natt_kick()
         if got:
             self.host.emit("close", state=self.state())
         return got
@@ -431,6 +502,8 @@ class Close:
             return 0, refreshed
         if it.get("kind") == "own":                     # от своего же устройства (ключ шифрования — из моих устройств)
             if it.get("out") and env.get("fd") != self.st["dev"]:
+                if isinstance(body.get("natt"), dict):  # фото и файлы заметки с телефона — к той же заметке здесь
+                    self._natt_add(body["natt"])
                 try:
                     getattr(self.host, "own_apply", lambda b: None)(body)
                     snap = body.get("want") and getattr(self.host, "own_snapshot", lambda: None)()

@@ -55,7 +55,7 @@ function dwRender() {
   $("#dw-stt-why").textContent = canStt || sttSrv ? "Быстро и точно даже на слабом компьютере; немного расходует заряд."
     : a.logged_in || (DW.cloud && DW.cloud.connected) ? "На сервере Dewiar распознавание речи сейчас не включено — компьютер распознаёт сам. Появится — переключатель станет доступен."
     : "Станет доступно после входа в аккаунт (или с ключом Dewiar).";
-  const canTts = !!(a.logged_in && a.services && a.services.tts);
+  const canTts = !!(a.logged_in && a.services && a.services.tts) || !!(d && d.cloud_tts);
   $("#dw-tts-row").style.display = canTts || ttsSrv ? "" : "none"; $("#dw-tts").checked = !!ttsSrv;
   dwSet("speech", sttSrv ? "ok" : canStt ? "" : "", sttSrv ? (ttsSrv ? "слух и голос" : "слух на сервере") : canStt ? "выключено"
     : a.logged_in || (DW.cloud && DW.cloud.connected) ? "нет на сервере" : "нужен вход");
@@ -212,7 +212,8 @@ $("#dw-stt").onchange = async (e) => {
   dwLoad();
 };
 $("#dw-tts").onchange = async (e) => { const on = e.target.checked;
-  try { await core.call("account_tts", { on }); $("#dw-speech-res").className = "res ok"; $("#dw-speech-res").textContent = on ? "Голос — с сервера Dewiar." : "Голос — этого компьютера."; }
+  const d = DW.dev || {}, how = on ? (d.account_tts ? "account_tts" : "cloud_tts") : (S.tts.remote || {}).cloud ? "cloud_tts" : "account_tts";
+  try { await core.call(how, { on }); $("#dw-speech-res").className = "res ok"; $("#dw-speech-res").textContent = on ? "Голос — с сервера Dewiar." : "Голос — этого компьютера."; }
   catch (x) { e.target.checked = !on; toast(x.message); } dwLoad(); };
 $("#dw-light").onchange = async (e) => { const on = e.target.checked;
   try { const r = await core.call("device_light", { on }); DW.dev = r; toast(on ? "Лёгкий режим включён" : "Лёгкий режим выключен" + (r.done && r.done.length ? ": " + r.done.join(", ") : "")); }

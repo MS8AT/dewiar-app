@@ -521,6 +521,9 @@ class CommandsMixin:
                         if self.s.get("stt", "engine") == "remote" and self.s.get("stt", "remote", "cloud"):
                             self.s.update({"stt": {"engine": self._stt_local(), "remote": {"cloud": False}}})
                             self.apply_engines()
+                        if self.s.get("tts", "engine") == "remote" and self.s.get("tts", "remote", "cloud"):
+                            self.cloud.set_tts(False, self._tts_local())
+                            self.apply_engines()
                         self.emit("settings", settings=self.s.snapshot())
                     if self.telegram.uses_account():           # общий бот через аккаунт — отключаем (по ключу — остаётся)
                         self.telegram.forget()
@@ -699,7 +702,7 @@ class CommandsMixin:
             return r
         if cmd == "llm_models":
             return list_models(a["profile"])
-        if cmd in ("cloud_usage", "cloud_topup", "cloud_topup_send", "cloud_models", "cloud_model", "cloud_stt", "cloud_fallback"):
+        if cmd in ("cloud_usage", "cloud_topup", "cloud_topup_send", "cloud_models", "cloud_model", "cloud_stt", "cloud_tts", "cloud_fallback"):
             from cloud import CloudError
             try:
                 if cmd == "cloud_usage":
@@ -717,6 +720,9 @@ class CommandsMixin:
                     if not a.get("on") and self._stt_local() != "gigaam":
                         self.s.update({"stt": {"engine": self._stt_local()}})
                         r = self.s.get("stt")
+                    self.apply_engines()
+                elif cmd == "cloud_tts":                  # «Голос Dewiar» — тот же, что на телефоне
+                    r = self.cloud.set_tts(bool(a.get("on")), self._tts_local())
                     self.apply_engines()
                 else:
                     self.s.update({"llm": {"fallback": a.get("id") or ""}})
@@ -836,6 +842,12 @@ class CommandsMixin:
                     if self.s.get("stt", "engine") == "remote" and self.s.get("stt", "remote", "cloud"):
                         self.s.update({"stt": {"engine": self._stt_local(), "remote": {"cloud": False}}})
                         self.apply_engines()                 # ключа больше нет — распознаём у себя
+                    if self.s.get("tts", "engine") == "remote" and self.s.get("tts", "remote", "cloud") and not self.s.get("cloud", "key"):
+                        self.cloud.set_tts(False, self._tts_local())
+                        self.apply_engines()                 # и говорим своим голосом
+                    elif self.s.get("tts", "engine") == "remote" and self.s.get("tts", "remote", "cloud"):
+                        self.cloud.set_tts(True)
+                        self.apply_engines()                 # ключ сменился на вход аккаунтом — голос по нему
                     self.emit("settings", settings=self.s.snapshot())
                     return r
                 return self.cloud.status(refresh=bool(a.get("refresh")))

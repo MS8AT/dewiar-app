@@ -164,6 +164,14 @@ class ToolsMixin:
         if isinstance(h, dict) and self.home.adopt(h.get("token"), h.get("at")):
             self.emit("tools", tools=self.toolbox.catalog())
 
+    def note_rel_of(self, nid):
+        """Заметка, пришедшая синхронизацией с id другого устройства, -> её путь в папке ассистента («Заметки/…») или None."""
+        from sync import NOTES
+        rel = (self.sync.state.get("map") or {}).get(str(nid))
+        if rel and (self.workspace.ensure() / NOTES / rel).is_file():
+            return f"{NOTES}/{rel}"
+        return None
+
     def own_share(self):
         """Умный дом поменяли здесь — отправить своим устройствам (в фоне; нет связи — дойдёт со следующим изменением)."""
         snap = self.own_snapshot()

@@ -143,7 +143,7 @@ DEFAULTS = {
                  "search": True,        # искать ответы во всём хранилище
                  "sync_all": False},    # всё хранилище (тексты .md) — одинаковое на всех компьютерах через облако Dewiar
     "calendars": {"items": [], "remind_minutes": 10},   # календари по ссылке iCal (Google, Яндекс…), напомнить за N минут
-    "cloud": {"key": "", "url": "", "account": False, "stt_ok": False,
+    "cloud": {"key": "", "url": "", "account": False, "stt_ok": False, "tts_ok": False,
               "join": {}},      # заявка на Dewiar из программы: {id, secret, url} — ждём ключ (engine_brain._join_loop)   # ключ Dewiar Облака (dw-…): модели сервера Dewiar с зарядом в талерах
     "net": {"proxy": "", "dewiar": False,   # прокси для серверов Dewiar, если провайдер блокирует dewiar.pro: свой (socks5://… или http://…) или «Использовать прокси Dewiar»
             "dewiar_secret": "", "dewiar_at": 0,                # прокси, выданный dewiar.pro, и когда получен (обновляется раз в 6 часов, engine_brain.py)

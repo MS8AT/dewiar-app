@@ -2410,7 +2410,7 @@ async function runTool(name, a) {
       const all = notes().slice().sort((x, y) => (+y.time || 0) - (+x.time || 0));
       const w = String(a.query || "").toLowerCase().replace(/ё/g, "е").split(/[\s,.]+/).filter(x => x.length > 2 && !NOTE_GENERIC.test(x)).map(x => x.slice(0, 5));
       const f = w.length ? all.filter(n => w.some(x => (n.title + " " + n.text).toLowerCase().replace(/ё/g, "е").includes(x))).slice(0, 8) : [];
-      const show = (l) => l.map(n => `«${n.title}» (${whenText(new Date(+n.time || Date.now()))}): ${noteBody(n.text).slice(0, 600)}${(n.att || []).length ? ` [вложений: ${n.att.length}]` : ""}`).join("\n\n");
+      const show = (l) => l.map(n => `«${n.title}» (${whenText(new Date(+n.time || Date.now()))}): ${noteShown(n.text).slice(0, 600)}${(n.att || []).length ? ` [вложений: ${n.att.length}]` : ""}`).join("\n\n");
       if (f.length) return show(f);
       if (!all.length) return "Заметок пока нет.";
       return (w.length ? "По этим словам в заметках ничего нет. " : "") + `Всего заметок: ${all.length}. Последние:\n\n` + show(all.slice(0, 10));
@@ -2609,9 +2609,14 @@ function noteQuick(text, att) {
 }
 /* ---------- заметка целиком: открыть, поправить, фото и файлы (лист #sh-note) ----------
    Вложения — файлы natt-<id> во внутренней памяти (data: URL; фото сжаты shrinkImage), в заметке — только их список att.
-   Синхронизация уносит на компьютер текст заметки; вложения пока живут на телефоне (syncApply их сохраняет). */
+   Синхронизация уносит на компьютер текст заметки; вложения — зашифрованным каналом своих устройств (noteAttShare). */
 let turnAtt = [], turnAsk = "", noteCur = "", notePend = [];
 const noteBody = (t) => String(t || "").replace(/^\s*#[^\n]*\n+(\*[^\n]*\*\n+)?/, "");   // заметка с компьютера: без заголовка и даты
+// строки-ссылки на вложения компьютера («![фото.jpg](Вложения/…)», «📎 [план.pdf](Вложения/…)», core/workspace.py NOTE_LINK_RX):
+// в тексте на телефоне их не показываем, а при сохранении возвращаем в конец — иначе ссылки потерялись бы на компьютере
+const NOTE_LINK_LINE = /^[ \t]*(?:📎\s*)?!?\[[^\]\n]*\]\(Вложения\/[^)\s]+\)[ \t]*$/gm;
+const noteShown = (t) => noteBody(t).replace(NOTE_LINK_LINE, "").replace(/\n{3,}/g, "\n\n").trim();
+const noteLinks = (t) => (String(t || "").match(NOTE_LINK_LINE) || []).map(x => x.trim());
 const noteAttGet = (id) => fileGet("natt-" + id) || "";
 function noteAttSave(list) {
   return (list || []).filter(a => a && (a.url || a.text != null)).slice(0, 12).map((a, i) => {
@@ -2646,7 +2651,7 @@ function renderNote() {
   const n = noteCur ? notes().find(x => x.id === noteCur) : null, att = (n ? n.att || [] : []).concat(notePend);
   $("#nt-h").textContent = n ? "Заметка" : "Новая заметка";
   $("#note-body").innerHTML = `<input id="nt-title" placeholder="Заголовок" maxlength="120" value="${esc(n ? n.title : "")}">
-    <textarea id="nt-text" placeholder="Текст заметки…">${esc(n ? noteBody(n.text) : "")}</textarea>
+    <textarea id="nt-text" placeholder="Текст заметки…">${esc(n ? noteShown(n.text) : "")}</textarea>
     <div class="ntatt">${att.map(a => a.type === "image" ? `<button class="ntimg" data-id="${esc(a.id)}"><img src="${a.data || noteAttGet(a.id)}" alt="${esc(a.name)}"></button>`
       : `<button class="ntf" data-id="${esc(a.id)}">📎 ${esc(a.name)}<small>${fsize(a.size)}</small></button>`).join("")}</div>
     <div class="ntadd"><label class="btn"><input type="file" id="nt-photo" accept="image/*" multiple hidden>Добавить фото</label><label class="btn"><input type="file" id="nt-file" multiple hidden>Добавить файл</label></div>
@@ -2673,24 +2678,60 @@ function renderNote() {
     const title = $("#nt-title").value.trim(), text = $("#nt-text").value.trim();
     if (!title && !text && !notePend.length) { toast("Пустая заметка"); return; }
     const all = notes(), t0 = title || text.split(/\n/)[0].slice(0, 60) || "Фото";
-    if (n) { const x = all.find(y => y.id === n.id); if (x) { x.title = t0; x.text = text; x.time = Date.now(); } }
+    if (n) { const x = all.find(y => y.id === n.id), ln = noteLinks(x && x.text); if (x) { x.title = t0; x.text = text + (ln.length ? "\n\n" + ln.join("\n") : ""); x.time = Date.now(); } }
     else all.push(Object.assign({ id: "n" + Date.now(), title: t0, text, time: Date.now() }, notePend.length ? { att: noteAttSave(notePend.map(p => p.src)) } : {}));
     notePend = []; saveNotes(all); closeSheets(); renderDay(); openSheet("#sh-day"); toast("Заметка сохранена");
   };
   if (n) {
     $("#nt-del").onclick = () => noteDelete(n.id, true);
-    $("#nt-share").onclick = () => D.share((n.title ? n.title + "\n\n" : "") + noteBody(n.text));
+    $("#nt-share").onclick = () => D.share((n.title ? n.title + "\n\n" : "") + noteShown(n.text));
   }
 }
 function noteFileSave(a) {
-  const d = noteAttGet(a.id), m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(d);
+  const d = noteAttGet(a.id), m = /^data:([^;,]*)(?:;[^;,=]+=[^;,]*)*(;base64)?,(.*)$/s.exec(d);
   if (!m) { toast("Файл не найден"); return; }
   const b64 = m[2] ? m[3] : btoa(unescape(encodeURIComponent(decodeURIComponent(m[3]))));
   const where = D.saveDownloadB64 ? D.saveDownloadB64(a.name, m[1] || "application/octet-stream", b64) : "";
   toast(where ? "Сохранено: " + where : "Не получилось сохранить", 3500);
 }
 function imgView(src) { const v = $("#imgview"); $("img", v).src = src; v.classList.add("on"); v.onclick = () => { v.classList.remove("on"); $("img", v).src = ""; }; }
-const saveNotes = (n) => { fileSave("notes.json", JSON.stringify(n)); syncSoon(); };
+const saveNotes = (n) => { fileSave("notes.json", JSON.stringify(n)); syncSoon(); if (n.some(x => (x.att || []).some(a => !a.pc))) noteAttSoon(); };
+/* Фото и файлы заметок — на свои компьютеры (отзыв 11.10). Тем же зашифрованным каналом, что ключ умного дома: файл
+   шифруется своим ключом и кладётся в облако (/close/file себе), ключ к нему — в конверте /close/self {natt}, который
+   откроют только мои устройства (core/close.py _natt_add: к той же заметке, когда она придёт синхронизацией). Отправленное
+   помечается a.pc (время; -1 — не отправить вовсе); нет связи или других устройств — попробуем при следующей проверке. */
+var nattBusy = false, nattT = 0;               // var: saveNotes может позвать до этой строки
+function noteAttSoon(ms) { clearTimeout(nattT); nattT = setTimeout(() => noteAttShare().catch(e => plog("info", "вложения заметок на компьютер: " + e.message)), ms || 4000); }
+async function noteAttShare() {
+  if (nattBusy || SANDBOX || !syncCred() || !DC()) return 0;
+  const todo = notes().filter(n => (n.att || []).some(a => !a.pc)); if (!todo.length) return 0;
+  nattBusy = true;
+  try {
+    const k = clKeys(); if (!clLoad().me.pid || Date.now() - (CLS.hello || 0) > 600000) await clHello();
+    const t = {}; ((CLS.me || {}).devs || []).forEach(d => { if (d.pub && d.dev && d.dev !== k.dev) t[d.dev] = DC().b64d(d.pub); });
+    if (!Object.keys(t).length || !CLS.me.pid) return 0;              // других своих устройств пока нет
+    t[k.dev] = DC().b64d(k.pub);
+    let sent = 0;
+    for (const n of todo.slice(0, 3)) {                                // не больше трёх заметок за раз: у облака лимит конвертов в час
+      const files = [], mark = {};
+      for (const a of n.att.filter(a => !a.pc)) {
+        const m = /^data:([^;,]*)(?:;[^;,=]+=[^;,]*)*(;base64)?,(.*)$/s.exec(noteAttGet(a.id));
+        const bin = !m ? null : m[2] ? Uint8Array.from(atob(m[3]), c => c.charCodeAt(0)) : new TextEncoder().encode(decodeURIComponent(m[3]));
+        if (!bin || !bin.length || bin.length > 10 * 1024 * 1024) { mark[a.id] = -1; continue; }
+        const fk = DC().randomBytes(32);
+        const d = await clReq("POST", "/close/file", clStdB64(DC().seal(fk, bin)), "&b64=1&to=" + encodeURIComponent(CLS.me.pid));
+        files.push({ id: d.id, key: DC().b64e(fk), name: a.name, type: (m && m[1]) || a.type || "", size: bin.length, aid: a.id });
+      }
+      if (files.length) await clReq("POST", "/close/self", { env: DC().encryptFor({ natt: { note: n.id, title: n.title, files }, ts: Date.now() }, DC().b64d(k.priv), k.dev, t) });
+      files.forEach(f => { mark[f.aid] = Date.now(); }); sent += files.length;
+      const all = notes(), x = all.find(y => y.id === n.id);
+      if (x) { (x.att || []).forEach(a => { if (mark[a.id]) a.pc = mark[a.id]; }); fileSave("notes.json", JSON.stringify(all)); }
+    }
+    if (sent) plog("info", `📎 вложения заметок — на свои компьютеры: ${sent}`);
+    if (todo.length > 3) noteAttSoon(60000);
+    return sent;
+  } finally { nattBusy = false; }
+}
 const money = () => { try { return JSON.parse(fileGet("money.json") || "[]"); } catch (e) { return []; } };
 const saveMoney = (m) => { fileSave("money.json", JSON.stringify(m)); syncSoon(); };
 function periodStart(p) { const d = new Date(); d.setHours(0, 0, 0, 0);
@@ -2859,7 +2900,7 @@ function renderDay() {
     const n = notes().slice().sort((a, b) => (+b.time || 0) - (+a.time || 0));          // новые сверху — и с компьютера тоже
     box.innerHTML = `<button class="btn p ntnew" id="nt-new">Новая заметка</button>` + (n.length ? n.map(x => {
       const img = (x.att || []).find(a => a.type === "image"), more = (x.att || []).length;
-      return `<div class="it note" data-id="${esc(x.id)}">${img ? `<img class="nthumb" src="${noteAttGet(img.id)}" alt="">` : ""}<div class="bd"><b>${esc(x.title)}${more ? `<span class="ntc">📎${more}</span>` : ""}</b><small>${esc(noteBody(x.text).slice(0, 220))}</small></div></div>`; }).join("")
+      return `<div class="it note" data-id="${esc(x.id)}">${img ? `<img class="nthumb" src="${noteAttGet(img.id)}" alt="">` : ""}<div class="bd"><b>${esc(x.title)}${more ? `<span class="ntc">📎${more}</span>` : ""}</b><small>${esc(noteShown(x.text).slice(0, 220))}</small></div></div>`; }).join("")
       : `<div class="empty">Заметок нет.<br>Скажите: «запиши в заметки: купить хлеб и молоко» — или нажмите «Новая заметка».</div>`);
     $("#nt-new").onclick = () => openNote("");
     $$(".it.note", box).forEach(el => el.onclick = () => openNote(el.dataset.id));
@@ -4886,8 +4927,8 @@ async function clSaveFile(p, m, j) {
 }
 $("#b-close").onclick = () => openClose("");
 $("#cl-inv").onclick = () => { if (clTab === "ref") return refShare().catch(e => toast(e.message, 4000)); clInviteOpen(); };
-document.addEventListener("visibilitychange", () => { if (!document.hidden && syncCred()) clPoll(); });
-setTimeout(() => { clLoad(); clBadge(); if (S.closePending && syncCred()) clAcceptLink(S.closePending); clPoll(); clSchedule(); }, 4000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && syncCred()) { clPoll(); noteAttSoon(6000); } });
+setTimeout(() => { clLoad(); clBadge(); if (S.closePending && syncCred()) clAcceptLink(S.closePending); clPoll(); clSchedule(); noteAttSoon(9000); }, 4000);
 
 /* ---------- «сам замечает»: открыли приложение после перерыва — коротко о главном (как core/presence.py) ----------
    Перерыв считается от того, когда приложение последний раз было на экране (S.welcome.seen). Первый раз за день после 3 часов —

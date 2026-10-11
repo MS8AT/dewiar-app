@@ -82,7 +82,7 @@ class AudioMixin:
         prof = self.s.active_llm()
         self.status.update(stt=self.stt.name, stt_ready=getattr(self.stt, "ready", True),
                            tts={"piper": "Piper", "vosk": "Vosk TTS" + ("" if self.vosk_tts.ready else " (загружается, пока Piper)"),
-                                "remote": "Удалённый голос", "elevenlabs": "ElevenLabs", "espeak": "Голос Windows" if os.name == "nt" else "eSpeak", "off": "Выключен"}.get(tt["engine"], tt["engine"]),
+                                "remote": "Голос Dewiar" if (tt.get("remote") or {}).get("cloud") else "Удалённый голос", "elevenlabs": "ElevenLabs", "espeak": "Голос Windows" if os.name == "nt" else "eSpeak", "off": "Выключен"}.get(tt["engine"], tt["engine"]),
                            llm=(prof or {}).get("name", ""))
         self.emit("status", status=self.status)
 

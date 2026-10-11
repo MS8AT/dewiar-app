@@ -331,9 +331,18 @@ $("#srv-stt-go").onclick = async (ev) => {
   try { await core.call("account_stt", { on }); S.stt.engine = on ? "remote" : "gigaam"; S.stt.remote = Object.assign({}, S.stt.remote, { from_account: on }); renderSrvStt(); toast(on ? "Распознавание — на сервере" : "Распознавание — на этом компьютере"); }
   catch (e) { toast(e.message); } finally { ev.target.disabled = false; }
 };
+/* «Голос Dewiar» — как на телефоне: синтез сайта по аккаунту (services.tts) или облако Dewiar (ключ или вход аккаунтом,
+   облако умеет озвучку — device.cloud_tts). -> "account" | "cloud" | "" */
+function srvTtsHow() {
+  const a = lastAccount, d = typeof DW !== "undefined" && DW.dev;
+  if (a && a.logged_in && a.services && a.services.tts) return "account";
+  if (d && d.cloud_tts) return "cloud";
+  if (typeof DW !== "undefined" && !DW.dev && !srvTtsHow.asked) { srvTtsHow.asked = true; core.call("device").then(x => { DW.dev = x; renderSrvTts(); }).catch(() => {}); }
+  return "";
+}
 function renderSrvTts() {
-  const a = lastAccount, on = S && S.tts && S.tts.engine === "remote" && S.tts.remote && S.tts.remote.from_account;
-  $("#srv-tts").style.display = a && a.logged_in && a.services && a.services.tts ? "" : "none";
+  const on = S && S.tts && S.tts.engine === "remote" && S.tts.remote && S.tts.remote.from_account;
+  $("#srv-tts").style.display = srvTtsHow() || on ? "" : "none";
   $("#srv-tts-go").textContent = on ? "Выключить" : "Включить";
   $("#srv-tts-go").className = on ? "btn" : "btn primary";
   $("#srv-tts-res").className = on ? "res ok" : "res"; $("#srv-tts-res").textContent = on ? "Включено: говорит сервер" : "";
@@ -341,7 +350,9 @@ function renderSrvTts() {
 $("#srv-tts-go").onclick = async (ev) => {
   const on = !(S.tts.engine === "remote" && S.tts.remote && S.tts.remote.from_account);
   ev.target.disabled = true;
-  try { await core.call("account_tts", { on }); S.tts.engine = on ? "remote" : "vosk"; S.tts.remote = Object.assign({}, S.tts.remote, { from_account: on }); renderSrvTts(); toast(on ? "Голос — с сервера" : "Голос — этого компьютера"); }
+  const how = on ? srvTtsHow() : (S.tts.remote || {}).cloud ? "cloud" : "account";
+  try { const t = await core.call(how === "cloud" ? "cloud_tts" : "account_tts", { on }); if (t && t.engine) S.tts = Object.assign({}, S.tts, t); else { S.tts.engine = on ? "remote" : "vosk"; S.tts.remote = Object.assign({}, S.tts.remote, { from_account: on }); }
+    renderSrvTts(); toast(on ? "Говорит «Голос Dewiar» — как на телефоне" : "Голос — этого компьютера"); }
   catch (e) { toast(e.message); } finally { ev.target.disabled = false; }
 };
 function renderAccount(a) {

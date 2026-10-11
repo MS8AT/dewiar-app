@@ -91,6 +91,7 @@ public final class Tts {
 
     public void stop() {
         gen++;                                            // фразы, что ещё в очереди, — не играть
+        synchronized (pending) { for (java.util.concurrent.Future<File> x : pending) x.cancel(true); }   // и не скачивать
         try { if (tts != null) tts.stop(); } catch (Throwable ignored) { }
         synchronized (this) {
             if (player != null) { try { player.stop(); player.release(); } catch (Throwable ignored) { } player = null; }
@@ -102,47 +103,44 @@ public final class Tts {
 
     private synchronized boolean playing(MediaPlayer mp) { return player == mp; }
 
-    /** Голос сервера: скачать звук фразы (body — JSON запроса /v1/audio/speech) и проиграть — по одной, по порядку.
-     *  Следующая фраза скачивается только после того, как отзвучала предыдущая. */
+    /** Голос сервера: звук фразы скачивается сразу (до двух фраз одновременно — пока звучит одна, следующая уже
+     *  готовится), а играют фразы строго по очереди. Раньше следующая начинала скачиваться, только когда отзвучала
+     *  предыдущая, — между фразами были паузы на всё время синтеза (отзыв 11.10: «как у Алисы»). Короткие фразы
+     *  («Хорошо.», «Пожалуйста!», «Наведите камеру на код.») запоминаются (VoiceCache) — второй раз звучат сразу. */
+    private final java.util.concurrent.ExecutorService fetch = java.util.concurrent.Executors.newFixedThreadPool(2);
+    private final java.util.List<java.util.concurrent.Future<File>> pending = new java.util.ArrayList<>();
+
     public void speakRemote(final String id, final String url, final String key, final String body) {
         final int my = gen;
+        final java.util.concurrent.Future<File> got = fetch.submit(new java.util.concurrent.Callable<File>() {
+            @Override public File call() throws Exception { return my != gen ? null : VoiceCache.get(ctx.getCacheDir(), id, url, key, body); }
+        });
+        synchronized (pending) { pending.add(got); }
         queue.execute(new Runnable() {
             @Override public void run() {
-                if (my != gen) { ev("tts_done", id); return; }
+                File f = null;
                 try {
-                    HttpURLConnection c = (HttpURLConnection) NetProxy.open(new URL(url));
-                    c.setConnectTimeout(10000);
-                    c.setReadTimeout(60000);
-                    c.setRequestMethod("POST");
-                    c.setDoOutput(true);
-                    c.setRequestProperty("Content-Type", "application/json");
-                    if (key != null && key.startsWith("xi-api-key:")) c.setRequestProperty("xi-api-key", key.substring(11));   // ElevenLabs
-                    else if (key != null && !key.isEmpty()) c.setRequestProperty("Authorization", "Bearer " + key);
-                    OutputStream os = c.getOutputStream();
-                    os.write(body.getBytes("UTF-8"));
-                    os.close();
-                    if (c.getResponseCode() >= 400) throw new Exception("сервер голоса ответил " + c.getResponseCode());
-                    File f = new File(ctx.getCacheDir(), "say-" + id + ".audio");
-                    InputStream in = c.getInputStream();
-                    FileOutputStream fo = new FileOutputStream(f);
-                    byte[] buf = new byte[16384];
-                    int n;
-                    while ((n = in.read(buf)) > 0) fo.write(buf, 0, n);
-                    fo.close();
-                    in.close();
-                    if (my != gen) { f.delete(); ev("tts_done", id); return; }
-                    play(id, f);
-                } catch (Throwable e) {
-                    try { sink.event("tts_error", new JSONObject().put("id", id).put("error", String.valueOf(e.getMessage()))); } catch (Exception ignored) { }
+                    f = got.get();
+                    boolean temp = f != null && !VoiceCache.cached(f);
+                    if (my != gen || f == null) { if (temp) //noinspection ResultOfMethodCallIgnored
+                        f.delete(); ev("tts_done", id); return; }
+                    play(id, f, temp);
+                } catch (java.util.concurrent.CancellationException e) {
                     ev("tts_done", id);
+                } catch (Throwable e) {
+                    Throwable c = e instanceof java.util.concurrent.ExecutionException && e.getCause() != null ? e.getCause() : e;
+                    try { sink.event("tts_error", new JSONObject().put("id", id).put("error", String.valueOf(c.getMessage()))); } catch (Exception ignored) { }
+                    ev("tts_done", id);
+                } finally {
+                    synchronized (pending) { pending.remove(got); }
                 }
             }
         });
     }
 
-    /** Проиграть файл и дождаться конца (не дольше 2 минут) в потоке очереди. Звук помечен как голос
+    /** Проиграть файл и дождаться конца (не дольше 2 минут) в потоке очереди; temp — удалить после. Звук помечен как голос
      *  ассистента (USAGE_ASSISTANT, Android 8+; на старых — как медиа). */
-    private void play(final String id, final File f) throws Exception {
+    private void play(final String id, final File f, boolean temp) throws Exception {
         final Object lock = playLock;
         final boolean[] done = {false};
         MediaPlayer mp = new MediaPlayer();
@@ -164,7 +162,7 @@ public final class Tts {
         synchronized (this) { if (player == mp) { player = null; } }
         try { mp.release(); } catch (Throwable ignored) { }
         //noinspection ResultOfMethodCallIgnored
-        f.delete();
+        if (temp) f.delete();                         // запомненная фраза остаётся для следующего раза
         ev("tts_done", id);
     }
 
