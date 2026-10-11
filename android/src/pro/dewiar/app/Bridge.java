@@ -390,6 +390,17 @@ public final class Bridge {
     /** Сохранить сделанное ассистентом (страница, мини-программа) в «Загрузки/Dewiar» — его видно в «Файлах» телефона.
      *  Android 10+: через MediaStore без разрешений; старее — в папку приложения на карте памяти (Android/data/…/Download).
      *  -> путь для показа человеку или "" при ошибке. */
+    /** Показать чужой HTML (сделанное моделью, файлы задач) в отдельном окне без моста — см. HtmlView. */
+    @JavascriptInterface public boolean viewHtml(String title, String html) {
+        try {
+            java.io.File f = new java.io.File(a.getCacheDir(), "htmlview.html");
+            try (java.io.FileOutputStream o = new java.io.FileOutputStream(f)) { o.write((html == null ? "" : html).getBytes("UTF-8")); }
+            final android.content.Intent i = new android.content.Intent(a, HtmlView.class).putExtra("path", f.getAbsolutePath()).putExtra("title", title);
+            a.runOnUiThread(new Runnable() { @Override public void run() { a.startActivityForResult(i, HtmlView.REQ); } });
+            return true;
+        } catch (Exception e) { return false; }
+    }
+
     @JavascriptInterface public String saveDownload(String name, String mime, String text) {
         try {
             return saveBytes(name, mime, text.getBytes("UTF-8"));

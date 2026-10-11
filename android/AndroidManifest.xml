@@ -58,6 +58,7 @@
                 <data android:mimeType="application/octet-stream"/>
             </intent-filter>
         </activity>
+        <activity android:name=".HtmlView" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden|uiMode|screenLayout|smallestScreenSize"/>
         <activity android:name=".AlarmActivity" android:exported="false" android:showWhenLocked="true" android:turnScreenOn="true"
             android:launchMode="singleInstance" android:excludeFromRecents="true" android:screenOrientation="fullUser"/>
         <receiver android:name=".AlarmReceiver" android:exported="false"/>

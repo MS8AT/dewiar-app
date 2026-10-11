@@ -2002,6 +2002,20 @@ class Toolbox:
             except guard.Blocked as e:
                 return str(e), False, None
             return None, True, guard.describe_delete(plan)
+        if name == "close_send" and (args or {}).get("files"):
+            # файлы уходят другому человеку — только с подтверждением; ключи и пароли не уходят вовсе
+            # (просьбу «отправь…» могла подсунуть страница или чужое сообщение)
+            from settings import CONFIG_DIR
+            names = []
+            for x in (args or {}).get("files") or []:
+                fp = Path(str(x)).expanduser().resolve()
+                secret = re.search(r"(^|[\\/])(\.ssh|\.gnupg|\.password-store|keyrings?)([\\/]|$)", str(fp), re.I) \
+                    or re.search(r"(^\.env(\..*)?$|^id_[a-z0-9]+$|\.(pem|key|jks|keystore|p12|pfx|kdbx)$|^provision.*\.json$)", fp.name, re.I) \
+                    or Path(CONFIG_DIR).resolve() in fp.parents
+                if secret:
+                    return f"«{fp.name}» похож на ключ или пароль — такие файлы не отправляю", False, None
+                names.append(fp.name)
+            return None, True, f"Отправить {args.get('to', '')}: {', '.join(names)}?"
         if name == "lab_run" and self.hooks.get("workspace"):
             try:
                 p = self.hooks["workspace"].safe(str(Path("Лаборатория") / str((args or {}).get("name") or "").lstrip("/")))

@@ -11,7 +11,9 @@ BT=/usr/lib/android-sdk/build-tools/debian
 FR=/usr/share/android-framework-res/framework-res.apk
 AJ=/usr/lib/android-sdk/platforms/android-23/android.jar
 KS="${DEWIAR_KEYSTORE:-/home/claude/dewiar-keys/dewiar-release.jks}"
-KP="${DEWIAR_KEYPASS:-dewiar-keys}"
+KP="${DEWIAR_KEYPASS:-}"                                  # пароль — только из окружения или файла рядом с ключом (<ключ>.pass), не из кода
+[ -z "$KP" ] && [ -f "$KS.pass" ] && KP=$(cat "$KS.pass")
+[ -n "$KP" ] || { echo "нет пароля ключа подписи: задайте DEWIAR_KEYPASS или положите его в $KS.pass" >&2; exit 1; }
 VER=$(sed -n 's/.*static final String VERSION = "\([0-9.]*\)".*/\1/p' "$HERE/src/pro/dewiar/app/BuildInfo.java")
 CODE=$(echo "$VER" | awk -F. '{print $1*10000+$2*100+$3}')
 B=$(mktemp -d); trap 'rm -rf "$B"' EXIT
@@ -60,6 +62,6 @@ for V in base hands; do
   "$BT/zipalign" -f -p 4 "$B/u.apk" "$B/a.apk"
   APK="$OUT/Dewiar-$VER.apk"; [ "$V" = hands ] && APK="$OUT/Dewiar-$VER-hands.apk"
   "$BT/apksigner" sign --ks "$KS" --ks-pass "pass:$KP" --ks-key-alias dewiar --out "$APK" "$B/a.apk" 2>&1 | grep -v JAVA_TOOL_OPTIONS || true
-  "$BT/apksigner" verify "$APK" 2>&1 | grep -v JAVA_TOOL_OPTIONS || true
+  "$BT/apksigner" verify "$APK" >/dev/null 2>&1 || { echo "подпись $APK не прошла проверку" >&2; exit 1; }   # неподписанный файл в выпуск не уходит
   ls -la "$APK"
 done

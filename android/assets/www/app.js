@@ -583,9 +583,9 @@ async function thanksGet() {
 const BUG_ST = { new: "отправлена", seen: "прочитана", work: "в работе", fixed: "исправлено", no: "не ошибка" };
 function complaintsHtml() {
   const mine = (S.complaints || []).slice().reverse().slice(0, 6);
-  return mine.length ? `<div class="bugh">Мои жалобы</div>` + mine.map(c => `<div class="bugc"><div><b>№${c.id}</b> ${esc(c.note || "")}</div>`
-    + `<div class="bst"><span class="chip ${c.status}">${BUG_ST[c.status] || c.status}${c.status === "fixed" && c.fixed ? " в " + esc(c.fixed) : ""}</span>`
-    + `${new Date(c.ts * 1000).toLocaleDateString("ru-RU")}${c.reward ? ` · спасибо ${c.reward} тал.` : ""}</div>${c.reply ? `<div class="brep">${esc(c.reply)}</div>` : ""}</div>`).join("") : "";
+  return mine.length ? `<div class="bugh">Мои жалобы</div>` + mine.map(c => `<div class="bugc"><div><b>№${esc(c.id)}</b> ${esc(c.note || "")}</div>`
+    + `<div class="bst"><span class="chip ${esc(c.status)}">${BUG_ST[c.status] || esc(c.status)}${c.status === "fixed" && c.fixed ? " в " + esc(c.fixed) : ""}</span>`
+    + `${new Date(c.ts * 1000).toLocaleDateString("ru-RU")}${c.reward ? ` · спасибо ${+c.reward || 0} тал.` : ""}</div>${c.reply ? `<div class="brep">${esc(c.reply)}</div>` : ""}</div>`).join("") : "";
 }
 // «сообщи об ошибке: радио молчит», «передай разработчику, что…», «пожалуйся разработчику…»
 const BUG_RX = /^(?:(?:сообщи|передай|напиши|отправь|скажи)\s+(?:разработчик\S*\s+)?(?:об?\s+)?(?:ошибк\S*|проблем\S*|баг\S*|сбо\S*)|отправь\s+жалобу(?:\s+разработчик\S*)?|пожалуйся(?:\s+разработчик\S*)?|(?:передай|скажи|напиши)\s+разработчик\S*)(?:\s*[:,.—-]\s*|\s+)?(?:что\s+)?([\s\S]*)$/i;
@@ -838,7 +838,7 @@ function setState(s) {
   $("#state").textContent = STATE_RU[s] || ""; $("#state").classList.toggle("idle", s === "idle");
   const rb = $("#radiobox"); if (rb) rb.classList.toggle("talking", s !== "idle");   // подсказка про голос — только в покое
   const m = $("#mic"); m.classList.toggle("on", s === "listening"); m.classList.toggle("busy", s === "thinking" || s === "speaking");
-  D.keepScreen(s !== "idle");
+  D.keepScreen(s !== "idle" || !!(window.DewiarCall && DewiarCall.active()));     // идёт звонок «Близким» — экран не гаснет
   const duck = radio.on() && s !== "idle";        // пока слушаю и отвечаю — радио тише
   if (duck !== radioDucked) { radioDucked = duck; D.radioDuck(duck); }
   if (s === "idle") radio.resumeAfterTalk();
@@ -2636,7 +2636,7 @@ function renderDay() {
 /* ---------- сделанное: мини-программы и страницы, которые ассистент сделал прямо на телефоне (make_app) ----------
    Программа сразу открывается на экране — иначе после «Готово» непонятно, где её взять; хранится в «Мой день» →
    «Сделанное» (последние 40: файлы app-<id>.html и список apps.json), её можно сохранить в «Загрузки».
-   Показ — в iframe sandbox без allow-same-origin: код, написанный моделью, не достаёт до window.Dewiar и данных приложения. */
+   Показ — в отдельном окне без моста Dewiar (openHtmlView → HtmlView.java): код, написанный моделью, не достаёт до ключей и телефона. */
 const apps = () => { try { return JSON.parse(fileGet("apps.json") || "[]") || []; } catch (e) { return []; } };
 function saveApp(title, html) {
   const id = "a" + Date.now().toString(36);
@@ -2710,7 +2710,11 @@ async function taskFileSave(id, name, got) {
     toast(where ? "Сохранено: " + where : "Не получилось сохранить", 3500);
   } catch (e) { plog("warn", "файл задачи: " + e.message); toast("Не сохранился: " + e.message, 4000); }
 }
+let htmlViewSave = null;
 function openHtmlView(title, html, onSave) {
+  // на телефоне — отдельное окно без моста Dewiar (HtmlView.java): мост виден во всех фреймах, iframe sandbox не защищает;
+  // iframe ниже — только для проверки в браузере, где моста нет
+  if (D.viewHtml && !D.mock) { htmlViewSave = onSave; if (D.viewHtml(String(title || ""), String(html || ""))) return; }
   let v = $("#appview");
   if (!v) { v = document.createElement("div"); v.id = "appview"; document.body.appendChild(v); }
   v.innerHTML = `<div class="avh"><b>${esc(title)}</b><button class="btn" id="av-dl">В «Загрузки»</button><button class="ib" id="av-x" title="Закрыть">${X_SVG}</button></div><iframe sandbox="allow-scripts allow-forms allow-modals" title="${esc(title)}"></iframe>`;
@@ -3110,7 +3114,7 @@ function wireSettings(info) {
     if (g("pulse-on")) g("pulse-on").onchange = () => { S.pulse = g("pulse-on").checked; saveS(); };
     if (g("bug-img")) g("bug-img").onclick = () => g("bug-img").classList.toggle("zoom");
     if (g("bug-thx")) thanksGet().then(th => { if (g("bug-thx") && th.length) g("bug-thx").innerHTML = `<div class="bugh">Помощники проекта — их жалобы сделали Dewiar лучше</div><div class="thx">`
-      + th.slice(0, 30).map(p => `<span>${esc(p.name)}<b>${p.n}</b></span>`).join("") + "</div>"; }).catch(() => {});
+      + th.slice(0, 30).map(p => `<span>${esc(p.name)}<b>${+p.n || 0}</b></span>`).join("") + "</div>"; }).catch(() => {});
     if (g("bug-mine") && (S.complaints || []).length) complaintsCheck().then(n => { if (n.length && g("bug-mine")) g("bug-mine").innerHTML = complaintsHtml(); }).catch(() => {});
     if (g("cr-clear")) g("cr-clear").onclick = () => { D.clearCrash(); renderSettings(); };
     g("reset").onclick = () => {                       // два вопроса подряд: случайным нажатием отношения с ассистентом не стереть
@@ -3446,7 +3450,7 @@ async function cloudPost(path, body) {
 const RQ = { new: "на проверке", done: "зачислено", rejected: "отклонено" };
 function clReqs(list) {
   const el = $("#cl-reqs"); if (!el) return;
-  el.innerHTML = (list || []).map(r => `<div class="rqi ${r.status}"><span>${new Date(r.ts * 1000).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}${r.amount ? " · " + r.amount + " тал." : ""}${r.reply ? " · «" + esc(r.reply) + "»" : ""}</span><b>${RQ[r.status] || r.status}${r.status === "done" ? " +" + r.credited : ""}</b></div>`).join("");
+  el.innerHTML = (list || []).map(r => `<div class="rqi ${esc(r.status)}"><span>${new Date(r.ts * 1000).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}${r.amount ? " · " + (+r.amount || 0) + " тал." : ""}${r.reply ? " · «" + esc(r.reply) + "»" : ""}</span><b>${RQ[r.status] || esc(r.status)}${r.status === "done" ? " +" + (+r.credited || 0) : ""}</b></div>`).join("");
 }
 async function clPayLoad() { try { const r = await cloudGet(cloudBase(), S.llm.api_key, "/topup"); $("#cl-top").textContent = r.text || ""; clReqs(r.requests); } catch (e) { $("#cl-top").textContent = e.message; } }
 async function cloudUsage() {
@@ -3529,7 +3533,7 @@ async function refLoad() {
     + (d.bonus_new > 0 ? `, другу — +${talers(d.bonus_new)} сразу` : "") + ".";
   const list = d.invited || [];
   more.innerHTML = `<details class="more" style="margin:8px 2px 0"><summary>Мой код <b>${esc(d.code)}</b>${list.length ? ` · приглашено ${list.length}` + (d.earned > 0 ? `, получено ${talers(d.earned)} тал.` : "") : ""}</summary>
-      ${list.length ? `<div class="refs">${list.map(x => `<div class="refi"><span>${esc(x.name)}</span><small>${x.paid ? "засчитано ✓" : `пользуется ${x.days} из ${x.need} дн.`}</small></div>`).join("")}</div>` : `<p class="hint" style="margin:6px 0">Пока никого — нажмите «Пригласить» и отправьте ссылку.</p>`}
+      ${list.length ? `<div class="refs">${list.map(x => `<div class="refi"><span>${esc(x.name)}</span><small>${x.paid ? "засчитано ✓" : `пользуется ${+x.days || 0} из ${+x.need || 0} дн.`}</small></div>`).join("")}</div>` : `<p class="hint" style="margin:6px 0">Пока никого — нажмите «Пригласить» и отправьте ссылку.</p>`}
       <button class="btn w" id="ref-copy" style="margin-top:6px">Скопировать ссылку</button></details>
     ${d.can_use ? `<details class="more" style="margin:4px 2px 0"><summary>Есть код приглашения?</summary><div class="row2" style="margin-top:6px"><input id="ref-code" placeholder="6 знаков" autocapitalize="characters" style="flex:1;padding:12px 14px;border-radius:14px;border:0;background:var(--field)"><button class="btn p" id="ref-use">Ввести</button></div><div class="res" id="ref-res"></div></details>` : ""}`;
   if ($("#ref-copy")) $("#ref-copy").onclick = () => { D.copy(d.link); toast("Ссылка скопирована"); };
@@ -3766,7 +3770,7 @@ async function kbPicker(pid) {
   const key = (b) => b.kind + ":" + b.id, sel = new Set(kbOf(pid).map(key));
   const groups = []; for (const b of bases) { let g = groups.find(x => x.name === b.group); if (!g) groups.push(g = { name: b.group, items: [] }); g.items.push(b); }
   el.innerHTML = groups.map(g => `<div class="kbg">${esc(g.name)}</div>` + g.items.map(b => `<label class="kbi"><input type="checkbox" value="${esc(key(b))}" ${sel.has(key(b)) ? "checked" : ""}>
-    <span>${esc(b.whole ? "Вся библиотека" : b.label)}</span><small>${b.docs} док.</small></label>`).join("")).join("")
+    <span>${esc(b.whole ? "Вся библиотека" : b.label)}</span><small>${+b.docs || 0} док.</small></label>`).join("")).join("")
     + `<p class="hint" style="margin:8px 0 0">До 6 баз. Чем точнее раздел, тем точнее ответы.</p>`;
   $$("input", el).forEach(i => i.onchange = () => {
     const on = $$("input:checked", el).map(x => x.value);
@@ -3940,6 +3944,15 @@ async function probeServer(addr) {
 }
 /* Файл настроек или манифест сервера Dewiar (формат компьютера: llm.profiles, stt/tts.remote) → настройки телефона.
    ${KEY} в строках — место для кода доступа, который выдал администратор. */
+/* Настройки по ссылке или из файла меняют, куда уходят голос и вопросы, — без спроса нельзя: ссылку dewiar://import
+   может подсунуть любая страница, код или сообщение. Показываем, на какие серверы всё переедет. */
+function cfgAsk(m) {
+  const host = (u) => { try { return new URL(String(u)).host; } catch (e) { return String(u || "").slice(0, 60); } };
+  const l = (m && m.llm) || {}, prof = (l.profiles || {})[l.active] || Object.values(l.profiles || {})[0] || {};
+  const rows = [prof.base_url && "Мозг: " + host(prof.base_url), m && m.stt && m.stt.remote && m.stt.remote.base_url && "Распознавание речи: " + host(m.stt.remote.base_url),
+                m && m.tts && m.tts.remote && m.tts.remote.base_url && "Голос: " + host(m.tts.remote.base_url)].filter(Boolean);
+  return confirm("Перенести настройки?\n\n" + (rows.join("\n") || "без серверов") + "\n\nСоглашайтесь, только если сами открыли этот код в своей студии Dewiar.");
+}
 function applyConfig(m, key) {
   const fill = (v) => typeof v === "string" ? v.replace(/\$\{KEY\}/g, key || "") : v;
   const l = m.llm || {}, prof = (l.profiles || {})[l.active] || Object.values(l.profiles || {})[0];
@@ -4044,6 +4057,7 @@ const sendTyped = () => {
 $("#send").onclick = sendTyped;
 $("#typed").onkeydown = (e) => { if (e.key === "Enter") sendTyped(); };
 N.on("intent", (e) => handleIntent(e));
+N.on("htmlview", (e) => { const f = htmlViewSave; htmlViewSave = null; if (e.save && f) f(); });
 // вернулись из настроек Android после «Включить» — карточка «Управлять приложениями» показывает новое состояние
 N.on("resume", () => { if (handsAsked && Date.now() - handsAsked < 10 * 60000 && $("#hands-card")) { $("#hands-card").innerHTML = handsCard(); wireHands(); } });
 N.on("pause", () => { if (state === "listening") stopListen(), setState("idle"); });
@@ -4053,13 +4067,15 @@ N.on("pause", () => { if (state === "listening") stopListen(), setState("idle");
 function handleIntent(e) {
   if (!e || !e.action) return;
   if (e.action === "listen") { closeSheets(); listen(); }
-  else if (e.action === "say") ask(e.text);
+  else if (e.action === "say") {        // текст, которым поделилось другое приложение, — в поле ввода: отправляет сам человек
+    closeSheets(); $("#typebox").classList.add("on"); $("#typed").value = String(e.text || "").slice(0, 4000); setTimeout(() => $("#typed").focus(), 300); }
   else if (e.action === "type") { closeSheets(); $("#typebox").classList.add("on"); setTimeout(() => $("#typed").focus(), 300); }
-  else if (e.action === "import") { try { applyConfig(JSON.parse(e.text), ""); showBot("Настройки с компьютера применены. Мозг: " + brainName() + "."); } catch (x) { showBot("Файл настроек не подошёл: " + x.message, "err"); } }
+  else if (e.action === "import") { try { const m = JSON.parse(e.text); if (!cfgAsk(m)) return; applyConfig(m, ""); showBot("Настройки с компьютера применены. Мозг: " + brainName() + "."); } catch (x) { showBot("Файл настроек не подошёл: " + x.message, "err"); } }
   else if (e.action === "link" && /^dewiar:\/\/import/.test(e.url || "")) {        // QR из студии на компьютере
     try {
       let c = (/[?&]c=([^&]+)/.exec(e.url) || [])[1] || ""; c = c.replace(/-/g, "+").replace(/_/g, "/"); while (c.length % 4) c += "=";
       const m = JSON.parse(decodeURIComponent(escape(atob(c))));
+      if (!cfgAsk(m)) return;
       applyConfig(m, ""); if (m.home && m.home.token) { S.home.token = m.home.token; saveS(); }
       showBot(`Готово — настройки с компьютера перенесены. Мозг: ${brainName()}. Нажмите микрофон и спросите что-нибудь.`); say("Готово! Настройки перенесены.");
     } catch (x) { showBot("Код с настройками не подошёл: " + x.message, "err"); }
@@ -4211,7 +4227,7 @@ function clWatch() {
 const clActive = () => { const st = clLoad(); return st.people.length > 0 || (st.invite && Date.now() / 1000 < (st.invite.expires || 0)); };
 function clSchedule() {
   clearTimeout(clTimer);
-  clTimer = setTimeout(async () => { if (!document.hidden) await clPoll(); clSchedule(); }, clFast ? 1200 : clActive() ? 6000 : 600000);
+  clTimer = setTimeout(async () => { if (!document.hidden || clFast) await clPoll(); clSchedule(); }, clFast ? 1200 : clActive() ? 6000 : 600000);   // во время звонка — и в фоне: отбой и «ответили» не должны теряться
 }
 function clPrompt() {
   const st = clLoad(); if (!st.people.length) return "";
@@ -4246,7 +4262,7 @@ function clTransport(p) {
   return {
     send: (sig) => clSend(p.pid, "", [], "sig", { s: sig }),
     ice: async () => (await clReq("GET", "/close/ice")).iceServers || [],
-    fast: (on) => { clFast = !!on; clSchedule(); },
+    fast: (on) => { clFast = !!on; clSchedule(); try { D.keepScreen(!!on || state !== "idle"); } catch (e) { } },   // звонок — экран не гаснет
     done: (info) => {
       const t = info.secs ? `📞 Звонок · ${String(Math.floor(info.secs / 60)).padStart(2, "0")}:${String(info.secs % 60).padStart(2, "0")}` : "📞 " + (info.reason || "Звонок");
       clAdd(p.pid, { mid: "call" + Date.now(), ts: Date.now(), out: info.role === "caller", t, call: true });

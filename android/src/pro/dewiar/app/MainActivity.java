@@ -49,7 +49,8 @@ public class MainActivity extends Activity implements Net.Sink {
         s.setAllowFileAccess(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setTextZoom(100);                                     // крупный шрифт системы не ломает вёрстку — размеры задаёт app.css
-        WebView.setWebContentsDebuggingEnabled(true);
+        // отладка WebView (chrome://inspect) — только в отладочной сборке: в обычной через USB достали бы ключи и токены
+        WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0);
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onConsoleMessage(ConsoleMessage m) {     // console.log интерфейса — в logcat (тег Dewiar)
                 android.util.Log.i("Dewiar", m.message() + " (" + m.sourceId() + ":" + m.lineNumber() + ")");
@@ -126,6 +127,10 @@ public class MainActivity extends Activity implements Net.Sink {
             fileCb.onReceiveValue(out);
             fileCb = null;
         }
+        if (req == HtmlView.REQ) {                              // окно чужого HTML закрыли: «В «Загрузки»» — сохраняет интерфейс
+            try { event("htmlview", new JSONObject().put("save", res == RESULT_OK && data != null && data.getBooleanExtra("save", false))); }
+            catch (Exception ignored) { }
+        }
     }
 
     @Override protected void onNewIntent(Intent i) {
@@ -152,7 +157,7 @@ public class MainActivity extends Activity implements Net.Sink {
             } else if (Intent.ACTION_VIEW.equals(a) && i.getData() != null) {
                 Uri u = i.getData();
                 if ("dewiar".equals(u.getScheme())) pending = new JSONObject().put("action", "link").put("url", u.toString());
-                else pending = new JSONObject().put("action", "import").put("text", read(u));
+                else if ("content".equals(u.getScheme())) pending = new JSONObject().put("action", "import").put("text", read(u));   // файл настроек, выбранный человеком
             } else if (Intent.ACTION_SEND.equals(a)) {
                 Uri st = i.getParcelableExtra(Intent.EXTRA_STREAM);
                 String t = i.getStringExtra(Intent.EXTRA_TEXT);

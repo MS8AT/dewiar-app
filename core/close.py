@@ -32,6 +32,25 @@ HIST_MAX = 300
 FILE_MAX = 10 * 1024 * 1024
 
 
+def _int(v):
+    """Число из чужих данных: не число — 0 (кривое сообщение не должно ронять приём)."""
+    try:
+        return int(float(v))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+
+
+def safe_name(s, fallback="без имени", limit=120):
+    """Имя папки или файла из чужих данных: без разделителей пути, «..», управляющих символов и имён, запретных в Windows."""
+    s = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", str(s or "")).strip().strip(".").strip()[:limit].strip()
+    if not s or s.split(".")[0].lower() in _RESERVED:
+        return fallback
+    return s
+
+
 class CloseError(Exception):
     """Ошибка с понятным человеку текстом."""
 
@@ -270,7 +289,7 @@ class Close:
             return d
         item = {"mid": body["mid"], "ts": body["ts"], "out": True, "t": body["t"], "f": [dict(x, path=str(Path(f).resolve())) for x, f in zip(fl, files or [])]}
         self._add(p["pid"], item)
-        log.info("💌 Близким: %s ← %s", p["name"], (body["t"] or "файл")[:60])
+        log.info("💌 Близким: %s ← %s", p["name"], f"текст, {len(body['t'])} зн." if body["t"] else "файл")   # содержимое — не в журнал
         return item
 
     def _upload(self, p, path):
@@ -300,45 +319,55 @@ class Close:
         d = self._req("GET", "/close/inbox", params={"after": int(self.st["cursor"])}).json()
         got, refreshed = 0, False
         for it in d.get("items") or []:
-            env, peer = it.get("env") or {}, it.get("peer", "")
-            pub = self._pub_of(peer, env.get("fd", ""), it.get("out"))
-            if pub is None and not refreshed:
-                refreshed = True
-                try:
-                    self.hello()
-                except CloseError:
-                    pass
-                pub = self._pub_of(peer, env.get("fd", ""), it.get("out"))
-            if pub is None:
-                log.info("близкие: неизвестное устройство %s — пропускаю", env.get("fd"))
-                continue
-            try:
-                body = CC.decrypt_from(env, priv, self.st["dev"], pub)
-            except CC.CloseCryptoError as e:
-                log.info("близкие: не открылось (%s)", e)
-                continue
-            if it.get("kind") == "sig":
-                self._sig(peer, it.get("name", ""), body)
-                continue
-            item = {"mid": body.get("mid") or str(it.get("id")), "ts": int(body.get("ts") or it.get("ts", 0) * 1000), "out": bool(it.get("out")),
-                    "t": str(body.get("t") or "")[:20000], "f": [x for x in body.get("f") or [] if isinstance(x, dict)][:10]}
-            if not self._add(peer, item) or item["out"]:
-                continue
-            got += 1
-            name = it.get("name") or "близкого"
-            with self._lock:
-                self.st["unread"][peer] = int(self.st["unread"].get(peer, 0)) + 1
-                self._save()
-            self.host.emit("close_msg", pid=peer, name=name, text=item["t"], files=[x.get("name") for x in item["f"]])
-            if item["f"]:
-                threading.Thread(target=self._fetch_files, args=(peer, name, item), daemon=True).start()
-            self._tell(name, item)
+            try:                                   # одно кривое сообщение не должно стопорить весь ящик
+                n, refreshed = self._take(it, priv, refreshed)
+                got += n
+            except Exception:  # noqa: BLE001
+                log.exception("близкие: сообщение %s пропущено", it.get("id") if isinstance(it, dict) else "?")
         with self._lock:
             self.st["cursor"] = max(int(self.st["cursor"]), int(d.get("last") or 0))
             self._save()
         if got:
             self.host.emit("close", state=self.state())
         return got
+
+    def _take(self, it, priv, refreshed):
+        """Одно входящее из ящика. -> (1, если новое сообщение — для счёта, обновлён ли список устройств)."""
+        env, peer = it.get("env") or {}, it.get("peer", "")
+        pub = self._pub_of(peer, env.get("fd", ""), it.get("out"))
+        if pub is None and not refreshed:
+            refreshed = True
+            try:
+                self.hello()
+            except CloseError:
+                pass
+            pub = self._pub_of(peer, env.get("fd", ""), it.get("out"))
+        if pub is None:
+            log.info("близкие: неизвестное устройство %s — пропускаю", env.get("fd"))
+            return 0, refreshed
+        try:
+            body = CC.decrypt_from(env, priv, self.st["dev"], pub)
+        except CC.CloseCryptoError as e:
+            log.info("близкие: не открылось (%s)", e)
+            return 0, refreshed
+        if not isinstance(body, dict):
+            return 0, refreshed
+        if it.get("kind") == "sig":
+            self._sig(peer, it.get("name", ""), body)
+            return 0, refreshed
+        item = {"mid": body.get("mid") or str(it.get("id")), "ts": _int(body.get("ts")) or _int(it.get("ts")) * 1000, "out": bool(it.get("out")),
+                "t": str(body.get("t") or "")[:20000], "f": [x for x in body.get("f") or [] if isinstance(x, dict)][:10]}
+        if not self._add(peer, item) or item["out"]:
+            return 0, refreshed
+        name = it.get("name") or "близкого"
+        with self._lock:
+            self.st["unread"][peer] = int(self.st["unread"].get(peer, 0)) + 1
+            self._save()
+        self.host.emit("close_msg", pid=peer, name=name, text=item["t"], files=[x.get("name") for x in item["f"]])
+        if item["f"]:
+            threading.Thread(target=self._fetch_files, args=(peer, name, item), daemon=True).start()
+        self._tell(name, item)
+        return 1, refreshed
 
     def _pub_of(self, peer, dev, out):
         who = self.st.get("me") if out else next((p for p in self.st["people"] if p["pid"] == peer), None)
@@ -365,13 +394,16 @@ class Close:
 
     def _fetch_files(self, pid, name, item):
         """Скачать и расшифровать файлы в папку ассистента «Близкие/<имя>»."""
-        root = Path(self.host.workspace.root) / "Близкие" / re.sub(r'[\\/:*?"<>|]', "_", name or "без имени")
+        base = (Path(self.host.workspace.root) / "Близкие").resolve()
+        root = base / safe_name(name)
+        if root.resolve().parent != base:                   # имя придумал собеседник — из «Близких» не выходим
+            root = base / "без имени"
         for f in item.get("f") or []:
             try:
                 r = self._req("GET", "/close/file", params={"id": f["id"]}, timeout=120)
                 data = CC.unseal(CC.b64d(f["key"]), r.content)
                 root.mkdir(parents=True, exist_ok=True)
-                safe = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", f.get("name") or "файл")[:120] or "файл"
+                safe = safe_name(f.get("name"), "файл")
                 out = root / safe
                 n = 1
                 while out.exists() and hashlib.sha1(out.read_bytes()).hexdigest() != hashlib.sha1(data).hexdigest():
@@ -391,7 +423,7 @@ class Close:
 
     # ---------- фон ----------
     def active(self):
-        return bool(self.st["people"] or (self.st.get("invite") and time.time() < float(self.st["invite"].get("expires") or 0)))
+        return bool(self.st["people"] or (self.st.get("invite") and time.time() < _int(self.st["invite"].get("expires"))))
 
     def loop(self, stopping):
         time.sleep(8)
@@ -408,7 +440,12 @@ class Close:
                 log.info("Близкие: %s", e)
             except Exception:  # noqa: BLE001
                 log.exception("Близкие")
-            self.soon.wait(1 if self._fast() else 6 if self.active() else 600)
+            try:
+                wait = 1 if self._fast() else 6 if self.active() else 600
+            except Exception:  # noqa: BLE001 — поток опроса не должен умирать
+                log.exception("Близкие: пауза")
+                wait = 60
+            self.soon.wait(wait)
             self.soon.clear()
 
     # ---------- звонки (страница ui/call.html в браузере, assets/call.js — WebRTC) ----------
@@ -420,7 +457,12 @@ class Close:
         for cid, c in list(self.calls.items()):
             if now - c["at"] > 4 * 3600:
                 self.calls.pop(cid, None)
-        return any(c.get("fast") and now - c["at"] < 3600 for c in self.calls.values())
+        return any(self._live(c, now) for c in list(self.calls.values()))
+
+    @staticmethod
+    def _live(c, now):
+        """Звонок идёт: страница звонка жива (напоминает о себе раз в 20 с; закрыли вкладку — через 90 с уже нет)."""
+        return bool(c.get("fast")) and not c.get("ended") and now - c.get("seen", c["at"]) < 90 and now - c["at"] < 4 * 3600
 
     def _open_call(self, c):
         import callpage
@@ -445,9 +487,11 @@ class Close:
     def _sig(self, peer, name, body):
         s = (body or {}).get("s") or {}
         if s.get("type") == "ring":
-            if time.time() * 1000 - float(s.get("ts") or 0) > 45000 or s.get("call") in self.calls:
+            if time.time() * 1000 - _int(s.get("ts")) > 45000 or s.get("call") in self.calls:
                 return
-            if any(c for c in self.calls.values() if time.time() - c["at"] < 3600 and not c.get("ended")):
+            if not re.fullmatch(r"[0-9a-z]{6,32}", str(s.get("call") or "")):           # id звонка уходит в адрес страницы
+                return
+            if any(self._live(c, time.time()) for c in list(self.calls.values())):
                 try:                                   # уже идёт звонок — «занято»
                     self.send(peer, kind="sig", payload={"s": {"type": "busy", "call": s.get("call")}})
                 except CloseError:
@@ -478,6 +522,7 @@ class Close:
             return self._req("GET", "/close/ice").json().get("iceServers") or []
         if not c:
             raise CloseError("звонок уже закончился")
+        c["seen"] = time.time()                              # страница звонка жива
         if cmd == "call_info":
             return {"call": c["call"], "role": c["role"], "video": c["video"], "offer": c["offer"],
                     "peer": {"pid": c["pid"], "name": c["name"], "color": _color_of(c["pid"])}}

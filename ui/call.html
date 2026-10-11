@@ -35,6 +35,9 @@ core.on("hello", async () => {
         setTimeout(() => { document.body.innerHTML = '<div id="wait">' + (d.reason || "Звонок завершён") + ' — окно можно закрыть</div>'; try { window.close(); } catch (e) {} }, 1800); },
     } });
 });
+// «я жива»: пока звонок идёт, страница раз в 20 с напоминает о себе — закрыли вкладку, и компьютер через ~минуту
+// перестаёт опрашивать сервер каждую секунду и снова принимает звонки
+setInterval(() => { if (DewiarCall.active()) core.call("call_fast", { call: CALL, on: true }).catch(() => {}); }, 20000);
 core.on("close_sig", e => { if (e.sig && e.sig.s) DewiarCall.signal(e.peer, e.sig.s, {}); });
 core.on("offline", () => { if (!DewiarCall.active()) document.title = "Dewiar — нет связи"; });
 </script>

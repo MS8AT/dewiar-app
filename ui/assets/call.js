@@ -112,8 +112,18 @@
     try { return await md.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: video ? { facingMode: "user", width: { ideal: 1280 } } : false }); }
     catch (e) { if (video) return md.getUserMedia({ audio: true, video: false }); throw new Error("нет доступа к микрофону" + (e && e.name === "NotAllowedError" ? " — разрешите его в настройках" : "")); }
   }
+  // пока ждали камеру или ICE, звонок могли закончить (отбой, «занято», тайм-аут) — тогда новое сразу гасим, иначе
+  // микрофон и камера остались бы включены
+  const GONE = new Error("звонок уже завершён");
+  async function grab(c) {
+    const s = await media(c.video);
+    if (cur !== c) { s.getTracks().forEach(t => t.stop()); throw GONE; }
+    c.local = s;
+  }
   async function peer() {
-    let ice = []; try { ice = await cur.transport.ice(); } catch (e) { }
+    const c = cur;
+    let ice = []; try { ice = await c.transport.ice(); } catch (e) { }
+    if (cur !== c) throw GONE;
     const pc = new RTCPeerConnection({ iceServers: ice && ice.length ? ice : [{ urls: "stun:stun.l.google.com:19302" }] });
     cur.pc = pc;
     cur.local.getTracks().forEach(t => pc.addTrack(t, cur.local));
@@ -160,7 +170,7 @@
   async function startCaller() {
     setStatus("Звоню…"); bar("call");
     cur.ring = tones("out"); cur.ring.start();
-    cur.local = await media(cur.video);
+    await grab(cur);
     if (!cur.local.getVideoTracks().length) { cur.video = false; cur.el.classList.remove("vid", "cam"); bar("call"); }
     const pc = await peer();
     await pc.setLocalDescription(await pc.createOffer());
@@ -179,7 +189,7 @@
     cur.ring && cur.ring.stop(); clearTimeout(cur.timeout);
     setStatus("Соединяю…"); bar("call");
     try {
-      cur.local = await media(cur.video);
+      await grab(cur);
       if (!cur.local.getVideoTracks().length && cur.video) { cur.el.classList.remove("cam"); }
       const pc = await peer();
       await pc.setRemoteDescription({ type: "offer", sdp: cur.offer });
@@ -188,7 +198,7 @@
       if (!cur) return;
       await send({ type: "answer", sdp: pc.localDescription.sdp });
       cur.timeout = setTimeout(() => { if (cur && !cur.started) { send({ type: "bye" }); finish("Связь не установилась: возможно, нужен TURN-сервер", true); } }, 25000);
-    } catch (e) { send({ type: "decline" }); finish("Не получилось: " + e.message, true); }
+    } catch (e) { if (e === GONE) return; send({ type: "decline" }); finish("Не получилось: " + e.message, true); }
   }
   function decline() { send({ type: "decline" }); finish("Отклонено"); }
   function hangup() { send({ type: cur && !cur.started && cur.role === "caller" ? "cancel" : "bye" }); finish(""); }
@@ -202,7 +212,7 @@
       cur.el = ui(cur);
       try { cur.transport.fast && cur.transport.fast(true); } catch (e) { }
       try { if (o.role === "caller") await startCaller(); else startCallee(); }
-      catch (e) { finish("Не получилось: " + e.message, true); }
+      catch (e) { if (e !== GONE) finish("Не получилось: " + e.message, true); }
     },
     /* входящий сигнал от близкого (peerPid) */
     async signal(peerPid, s, start) {
