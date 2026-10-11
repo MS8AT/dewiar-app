@@ -146,9 +146,16 @@ class VoskProc:
         # CREATE_NO_WINDOW: без чёрного окна; Linux/macOS — голоса уступают процессор другим программам (nice +5):
         # загрузка и синтез тяжёлые, а курсор и окна у человека не должны дёргаться
         kw = {"creationflags": 0x08000000} if os.name == "nt" else {"preexec_fn": lambda: os.nice(5)}
-        self.p = subprocess.Popen([sys.executable, str(Path(__file__).with_name("tts_worker.py")), self.path],
-                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **kw)
-        r = self._read_json()
+        try:
+            import ortcfg                               # не одновременно с загрузкой слуха (GigaAM): по очереди
+            heavy = ortcfg.HEAVY
+        except Exception:  # noqa: BLE001
+            import contextlib
+            heavy = contextlib.nullcontext()
+        with heavy:
+            self.p = subprocess.Popen([sys.executable, str(Path(__file__).with_name("tts_worker.py")), self.path],
+                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, **kw)
+            r = self._read_json()
         if not r.get("ok"):
             self.close()
             raise RuntimeError(r.get("error") or "процесс голосов не запустился")

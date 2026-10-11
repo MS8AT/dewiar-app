@@ -142,7 +142,8 @@ async function loadVosk() {
 function renderFx() {
   const cur = S.tts.fx || "persona";
   const items = [{ id: "persona", name: "Как у персонажа", description: "у каждого своя обработка" }].concat(S_fx);
-  $("#fxgrid").innerHTML = items.map(f => `<button data-fx="${f.id}" class="${f.id === cur ? "on" : ""}"><b>${f.name}</b><span>${f.description}</span></button>`).join("");
+  // ▶ у каждого варианта — видно, что его можно послушать (отзыв 11.10: «как проверить звучание, непонятно»)
+  $("#fxgrid").innerHTML = items.map(f => `<button data-fx="${f.id}" class="${f.id === cur ? "on" : ""}" title="Выбрать и послушать"><b><i class="fxp"></i>${f.name}</b><span>${f.description}</span></button>`).join("");
   $$("#fxgrid button").forEach(b => b.onclick = () => {
     save({ tts: { fx: b.dataset.fx } });
     previewVoice(b, { text: "Слушаю вас. Чем могу помочь?", fx: b.dataset.fx === "persona" ? null : b.dataset.fx });

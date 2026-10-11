@@ -42,6 +42,16 @@ class VoskSTT:
         return json.loads(rec.FinalResult()).get("text", "")
 
 
+def _heavy():
+    """Замок тяжёлых загрузок (ortcfg.HEAVY): слух и голоса грузятся по очереди, а не вместе."""
+    try:
+        import ortcfg
+        return ortcfg.HEAVY
+    except Exception:  # noqa: BLE001
+        import contextlib
+        return contextlib.nullcontext()
+
+
 class GigaAMSTT:
     def __init__(self, model_name="gigaam-v3-e2e-rnnt"):
         self.model_name = model_name
@@ -137,30 +147,32 @@ class GigaAMSTT:
                         log.warning("GigaAM со своего сайта не скачался (%s) — беру с Hugging Face", e)
                 if self._local_ok():
                     q = "int8" if any(self.local_dir.glob("*int8*.onnx")) else None
-                    self.model = onnx_asr.load_model(self.model_name, str(self.local_dir), quantization=q, sess_options=so)
-                    self.model.recognize(np.zeros(8000, dtype=np.float32))
+                    with _heavy():                      # не одновременно с загрузкой голосов
+                        self.model = onnx_asr.load_model(self.model_name, str(self.local_dir), quantization=q, sess_options=so)
+                        self.model.recognize(np.zeros(8000, dtype=np.float32))
                     log.info("GigaAM готов за %.1f с (%s)", time.monotonic() - t0, self.local_dir)
                     self.error = ""
                     return True
                 if not self._hub_ok() and any((MODELS_DIR / "hf" / "hub").glob("models--*gigaam*")):
                     self._drop_hub()                       # оборванное скачивание: снимок без кодера — заново
-                try:
+                with _heavy():                          # кэш Hugging Face — тоже не вместе с голосами
                     try:
-                        self.model = onnx_asr.load_model(self.model_name, quantization="int8", sess_options=so)
-                    except Exception as e:  # noqa: BLE001  нет int8-варианта — берём полный
-                        log.info("int8-вариант недоступен (%s), загружаю полный", e)
-                        self.model = onnx_asr.load_model(self.model_name, sess_options=so)
-                except Exception as e:  # noqa: BLE001
-                    if "not found" not in str(e) and "No such file" not in str(e):
-                        raise
-                    self._drop_hub()                       # файла модели нет — кэш неполный: со своего сайта или заново
-                    if self.mirror and not tried:
-                        self._from_mirror(on_progress)
-                        q = "int8" if any(self.local_dir.glob("*int8*.onnx")) else None
-                        self.model = onnx_asr.load_model(self.model_name, str(self.local_dir), quantization=q, sess_options=so)
-                    else:
-                        self.model = onnx_asr.load_model(self.model_name, sess_options=so)
-                self.model.recognize(np.zeros(8000, dtype=np.float32))     # прогрев
+                        try:
+                            self.model = onnx_asr.load_model(self.model_name, quantization="int8", sess_options=so)
+                        except Exception as e:  # noqa: BLE001  нет int8-варианта — берём полный
+                            log.info("int8-вариант недоступен (%s), загружаю полный", e)
+                            self.model = onnx_asr.load_model(self.model_name, sess_options=so)
+                    except Exception as e:  # noqa: BLE001
+                        if "not found" not in str(e) and "No such file" not in str(e):
+                            raise
+                        self._drop_hub()                       # файла модели нет — кэш неполный: со своего сайта или заново
+                        if self.mirror and not tried:
+                            self._from_mirror(on_progress)
+                            q = "int8" if any(self.local_dir.glob("*int8*.onnx")) else None
+                            self.model = onnx_asr.load_model(self.model_name, str(self.local_dir), quantization=q, sess_options=so)
+                        else:
+                            self.model = onnx_asr.load_model(self.model_name, sess_options=so)
+                    self.model.recognize(np.zeros(8000, dtype=np.float32))     # прогрев
                 log.info("GigaAM готов за %.1f с", time.monotonic() - t0)
                 self.error = ""
                 return True

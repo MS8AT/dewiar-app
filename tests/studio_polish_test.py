@@ -45,5 +45,14 @@ ok(not errs, f"без ошибок на странице: {errs[:3]}")
 ph = (ROOT / "android/assets/www/app.js").read_text(encoding="utf-8")
 ok('data-ext="$1"' in ph[ph.index("async function clPayLoad"):ph.index("async function clPayLoad") + 800] and "#cl-top { -webkit-user-select: text"
    in (ROOT / "android/assets/www/app.css").read_text(encoding="utf-8"), "телефон: как пополнить — тоже выделяется, ссылки открываются")
+# слух и голоса грузятся по очереди (отзыв 11.10: GigaAM + Vosk TTS вместе — компьютер завис)
+import threading  # noqa: E402
+sys.path.insert(0, str(ROOT / "core"))
+import ortcfg  # noqa: E402
+stt_src, tts_src = (ROOT / "core/stt.py").read_text(encoding="utf-8"), (ROOT / "core/tts.py").read_text(encoding="utf-8")
+ok(isinstance(ortcfg.HEAVY, type(threading.Lock())) and stt_src.count("with _heavy():") == 2 and "with heavy:" in tts_src[tts_src.index("class VoskProc"):tts_src.index("class VoskTTS")],
+   "GigaAM и голоса Vosk грузятся по очереди, а не вместе")
+br = (ROOT / "ui/studio/brain.js").read_text(encoding="utf-8")
+ok('<i class="fxp"></i>' in br and "previewVoice(b" in br[br.index("function renderFx"):], "у каждого варианта обработки голоса — ▶: выбрать и послушать")
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)
