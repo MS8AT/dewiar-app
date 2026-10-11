@@ -644,6 +644,8 @@ def check_answer(expect, answer):
         if k.startswith("any"):
             ok = any(x.lower() in low for x in v)
             out.append({"name": f"в ответе есть: {' / '.join(v)}", "ok": ok})
+        elif k == "none":                                  # «заметок нет», когда они есть, — такого быть не должно
+            out.append({"name": f"в ответе нет: {' / '.join(v)}", "ok": not any(x.lower() in low for x in v)})
         elif k == "regex":
             out.append({"name": "в ответе есть нужное число", "ok": bool(re.search(v, answer, re.I))})
         elif k == "num":
@@ -796,8 +798,45 @@ def task_detail(res, t):
         res["steps"][-1]["answer"] = "⚠ " + t["error"][:600]
 
 
+async def seed(core, sd):
+    """Положить перед сценарием заметки (файлы «Заметки/…») и напоминания. -> что убрать после (unseed)."""
+    made = {"notes": [], "reminders": []}
+    for n in (sd or {}).get("notes") or []:
+        f = core.tmp / "ws" / "Заметки" / f"{n['title']}.md"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(f"# {n['title']}\n\n{n['text']}\n", encoding="utf-8")
+        made["notes"].append(f)
+    for ph in (sd or {}).get("reminders") or []:
+        r = await core.call("reminder_add", phrase=ph)
+        if isinstance(r, dict) and r.get("id"):
+            made["reminders"].append(r["id"])
+    return made
+
+
+async def unseed(core, made):
+    for f in made.get("notes") or []:
+        try:
+            f.unlink()
+        except OSError:
+            pass
+    for rid in made.get("reminders") or []:
+        try:
+            await core.call("reminder_cancel", id=rid)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 async def run_scenario(core, sc, judge_prof, work, log):
     t0 = time.time()
+    made = await seed(core, sc.get("seed")) if sc.get("seed") else {}
+    try:
+        return await _run_scenario(core, sc, judge_prof, work, log, t0)
+    finally:
+        if made:
+            await unseed(core, made)
+
+
+async def _run_scenario(core, sc, judge_prof, work, log, t0):
     res = {"id": sc["id"], "group": sc["group"], "title": sc["title"], "video": bool(sc.get("video")), "steps": [], "checks": []}
     try:
         await core.say("Начнём новый разговор", timeout=30)

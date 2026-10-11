@@ -1804,9 +1804,30 @@ async function quick(text) {
   // «запиши в заметки …», «добавь в заметки …», «заметка: …» — сразу в заметки, без модели: модель иногда отвечала
   // «Записала.», не вызвав save_note, и заметка терялась (отзыв 11.10). Текст — как сказан, заголовок — первые слова.
   { const n = noteQuick(text); if (n) return { say: n }; }
+  // «покажи напоминания», «какие у меня напоминания» — открыть и сказать, сколько (модель иногда отвечала «чистый лист»,
+  // не посмотрев, — отзыв 11.10)
+  { const tq = t.replace(/^([а-яa-z-]+)\s*,?\s+(?=\S)/, (m, w) => findPersona(w, true) ? "" : m);
+    if (/^(?:(?:покажи|открой|прочитай|какие|что|есть ли)\s+)?(?:у\s+меня\s+)?(?:есть\s+)?(?:мои\s+|все\s+)?(?:напоминани[яй]|будильники)(?:\s+(?:у\s+меня|есть|на\s+сегодня|на\s+завтра))?$/.test(tq)) {
+      const l = alarmsNow().sort((x, y) => x.at - y.at), jobs = (mind().jobs || []).filter(j => !j.paused);
+      setTimeout(() => { openSheet("#sh-day"); dayTab = "rem"; $$("#day-tabs button").forEach(x => x.classList.toggle("on", x.dataset.t === "rem")); renderDay(); }, 200);
+      if (!l.length && !jobs.length) return { say: "Напоминаний нет. Скажите: «напомни завтра в 9 позвонить маме»." };
+      const near = l.length === 1 ? ` ${whenText(new Date(l[0].at))} — ${l[0].title}.` : l.length ? ` Ближайшие: ${l.slice(0, 3).map(x => `${whenText(new Date(x.at))} — ${x.title}`).join("; ")}.` : "";
+      return { say: `Напоминаний: ${l.length}${jobs.length ? `, и дел по расписанию: ${jobs.length}` : ""}.${near}` };
+    } }
+  // «покажи заметки», «мои заметки», «что у меня в заметках» — открыть их и коротко сказать, сколько и какая последняя
+  { const tq = t.replace(/^([а-яa-z-]+)\s*,?\s+(?=\S)/, (m, w) => findPersona(w, true) ? "" : m).replace(/^что\s+у\s+меня\s+в\s+/, "что в ");
+    if (NOTES_SHOW_RX.test(tq) || /^что в заметках$/.test(tq)) {
+      const all = notes().slice().sort((x, y) => (+y.time || 0) - (+x.time || 0));
+      setTimeout(() => { openSheet("#sh-day"); dayTab = "notes"; $$("#day-tabs button").forEach(x => x.classList.toggle("on", x.dataset.t === "notes")); renderDay(); }, 200);
+      const k = all.length, w = k % 10 === 1 && k % 100 !== 11 ? "заметка" : [2, 3, 4].includes(k % 10) && ![12, 13, 14].includes(k % 100) ? "заметки" : "заметок";
+      return { say: !k ? "Заметок пока нет. Скажите: «запиши в заметки…»" : `Вот ваши заметки — ${k} ${w}, новые сверху.` };
+    } }
   // «отсканируй код», «открой сканер», «сканер qr» — сразу сканер, без модели
   const SCAN_OBJ = "(?:код|qr|кьюар|ку ар|qr[- ]?код|кьюар[- ]?код|ацтек|aztec|штрих[- ]?код|дата ?матрикс|data ?matrix|датаматрикс|товар|этикетку|упаковку|маркировку|честный знак|ценник)";
-  if (new RegExp(`^(?:(?:открой|запусти|включи|покажи)\\s+)?(?:сканер|сканирование)(?:\\s+(?:кодов|${SCAN_OBJ}))?$|^(?:от|про)?сканируй(?:\\s+(?:мне\\s+)?(?:этот\\s+|эту\\s+)?${SCAN_OBJ})?$|^(?:считай|прочитай|проверь)\\s+(?:этот\\s+|эту\\s+)?${SCAN_OBJ}$`).test(t))
+  // «Лира, открой сканер» / «Лира открой сканер» — имя в начале не мешает (иначе фраза уходила модели, и та отвечала
+  // «открыла сканер», не открыв его — отзыв 11.10)
+  const tn = t.replace(/^([а-яa-z-]+)\s*,?\s+(?=\S)/, (m, w) => findPersona(w, true) ? "" : m);
+  if (new RegExp(`^(?:(?:открой|запусти|включи|покажи)\\s+)?(?:сканер|сканирование)(?:\\s+(?:кодов|${SCAN_OBJ}))?$|^(?:от|про)?сканируй(?:\\s+(?:мне\\s+)?(?:этот\\s+|эту\\s+)?${SCAN_OBJ})?$|^(?:считай|прочитай|проверь)\\s+(?:этот\\s+|эту\\s+)?${SCAN_OBJ}$`).test(tn))
     { setTimeout(() => scanCode(), 300); return { say: "Наведите камеру на код." }; }
   // «спасибо», «спасибо большое», «ладно, благодарю» — коротко и вежливо, без модели (как на компьютере, отзыв 11.10)
   if (/^(?:(?:ну|ладно|хорошо|окей|ок|отлично|супер)[\s,]+)?(?:спасибо|благодарю|спс)(?:[\s,]+(?:большое|огромное|тебе|вам|за помощь|за все|очень))*$/.test(t))
@@ -2011,6 +2032,9 @@ const CLAIMS = [
   // «Готово, калькулятор сделан», «Я сделала мини-презентацию — она уже открылась на экране» — где угодно в ответе
   { rx: /(?:^|[\s,.!—–-])(?:готово|сделал[аи]?|создал[аи]?|подготовил[аи]?|собрал[аи]?|написал[аи]?|вот)(?![а-яё])[^.!?]{0,80}(?:калькулятор|игр[уаы]|страниц|программ|приложени|таймер|конвертер|викторин|презентаци|слайд|открытк|шпаргалк)|(?:открыл[аио]?сь|открыт[аоы]?|появил[аио]?сь)\s+(?:у\s+тебя\s+|тебе\s+)?на\s+экран/i,
     tool: "make_app", what: "сделал программу, страницу или презентацию" },
+  // «Открыла сканер», «Наведите камеру на код» — без scan_code сканер не открылся (отзыв 11.10)
+  { rx: /(?:открыл[аи]?|открываю|запускаю|запустил[аи]?|включил[аи]?|включаю)\s+(?:тебе\s+|вам\s+)?сканер|наведите\s+(?:камеру|телефон)\s+на\s+(?:код|qr|штрих)/i,
+    tool: "scan_code", what: "открыл(а) сканер" },
 ];
 /* -> обещание из CLAIMS, инструмент которого в этом ходе так и не вызывали (called — вызванные), или null.
    asked — просьба человека: у части обещаний («смотрю», «вот») смысл есть только при просьбе про камеру (c.user) */
@@ -2232,8 +2256,10 @@ async function runTool(name, a) {
       catch (e) { return "Ошибка: " + e.message; }
     }
     case "list_reminders": {
-      const l = JSON.parse(D.alarms() || "[]").sort((x, y) => x.at - y.at);
-      return l.length ? l.map(x => `${x.id}: ${whenText(new Date(x.at))}${x.repeat ? " (" + REP_RU[x.repeat] + ")" : ""} — ${x.title}`).join("\n") : "Напоминаний нет.";
+      const l = JSON.parse(D.alarms() || "[]").sort((x, y) => x.at - y.at), jobs = (mind().jobs || []).filter(j => !j.paused);
+      const out = l.map(x => `${x.id}: ${whenText(new Date(x.at))}${x.repeat ? " (" + REP_RU[x.repeat] + ")" : ""} — ${x.title}`);
+      if (jobs.length) out.push("Дела по расписанию (делает компьютер): " + jobs.map(j => `${j.title || j.prompt || "дело"}${j.at ? " — " + whenText(new Date(j.at)) : ""}`).join("; "));
+      return out.length ? out.join("\n") : "Напоминаний нет.";
     }
     case "cancel_reminder": {
       const l = JSON.parse(D.alarms() || "[]"), q = String(a.id || "").toLowerCase();
@@ -2303,9 +2329,15 @@ async function runTool(name, a) {
       return "Снимок снова на экране, под ним кнопка «Сохранить». Скажи об этом одной фразой.";
     }
     case "find_notes": {
-      const w = String(a.query || "").toLowerCase().split(/\s+/).filter(x => x.length > 2).map(x => x.slice(0, 5));
-      const f = notes().filter(n => w.some(x => (n.title + " " + n.text).toLowerCase().includes(x))).slice(-8);
-      return f.length ? f.map(n => `«${n.title}»: ${n.text}`).join("\n\n") : "В заметках ничего не нашлось.";
+      // «покажи заметки», «все», «последние» — это не слова для поиска: отдаём последние заметки. Раньше такие слова
+      // ничего не находили, и Лира говорила «заметок пока нет», хотя они были (отзыв 11.10)
+      const all = notes().slice().sort((x, y) => (+y.time || 0) - (+x.time || 0));
+      const w = String(a.query || "").toLowerCase().replace(/ё/g, "е").split(/[\s,.]+/).filter(x => x.length > 2 && !NOTE_GENERIC.test(x)).map(x => x.slice(0, 5));
+      const f = w.length ? all.filter(n => w.some(x => (n.title + " " + n.text).toLowerCase().replace(/ё/g, "е").includes(x))).slice(0, 8) : [];
+      const show = (l) => l.map(n => `«${n.title}» (${whenText(new Date(+n.time || Date.now()))}): ${noteBody(n.text).slice(0, 600)}${(n.att || []).length ? ` [вложений: ${n.att.length}]` : ""}`).join("\n\n");
+      if (f.length) return show(f);
+      if (!all.length) return "Заметок пока нет.";
+      return (w.length ? "По этим словам в заметках ничего нет. " : "") + `Всего заметок: ${all.length}. Последние:\n\n` + show(all.slice(0, 10));
     }
     case "remember": { const f = String(a.fact || "").trim(); if (f && !S.memory.includes(f)) { S.memory.push(f); S.memory = S.memory.slice(-80); saveS(); syncSoon(); } return "Запомнил."; }
     case "money_add": {
@@ -2477,6 +2509,10 @@ async function weather(city, days) {
 /* ---------- заметки и деньги — файлы notes.json и money.json в памяти приложения (Dewiar.files/saveFile);
    после каждой записи — синхронизация с компьютером (syncSoon) ---------- */
 const notes = () => { try { return JSON.parse(fileGet("notes.json") || "[]"); } catch (e) { return []; } };
+// напоминания телефона; в экзамене — его песочница (exam.js: EXAM.alarms), настоящие будильники не трогаем
+const alarmsNow = () => (typeof EXAM !== "undefined" && EXAM ? EXAM.alarms.slice() : JSON.parse(D.alarms() || "[]"));
+const NOTE_GENERIC = /^(?:заметк\w*|все|всё|мои|мой|моих|последн\w*|покажи|прочитай|список|какие|есть|что|там|записи|запис\w*|сохран\w*)$/;
+const NOTES_SHOW_RX = /^(?:(?:покажи|открой|прочитай|выведи|какие|что)\s+)?(?:(?:у\s+меня\s+)?(?:есть\s+)?(?:в\s+)?)?(?:мои\s+|все\s+)?(?:заметк(?:и|ах))(?:\s+(?:у\s+меня|есть))?$/;
 const NOTE_RX = /^(?:(?:запиши|запишите|сохрани|добавь|занеси|сделай|создай|оставь)(?:\s+(?:мне|себе|пожалуйста))*\s+)?(?:в\s+)?(?:заметк(?:а|у|и|ах)|новую\s+заметку)(?:\s+(?:что|о том,?\s+что))?\s*[:,—–-]?\s+(\S[\s\S]{2,})$/i;
 /* -> текст ответа, если фраза — явная просьба записать заметку (и заметка записана), иначе "" */
 function noteQuick(text, att) {
@@ -2508,11 +2544,25 @@ function noteAttSave(list) {
     return { id, name: String(a.name || (a.kind === "image" ? "фото" : "файл")).slice(0, 120), type: a.kind === "image" || /^data:image\//.test(data) ? "image" : (a.type || "file"), size: Math.round(data.length * 0.75) };
   });
 }
+/* Удалить заметку: всегда спрашиваем, и ещё 8 секунд можно «Вернуть» — вместе с вложениями (отзыв 11.10: одно
+   случайное нажатие — и заметки нет). Удалить — только из открытой заметки, крестика в списке нет. */
 function noteDelete(id, ask) {
   const n = notes().find(x => x.id === id); if (!n) return;
-  if (ask && (n.att || []).length && !confirm(`Удалить заметку «${n.title}» вместе с вложениями?`)) return;
+  if (ask && !confirm(`Удалить заметку «${n.title}»${(n.att || []).length ? " вместе с вложениями" : ""}?`)) return;
+  const keep = (n.att || []).map(a => [a.id, noteAttGet(a.id)]);
   (n.att || []).forEach(a => fileSave("natt-" + a.id, ""));
   saveNotes(notes().filter(x => x.id !== id)); if (noteCur === id) closeSheets(); renderDay();
+  if (ask) undoBar("Заметка удалена", () => {
+    keep.forEach(([aid, data]) => fileSave("natt-" + aid, data));
+    const all = notes(); if (!all.some(x => x.id === n.id)) { all.push(n); saveNotes(all); }
+    renderDay(); toast("Заметка возвращена");
+  });
+}
+function undoBar(text, onUndo, ms = 8000) {
+  let el = $("#undo"); if (!el) { el = document.createElement("div"); el.id = "undo"; document.body.appendChild(el); }
+  el.innerHTML = `<span>${esc(text)}</span><button>Вернуть</button>`; el.classList.add("on");
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("on"), ms);
+  el.querySelector("button").onclick = () => { clearTimeout(el._t); el.classList.remove("on"); onUndo(); };
 }
 function openNote(id) { noteCur = id || ""; notePend = []; renderNote(); openSheet("#sh-note"); if (!id) setTimeout(() => $("#nt-text") && $("#nt-text").focus(), 300); }
 function renderNote() {
@@ -2732,11 +2782,10 @@ function renderDay() {
     const n = notes().slice().sort((a, b) => (+b.time || 0) - (+a.time || 0));          // новые сверху — и с компьютера тоже
     box.innerHTML = `<button class="btn p ntnew" id="nt-new">Новая заметка</button>` + (n.length ? n.map(x => {
       const img = (x.att || []).find(a => a.type === "image"), more = (x.att || []).length;
-      return `<div class="it note" data-id="${esc(x.id)}">${img ? `<img class="nthumb" src="${noteAttGet(img.id)}" alt="">` : ""}<div class="bd"><b>${esc(x.title)}${more ? `<span class="ntc">📎${more}</span>` : ""}</b><small>${esc(noteBody(x.text).slice(0, 220))}</small></div><button class="x" data-id="${esc(x.id)}" title="Удалить">${X_SVG}</button></div>`; }).join("")
+      return `<div class="it note" data-id="${esc(x.id)}">${img ? `<img class="nthumb" src="${noteAttGet(img.id)}" alt="">` : ""}<div class="bd"><b>${esc(x.title)}${more ? `<span class="ntc">📎${more}</span>` : ""}</b><small>${esc(noteBody(x.text).slice(0, 220))}</small></div></div>`; }).join("")
       : `<div class="empty">Заметок нет.<br>Скажите: «запиши в заметки: купить хлеб и молоко» — или нажмите «Новая заметка».</div>`);
     $("#nt-new").onclick = () => openNote("");
-    $$(".it.note", box).forEach(el => el.onclick = (e) => { if (!e.target.closest(".x")) openNote(el.dataset.id); });
-    $$(".x", box).forEach(b => b.onclick = () => noteDelete(b.dataset.id, true));
+    $$(".it.note", box).forEach(el => el.onclick = () => openNote(el.dataset.id));
   } else if (dayTab === "made") {
     const l = apps().slice().reverse();
     box.innerHTML = tasksHtml() + (l.length ? `<div class="bugh">Сделано на телефоне</div>` + l.map(x => `<div class="it"><div class="bd" data-open="${esc(x.id)}"><b>${esc(x.title)}</b><small>${esc(whenText(new Date(x.ts)))} · ${Math.max(1, Math.round(x.size / 1024))} КБ · нажмите, чтобы открыть</small></div><button class="x" data-id="${esc(x.id)}">${X_SVG}</button></div>`).join("")
@@ -3695,6 +3744,10 @@ function refPeer(x) {                         // друг в «Близких» 
   const m = (x && refMap[x.rid]) || {}, p = m.pid && clLoad().people.find(q => q.pid === m.pid);
   return { pid: p ? p.pid : "", name: p ? p.name : x.name, offered: !!m.offered, devs: p ? (p.devs || []).length : 0 };
 }
+/* состояние приглашённого: засчитан; не засчитан (тот же интернет или устройство — защита от накруток); ждёт его
+   первого пополнения или нового месяца (лимит наград); пробует Dewiar N из M дней */
+const refState = (x) => x.paid ? "засчитан ✓" : x.why === "same" ? "не засчитан: тот же интернет или устройство" : x.why === "topup" ? "засчитается после его первого пополнения"
+  : x.why === "cap" ? "засчитается в следующем месяце — лимит наград" : `пользуется ${+x.days || 0} из ${+x.need || 0} дн.`;
 function refRow(x, key, sub) {
   const q = refPeer(x), col = window.DewiarRefNet ? DewiarRefNet.color(x.name) : clCol(x.name);   // цвет — как у звезды в созвездии
   const act = q.pid ? `<button class="ib soft" data-w="${esc(q.pid)}" title="Написать"><svg viewBox="0 0 24 24"><path d="M4 5.5h16v11H9l-5 4z"/></svg></button>`
@@ -3715,7 +3768,7 @@ function refDraw(calm) {
       <p class="hint" style="margin:8px 0 0">${esc(rules)}</p></div>
     ${d.by ? `<h3>Вас пригласил</h3>${refRow(d.by, "by", "с этого приглашения вы в Dewiar")}` : ""}
     <h3>Приглашённые${list.length ? ` · ${list.length}` : ""}</h3>
-    ${list.length ? list.map((x, i) => refRow(x, i, (x.paid ? "засчитан ✓" : `пользуется ${+x.days || 0} из ${+x.need || 0} дн.`) + (x.sub ? ` · позвал ещё ${x.sub}` : ""))).join("")
+    ${list.length ? list.map((x, i) => refRow(x, i, refState(x) + (x.sub ? ` · позвал ещё ${x.sub}` : ""))).join("")
       : `<div class="card"><b>Пока никого</b><p class="hint" style="margin:4px 0 0">Нажмите «Пригласить» — ссылка с вашим кодом уйдёт в любой мессенджер. Каждый засчитанный друг — новая звезда.</p></div>`}
     <p class="hint" style="margin:10px 4px">Переписываться и созваниваться можно с теми, кого пригласили вы, и с тем, кто пригласил вас, — когда оба согласны: «Позвать в Близкие».</p>
     ${d.can_use ? `<details class="more" style="margin:4px 2px 0"><summary>Есть код приглашения?</summary><div class="row2" style="margin-top:6px"><input id="ref-code" placeholder="6 знаков" autocapitalize="characters" style="flex:1;padding:12px 14px;border-radius:14px;border:0;background:var(--field)"><button class="btn p" id="ref-use">Ввести</button></div><div class="res" id="ref-res"></div></details>` : ""}`;

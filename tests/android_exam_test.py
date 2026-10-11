@@ -90,6 +90,10 @@ with sync_playwright() as p:
     ok(sc.get("money", {}).get("passed") and sc.get("radio", {}).get("passed"), "расход и радио — по действиям модели")
     ok(sc.get("flashlight", {}).get("passed"), "фонарик через быстрый ответ — засчитан (в песочнице)")
     ok(all(s.get("judge", {}).get("score") == 8 for s in sc.values()), "судья оценил каждое испытание")
+    # ошибки, найденные руками 11.10, — в экзамене: заметки и напоминания «есть, а говорит нет», фото к заметке, сканер
+    for k in ("notes_show", "reminders_show", "note_photo", "note_long", "scanner_open"):
+        ok(sc.get(k, {}).get("passed"), f"экзамен ловит «{k}»: {[(c['name'], c['ok']) for c in sc.get(k, {}).get('checks', [])]} · {[x.get('answer') for x in sc.get(k, {}).get('steps', [])]}")
+    ok(not sc.get("notes_find", {}).get("passed"), "«что я записывал про ремонт» без поиска по заметкам (заглушка модели) — не засчитан")
     ok(R["alarms"] == [], f"на «телефоне» не появилось ни одного будильника: {R['alarms']}")
     ok(R["memPref"] == ["Любит зелёный чай"] and R["histPref"] == 2, "сохранённые память и разговор не тронуты")
     ok(R["spoken"] == 0, "голос во время экзамена молчал")

@@ -22,6 +22,10 @@ function rfPeer(x) {                           // друг в «Близких»
   const m = (x && RF.map[x.rid]) || {}, p = m.pid && ((CL.st && CL.st.people) || []).find(q => q.pid === m.pid);
   return { pid: p ? p.pid : "", name: p ? p.name : x.name, offered: !!m.offered, devs: p ? (p.devs || []).length : 0 };
 }
+/* состояние приглашённого: засчитан; не засчитан (тот же интернет или устройство — защита от накруток); ждёт его
+   первого пополнения или нового месяца (лимит наград); пробует Dewiar N из M дней */
+const refState = (x) => x.paid ? "засчитан ✓" : x.why === "same" ? "не засчитан: тот же интернет или устройство" : x.why === "topup" ? "засчитается после его первого пополнения"
+  : x.why === "cap" ? "засчитается в следующем месяце — лимит наград" : `пользуется ${+x.days || 0} из ${+x.need || 0} дн.`;
 function rfRow(x, key, sub) {
   const q = rfPeer(x);
   const act = q.pid ? `<button class="btn small" data-w="${clEsc(q.pid)}">Написать</button>` + (q.devs ? `<button class="btn small" data-c="${clEsc(q.pid)}">Позвонить</button>` : "")
@@ -46,7 +50,7 @@ function rfRender() {
   }
   $("#rf-by").innerHTML = d.by ? `<h2>Вас пригласил</h2><div class="rf-list">${rfRow(d.by, "by", "с этого приглашения вы в Dewiar")}</div>` : "";
   $("#rf-h").textContent = list.length ? `Приглашённые · ${list.length}` : "Приглашённые";
-  $("#rf-list").innerHTML = list.length ? list.map((x, i) => rfRow(x, i, (x.paid ? "засчитан ✓" : `пользуется ${+x.days || 0} из ${+x.need || 0} дн.`) + (x.sub ? ` · позвал ещё ${x.sub}` : ""))).join("")
+  $("#rf-list").innerHTML = list.length ? list.map((x, i) => rfRow(x, i, refState(x) + (x.sub ? ` · позвал ещё ${x.sub}` : ""))).join("")
     : `<div class="rf-empty"><b>Пока никого</b><span>Скопируйте приглашение или покажите печать — каждый засчитанный друг станет новой звездой.</span></div>`;
   $$(".rf-p").forEach(r => r.onclick = (e) => { if (e.target.closest("button")) return; const k = r.dataset.k === "by" ? "by" : +r.dataset.k; RF.sel = RF.sel === k ? null : k; rfRender(); });
   $$(".rf-p [data-w]").forEach(b => b.onclick = () => { $('nav button[data-p="close"]').click(); setTimeout(() => clOpen(b.dataset.w), 250); });

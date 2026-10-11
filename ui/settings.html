@@ -62,6 +62,7 @@
   <div class="ng">Мой день</div>
   <button data-p="calendar">Календарь</button>
   <button data-p="reminders">Напоминания</button>
+  <button data-p="notes" title="Все заметки: поиск, фото и файлы">Заметки</button>
   <button data-p="close" title="Переписка с помощниками близких людей">Близкие<i class="ndot" id="close-dot"></i></button>
   <button data-p="ref" title="Приглашённые друзья: созвездие, ссылка, награды">Рефералы</button>
   <button data-p="tasks">Задачи</button>
@@ -111,7 +112,7 @@
     <h1>Календарь</h1>
     <p class="lead">Ваш день, деньги и дела — в одном месте. Скажите «купил кофе за 8 рублей», «получил зарплату 3000»,
       «напомни в пятницу в 15:00 позвонить Лёше» — всё появится здесь. «Сколько я потратил за неделю?» — ответит голосом.</p>
-    <div class="tabs" id="cal-tabs"><button data-ct="month" class="on">Календарь</button><button data-ct="money">Деньги</button><button data-ct="notes">Заметки</button><button data-ct="feed">Список</button></div>
+    <div class="tabs" id="cal-tabs"><button data-ct="month" class="on">Календарь</button><button data-ct="money">Деньги</button><button data-ct="feed">Список</button></div>
 
     <div id="ct-month">
       <div class="calbar">
@@ -153,16 +154,21 @@
       </div>
     </div>
 
-    <div id="ct-notes" style="display:none">
-      <div class="nt-bar"><input id="nt-q" type="search" placeholder="Найти в заметках: слово или несколько слов" autocomplete="off"><button class="btn primary" id="nt-add">Новая заметка</button></div>
-      <div class="nt-cols"><div id="nt-list" class="nt-list"></div><div id="nt-view" class="nt-view"></div></div>
-    </div>
 
     <div id="ct-feed" style="display:none">
       <div id="cal-feed"></div>
     </div>
   </section>
 
+  <section id="p-notes" class="wide">
+    <h1>Заметки</h1>
+    <p class="lead">Всё, что вы записали голосом, с телефона или здесь. Помощница знает эти заметки и отвечает по ним:
+      «что я записывал про ремонт?»</p>
+    <div class="nt-bar"><label class="nt-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+      <input id="nt-q" type="search" placeholder="Найти: слово или несколько слов" autocomplete="off"></label><span class="nt-count" id="nt-count"></span>
+      <button class="btn primary" id="nt-add">Новая заметка</button></div>
+    <div class="nt-cols"><div id="nt-list" class="nt-list"></div><div id="nt-view" class="nt-view"></div></div>
+  </section>
   <section id="p-ref" class="wide">
     <h1>Рефералы</h1>
     <p class="lead">Друзья, которых вы позвали в Dewiar. Каждый засчитанный — звезда в вашем созвездии и талеры на счёт.
@@ -1330,5 +1336,6 @@
 <script src="studio/look.js"></script>
 <script src="studio/close.js"></script>
 <script src="studio/refs.js"></script>
+<script src="studio/notes.js"></script>
 </body>
 </html>

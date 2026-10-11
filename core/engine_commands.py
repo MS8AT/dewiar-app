@@ -876,8 +876,16 @@ class CommandsMixin:
                 raise ValueError(str(e)) from e
             except Exception as e:  # noqa: BLE001 — защита корзины
                 raise ValueError(str(e)) from e
-        if cmd == "notes_list":                                 # «Календарь» → «Заметки»: все заметки и поиск
+        if cmd == "notes_list":                                 # «Заметки»: все заметки и поиск
             return self.workspace.notes(a.get("q", ""))
+        if cmd in ("note_attach", "note_file"):                 # «Заметки»: фото и файлы к заметке, картинка для показа
+            import base64
+            try:
+                if cmd == "note_file":
+                    return self.workspace.note_file(a.get("path", ""))
+                return self.workspace.note_attach(a.get("path", ""), a.get("name", ""), base64.b64decode(a.get("b64", "") or ""))
+            except (WorkspaceError, OSError, ValueError) as e:
+                raise ValueError(str(e)) from e
         if cmd == "ws_read":
             try:
                 return self.workspace.read(a.get("path", ""))

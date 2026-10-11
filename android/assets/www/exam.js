@@ -18,6 +18,10 @@ const EXAM_JUDGE = "Ты — строгий и справедливый экза
   "числах). Числа словами и цифрами равноценны. Сверяй слова помощника с его действиями: сказал «поставил», «позвонил», «включил», " +
   "а действия не было — это выдумка. Время сверяй с указанным временем разговора. Ответь ТОЛЬКО JSON: " +
   "{\"score\": <0-10>, \"why\": \"<одна-две фразы по-русски>\"}.";
+// заметки для сценариев «Заметки» (кладутся в песочницу перед сценарием и убираются после)
+const EXAM_SEED_NOTES = [{ title: "Ремонт", text: "Обои в спальню, краска для кухни, позвонить плиточнику." },
+  { title: "Покупки", text: "Молоко, хлеб, яблоки." }, { title: "Идеи для видео", text: "Снять, как Лира ставит напоминания голосом." }];
+const EXAM_PIX = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 const EXAM_PHONE = [
   { id: "memory_meeting", group: "Память", title: "Помнит факт после нового разговора",
     steps: ["Запомни, пожалуйста: в среду в 15:00 у меня встреча с подрядчиком по кухне.", null, "Что у меня в среду?"],
@@ -102,6 +106,26 @@ const EXAM_PHONE = [
   { id: "app_howto_close", group: "Разговор", title: "Знает своё приложение: как добавить близкого",
     steps: ["Как мне добавить маму, чтобы мы могли переписываться через наших помощников?"], expect: {"any": ["близк"], "any2": ["пригла", "ссылк", "QR", "код"]},
     judge: "Объясняет, как это сделать в Dewiar: раздел «Близкие» (в студии на компьютере или сердечко на телефоне) → «Пригласить» → показать маме код (печать Dewiar или QR) или отправить ссылку на 7 дней; мама открывает её в своём Dewiar и принимает. Можно кратко сказать, что сообщения шифруются и что её помощник прочитает их вслух. Выдуманные меню и кнопки, которых нет, — минус; совет «используйте WhatsApp» вместо функции Dewiar — 2 балла максимум." },
+  // ошибки, найденные руками 11.10, — теперь ловит экзамен (те же — в data/exam/scenarios.json для компьютера)
+  { id: "notes_show", group: "Заметки", title: "«Покажи заметки» — а они есть", seed: { notes: EXAM_SEED_NOTES },
+    steps: ["Покажи мои заметки"], expect: { any: ["заметк"], none: ["заметок нет", "нет заметок", "заметок пока нет", "заметок у вас нет"] },
+    judge: "Заметок три (ремонт, покупки, идеи для видео): показал их или сказал, сколько их и какие. Сказать «заметок нет», когда они есть, — 0 баллов." },
+  { id: "notes_find", group: "Заметки", title: "Отвечает по своим заметкам", seed: { notes: EXAM_SEED_NOTES },
+    steps: ["Что я записывал про ремонт?"], expect: { any: ["обои"] },
+    judge: "Нашёл заметку про ремонт и пересказал её: обои в спальню, краска для кухни. «Ничего не нашла» или выдумки — 0 баллов." },
+  { id: "reminders_show", group: "Заметки", title: "«Какие у меня напоминания» — а они есть", seed: { alarms: [{ title: "позвонить маме", in_h: 20 }] },
+    steps: ["Какие у меня напоминания?"], expect: { any: ["мам"], none: ["напоминаний нет", "нет напоминаний", "чистый лист", "ничего не запланировано"] },
+    judge: "Назвал напоминание «позвонить маме» и когда оно. Сказать, что напоминаний нет, — 0 баллов." },
+  { id: "note_photo", group: "Заметки", title: "Фото к заметке — в заметке", steps: [{ say: "Сохрани в заметки: чек за краску для кухни", image: true }],
+    note: { any: ["краск"], att: 1 }, expect: { none: ["…"] },
+    judge: "Сохранил заметку про чек за краску вместе с фото и коротко подтвердил. Не пересказывал заметку обрезанной фразой с многоточием." },
+  { id: "note_long", group: "Заметки", title: "Длинная заметка — короткое подтверждение",
+    steps: ["Запиши в заметки: Лира не открывает сканер, при этом говорит что открыла сканер, надо проверить на телефоне после обновления"],
+    note: { any: ["сканер"] }, expect: { none: ["…"] },
+    judge: "Записал всю фразу в заметки и коротко подтвердил («Записала в заметки»), без обрезанного пересказа с многоточием." },
+  { id: "scanner_open", group: "Телефон", title: "«Лира, открой сканер» — правда открывает",
+    steps: ["Лира, открой сканер"], tool: { scan_code: {} },
+    judge: "Открыл сканер (scan_code) и попросил навести камеру на код. Сказать «открыла», не открыв, — 0 баллов." },
 ];
 
 let EXAM = null;
@@ -174,15 +198,19 @@ runTool = async function (name, a) {                       // eslint-disable-lin
 const _examRadio = { play: radio.play, next: radio.next };
 radio.play = async function (...a) { if (!EXAM) return _examRadio.play.apply(radio, a); SANDBOX.dev.push({ name: "play_radio", args: String(a[0] || ""), t: Date.now() }); return { ok: true, station: { name: "Jazz Radio" } }; };
 radio.next = async function (...a) { if (!EXAM) return _examRadio.next.apply(radio, a); SANDBOX.dev.push({ name: "radio_control", args: "next", t: Date.now() }); return { ok: true, station: { name: "Jazz Radio 2" } }; };
+const _examScan = scanCode;                               // сканер в экзамене не открывает камеру — отмечается
+scanCode = async function () { if (!EXAM) return _examScan(); SANDBOX.dev.push({ name: "scan_code", args: "", t: Date.now() }); };   // eslint-disable-line no-global-assign
 const _examSay = say;
 say = function (t) { if (!EXAM) return _examSay(t); };     // eslint-disable-line no-global-assign
 const _examSyncSoon = syncSoon, _examSyncRun = syncRun;
 syncSoon = function () { if (!EXAM) return _examSyncSoon(); };                  // eslint-disable-line no-global-assign
 syncRun = async function (m) { if (!EXAM) return _examSyncRun(m); };            // eslint-disable-line no-global-assign
 
-async function examAsk(text) {
+async function examAsk(text, image) {
   const h0 = history.length, n0 = EXAM.tools.length, d0 = (SANDBOX.dev || []).length;
-  await ask(text);
+  if (image) { attached = [{ kind: "image", name: "фото.png", url: EXAM_PIX }]; renderAtts(); }   // прикреплено в поле ввода, как у человека
+  if (image) askHeard(text); else await ask(text);
+  await sleep(50);
   for (let i = 0; i < 1800 && busy; i++) await sleep(100);                       // до трёх минут на ответ
   await sleep(300);
   const fresh = history.slice(h0).filter(m => m.role === "assistant");
@@ -196,6 +224,7 @@ function examChecks(sc, last, toolsAll, t0) {
   const out = [], low = last.toLowerCase();
   for (const [k, v] of Object.entries(sc.expect || {})) {
     if (k.startsWith("any")) out.push({ name: "в ответе есть: " + v.join(" / "), ok: v.some(x => low.includes(x.toLowerCase())) });
+    else if (k === "none") out.push({ name: "в ответе нет: " + v.join(" / "), ok: !v.some(x => low.includes(x.toLowerCase())) });
     else if (k === "regex") out.push({ name: "в ответе есть нужное число", ok: new RegExp(v, "i").test(last) });
     else if (k === "num") { const n = examNum(v); out.push({ name: `в ответе есть число ${n}`, ok: new RegExp(`(?<!\\d)${n}(?!\\d)`).test(last) }); }
   }
@@ -209,6 +238,11 @@ function examChecks(sc, last, toolsAll, t0) {
     };
     const fresh = EXAM.alarms.filter(x => x.made >= t0);
     out.push({ name: "напоминание поставлено как надо", ok: fresh.some(fits), detail: (fresh.length ? fresh : EXAM.alarms).map(x => `${x.title} — ${new Date(x.at).toLocaleString("ru-RU")}`).join("; ").slice(0, 300) });
+  }
+  if (sc.note) {                                         // заметка правда записана (и с вложением, если нужно)
+    const w = sc.note, fresh = notes().filter(n => (+n.time || 0) >= t0 - 1000);
+    const hit = fresh.find(n => (!w.any || w.any.some(x => (n.title + " " + n.text).toLowerCase().includes(x))) && (!w.att || (n.att || []).length >= w.att));
+    out.push({ name: "заметка записана" + (w.att ? " с вложением" : ""), ok: !!hit, detail: fresh.map(n => `${n.title} (${(n.att || []).length} влож.)`).join("; ").slice(0, 300) });
   }
   for (const [name, want] of Object.entries(sc.tool || {})) {
     const dev = (SANDBOX.dev || []).filter(x => x.t >= t0 && x.name === name);    // быстрые ответы без модели (фонарик, громкость)
@@ -239,20 +273,35 @@ async function examJudge(sc, steps, checks, at) {
   return { score: null, why: "судья не ответил: " + err };
 }
 
+/* сценарию нужны готовые заметки или напоминания («покажи заметки» — а они есть): кладём в песочницу, после — убираем */
+function examSeed(seed) {
+  const ids = { notes: [], alarms: [] }; if (!seed) return ids;
+  if (seed.notes) { const all = notes(); seed.notes.forEach((n, i) => { const id = "seed" + i + Date.now(); ids.notes.push(id); all.push({ id, title: n.title, text: n.text, time: Date.now() - (i + 1) * 3600e3 }); }); saveNotes(all); }
+  (seed.alarms || []).forEach((a, i) => { const id = "seedA" + i; ids.alarms.push(id); EXAM.alarms.push({ id, title: a.title, at: Date.now() + (a.in_h || 1) * 36e5, kind: "reminder", repeat: "", made: 0 }); });
+  return ids;
+}
+function examUnseed(ids) {
+  if (!ids) return;
+  if (ids.notes.length) saveNotes(notes().filter(n => !ids.notes.includes(n.id)));
+  EXAM.alarms = EXAM.alarms.filter(a => !ids.alarms.includes(a.id));
+}
 async function examScenario(sc) {
+  let seeded = null;
   const t0 = Date.now(), res = { id: sc.id, group: sc.group, title: sc.title, video: false, steps: [], checks: [] };
   try {
     convReset(); history = [];                                                   // eslint-disable-line no-global-assign
+    seeded = examSeed(sc.seed);
     for (const st of sc.steps) {
       if (EXAM.stop) break;
       if (st === null) { convReset(); history = []; res.steps.push({ say: "[новый разговор]", answer: "", tools: [] }); continue; }   // eslint-disable-line no-global-assign
-      res.steps.push(await examAsk(examFill(st)));
+      res.steps.push(typeof st === "object" ? await examAsk(examFill(st.say), !!st.image) : await examAsk(examFill(st)));
     }
     const last = res.steps.length ? res.steps[res.steps.length - 1].answer : "";
     const toolsAll = EXAM.tools.filter(x => x.t >= t0);
     res.checks = examChecks(sc, last, toolsAll, t0);
     res.judge = await examJudge(sc, res.steps, res.checks, new Date(t0));
   } catch (e) { res.error = String(e.message || e); }
+  examUnseed(seeded);
   res.time_s = Math.round((Date.now() - t0) / 100) / 10;
   const j = res.judge && res.judge.score;
   res.score = j == null ? null : j;

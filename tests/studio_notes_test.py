@@ -25,31 +25,71 @@ ok([x["title"] for x in w.notes()] == ["Ёлка", "Покупки", "Умный
 ok([x["title"] for x in w.notes("умный синхрон")] == ["Умный дом"] and [x["title"] for x in w.notes("елку")] == ["Ёлка"]
    and [x["title"] for x in w.notes("дача")] == ["Покупки"], "поиск: все слова, без регистра и «ё», и по папке")
 ok(w.notes("умный")[0]["snippet"].startswith("Настроенный умный дом") and not w.notes("квантовая"), "в выдаче — кусок текста; ничего — пусто")
+# вложения: фото и файл рядом с заметкой, ссылками в конце текста; удаление уносит и их
+rel = [x["path"] for x in w.notes() if x["title"] == "Покупки"][0]
+r1 = w.note_attach(rel, "чек (магазин).jpg", b"\xff\xd8jpeg")
+r2 = w.note_attach(rel, "список.pdf", b"%PDF")
+p_ = w.safe(rel); p_.write_text(p_.read_text() + "\n" + r1["line"] + "\n" + r2["line"] + "\n", encoding="utf-8")
+n = [x for x in w.notes() if x["title"] == "Покупки"][0]
+ok(n["att"] == 2 and n["img"].endswith("чек (магазин).jpg") and w.note_file(n["img"])["url"].startswith("data:image/jpeg") and "Вложения" not in n["snippet"],
+   f"вложения: миниатюра и счёт в списке, картинка для показа, в тексте-превью ссылок нет: {n}")
+try:
+    w.note_attach("Память/Обо мне.md", "x.txt", b"x"); bad = False
+except Exception:  # noqa: BLE001
+    bad = True
+ok(bad, "прикреплять можно только к заметкам из «Заметок»")
 NOTES = w.notes()
+BUY = rel
+PIX = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 with sync_playwright() as p:
     b = p.chromium.launch(); errs = []
-    pg = b.new_page(viewport={"width": 1280, "height": 860}); pg.on("pageerror", lambda e: errs.append(str(e)))
+    pg = b.new_page(viewport={"width": 1400, "height": 900}); pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.add_init_script("window.pywebview = { api: new Proxy({}, { get: () => () => Promise.resolve(true) }) };")
     pg.goto((ROOT / "ui/settings.html").as_uri() + "?port=1"); pg.wait_for_timeout(1000)
-    pg.evaluate("""(notes) => { window._calls = []; core.call = (c, a) => { _calls.push([c, a]);
+    pg.evaluate("""([notes, pix, buy]) => { window._calls = []; window._files = { [buy]: '# Покупки\\n\\n*11 октября*\\n\\nмолоко, хлеб\\n- [ ] яблоки\\n\\n![чек.jpg](Вложения/Покупки/%D1%87%D0%B5%D0%BA.jpg)\\n📎 [список.pdf](Вложения/Покупки/список.pdf)\\n' };
+      core.call = (c, a) => { _calls.push([c, a]);
         if (c === 'notes_list') { const q = (a.q || '').toLowerCase(); return Promise.resolve(notes.filter(n => !q || (n.title + ' ' + n.snippet).toLowerCase().includes(q))); }
-        if (c === 'ws_read') return Promise.resolve({ path: a.path, text: '# Умный дом\\n\\nтекст заметки', mtime: Date.now() / 1000 });
-        if (c === 'ws_write' || c === 'ws_new_note') return Promise.resolve({ path: 'Заметки/Новая заметка.md' });
+        if (c === 'ws_read') return Promise.resolve({ path: a.path, text: _files[a.path] || '# ' + a.path.split('/').pop().replace('.md', '') + '\\n\\nтекст заметки', mtime: Date.now() / 1000 });
+        if (c === 'ws_write') { _files[a.path] = a.text; return Promise.resolve({ path: a.path }); }
+        if (c === 'ws_new_note') return Promise.resolve({ path: 'Заметки/Новая заметка.md' });
+        if (c === 'ws_rename') return Promise.resolve({ path: 'Заметки/' + a.title + '.md' });
+        if (c === 'note_file') return Promise.resolve({ url: pix });
+        if (c === 'note_attach') return Promise.resolve({ line: '![фото.png](Вложения/Покупки/фото.png)', kind: 'image', name: 'фото.png', path: 'Заметки/Вложения/Покупки/фото.png' });
         return Promise.resolve({}); };
-      $('nav button[data-p="calendar"]').click(); }""", NOTES)
-    pg.wait_for_timeout(300)
-    pg.click('#cal-tabs button[data-ct="notes"]'); pg.wait_for_timeout(500)
-    r = pg.evaluate("() => [[...document.querySelectorAll('#nt-list .nt-row b')].map(x => x.textContent), !!document.querySelector('#nt-text')]")
-    ok(r[0] == ["Ёлка", "Покупки", "Умный дом"] and r[1], f"вкладка «Заметки»: список и первая открыта: {r}")
+      $('nav button[data-p="notes"]').click(); }""", [NOTES, PIX, BUY])
+    pg.wait_for_timeout(600)
+    nav = pg.evaluate("() => [...document.querySelectorAll('nav button[data-p]')].map(b => b.dataset.p)")
+    ok(nav.index("notes") == nav.index("reminders") + 1 and nav.index("close") == nav.index("notes") + 1, "«Заметки» — в меню между «Напоминаниями» и «Близкими»")
+    ok(not pg.evaluate("!!document.querySelector('#cal-tabs [data-ct=\"notes\"]')"), "в «Календаре» вкладки «Заметки» больше нет — всё в одном разделе")
+    r = pg.evaluate("() => [[...document.querySelectorAll('#nt-list .nt-row b')].map(x => x.textContent), !!document.querySelector('#nt-list .nt-th'), !!document.querySelector('.nt-h')]")
+    ok(r[0][:3] == ["Ёлка", "Покупки", "Умный дом"] or sorted(r[0]) == sorted([x["title"] for x in NOTES]), f"список заметок, новые сверху: {r}")
+    ok(r[1] and r[2], f"у заметки с фото — миниатюра; первая заметка открыта для чтения: {r}")
     pg.fill("#nt-q", "умный"); pg.wait_for_timeout(500)
     r = pg.evaluate("() => [[...document.querySelectorAll('#nt-list .nt-row b')].map(x => x.textContent), document.querySelectorAll('#nt-list mark').length]")
     ok(r[0] == ["Умный дом"] and r[1] >= 1, f"поиск на лету с подсветкой: {r}")
-    pg.click("#nt-list .nt-row"); pg.wait_for_timeout(300); pg.fill("#nt-text", "# Умный дом\n\nновый текст"); pg.click("#nt-save"); pg.wait_for_timeout(300)
-    ok(["ws_write", {"path": NOTES[2]["path"], "text": "# Умный дом\n\nновый текст"}] in pg.evaluate("_calls"), "правка заметки сохраняется на месте")
-    pg.click("#nt-add"); pg.wait_for_timeout(400)
-    ok(any(c[0] == "ws_new_note" for c in pg.evaluate("_calls")), "«Новая заметка»")
+    pg.fill("#nt-q", ""); pg.wait_for_timeout(400)
+    pg.click(f'#nt-list .nt-row[data-p="{BUY}"]'); pg.wait_for_timeout(500)
+    r = pg.evaluate("() => [document.querySelector('.nt-h').textContent, document.querySelectorAll('.nt-body li.ck').length, document.querySelectorAll('.nt-pics figure').length, [...document.querySelectorAll('.nt-f')].map(x => x.textContent.trim()), document.querySelector('.nt-body').textContent.includes('Вложения')]")
+    ok(r == ["Покупки", 1, 1, ["список.pdf"], False], f"чтение: название, дела списком, фото плиткой, файл, ссылки в тексте не видны: {r}")
+    if os.environ.get("DEWIAR_SHOTS"): pg.screenshot(path=str(Path(os.environ["DEWIAR_SHOTS"]) / "studio-notes.png"))
+    pg.click("#nt-edit"); pg.wait_for_timeout(300)
+    pg.fill("#nt-text", "молоко, хлеб, сыр"); pg.wait_for_timeout(1100)
+    saved = pg.evaluate("(b) => _files[b]", BUY)
+    ok(saved.startswith("# Покупки\n\n*11 октября*\n\nмолоко, хлеб, сыр\n") and "![чек.jpg](Вложения/Покупки/%D1%87%D0%B5%D0%BA.jpg)" in saved and "📎 [список.pdf]" in saved,
+       f"правка сохраняется сама; заголовок, дата и вложения на месте: {saved!r}")
+    pg.set_input_files("#nt-file", files=[{"name": "фото.png", "mimeType": "image/png", "buffer": b"\x89PNG"}]); pg.wait_for_timeout(600)
+    ok("![фото.png](Вложения/Покупки/фото.png)" in pg.evaluate("(b) => _files[b]", BUY) and pg.evaluate("document.querySelectorAll('.nt-pics figure').length") == 2,
+       "фото к заметке — кнопкой (и перетаскиванием, Ctrl+V)")
+    pg.click(".nt-pics figure .nt-x"); pg.wait_for_timeout(1100)
+    ok("%D1%87%D0%B5%D0%BA" not in pg.evaluate("(b) => _files[b]", BUY), "вложение убирается крестиком в правке")
+    pg.fill("#nt-title", "Покупки на неделю"); pg.dispatch_event("#nt-title", "change"); pg.wait_for_timeout(500)
+    ok(["ws_rename", {"path": BUY, "title": "Покупки на неделю"}] in pg.evaluate("_calls") and pg.evaluate("_files['Заметки/Покупки на неделю.md'] || ''").startswith("# Покупки на неделю"),
+       "переименование — и файл, и заголовок в тексте")
+    pg.click("#nt-add"); pg.wait_for_timeout(500)
+    ok(any(c[0] == "ws_new_note" for c in pg.evaluate("_calls")) and pg.evaluate("!!document.querySelector('#nt-title')"), "«Новая заметка» — сразу на правку")
     b.close()
 ok(not errs, f"без ошибок на странице: {errs[:3]}")
-ok('cmd == "notes_list"' in (ROOT / "core/engine_commands.py").read_text(), "ядро: команда notes_list")
+cmds = (ROOT / "core/engine_commands.py").read_text()
+ok('cmd == "notes_list"' in cmds and '("note_attach", "note_file")' in cmds, "ядро: notes_list, note_attach, note_file")
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)

@@ -1424,8 +1424,26 @@ def t_calendar_list(a, ctx):
     return "\n".join(out[-300:]) or "За этот период в календаре ничего нет."
 
 
+NOTES_GENERIC = re.compile(r"^(?:заметк\w*|все|всё|мои|мой|моих|последн\w*|покажи|прочитай|список|какие|есть|что|там|запис\w*|сохран\w*)$")
+
+
+def _latest_notes(ctx, lead=""):
+    """Последние заметки — когда просят «покажи заметки» или по словам ничего нет (иначе Лира отвечала «заметок нет»)."""
+    try:
+        lst = _ws(ctx).notes()
+    except Exception:  # noqa: BLE001
+        lst = []
+    if not lst:
+        return "Заметок пока нет."
+    rows = [f"{n['path']}: {n['title']} — {n['snippet'][:200]}" + (f" [вложений: {n['att']}]" if n.get("att") else "") for n in lst[:10]]
+    return lead + f"Всего заметок: {len(lst)}. Последние (новые сверху):\n" + "\n".join(rows) + "\n\nЦеликом — read_file с путём."
+
+
 def t_find_notes(a, ctx):
     """Сначала поиск recall.py (ранжированный, с Obsidian), ничего — простой поиск по папке ассистента."""
+    q = str(a.get("query", "") or "")
+    if not [w for w in re.split(r"[\s,.]+", q.lower().replace("ё", "е")) if len(w) > 2 and not NOTES_GENERIC.match(w)]:
+        return _latest_notes(ctx)
     rc = ctx.get("recall")
     if rc is not None:
         res = rc.search(a.get("query", ""), limit=8)
@@ -1434,7 +1452,7 @@ def t_find_notes(a, ctx):
                 "\n\nЦеликом — read_file с путём."
     res = _ws_call(lambda: _ws(ctx).find(a.get("query", "")))
     if not res:
-        return "В папке Dewiar ничего подходящего не нашёл."
+        return _latest_notes(ctx, "По этим словам ничего не нашлось. ")
     return "\n".join(f"{r['path']}: {r['snippet']}" for r in res)
 
 

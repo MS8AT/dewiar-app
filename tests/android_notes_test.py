@@ -54,6 +54,19 @@ with sync_playwright() as p:
     r = pg.evaluate(f"""async () => {{ turnAtt = [{{ kind: 'image', name: 'доска.jpg', url: '{PIX}' }}]; const t = await runTool('save_note', {{ title: 'Доска', text: 'схема' }});
       return [t, (notes().find(n => n.title === 'Доска').att || []).length]; }}""")
     ok("вложений: 1" in r[0] and r[1] == 1, f"модель записала заметку — фото этого хода с ней: {r}")
+    # «Лира, открой сканер» — сразу сканер (имя не мешает); «Открыла сканер» без scan_code — ловится (заметка 11.10)
+    r = pg.evaluate("""async () => { let opened = 0; const s0 = scanCode; scanCode = () => { opened++; };
+      const a = await quick('Лира, открой сканер'), b = await quick('лира открой сканер'); await new Promise(r => setTimeout(r, 400)); scanCode = s0;
+      return [a && a.say, b && b.say, opened, !!claimedAction('Открыла сканер, наведи камеру.', new Set(), 'сканер'), !!claimedAction('Открыла сканер.', new Set(['scan_code']), 'сканер')]; }""")
+    ok(r == ["Наведите камеру на код.", "Наведите камеру на код.", 2, True, False], f"«Лира, открой сканер» — сканер открывается; «открыла» без открытия — ловится: {r}")
+    # «покажи заметки» — открывает заметки; поиск «заметки», «все» — последние, а не «заметок нет» (отзыв 11.10)
+    r = pg.evaluate("""async () => { const a = await quick('Покажи заметки'), b = await quick('Лира, что у меня в заметках');
+      await new Promise(r => setTimeout(r, 400)); const open = document.querySelector('#sh-day').classList.contains('on') && dayTab === 'notes';
+      closeSheets(); const t1 = await runTool('find_notes', { query: 'заметки' }), t2 = await runTool('find_notes', { query: '' }), t3 = await runTool('find_notes', { query: 'Ольге' }),
+      t4 = await runTool('find_notes', { query: 'квантовый телепорт' });
+      return [a && a.say, b && b.say, open, t1.includes('Последние'), t2.includes('Всего заметок'), t3.includes('Позвонить Ольге') && !t3.includes('Всего'), t4.startsWith('По этим словам')]; }""")
+    ok(r[0].startswith("Вот ваши заметки") and r[1].startswith("Вот ваши заметки") and r[2:] == [True, True, True, True, True],
+       f"«покажи заметки» — открыты; find_notes с «заметки»/пусто — последние, по словам — найденные: {r}")
     # лист заметок: новые сверху, миниатюра, открыть и поправить
     pg.evaluate("() => { renderDay && openSheet('#sh-day'); dayTab = 'notes'; renderDay(); }"); pg.wait_for_timeout(200)
     r = pg.evaluate("() => [[...document.querySelectorAll('#day-body .it.note b')].map(b => b.textContent).slice(0, 2), !!document.querySelector('#day-body .nthumb')]")
@@ -71,6 +84,17 @@ with sync_playwright() as p:
     pg.click("#nt-save"); pg.wait_for_timeout(200)
     r = pg.evaluate("() => { const x = notes().find(n => n.title === 'Ремонт'); return x && [x.text, (x.att || []).length, fileGet('natt-' + x.att[0].id).slice(0, 11)]; }")
     ok(r == ["обои в спальню", 1, "data:image/"], f"«Новая заметка» с фото: {r}")
+    r = pg.evaluate("""async () => { const a0 = D.alarms; D.alarms = () => JSON.stringify([{ id: 'r1', at: Date.now() + 3600e3, title: 'позвонить маме' }]);
+      const a = await quick('Лира, какие у меня напоминания'), t = await runTool('list_reminders', {}); D.alarms = a0;
+      await new Promise(r => setTimeout(r, 400)); const open = dayTab === 'rem'; closeSheets(); return [a && a.say, t.includes('позвонить маме'), open]; }""")
+    ok(r[0].startswith("Напоминаний: 1.") and "позвонить маме" in r[0] and r[1] and r[2], f"«какие у меня напоминания» — сразу, без модели, и открыты: {r}")
+    # удалить — только из открытой заметки, с вопросом; «Вернуть» возвращает и вложения
+    r = pg.evaluate("""async () => { const x = notes().find(n => n.title === 'Доска'); const aid = x.att[0].id;
+      const crosses = document.querySelectorAll('#day-body .it.note .x').length;
+      noteDelete(x.id, true); const gone = !notes().some(n => n.id === x.id) && fileGet('natt-' + aid) === '';
+      document.querySelector('#undo button').click(); const back = notes().find(n => n.id === x.id);
+      return [crosses, gone, !!back, fileGet('natt-' + aid).slice(0, 11)]; }""")
+    ok(r == [0, True, True, "data:image/"], f"удаление — с вопросом и «Вернуть» (вместе с фото); крестиков в списке нет: {r}")
     # синхронизация с компьютера не теряет вложения; удаление убирает файлы
     r = pg.evaluate("""() => { const x = notes().find(n => n.title === 'Ремонт'); syncApply({ kind: 'note', id: x.id, data: { title: 'Ремонт', text: 'обои и краска' }, updated: Date.now() });
       const y = notes().find(n => n.id === x.id); const aid = y.att[0].id; noteDelete(y.id, false); return [y.text, y.att.length, notes().some(n => n.id === x.id), fileGet('natt-' + aid)]; }""")

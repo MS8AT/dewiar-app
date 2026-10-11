@@ -76,6 +76,11 @@ class WorkspaceError(Exception):
     pass
 
 
+NOTE_ATT_MAX = 20 * 1048576
+NOTE_IMG = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+NOTE_LINK_RX = re.compile(r"(?:📎\s*)?(!?)\[[^\]\n]*\]\((Вложения/[^)\s]+)\)")    # ссылки на вложения в тексте заметки
+
+
 def _clean_name(name, default="заметка"):
     """Имя файла или папки: без знаков, запрещённых в Windows, без точек и пробелов по краям, до 80 знаков.
     Им же sync.py чистит имена, пришедшие из облака."""
@@ -248,10 +253,53 @@ class Workspace:
                 continue
             at = hay.find(words[0]) - len(f.stem) - 1 if words else -1
             snip = body[max(0, at - 50): max(0, at - 50) + 180] if at > 50 else body[:180]
+            atts = NOTE_LINK_RX.findall(body)              # вложения: первая картинка — миниатюрой в списке
+            img = next((u for bang, u in atts if bang), "")
+            if img:
+                import urllib.parse
+                img = (f.parent / urllib.parse.unquote(img)).relative_to(self.root).as_posix()
+            snip = NOTE_LINK_RX.sub("", snip)
             out.append({"path": f.relative_to(self.root).as_posix(), "title": f.stem, "mtime": st.st_mtime, "size": st.st_size,
-                        "folder": folder, "snippet": re.sub(r"\s+", " ", snip).strip()})
+                        "folder": folder, "snippet": re.sub(r"\s+", " ", snip).strip(), "att": len(atts), "img": img})
         out.sort(key=lambda x: -x["mtime"])
         return out[:limit]
+
+    # ---------- вложения заметок: фото и файлы рядом с заметкой ----------
+    # <папка заметки>/Вложения/<имя заметки>/<файл>; в тексте — строка-ссылка в конце: «![имя](Вложения/…)» для фото,
+    # «📎 [имя](Вложения/…)» для файла (пути с %20 — так их понимают и Obsidian, и любой просмотрщик Markdown)
+
+    def note_attach(self, rel, name, data):
+        """Положить файл к заметке (только «Заметки/…»). -> {line, path, kind, name}; строку ссылки студия ставит в текст сама."""
+        p = self.safe(rel)
+        if p.suffix.lower() != ".md" or not p.is_file() or Path(str(rel)).parts[:1] != ("Заметки",):
+            raise WorkspaceError("прикреплять можно только к заметке из «Заметок»")
+        if len(data) > NOTE_ATT_MAX:
+            raise WorkspaceError(f"файл больше {NOTE_ATT_MAX // 1048576} МБ")
+        ext = re.sub(r"[^a-z0-9]", "", Path(str(name or "")).suffix.lower())[:8]
+        stem = _clean_name(Path(str(name or "")).stem, "файл")[:60]
+        d = p.parent / "Вложения" / _clean_name(p.stem)
+        d.mkdir(parents=True, exist_ok=True)
+        out, n = d / (stem + ("." + ext if ext else "")), 2
+        while out.exists():
+            out, n = d / (f"{stem} ({n})" + ("." + ext if ext else "")), n + 1
+        out.write_bytes(data)
+        link = out.relative_to(p.parent).as_posix().replace("%", "%25").replace(" ", "%20").replace("(", "%28").replace(")", "%29")
+        kind = "image" if "." + ext in NOTE_IMG else "file"
+        label = out.name.replace("]", ")").replace("[", "(")
+        return {"line": (f"![{label}]({link})" if kind == "image" else f"📎 [{label}]({link})"),
+                "path": out.relative_to(self.ensure().resolve()).as_posix(), "kind": kind, "name": out.name}
+
+    def note_file(self, rel):
+        """Картинка заметки для показа в студии: -> {url: data:…} (до NOTE_ATT_MAX)."""
+        import base64
+        import mimetypes
+        p = self.safe(rel)
+        if not p.is_file() or p.suffix.lower() not in NOTE_IMG:
+            raise WorkspaceError("это не картинка заметки")
+        if p.stat().st_size > NOTE_ATT_MAX:
+            raise WorkspaceError("картинка слишком большая для просмотра")
+        mt = mimetypes.guess_type(p.name)[0] or "image/png"
+        return {"url": f"data:{mt};base64," + base64.b64encode(p.read_bytes()).decode()}
 
     def new_note(self, title, folder="Заметки", text=""):
         """Новая заметка из студии: в главной папке или внутри «Заметок», со свободным именем. -> путь."""
@@ -287,7 +335,12 @@ class Workspace:
         if rel in (MEMORY.as_posix(), "README.md"):
             raise WorkspaceError("этот файл удалять нельзя — его можно только очистить")
         import guard
-        guard.trash([{"path": str(p), "dir": False, "files": 1, "size": p.stat().st_size}])
+        items = [{"path": str(p), "dir": False, "files": 1, "size": p.stat().st_size}]
+        att = p.parent / "Вложения" / _clean_name(p.stem)        # вложения заметки — в корзину вместе с ней
+        if p.suffix.lower() == ".md" and att.is_dir():
+            files = [x for x in att.rglob("*") if x.is_file()]
+            items.append({"path": str(att), "dir": True, "files": len(files), "size": sum(x.stat().st_size for x in files)})
+        guard.trash(items)
         return True
 
     # ---------- для ассистента ----------

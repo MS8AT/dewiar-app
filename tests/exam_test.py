@@ -60,6 +60,12 @@ class H(BaseHTTPRequestHandler):
             out = "В среду в 15:00 у вас встреча с подрядчиком по кухне." if "подрядчик" in seen else "Не знаю."
         elif last.startswith("Запомни") and msgs[-1]["role"] == "user":
             calls = [("remember", {"fact": "В среду в 15:00 встреча с подрядчиком по кухне"})]
+        elif (msgs[-1]["role"] == "tool" or last.startswith("<tool_response>")) and ("Покажи мои заметки" in json.dumps(msgs, ensure_ascii=False) or "Какие у меня напоминания" in json.dumps(msgs, ensure_ascii=False)):
+            out = "Вот что есть: " + last[:400]                 # пересказывает результат инструмента
+        elif "Покажи мои заметки" in last:
+            calls = [("find_notes", {"query": "заметки"})]     # «заметки» — не слово для поиска: инструмент отдаёт последние
+        elif "Какие у меня напоминания" in last:
+            calls = [("list_reminders", {})]
         elif "завтрак" in last:
             out = "На завтрак вы ели яичницу с беконом."
         else:
@@ -80,7 +86,7 @@ ok(X.days_to_new_year(__import__("datetime").date(2026, 12, 30)) == 2, "дни �
 im = X.make_image("receipt")
 ok(im and im.startswith("data:image/png;base64,"), "картинка чека рисуется")
 logs = []
-rep = asyncio.run(X.run_exam(prof, only={"memory_meeting", "money", "oven", "honest_breakfast", "vision_receipt", "code_bugfix"},
+rep = asyncio.run(X.run_exam(prof, only={"memory_meeting", "money", "oven", "honest_breakfast", "vision_receipt", "code_bugfix", "notes_show", "reminders_show"},
                              log=lambda s: (print(s), logs.append(s))))
 R = {r["id"]: r for r in rep["scenarios"]}
 ok(R["memory_meeting"]["passed"], f"память через новый разговор — сдан: {R['memory_meeting']['steps'][-1]['answer']}")
@@ -90,10 +96,12 @@ ok(not hb["passed"] and hb["score"] == 2, f"выдумал завтрак — с
 ok(R["vision_receipt"]["passed"] and IMAGES, "чек — картинкой модели, ответ проверен")
 cb = R["code_bugfix"]
 ok(cb["passed"] and all(c["ok"] for c in cb["checks"]), f"код: задача, тесты, тесты не тронуты — {[(c['name'], c['ok']) for c in cb['checks']]}")
+for k in ("notes_show", "reminders_show"):      # заметки и напоминания положены перед сценарием — и найдены
+    ok(R[k]["passed"], f"экзамен: {k} — {[(c['name'], c['ok']) for c in R[k]['checks']]} · {R[k]['steps'][-1]['answer'][:160]}")
 s = rep["summary"]
-ok(s["total"] == 6 and s["passed"] == 5 and "Код" in s["by_group"], f"итог: {s}")
+ok(s["total"] == 8 and s["passed"] == 7 and "Код" in s["by_group"], f"итог: {s}")
 md = X.markdown(rep)
-ok("# Экзамен Dewiar" in md and "❌ Честность" in md and "Сдано **5 из 6**" in md, "отчёт Markdown")
+ok("# Экзамен Dewiar" in md and "❌ Честность" in md and "Сдано **7 из 8**" in md, "отчёт Markdown")
 ok(json.loads(json.dumps(rep, ensure_ascii=False))["version"], "отчёт JSON")
 srv.shutdown()
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
