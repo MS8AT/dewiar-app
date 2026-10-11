@@ -1444,21 +1444,44 @@ def _latest_notes(ctx, lead=""):
     return lead + f"Всего заметок: {len(lst)}. Последние (новые сверху):\n" + "\n".join(rows) + "\n\nЦеликом — read_file с путём."
 
 
+def _memory_hits(ctx, q):
+    """Строки «Обо мне» к запросу (по началу слов) — или последние, если совпадений нет. Экзамен 11.10: «запомни: на работе
+    отчёт, дизайнер, сайт» → новый разговор → «вспомни, что я говорил про работу» — модель искала в заметках и календаре,
+    ничего не нашла по слову «работа» и ответила «ничего не записано», хотя всё было в памяти. -> текст или ""."""
+    try:
+        body = _ws(ctx).memory_text(limit=6000)
+    except Exception:  # noqa: BLE001
+        return ""
+    facts = [ln.strip()[2:] for ln in body.splitlines() if ln.strip().startswith("- ")]
+    if not facts:
+        return ""
+    stems = {w[:5] if len(w) > 5 else w for w in re.findall(r"[а-яa-z0-9]{4,}", q.lower().replace("ё", "е")) if not NOTES_GENERIC.match(w)}
+    hit = [f for f in facts if any(st in f.lower().replace("ё", "е") for st in stems)]
+    recent = [f for f in facts[-8:] if f not in hit]
+    if hit:                                   # и недавние: «работа» могла быть сказана другими словами («начальник просил…»)
+        return "Из твоей памяти «Обо мне»:\n" + "\n".join("- " + f for f in hit[-12:]) + \
+            ("\nНедавно запомнено (может быть о том же):\n" + "\n".join("- " + f for f in recent) if recent else "")
+    return "В памяти «Обо мне» по этим словам ничего, вот последние записи (может, это оно):\n" + "\n".join("- " + f for f in facts[-10:])
+
+
 def t_find_notes(a, ctx):
-    """Сначала поиск recall.py (ранжированный, с Obsidian), ничего — простой поиск по папке ассистента."""
+    """Сначала поиск recall.py (ранжированный, с Obsidian), ничего — простой поиск по папке ассистента. К найденному —
+    строки памяти «Обо мне» (_memory_hits): «вспомни, что я говорил…» часто про запомненное, а не про заметки."""
     q = str(a.get("query", "") or "")
     if not [w for w in re.split(r"[\s,.]+", q.lower().replace("ё", "е")) if len(w) > 2 and not NOTES_GENERIC.match(w)]:
         return _latest_notes(ctx)
+    mem = _memory_hits(ctx, q)
+    tail = ("\n\n" + mem) if mem else ""
     rc = ctx.get("recall")
     if rc is not None:
         res = rc.search(a.get("query", ""), limit=8)
         if res:
             return "\n".join(f"{r['path']}: {r['snippet'][:300]}" for r in res) + \
-                "\n\nЦеликом — read_file с путём."
+                "\n\nЦеликом — read_file с путём." + tail
     res = _ws_call(lambda: _ws(ctx).find(a.get("query", "")))
     if not res:
-        return _latest_notes(ctx, "По этим словам ничего не нашлось. ")
-    return "\n".join(f"{r['path']}: {r['snippet']}" for r in res)
+        return _latest_notes(ctx, "В заметках по этим словам ничего не нашлось. ") + tail
+    return "\n".join(f"{r['path']}: {r['snippet']}" for r in res) + tail
 
 
 def t_read_file(a, ctx):

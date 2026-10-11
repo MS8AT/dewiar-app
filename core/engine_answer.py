@@ -192,7 +192,8 @@ class AnswerMixin:
         base = self.personas.system_prompt(self.s.get("persona"), self.s.get("user_name") or "", now_str)
         mem = self.workspace.memory_text()
         if mem:
-            base += "\n\nЧто ты знаешь о пользователе (твоя память, файл «Память/Обо мне.md»):\n" + mem
+            base += ("\n\nЧто ты знаешь о пользователе (твоя память, файл «Память/Обо мне.md»; «вспомни, что я говорил…» — "
+                     "отвечай отсюда, даже если в заметках и календаре пусто):\n" + mem)
         try:
             import quality as Q
             base += Q.talk_lessons_block(self.workspace.root / Q.TALK_LESSONS_FILE)   # уроки из его поправок

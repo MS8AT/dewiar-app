@@ -62,6 +62,7 @@ run "телефон: чужой код и чужие ссылки" $PY "$T/andro
 run "голос с сервера: клиент" $PY "$T/tts_client_test.py"
 run "«Рефералы»: созвездие, ссылка, «Позвать в Близкие»" $PY "$T/refs_section_test.py"
 run "голос телефона: наперёд и запомненные фразы" $PY "$T/voice_cache_test.py"
+run "суфлёр: «Закончить встречу?» внутри окна" $PY "$T/prompter_end_test.py"
 run "студия: суфлёр на нескольких мониторах, пополнение, плитки «Мозга»" $PY "$T/studio_polish_test.py"
 run "ядро: данные не затирают методы" $PY "$T/engine_names_test.py"
 run "телефон: длинная диктовка" $PY "$T/android_dictation_test.py"

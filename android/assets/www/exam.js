@@ -180,8 +180,10 @@ function examFakeTool(name, a) {
     case "open_made": return "Открыто.";
     case "start_task": return "Задача передана компьютеру.";
     case "smart_home": return "Готово.";
-    case "close_call": return `Звоню через Dewiar: ${a.to || ""}.`;
-    case "close_send": return `Отправлено ${a.to || ""}.`;
+    // как настоящие: кого нет в «Близких» — ошибка (экзамен 11.10: «Напиши Андрею» — заглушка ответила «Отправлено»,
+    // и модель доложила об отправке человеку, которого нет)
+    case "close_call": return `Звоню через Dewiar: ${clPerson(a.to || "").name}.`;
+    case "close_send": return `Отправлено ${clPerson(a.to || "").name}. Скажи коротко, что отправила.`;
   }
   return "Готово.";
 }

@@ -833,6 +833,23 @@ async def unseed(core, made):
             pass
 
 
+async def program_state(core, sd):
+    """Что на самом деле есть в программе — для судьи: все заметки и напоминания, а не только положенные сценарием
+    (экзамен 11.10: заметки и напоминания, созданные прошлыми сценариями, судья считал выдуманными)."""
+    out = []
+    if sd.get("notes"):
+        root = core.tmp / "ws" / "Заметки"
+        ns = sorted(root.rglob("*.md"), key=lambda p: -p.stat().st_mtime) if root.is_dir() else []
+        out.append(f"заметок {len(ns)}: " + "; ".join(p.stem for p in ns[:12]))
+    if sd.get("reminders"):
+        try:
+            items = await core.call("reminders") or []
+        except Exception:  # noqa: BLE001
+            items = []
+        out.append(f"напоминаний {len(items)}: " + "; ".join(f"{x.get('text')} — {x.get('at')}" for x in items[:12]))
+    return "; ".join(out)
+
+
 async def run_scenario(core, sc, judge_prof, work, log):
     t0 = time.time()
     made = await seed(core, sc.get("seed")) if sc.get("seed") else {}
@@ -896,10 +913,7 @@ async def _run_scenario(core, sc, judge_prof, work, log, t0):
                                       "detail": last[:120]})
             res["checks"] += await check_state(core, sc.get("state"), t0)
             if sc.get("seed"):                          # судье — что было в программе (иначе «выдумал заметки», которые правда есть)
-                sd = sc["seed"]
-                res["checks"].append({"name": "в программе было", "ok": True, "detail": "; ".join(
-                    ([f"заметки: {', '.join(n['title'] for n in sd.get('notes') or [])}"] if sd.get("notes") else [])
-                    + ([f"напоминания: {', '.join(sd.get('reminders') or [])}"] if sd.get("reminders") else []))})
+                res["checks"].append({"name": "в программе было", "ok": True, "detail": await program_state(core, sc["seed"])})
             if (sc.get("state") or {}).get("task"):
                 want = sc["state"]["task"]
                 t = await wait_task(core, t0, float(want.get("timeout", 1200)))

@@ -126,6 +126,7 @@ run "персонажи: Лира и Патрик, остальные — шаб
 run "телефон 0.4.27: родные, снимок, связь, пустые ответы" $PY "$T/android_fixes0427_test.py"
 run "суфлёр: подсказки на встрече, шпаргалка, итог" $PY "$T/prompter_test.py"
 run "суфлёр вживую: голос, «замешкались», пауза" $PY "$T/prompter_live_test.py"
+run "суфлёр: «Закончить встречу?» внутри окна" $PY "$T/prompter_end_test.py"
 run "нехватка памяти — подсказка"      $PY "$T/memory_pressure_test.py"
 run "потолки памяти Dewiar"         $PY "$T/memcap_test.py"
 run "сигнал «ваша очередь»"         $PY "$T/turn_cue_test.py"

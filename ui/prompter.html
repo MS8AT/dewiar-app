@@ -197,6 +197,17 @@
   #sheet li .sq { display: block; font-size: 13.5px; color: var(--them); font-weight: 600; margin-bottom: 3px; }
   #sheet li span { font-size: 14.5px; line-height: 1.45; }
   #voice { padding: 18px 20px 18px; z-index: 6; }
+  #endask { position: absolute; inset: 0; z-index: 9; display: flex; align-items: flex-end; padding: 12px; background: rgb(6 6 12 / 55%);
+            border-radius: var(--r); animation: fadeIn .15s ease-out; }
+  #endask .card { width: 100%; padding: 20px 20px 16px; border-radius: 20px; background: var(--frost); box-shadow: 0 24px 60px -12px rgb(0 0 0 / 60%);
+                  animation: rise .18s ease-out; }
+  #endask h2 { font: 600 16px/1.3 "Unbounded", "Manrope", sans-serif; margin-bottom: 6px; }
+  #endask p { color: var(--muted); font-size: 14px; line-height: 1.45; margin-bottom: 16px; }
+  #endask .row { display: flex; gap: 10px; }
+  #endask .row button { flex: 1; margin: 0; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes rise { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { #endask, #endask .card { animation: none; } }
   #voice .lead { margin-bottom: 16px; }
   #vcard { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 14px;
            padding: 20px 22px; border-radius: 20px; overflow: hidden; }
@@ -304,6 +315,12 @@
     <div id="vcard" class="blk"><span id="vsay">Скажите</span><div id="vphrase"></div><div id="vmeter"></div></div>
     <div id="vsteps"></div>
     <p id="vnote"></p>
+  </div>
+  <!-- «Закончить встречу?» — своё окно внутри суфлёра: системный диалог браузера в Linux шире окна и обрезалось (отзыв 11.10) -->
+  <div id="endask" class="hidden" role="alertdialog" aria-labelledby="endask-t" aria-describedby="endask-d">
+    <div class="card"><h2 id="endask-t">Закончить встречу?</h2>
+      <p id="endask-d">Подведу итог и сохраню его в папку «Встречи».</p>
+      <div class="row"><button class="ghost blk" id="endask-no">Продолжить</button><button class="go" id="endask-yes">Закончить</button></div></div>
   </div>
 </div>
 <script src="assets/dewiar.js"></script>
@@ -505,13 +522,24 @@ $("#b-sheet").onclick = () => { renderSheet(); $("#sheet").classList.toggle("hid
 $("#sheet-x").onclick = () => $("#sheet").classList.add("hidden");
 $("#prev").onclick = () => { follow = false; idx = Math.max(0, idx - 1); renderHint(); };
 $("#next").onclick = () => { const n = (st.hints || []).filter(h => !h.empty).length; idx = Math.min(n - 1, idx + 1); follow = idx === n - 1; renderHint(); };
-function closeWin() {
-  if (st && st.on && !confirm("Закончить встречу? Итог сохранится в папку «Встречи».")) return;
+function closeWin(sure) {
+  if (st && st.on && sure !== true) { endAsk(); return; }       // встреча идёт — сначала спросить (своим окном, не системным диалогом)
   if (st && st.on) core.call("prompter_stop", { summary: true });
   const a = api(); if (a && a.close_prompter) a.close_prompter(); else window.close();
 }
+function endAsk(open = true) {
+  $("#endask").classList.toggle("hidden", !open);
+  if (open) setTimeout(() => $("#endask-yes").focus(), 30);
+}
+$("#endask-no").onclick = () => endAsk(false);
+$("#endask-yes").onclick = () => { endAsk(false); closeWin(true); };
+$("#endask").onclick = (e) => { if (e.target.id === "endask") endAsk(false); };
 $("#b-close").onclick = closeWin;
 document.addEventListener("keydown", (e) => {
+  if (!$("#endask").classList.contains("hidden")) {           // открыт вопрос «Закончить встречу?»
+    if (e.key === "Escape") { e.preventDefault(); endAsk(false); }
+    return;
+  }
   if (view !== "live" || /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
   if (e.key === " " || e.key === "Enter") { e.preventDefault(); $("#ask").click(); }
   else if (e.key === "ArrowLeft") $("#prev").click();
