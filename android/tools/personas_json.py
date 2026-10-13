@@ -29,6 +29,7 @@ for pid, p in P.BUILTIN.items():
                 "voice_remote": (p.get("voice") or {}).get("remote", ""), "avatar": av, "live": p.get("live", "")})
 print("window.DEWIAR_PERSONAS = " + json.dumps(out, ensure_ascii=False) + ";")
 print("window.DEWIAR_VOICE_RULES = " + json.dumps(P.VOICE_RULES, ensure_ascii=False) + ";")
+print("window.DEWIAR_TALK_RULES = " + json.dumps(P.TALK_RULES, ensure_ascii=False) + ";")
 import gender as G  # noqa: E402
 print("window.DEWIAR_FEM = " + json.dumps(G._FORMS, ensure_ascii=False) + ";")            # «включил» → «включила»
 print("window.DEWIAR_GENDER_RULES = " + json.dumps({g: G.prompt_rule(g) for g in ("female", "male")}, ensure_ascii=False) + ";")
