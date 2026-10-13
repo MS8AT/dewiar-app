@@ -1,0 +1,51 @@
+# ============================================================================
+#  DEWIAR VOICES — живые голоса персонажей (Qwen3-TTS) на своей видеокарте
+# ============================================================================
+#  Рядом с распознаванием (dewiar-asr) — так же устроено и так же ставится.
+#  Приложения ходят по стандарту OpenAI:  POST http://tts:8000/v1/audio/speech
+#  (через шлюз — http://ollama:11434/v1/audio/speech, с журналом).
+#  Панель: https://<сервер>/vllm/voices.php — голоса, образцы, кому какой голос.
+#
+#  УСТАНОВКА (один раз, в корне проекта на сервере):
+#    1. Папку tts положить в src/vllm/tts, этот файл — рядом с docker-compose.yml
+#    2. В .env к строке COMPOSE_FILE дописать  :docker-compose.dewiar-tts.yml
+#       и указать видеокарту:  DEWIAR_TTS_GPU=<номер RTX 3090 из nvidia-smi>
+#    3. docker compose up -d --build tts
+#  Первый запуск скачивает модели (~2,5 ГБ на каждую) в ./storage/tts_models —
+#  несколько минут; потом всё стартует за секунды.
+# ============================================================================
+services:
+  tts:
+    build:
+      context: ./src/vllm/tts
+      args:
+        TORCH_INDEX: "https://download.pytorch.org/whl/cu128"   # CUDA 12.8 — RTX 3090 / A4000 / A6000
+    image: dewiar/tts:latest
+    container_name: dewiar-tts
+    restart: always
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "3" }
+    networks:
+      - default                        # шлюз и панель
+    volumes:
+      - ./storage/tts_models:/models   # веса Qwen3-TTS (скачиваются один раз)
+      - ./storage/tts_voices:/data     # voices.json и образцы своих голосов — переживают пересборку
+    environment:
+      - TTS_DEVICE=auto
+      - TTS_PRELOAD=auto               # встроенные дикторы сразу; модель образцов — если есть свои голоса
+      - TTS_MAX_MODELS=2               # больше двух моделей в памяти не держим (каждая ~2–3 ГБ)
+      - TTS_GPU_MEM_GB=0               # потолок видеопамяти; 0 — без потолка
+      - TTS_BATCH=4
+      # Встроенные дикторы с «манерой» (спокойно, радостно, шёпотом) — большая модель, ~4–5 ГБ вместо ~2:
+      # - TTS_CUSTOM_MODEL=Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    deploy:
+      resources:
+        limits:
+          memory: 10g
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${DEWIAR_TTS_GPU:-0}"]
+              capabilities: [gpu]

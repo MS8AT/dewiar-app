@@ -1152,7 +1152,7 @@ function say(text) {
       JSON.stringify({ text: t, model_id: S.tts.el_model || "eleven_flash_v2_5", voice_settings: { speed: Math.max(0.7, Math.min(1.2, +S.tts.rate || 1)) } }));
   } else if ((S.tts.engine === "server" && S.tts.url) || cv) {
     const u = cv ? cv.url : S.tts.url, url = u.replace(/\/+$/, "") + (/speech$/.test(u) ? "" : "/audio/speech");
-    const body = cv ? { model: "tts-1", input: t, voice: persona().voice_remote || (persona().gender === "female" ? "serena" : "aiden"), response_format: "wav", speed: +S.tts.rate || 1 }
+    const body = cv ? { model: "tts-1", input: t, voice: persona().voice_remote || (persona().gender === "female" ? "serena" : "aiden"), persona: persona().id || "", response_format: "wav", speed: +S.tts.rate || 1 }
       : { model: S.tts.model || "tts-1", input: t, voice: (fem ? S.tts.voice : (S.tts.voice_m || S.tts.voice)) || "alloy", response_format: "mp3" };
     D.speakRemote(id, url, cv ? cv.key : (S.tts.key || ""), JSON.stringify(body));
   } else {
@@ -3111,7 +3111,7 @@ const examOn = () => typeof EXAM !== "undefined" && !!EXAM;
 function remDrop(id) { if (examOn()) { EXAM.alarms = EXAM.alarms.filter(x => x.id !== id); return; } D.alarmCancel(id); syncSoon(); }
 function remMatch(title, now = Date.now()) {
   const w = stems(title); if (!w.length) return null;
-  const end = new Date(now); end.setHours(23, 59, 59, 0);
+  const end = new Date(Math.max(new Date(now).setHours(23, 59, 59, 0), now + 3 * 3600e3));   // поздно вечером — и сразу после полуночи
   let best = null, bs = 0;
   for (const x of alarmsNow()) {
     if (x.kind === "timer" || x.kind === "alarm" || (!x.repeat && x.at > end.getTime())) continue;

@@ -202,7 +202,7 @@ def reminder_match(title, reminders, now=None):
     if not w:
         return None
     now = now or dt.datetime.now()
-    end = now.replace(hour=23, minute=59, second=59)
+    end = max(now.replace(hour=23, minute=59, second=59), now + dt.timedelta(hours=3))   # поздно вечером — и то, что сразу после полуночи
     best, bs = None, 0.0
     for x in reminders:
         if x.get("kind") in ("alarm", "timer", "job") or x.get("paused"):

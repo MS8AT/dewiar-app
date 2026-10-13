@@ -492,6 +492,8 @@ class RemoteTTS:
         own = c.get("voice_f") if voice_cfg.get("_gender") == "female" else c.get("voice_m")   # голос героинь / героев с сервера
         body = {"model": c.get("model") or "tts-1", "input": text, "voice": own or voice_cfg.get("remote") or "alloy",
                 "response_format": "pcm", "stream": True, "speed": speed}
+        if voice_cfg.get("_pid"):                         # служба голосов Dewiar даёт персонажу его собственный голос
+            body["persona"] = voice_cfg["_pid"]
         body.update(c.get("extra") or {})
         headers = {"Content-Type": "application/json"}
         if c.get("api_key"):
