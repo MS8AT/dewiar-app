@@ -47,6 +47,23 @@ ok(A.resolve("aiden")["id"] == "aiden" and A.resolve("aiden")["kind"] == "speake
 ok(A.resolve("onyx")["id"] == "ryan" and A.resolve("nova")["id"] == "serena", "имена OpenAI — голос по умолчанию для пола")
 ok(A.resolve("kto-to", gender="male")["id"] == "ryan", "незнакомый — по полу")
 ok(A.resolve("loop1")["kind"] == "speaker", f"петля псевдонимов не вешает: {A.resolve('loop1')}")
+# встроенные Qwen выключены — их имена ведут к своим голосам того же пола
+A.cfg_save({"voices": {"anna": {"kind": "clone", "audio": "a.wav", "text": "т", "gender": "female"},
+                       "oleg": {"kind": "clone", "audio": "o.wav", "text": "т", "gender": "male"}},
+            "personas": {"eva": "vivian"}, "default": {"female": "serena", "male": "aiden"}})
+A.BUILTIN_ON = False
+ok(A.resolve("serena")["id"] == "anna" and A.resolve("aiden")["id"] == "oleg" and A.resolve("x", "eva")["id"] == "anna"
+   and A.resolve("onyx")["id"] == "oleg" and A.resolve("")["id"] == "anna",
+   f"встроенные выключены — свои голоса по полу: {[A.resolve(v)['id'] for v in ('serena', 'aiden', 'onyx', '')]}")
+A.BUILTIN_ON = True
+ok(A.resolve("serena")["id"] == "serena", "встроенные включены — как раньше")
+# ESpeech: первая фраза одна, дальше куски до ~180 знаков (образец проходится раз на кусок, а не на каждую фразу)
+A.ENGINE.calls.clear()
+long_text = "Привет! " + " ".join(f"Это предложение номер {i}, в нём есть немного слов." for i in range(1, 9))
+list(A.synth_iter(long_text, {"id": "anna", "kind": "clone", "audio": "a.wav", "text": "т"}))
+lens = [len(c["texts"][0]) for c in A.ENGINE.calls]
+ok(A.ENGINE.calls[0]["role"] == "espeech" and A.ENGINE.calls[0]["texts"] == ["Привет!"] and all(len(c["texts"]) == 1 for c in A.ENGINE.calls)
+   and all(n <= 200 for n in lens) and len(A.ENGINE.calls) <= 4, f"ESpeech: «Привет!» отдельно, дальше куски: {lens}")
 A.cfg_save({})
 
 # видеокарта общая с vLLM: вторая модель не влезла — служба выгружает первую и продолжает, а не падает

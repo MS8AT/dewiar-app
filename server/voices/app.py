@@ -74,7 +74,8 @@ MODELS = {
 }
 CLONE_ENGINE = os.getenv("TTS_CLONE_ENGINE", "espeech")             # кто озвучивает свои голоса: espeech | qwen
 QWEN_FAST = os.getenv("TTS_QWEN_FAST", "1") == "1"                  # faster-qwen3-tts, если он стоит
-ESPEECH_NFE = int(os.getenv("TTS_ESPEECH_NFE", "32"))               # шагов: больше — чище, меньше — быстрее (16–48)
+ESPEECH_NFE = int(os.getenv("TTS_ESPEECH_NFE", "24"))               # шагов: больше — чище, меньше — быстрее и тише карта
+BUILTIN_ON = os.getenv("TTS_BUILTIN", "1") == "1"                  # 0 — встроенных дикторов Qwen нет: их имена → свои голоса
 ESPEECH_VOCAB = os.getenv("TTS_ESPEECH_VOCAB", "ESpeech/ESpeech-TTS-1_podcaster:vocab.txt")
 RUACCENT_DIR = os.getenv("TTS_RUACCENT_DIR", "/opt/ruaccent")
 PRELOAD = [x.strip() for x in os.getenv("TTS_PRELOAD", "auto").split(",") if x.strip()]
@@ -150,14 +151,31 @@ def exists(c: dict, vid: str) -> bool:
     return vid in c["voices"] or vid in BUILTIN
 
 
+def own_voice(c: dict, gender: str) -> str:
+    """Свой голос (по образцу или описанию) нужного пола, иначе любой свой; нет своих — пусто."""
+    own = [(k, v) for k, v in c["voices"].items() if k not in BUILTIN and v.get("kind", "clone") == "clone"]
+    for k, v in own:
+        if v.get("gender") == gender:
+            return k
+    return own[0][0] if own else ""
+
+
 def resolve(voice: str = "", persona: str = "", gender: str = "") -> dict:
-    """Какой голос звучит: персонаж → псевдоним → свой голос → встроенный → голос по умолчанию для пола."""
+    """Какой голос звучит: персонаж → псевдоним → свой голос → встроенный → голос по умолчанию для пола.
+    Встроенные выключены (TTS_BUILTIN=0) — вместо них голос по умолчанию для пола, если он свой, или любой свой того же пола."""
     c = cfg_load()
     name = c["personas"].get((persona or "").strip().lower(), "")
     if not name:
         v = (voice or "").strip().lower()
         name = c["aliases"].get(v, v)
-    for _ in range(3):                                   # псевдоним на псевдоним — не дальше трёх шагов
+    for _ in range(4):                                   # псевдоним на псевдоним — не дальше нескольких шагов
+        if name in BUILTIN and not BUILTIN_ON:
+            g = BUILTIN[name]
+            d = c["default"].get(g, "")
+            alt = d if d and d not in BUILTIN and d in c["voices"] else own_voice(c, g)
+            if alt:
+                name = alt
+                continue
         if name in c["voices"]:
             spec = dict(c["voices"][name], id=name)
             spec.setdefault("kind", "clone")
@@ -171,6 +189,9 @@ def resolve(voice: str = "", persona: str = "", gender: str = "") -> dict:
         if nxt == name:
             break
         name = nxt
+    if not BUILTIN_ON and own_voice(c, "female"):
+        o = own_voice(c, "female")
+        return dict(c["voices"][o], id=o, kind="clone")
     return {"id": "serena", "kind": "speaker", "speaker": "serena", "gender": "female"}
 
 
@@ -188,7 +209,8 @@ def voices_public() -> dict:
                     "builtin": False, "text": v.get("text", ""), "instruct": v.get("instruct", ""),
                     "designed": v.get("designed", ""), "added": v.get("added", 0)})
     return {"object": "list", "voices": out, "data": [{"id": x["id"], "object": "voice"} for x in out],
-            "personas": c["personas"], "aliases": c["aliases"], "default": c["default"], "clone_engine": CLONE_ENGINE}
+            "personas": c["personas"], "aliases": c["aliases"], "default": c["default"], "clone_engine": CLONE_ENGINE,
+            "builtin_on": BUILTIN_ON}
 
 
 # ── текст → фразы ────────────────────────────────────────────────────────
@@ -397,6 +419,10 @@ class Engine:
                 FasterQwen3TTS = None
             if FasterQwen3TTS is not None:          # CUDA graphs: в разы быстрее; графы строятся при первом проходе
                 m = FasterQwen3TTS.from_pretrained(MODELS[role], device=dev, dtype=dtype, attn_implementation=ATTN or "sdpa")
+                try:                                 # графы — сразу при загрузке, а не на первой фразе человека
+                    m.warmup(prefill_len=100)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("прогрев CUDA graphs не удался (%s) — построятся на первой фразе", e)
                 self.fast.add(role)
                 return m
         from qwen_tts import Qwen3TTSModel
@@ -624,10 +650,19 @@ def synth_iter(text, spec, speed=1.0, lang="Russian"):
     """Фраза за фразой: первая — одна (быстрее голос), дальше пачками по BATCH. Каждая пачка отдельно встаёт в очередь
     видеокарты, поэтому два разговора одновременно не ждут друг друга целиком."""
     parts = split_text(text)
-    i = 0
-    while i < len(parts):
-        group = parts[i:i + (1 if i == 0 else BATCH)]
-        i += len(group)
+    groups = [parts[:1]] + [parts[k:k + BATCH] for k in range(1, len(parts), BATCH)] if parts else []
+    if role_for(spec) == "espeech" and len(parts) > 1:
+        # ESpeech каждый вызов заново проходит образец (до 12 с) — фразы склеиваем в куски до ~180 знаков:
+        # первая — одна (раньше голос), дальше длиннее; модель держит образец + ~12 с новой речи
+        groups, cur = [parts[:1]], []
+        for p in parts[1:]:
+            if cur and sum(len(x) + 1 for x, _ in cur) + len(p[0]) > 180:
+                groups.append([(" ".join(x for x, _ in cur), cur[-1][1])])
+                cur = []
+            cur.append(p)
+        if cur:
+            groups.append([(" ".join(x for x, _ in cur), cur[-1][1])])
+    for group in groups:
         wavs, sr = on_gpu(lambda g=group: ENGINE.generate(spec, [p for p, _ in g], lang))
         for (_, pause), w in zip(group, wavs):
             a = level(trim(resample(to_mono(w), sr)))
@@ -639,9 +674,11 @@ def preload():
     want = PRELOAD
     if want == ["auto"]:
         c = cfg_load()
-        want = ["custom"]
+        want = []
         if any(v.get("kind", "clone") == "clone" for k, v in c["voices"].items() if k not in BUILTIN):
-            want.append(role_for({"kind": "clone"}))         # свои голоса есть — их модель тоже сразу (ESpeech или Qwen Base)
+            want.append(role_for({"kind": "clone"}))         # свои голоса есть — их модель первой (ESpeech или Qwen Base)
+        if BUILTIN_ON or not want:
+            want.append("custom")
     for role in want[:MAX_MODELS]:
         if role not in MODELS:
             continue
@@ -715,7 +752,10 @@ def add_voice(name, title, gender, text, audio: np.ndarray = None, draft: str = 
         entry["designed"] = designed
     if not FAKE:                                          # образец проверяется сразу: плохой файл — ошибка сейчас, а не в разговоре
         try:
-            on_gpu(lambda: ENGINE.prompt(vdir(fn), text))
+            if role_for({"kind": "clone"}) == "espeech":     # проверяем тем движком, что будет озвучивать, — не грузим лишнюю модель
+                on_gpu(lambda: ENGINE.ref(ENGINE.get("espeech"), vdir(fn), text))
+            else:
+                on_gpu(lambda: ENGINE.prompt(vdir(fn), text))
         except Exception as e:  # noqa: BLE001
             os.remove(vdir(fn))
             raise ValueError(f"модель не приняла образец: {e}") from e
@@ -870,7 +910,7 @@ class H(BaseHTTPRequestHandler):
             info = {"ok": True, **STATE, "uptime": int(time.time() - STATE["started"]), "models": MODELS,
                     "max_models": MAX_MODELS, "voices": len(cfg_load()["voices"]),
                     "instruct_ok": "0.6B" not in MODELS["custom"],          # манеру встроенным дикторам понимает только 1.7B
-                    "clone_engine": CLONE_ENGINE,
+                    "clone_engine": CLONE_ENGINE, "builtin_on": BUILTIN_ON, "espeech_nfe": ESPEECH_NFE,
                     "ttfa_ms_avg": int(STATE["ttfa_ms_sum"] / STATE["ttfa_n"]) if STATE["ttfa_n"] else 0}
             info.pop("ttfa_ms_sum", None)
             try:
