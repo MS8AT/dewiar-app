@@ -368,6 +368,34 @@ public final class Bridge {
         return c == null ? "" : c.toString();
     }
 
+    // ---------- календарь (Cal.java) ----------
+
+    /** Встречи за период: {"from": мс, "to": мс} → {"events": [...]}; без разрешения — {"need": READ_CALENDAR}. */
+    @JavascriptInterface public String calEvents(String json) {
+        if (!a.has(android.Manifest.permission.READ_CALENDAR)) return "{\"need\":\"android.permission.READ_CALENDAR\"}";
+        try {
+            JSONObject q = new JSONObject(json);
+            return new JSONObject().put("events", Cal.events(a.getContentResolver(), q.getLong("from"), q.getLong("to"))).toString();
+        } catch (Throwable e) {
+            return "{\"error\":" + JSONObject.quote(String.valueOf(e.getMessage())) + "}";
+        }
+    }
+
+    /** Записать встречу (app.js уже спросил «записать?»): {title, begin, end, all_day, location} → {id, calendar} | {error} | {need}. */
+    @JavascriptInterface public String calAdd(String json) {
+        if (!a.has(android.Manifest.permission.WRITE_CALENDAR)) return "{\"need\":\"android.permission.WRITE_CALENDAR\"}";
+        try {
+            return Cal.add(a.getContentResolver(), new JSONObject(json)).toString();
+        } catch (Throwable e) {
+            return "{\"error\":" + JSONObject.quote(String.valueOf(e.getMessage())) + "}";
+        }
+    }
+
+    /** Окно новой встречи в приложении «Календарь» — сохранит человек. */
+    @JavascriptInterface public boolean calOpenInsert(String json) {
+        try { return Cal.openInsert(a, new JSONObject(json)); } catch (Throwable e) { return false; }
+    }
+
     // есть разрешение CALL_PHONE — звоним сразу, нет — открываем набор номера, нажать «вызов» человек может сам
     @JavascriptInterface public boolean call(String number) {
         return Phone.call(a, number, a.has(android.Manifest.permission.CALL_PHONE));

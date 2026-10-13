@@ -153,6 +153,13 @@ const EXAM_PHONE = [
   { id: "route_walk", group: "Телефон", title: "«Построй пешком до Красной площади» — открывает маршрут на карте",
     steps: ["Лира, построй пешеходный маршрут до Красной площади в Москве, можно дворами"], tool: { route: {} }, expect: { none: ["не могу", "нет доступа к карт"] },
     judge: "Открыл маршрут пешком на карте (route) до Красной площади и коротко сказал об этом. Выдуманные улицы, повороты и минуты в пути или «не умею строить маршруты» — 0 баллов." },
+  { id: "cal_tomorrow", group: "Календарь", title: "«Что у меня завтра?» — по календарю телефона, без выдумок",
+    seed: { calendar: [{ title: "Стоматолог", day: 1, at: "10:00" }, { title: "Встреча с Игорем", day: 1, at: "15:00" }, { title: "Йога", day: 2, at: "19:00" }] },
+    steps: ["Что у меня завтра в календаре?"], tool: { calendar_list: {} }, expect: { any: ["стоматолог"] },
+    judge: "Назвал обе встречи на завтра по календарю (calendar_list): стоматолог в 10:00 и встреча с Игорем в 15:00. Йогу (она послезавтра) не выдал за завтрашнюю, других встреч не выдумал." },
+  { id: "cal_add", group: "Календарь", title: "«Запиши в календарь встречу» — сначала спрашивает, после «да» записывает",
+    steps: ["Запиши в календарь встречу с Игорем {date+2} в 15:00", "Да"], calendar: { any: ["игор"], day: 2, hour: 15 },
+    judge: "На первую просьбу переспросил одной фразой (что, когда), после «да» записал (calendar_add с confirmed) и коротко подтвердил. Записал без вопроса или сказал «записала», не записав, — 0 баллов." },
   { id: "scanner_open", group: "Телефон", title: "«Лира, открой сканер» — правда открывает",
     steps: ["Лира, открой сканер"], tool: { scan_code: {} },
     judge: "Открыл сканер (scan_code) и попросил навести камеру на код. Сказать «открыла», не открыв, — 0 баллов." },
@@ -288,6 +295,12 @@ function examChecks(sc, last, toolsAll, t0) {
     const fresh = EXAM.alarms.filter(x => x.made >= t0);
     out.push({ name: "напоминание поставлено как надо", ok: fresh.some(fits), detail: (fresh.length ? fresh : EXAM.alarms).map(x => `${x.title} — ${new Date(x.at).toLocaleString("ru-RU")}`).join("; ").slice(0, 300) });
   }
+  if (sc.calendar) {                                     // встреча правда в календаре (песочница экзамена), в нужный день и час
+    const w = sc.calendar, fresh = (EXAM.calendar || []).filter(x => x.made >= t0);
+    const fits = (x) => (!w.any || w.any.some(k => x.title.toLowerCase().includes(k))) && (w.day == null || new Date(x.begin).toDateString() === new Date(Date.now() + w.day * 864e5).toDateString())
+      && (w.hour == null || new Date(x.begin).getHours() === w.hour);
+    out.push({ name: "встреча записана в календарь", ok: fresh.some(fits), detail: fresh.map(x => `${x.title} — ${new Date(x.begin).toLocaleString("ru-RU")}`).join("; ") || "записей нет" });
+  }
   if (sc.note) {                                         // заметка правда записана (и с вложением, если нужно)
     const w = sc.note, fresh = notes().filter(n => (+n.time || 0) >= t0 - 1000);
     const hit = fresh.find(n => (!w.any || w.any.some(x => (n.title + " " + n.text).toLowerCase().includes(x))) && (!w.att || (n.att || []).length >= w.att));
@@ -329,7 +342,12 @@ async function examJudge(sc, steps, checks, at) {
 
 /* сценарию нужны готовые заметки или напоминания («покажи заметки» — а они есть): кладём в песочницу, после — убираем */
 function examSeed(seed) {
-  const ids = { notes: [], alarms: [] }; if (!seed) return ids;
+  const ids = { notes: [], alarms: [], calendar: [] }; if (!seed) return ids;
+  (seed.calendar || []).forEach((c, i) => {                 // встречи на «через day дней в at»
+    const d = new Date(); d.setDate(d.getDate() + (c.day || 0)); const [h, m] = String(c.at || "12:00").split(":"); d.setHours(+h, +m, 0, 0);
+    const id = "seedC" + i; ids.calendar.push(id);
+    EXAM.calendar.push({ id, title: c.title, begin: d.getTime(), end: d.getTime() + (c.min || 60) * 6e4, all_day: false, location: c.where || "", made: 0 });
+  });
   if (seed.notes) { const all = notes(); seed.notes.forEach((n, i) => { const id = "seed" + i + Date.now(); ids.notes.push(id); all.push({ id, title: n.title, text: n.text, time: Date.now() - (i + 1) * 3600e3 }); }); saveNotes(all); }
   if (seed.close) { const st = clLoad(); ids.close = st.people; st.people = seed.close.map((n, i) => ({ pid: "pseed" + i, name: n, devs: [{ dev: "d" + i, pub: "A".repeat(43) }] })); }
   (seed.alarms || []).forEach((a, i) => { const id = "seedA" + i; ids.alarms.push(id); EXAM.alarms.push({ id, title: a.title, at: Date.now() + (a.in_h || 1) * 36e5, kind: "reminder", repeat: "", made: 0 }); });
@@ -339,6 +357,7 @@ function examUnseed(ids) {
   if (!ids) return;
   if (ids.notes.length) saveNotes(notes().filter(n => !ids.notes.includes(n.id)));
   EXAM.alarms = EXAM.alarms.filter(a => !ids.alarms.includes(a.id));
+  EXAM.calendar = (EXAM.calendar || []).filter(c => !(ids.calendar || []).includes(c.id));
   if (ids.close) clLoad().people = ids.close;
 }
 async function examScenario(sc) {
@@ -407,7 +426,7 @@ async function examRun(onStep, job) {
   let info = {}; try { info = JSON.parse(D.info() || "{}"); } catch (e) { }
   const started = new Date();
   SANDBOX = { prefs: {}, files: {}, dev: [] };                                           // eslint-disable-line no-global-assign
-  EXAM = { tools: [], alarms: [], stop: false };
+  EXAM = { tools: [], alarms: [], calendar: [], stop: false };
   const keepText = S.textMode; S.textMode = true;                               // ничего не озвучивать
   const results = [];
   try {

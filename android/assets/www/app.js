@@ -41,6 +41,9 @@ const D = window.Dewiar || (() => {
     alarmSet(j) { const x = JSON.parse(j); x.id = x.id || "a" + Date.now(); const i = alarms.findIndex(a => a.id === x.id); if (i >= 0) alarms[i] = x; else alarms.push(x); return JSON.stringify(x); },
     alarmCancel(id) { const i = alarms.findIndex(a => a.id === id); if (i >= 0) alarms.splice(i, 1); return i >= 0; },
     alarms: () => JSON.stringify(alarms), alarmHistory: () => "[]", exactAlarms: () => true,
+    _cal: [], calEvents(j) { const q = JSON.parse(j); return JSON.stringify({ events: this._cal.filter(e => e.end > q.from && e.begin < q.to).sort((a, b) => a.begin - b.begin) }); },
+    calAdd(j) { const e = JSON.parse(j); e.id = this._cal.length + 1; e.calendar = "Мой календарь"; this._cal.push(e); return JSON.stringify({ id: e.id, calendar: e.calendar }); },
+    calOpenInsert(j) { window._calInsert = JSON.parse(j); return true; },
     contact: () => "", call: (n) => { (window._calls = window._calls || []).push(n); return true; }, sms: () => true, openApp: (n) => (/телеграм|telegram/i.test(n) ? "Telegram" : ""), apps: () => "[]",
     openUrl: () => true, torch: () => true, volume: (op, v) => { if (op !== "get") (window._vol = window._vol || []).push([op, v]); return 50; }, battery: () => JSON.stringify({ percent: 80, charging: false }),
     files: (n) => (n in files ? files[n] : (localStorage.getItem("f_" + n) || "")),
@@ -1243,6 +1246,7 @@ function systemPrompt() {
     + "напоминания, будильники и таймеры (set_reminder; время — точной датой ISO, ты знаешь, который час), звонки (call), SMS (send_sms — откроется сообщение, отправит пользователь), "
     + "радио прямо здесь, в приложении (play_radio, radio_control — на любую просьбу про радио или «включи музыку», не сайты и не приложения), "
     + "маршрут на карте — «как дойти», «проложи пешком», геоточка или ссылка на карту (route: карта сама ведёт кратчайшим путём, дворами), "
+    + "календарь телефона — «что у меня завтра», «какие встречи на неделе» (calendar_list), «запиши в календарь», «назначь встречу» (calendar_add: сначала спроси «записать?», запиши после «да»), "
     + "приложения (open_app), сайты (open_url), поиск в интернете (web_search, read_webpage), погода (weather), фонарик, громкость, заметки (save_note, find_notes), "
     + "память о пользователе (remember), деньги (money_add, money_report), сообщения в MAX, Telegram, WhatsApp (send_message), "
     + "мини-программы, страницы и презентации — калькулятор, игра, конвертер, таймер, слайды (make_app: сделай сам, она сразу откроется здесь; код программы не сохраняй заметкой; никогда не говори «готово», не вызвав make_app)" + (S.home.token ? ", умный дом Яндекса (smart_home)" : "")
@@ -1726,6 +1730,7 @@ async function ask(text, opts = {}) {
         called.add(c.name);
         let res;
         try { res = await runTool(c.name, safeJSON(c.args)); } catch (e) { res = "Ошибка: " + e.message; }
+        if (c.name === "calendar_add" && /^Записано/.test(String(res))) called.add("calendar_write");   // правда записано, а не только спросили
         if (c.name === "call_persona" && res && res.switchTo) { switchTo = res.switchTo; res = res.text; }
         if (res && res.image) { shots.push(res.image); res = res.text; }
         if (/^Ошибка/.test(String(res))) toolErr = toolErr || String(res).replace(/^Ошибка:\s*/, "");
@@ -2204,6 +2209,9 @@ const CLAIMS = [
     tool: "open_app|open_url|phone_nav", what: "открыл(а) приложение" },
   { rx: /(?:создал[аи]?|написал[аи]?|составил[аи]?|набрал[аи]?)(?![а-яё])\s+(?:тебе\s+|вам\s+)?(?:нов(?:ое|ый)\s+)?(?:письмо|черновик)/i,
     tool: "phone_type|send_message|send_sms|close_send|save_note", what: "создал(а) письмо" },
+  // «Записала встречу в календарь» — а calendar_add не вызван или только спросил «записать?» (записано — calendar_write)
+  { rx: /(?:записал[аи]?|добавил[аи]?|внес(?:ла|ли)?|занес(?:ла|ли)?|поставил[аи]?|запланировал[аи]?)(?![а-яё])[^.!?]{0,60}\sв\s+(?:твой\s+|ваш\s+)?календар/i,
+    tool: "calendar_write", what: "записал(а) в календарь" },
 ];
 /* -> обещание из CLAIMS, инструмент которого в этом ходе так и не вызывали (called — вызванные), или null.
    asked — просьба человека: у части обещаний («смотрю», «вот») смысл есть только при просьбе про камеру (c.user) */
@@ -2347,6 +2355,10 @@ function toolSpecs() {
     { name: "open_app", description: "Открыть приложение на телефоне по названию.", parameters: O({ name: STR }, ["name"]) },
     { name: "route", description: "Маршрут на карте: «как дойти до…», «проложи маршрут», «построй пешком дворами», геоточка или ссылка на карту. to — куда: адрес с городом, место или координаты, ссылка на карту; from — откуда (пусто — от того места, где пользователь сейчас); mode — walk (пешком, по умолчанию) | transit | car | bike; app — yandex | google (пусто — какие карты стоят). Карта сама строит кратчайший путь (пешком — и дворами); не выдумывай улицы и время.",
       parameters: O({ to: STR, from: STR, mode: { type: "string", enum: ["walk", "transit", "car", "bike"] }, app: { type: "string", enum: ["yandex", "google"] } }, ["to"]) },
+    { name: "calendar_list", description: "Календарь телефона (Google и другие календари человека): что запланировано. from — с какого дня ГГГГ-ММ-ДД (пусто — сегодня), days — на сколько дней (1 — один день, 7 — неделя), query — слово для поиска («Игорь», «стоматолог»). Для «что у меня завтра», «когда встреча с …», «свободен ли я в пятницу». Отвечай по найденному, не выдумывай встреч.",
+      parameters: O({ from: STR, days: NUM, query: STR }) },
+    { name: "calendar_add", description: "Записать встречу в календарь телефона — когда просят записать в календарь или назначить встречу (просто «запомни» — это remember). title — что, start — начало ГГГГ-ММ-ДДTЧЧ:ММ (местное; только дата — на весь день), minutes — длительность (по умолчанию 60), location — где. Первый вызов ничего не записывает — он скажет, о чём спросить; после «да» пользователя вызови снова с теми же данными и confirmed: true.",
+      parameters: O({ title: STR, start: STR, minutes: NUM, location: STR, confirmed: { type: "boolean" } }, ["title", "start"]) },
     { name: "open_url", description: "Открыть сайт или ссылку в браузере (YouTube, карты, поиск). Не для радио — для него play_radio.", parameters: O({ url: STR }, ["url"]) },
     { name: "play_radio", description: "Включить радио онлайн прямо здесь, в приложении: query — название станции («Европа Плюс», «Маяк», «Рекорд»), жанр или настроение («джаз», «рок», «классика», «что-нибудь спокойное»), пусто — на мой вкус. На любую просьбу про радио или «включи музыку» — только этот инструмент: не открывай сайты, Яндекс Музыку и другие приложения.",
       parameters: O({ query: STR }) },
@@ -2472,6 +2484,8 @@ async function runTool(name, a) {
       return `Открыто: ${n}.` + (scr && scr !== "OFF" ? "\n\nНа экране:\n" + scr : "");
     }
     case "route": return routeTool(a);
+    case "calendar_list": return calendarList(a);
+    case "calendar_add": return calendarAdd(a);
     case "open_url": { let u = String(a.url || ""); if (!/^https?:|^[a-z]+:/.test(u)) u = "https://" + u; return D.openUrl(u) ? "Открыто." : "Не открылось."; }
     case "play_radio": {
       const r = await radio.play(a.query || "");
@@ -3210,6 +3224,75 @@ function donePrompt() {
     + "Отметил по ошибке — mark_done с undo. «Что я сегодня сделал», «мои достижения» — done_report. "
     + `Сейчас: сегодня сделано ${s.today} ${delaRu(s.today)}` + (s.items.length ? ` (${s.items.slice(-6).map(x => x.title).join("; ")})` : "")
     + (s.streak >= 2 ? `, серия ${s.streak} ${dnRu(s.streak)} подряд` : "") + `, всего ${s.total}.`;
+}
+
+/* ---------- календарь телефона (Cal.java: Android-календарь — в нём Google и другие аккаунты человека, без паролей) ----------
+   Читать — свободно (разрешение спрашивается при первом вопросе). Записать — только после «да» человека: calendar_add без
+   confirmed ничего не пишет, а говорит модели, о чём спросить, и предупреждает о встречах в то же время. Нет доступа или
+   календаря для записи — открываем окно новой встречи в приложении «Календарь», сохраняет человек. Чужое не правим.
+   В экзамене — песочница EXAM.calendar: настоящий календарь не трогаем. */
+const CAL_R = "android.permission.READ_CALENDAR", CAL_W = "android.permission.WRITE_CALENDAR";
+const WD_SHORT = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+function calParse(x) {                                       // «2026-10-15» (весь день) или «2026-10-15T15:00» (местное)
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2}))?/.exec(String(x || "").trim());
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3], m[4] ? +m[4] : 0, m[5] ? +m[5] : 0);
+  return isNaN(d) ? null : { ms: d.getTime(), allDay: !m[4] };
+}
+function calWhen(e) {
+  const b = new Date(e.begin), en = new Date(e.end), day = `${WD_SHORT[b.getDay()]} ${b.getDate()} ${MON[b.getMonth()]}`;
+  if (e.all_day) return day + ", весь день";
+  const same = en.toDateString() === b.toDateString();
+  return `${day}, ${pad(b.getHours())}:${pad(b.getMinutes())}–${same ? "" : `${en.getDate()} ${MON[en.getMonth()]} `}${pad(en.getHours())}:${pad(en.getMinutes())}`;
+}
+const calLine = (e) => `${calWhen(e)} — ${e.title || "без названия"}${e.location ? ` (${e.location})` : ""}`;
+/* -> встречи за период или null — доступа к календарю не дали */
+async function calEvents(from, to) {
+  if (examOn()) return (EXAM.calendar || []).filter(e => e.end > from && e.begin < to).sort((a, b) => a.begin - b.begin);
+  if (typeof D.calEvents !== "function") return [];
+  let r = JSON.parse(D.calEvents(JSON.stringify({ from, to })) || "{}");
+  if (r.need) { if (!(await needPerm(r.need))) return null; r = JSON.parse(D.calEvents(JSON.stringify({ from, to })) || "{}"); }
+  if (r.error) throw new Error("календарь не прочитался: " + r.error);
+  return r.events || [];
+}
+async function calendarList(a) {
+  const st = a.from ? calParse(a.from) : null, d0 = st ? new Date(st.ms) : new Date();
+  const from = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate()).getTime();
+  const days = Math.max(1, Math.min(31, Math.round(+a.days || 1))), to = from + days * 864e5;
+  let ev = await calEvents(from, to);
+  if (ev === null) return "Доступ к календарю не разрешён. Скажи пользователю одной фразой: чтобы я видела календарь, разрешите доступ — спрошу снова при следующем вопросе. Не выдумывай встреч.";
+  const q = String(a.query || "").toLowerCase().trim();
+  if (q) { const w = stems(q); ev = ev.filter(e => { const t = (e.title + " " + e.location).toLowerCase(); return t.includes(q) || (w.length && stems(t).some(x => w.includes(x))); }); }
+  const span = days === 1 ? `${WD[new Date(from).getDay()].replace(/а$/, "у")}, ${new Date(from).getDate()} ${MON[new Date(from).getMonth()]}` : `${days} дн. с ${new Date(from).getDate()} ${MON[new Date(from).getMonth()]}`;
+  if (!ev.length) return `В календаре на ${span}${q ? ` по «${a.query}»` : ""} ничего нет.`;
+  return `Календарь на ${span}${q ? ` по «${a.query}»` : ""} (${ev.length}):\n` + ev.slice(0, 40).map(calLine).join("\n")
+    + (ev.length > 40 ? `\n…и ещё ${ev.length - 40}.` : "") + "\nРасскажи главное коротко, своими словами; не добавляй встреч, которых здесь нет.";
+}
+async function calendarAdd(a) {
+  const st = calParse(a.start);
+  if (!st) return "Ошибка: нужно начало — дата и время ГГГГ-ММ-ДДTЧЧ:ММ (или только дата — на весь день). Посчитай от текущей даты.";
+  const title = String(a.title || "").replace(/\s+/g, " ").trim().slice(0, 200) || "Встреча";
+  const mins = Math.max(5, Math.min(24 * 60, Math.round(+a.minutes || 60)));
+  const e = { title, begin: st.ms, end: st.allDay ? st.ms + 864e5 : st.ms + mins * 6e4, all_day: st.allDay, location: String(a.location || "").trim().slice(0, 200) };
+  if (!st.allDay && e.begin < Date.now() - 5 * 6e4) return `Ошибка: ${calWhen(e)} уже прошло — уточни у пользователя дату.`;
+  const what = calLine(e);
+  if (a.confirmed !== true) {
+    let busy = [];
+    try { busy = ((await calEvents(e.begin, e.end)) || []).filter(x => !x.all_day); } catch (x) { }
+    return `Ещё не записано. Спроси пользователя одной фразой: «Записать в календарь: ${what}?»`
+      + (busy.length ? ` Предупреди, что в это время уже есть: ${busy.slice(0, 3).map(x => x.title).join("; ")}.` : "")
+      + " Только после его «да» вызови calendar_add снова с теми же данными и confirmed: true; без «да» не говори, что записала.";
+  }
+  if (examOn()) { (EXAM.calendar = EXAM.calendar || []).push(Object.assign({ id: "ec" + Date.now(), made: Date.now() }, e)); return `Записано в календарь: ${what}.`; }
+  const insert = () => typeof D.calOpenInsert === "function" && D.calOpenInsert(JSON.stringify(e));
+  let r = JSON.parse(D.calAdd(JSON.stringify(e)) || "{}");
+  if (r.need) {
+    if (await needPerm(r.need)) r = JSON.parse(D.calAdd(JSON.stringify(e)) || "{}");
+    else return insert() ? `Доступа к календарю нет — открыла окно новой встречи (${what}). Скажи: проверьте и нажмите «Сохранить».` : "Ошибка: доступа к календарю нет.";
+  }
+  if (r.error === "no_calendar") return insert() ? `В телефоне нет календаря для записи — открыла окно новой встречи в «Календаре» (${what}). Скажи: проверьте и нажмите «Сохранить».` : "Ошибка: в телефоне нет календаря для записи — нужно приложение «Календарь» или аккаунт Google.";
+  if (r.error) return "Ошибка: " + r.error;
+  return `Записано в календарь «${r.calendar}»: ${what}${st.allDay ? "" : ". Календарь напомнит за 15 минут"}.`;
 }
 
 /* ---------- маршрут на карте (отзыв 13.10: «Лира берёт геоточку, открывает карту и предлагает короткий пешеходный маршрут
