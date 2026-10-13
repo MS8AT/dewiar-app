@@ -48,6 +48,35 @@ ok(A.resolve("kto-to", gender="male")["id"] == "ryan", "незнакомый —
 ok(A.resolve("loop1")["kind"] == "speaker", f"петля псевдонимов не вешает: {A.resolve('loop1')}")
 A.cfg_save({})
 
+# видеокарта общая с vLLM: вторая модель не влезла — служба выгружает первую и продолжает, а не падает
+import types  # noqa: E402
+_tries = []
+
+
+class _Q:
+    @staticmethod
+    def from_pretrained(name, **kw):
+        _tries.append(name)
+        if "Base" in name and _tries.count(name) == 1:
+            raise RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB")
+        if "VoiceDesign" in name:
+            raise RuntimeError("401 Unauthorized")
+        return "model:" + name
+
+
+_stub_torch = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: False, empty_cache=lambda: None), float32="f32", bfloat16="bf16")
+sys.modules["torch"], sys.modules["qwen_tts"] = _stub_torch, types.SimpleNamespace(Qwen3TTSModel=_Q)
+QE = A.QwenEngine()
+QE.get("custom")
+m = QE.get("base")
+ok(m.endswith("0.6B-Base") and sorted(QE.models) == ["base"] and A.STATE["loaded"] == ["base"], f"не хватило видеопамяти на вторую модель — первая выгружена, вторая загружена: {sorted(QE.models)}")
+try:
+    QE.get("design"); ok(False, "другая ошибка загрузки — не прячется")
+except RuntimeError as e:
+    ok("401" in str(e), "другая ошибка загрузки — не прячется")
+del sys.modules["torch"], sys.modules["qwen_tts"]
+A.STATE["loaded"] = []
+
 srv = A.serve(0)
 PORT = srv.server_address[1]
 threading.Thread(target=srv.serve_forever, daemon=True).start()

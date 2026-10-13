@@ -97,7 +97,10 @@ class FakeDocker:
         p = u.path
         body = h._body()
         self.calls.append((method, p, q))
+        if method == "GET" and p == "/info":
+            return h._out(200, {"NCPU": 16, "MemTotal": 64 * 1024 ** 3})
         if method == "POST" and p == "/build":
+            self.build_q = q
             self.builds += 1
             ok = not self.fail_build and b"Dockerfile" in body and b"app.py" in body
             lines = [{"stream": "Step 1/6 : FROM python:3.11-slim-bookworm\n"}, {"status": "Downloading torch"}]

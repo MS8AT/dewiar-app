@@ -369,7 +369,16 @@ class QwenEngine:
         t0 = time.time()
         log.info("загружаю %s (%s) на %s", role, MODELS[role], dev)
         try:
-            m = Qwen3TTSModel.from_pretrained(MODELS[role], **kw)
+            try:
+                m = Qwen3TTSModel.from_pretrained(MODELS[role], **kw)
+            except Exception as e:  # noqa: BLE001
+                # Видеокарта общая с vLLM: второй модели может не хватить места — тогда держим одну, а не падаем
+                if "out of memory" not in str(e).lower() or not self.models:
+                    raise
+                log.warning("для %s не хватило видеопамяти — выгружаю %s и пробую снова", role, ", ".join(self.models))
+                for r in list(self.models):
+                    self.unload(r)
+                m = Qwen3TTSModel.from_pretrained(MODELS[role], **kw)
         finally:
             STATE["loading"] = ""
         log.info("%s готова за %.1f с", role, time.time() - t0)
