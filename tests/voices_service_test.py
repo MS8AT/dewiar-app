@@ -198,8 +198,7 @@ try:
     # файлы для сервера на месте
     V = ROOT / "server/voices"
     ok((V / "Dockerfile").is_file() and "qwen-tts" in (V / "Dockerfile").read_text(encoding="utf-8"), "Dockerfile ставит qwen-tts")
-    dc = (V / "docker-compose.dewiar-tts.yml").read_text(encoding="utf-8")
-    ok("container_name: dewiar-tts" in dc and "tts:" in dc and "/data" in dc, "compose: служба tts с папкой голосов")
+    ok("HF_HUB_CACHE=/models" in (V / "Dockerfile").read_text(encoding="utf-8"), "веса — прямо в папке моделей (как у vLLM)")
 finally:
     srv.shutdown()
     shutil.rmtree(tmp, ignore_errors=True)

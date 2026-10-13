@@ -153,6 +153,7 @@ run "«Что нового» после обновления: студия, пр
 run "честное «готово» у фоновых задач" $PY "$T/task_honest_test.py"
 run "радио: «играет», а звука нет" $PY "$T/radio_silent_test.py"
 run "служба голосов Qwen3-TTS: фразы, персонажи, свои голоса, поток" $PY "$T/voices_service_test.py"
+run "телефон: голос сервера не ответил — говорит голосом телефона" $PY "$T/android_voice_fallback_test.py"
 run "экзамен 13.10: заметки, близкие, правдивые советы" $PY "$T/exam1013_test.py"
 run "телефон: заметки, фото и файлы" $PY "$T/android_notes_test.py"
 run "студия: заметки и поиск" $PY "$T/studio_notes_test.py"

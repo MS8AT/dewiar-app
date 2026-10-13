@@ -1082,6 +1082,10 @@ function stopListen() { sttGuard(0); sttGen++; dict = ""; if (sttActive) { sttAc
 /* ---------- голос: фразы по очереди (Tts.java) — голос телефона или сервера (/v1/audio/speech) ----------
    sayLeft — сколько фраз ещё не отзвучало: tts_done приходит на каждую (и при ошибке), на нуле ход заканчивается. */
 let sayN = 0, sayLeft = 0, voiceWarned = false, afterSpeak = null;
+/* Голос сервера не ответил (служба голосов выключена, сервер недоступен) — фраза звучит голосом телефона, и следующие две
+   минуты тоже: не ждём отказа на каждой фразе. sayTexts — текст фраз, ушедших на сервер, чтобы было что повторить. */
+let srvVoiceDownAt = 0, srvVoiceWarnAt = 0;
+const sayTexts = new Map();
 const EMOJI = (() => { try { return new RegExp("\\p{Extended_Pictographic}", "gu"); } catch (e) { return /[\u2600-\u27BF]|[\uD83C-\uDBFF][\uDC00-\uDFFF]/g; } })();
 /* Текст для голоса — как speakable в core/llm.py: без кода, ссылок, путей к файлам и расширений; сокращения — словами */
 const FILE_EXT = "(?:html?|pdf|pptx?|docx?|xlsx?|csv|json|md|txt|py|js|css|zip|png|jpe?g|svg|mp3|wav|mp4)";
@@ -1145,15 +1149,17 @@ function say(text) {
   }
   const id = "s" + (++sayN); sayLeft++;
   const cv = (S.tts.engine === "cloud" || (S.tts.engine === "system" && !D.ttsReady())) ? cloudVoice() : null;
+  const srvDown = Date.now() - srvVoiceDownAt < 120e3 && D.ttsReady();   // голос сервера только что не ответил — пока свой
   const fem = persona().gender === "female";
   if (S.tts.engine === "eleven" && S.tts.el_key) {           // ElevenLabs своим ключом: голос героя или героини
     const vid = (fem ? S.tts.el_voice_f : S.tts.el_voice_m) || EL_VOICES[fem ? "f" : "m"];
     D.speakRemote(id, `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(vid)}?output_format=mp3_44100_128`, "xi-api-key:" + S.tts.el_key,
       JSON.stringify({ text: t, model_id: S.tts.el_model || "eleven_flash_v2_5", voice_settings: { speed: Math.max(0.7, Math.min(1.2, +S.tts.rate || 1)) } }));
-  } else if ((S.tts.engine === "server" && S.tts.url) || cv) {
+  } else if (!srvDown && ((S.tts.engine === "server" && S.tts.url) || cv)) {
+    sayTexts.set(id, t);
     const u = cv ? cv.url : S.tts.url, url = u.replace(/\/+$/, "") + (/speech$/.test(u) ? "" : "/audio/speech");
     const body = cv ? { model: "tts-1", input: t, voice: persona().voice_remote || (persona().gender === "female" ? "serena" : "aiden"), persona: persona().id || "", response_format: "wav", speed: +S.tts.rate || 1 }
-      : { model: S.tts.model || "tts-1", input: t, voice: (fem ? S.tts.voice : (S.tts.voice_m || S.tts.voice)) || "alloy", response_format: "mp3" };
+      : { model: S.tts.model || "tts-1", input: t, voice: (fem ? S.tts.voice : (S.tts.voice_m || S.tts.voice)) || "alloy", persona: persona().id || "", response_format: "mp3" };
     D.speakRemote(id, url, cv ? cv.key : (S.tts.key || ""), JSON.stringify(body));
   } else {
     if (!D.ttsReady()) {
@@ -1168,11 +1174,21 @@ function say(text) {
 }
 N.on("tts_start", () => { vCount("tts_ok"); if (state === "thinking") setState("speaking"); });
 N.on("tts_fail", e => { vCount("tts_err"); plog("warn", "голос устройства не сказал фразу (код " + (e.code ?? "?") + ")"); });
-N.on("tts_done", () => {
+N.on("tts_done", e => {
+  if (e && e.id) sayTexts.delete(e.id);
   sayLeft = Math.max(0, sayLeft - 1);
   if (sayLeft === 0 && state === "speaking" && !busy) finishTurn();
 });
-N.on("tts_error", e => { vCount("tts_err"); plog("warn", "голос сервера: " + e.error); toast("Голос сервера: " + e.error); });
+N.on("tts_error", e => {
+  vCount("tts_err"); plog("warn", "голос сервера: " + e.error);
+  const t = sayTexts.get(e.id); sayTexts.delete(e.id);
+  if (t && D.ttsReady()) {                                   // эта фраза — голосом телефона, а не тишина
+    srvVoiceDownAt = Date.now(); sayLeft++;
+    const sv = sysVoiceFor(persona().gender);
+    D.speak("f" + e.id, t, S.tts.rate || 1.0, sv.pitch, sv.name, true);
+    if (Date.now() - srvVoiceWarnAt > 600e3) { srvVoiceWarnAt = Date.now(); toast("Голос сервера сейчас недоступен — говорю голосом телефона", 5000); }
+  } else if (t) toast("Голос сервера: " + e.error);      // своего голоса нет — честно говорим, почему тихо
+});
 function stopVoice() { sayLeft = 0; D.stopSpeak(); }
 function finishTurn() {
   setState("idle");
