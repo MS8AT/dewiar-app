@@ -104,6 +104,7 @@ public class MainActivity extends Activity implements Net.Sink {
         });
         // намерение, с которым запустили, ждёт в pending, пока app.js не заберёт его (Dewiar.takeIntent);
         // будильники ставим заново при каждом запуске — на случай, если система их сбросила
+        Speech.restoreBeeps(this);                   // закрылись посреди «удерживайте и говорите» — звук вернуть
         speech = new Speech(this, this);
         tts = new Tts(this, this);
         radio = Radio.get(this, this);
@@ -246,7 +247,7 @@ public class MainActivity extends Activity implements Net.Sink {
 
     @Override protected void onDestroy() {
         if (live.get() == this) live.clear();
-        if (speech != null) speech.cancel();
+        if (speech != null) { speech.cancel(); speech.release(); }
         if (tts != null) tts.shutdown();
         if (radio != null && isFinishing()) radio.stop();          // закрыли приложение — радио тоже; при пересоздании экрана играет дальше
         if (web != null) { web.destroy(); web = null; }

@@ -121,7 +121,7 @@ def _hm(sec):
     return f"{h} ч" + (f" {m} мин" if m else "")
 
 
-def plan(gone, since, tasks, upcoming, last_greet, now=None, night=(23, 7), day_brief=True, dstat=None, eve_said=None):
+def plan(gone, since, tasks, upcoming, last_greet, now=None, night=(23, 7), day_brief=True, dstat=None, eve_said=None, news=""):
     """Что сказать вернувшемуся. gone — секунд отлучки, since — datetime ухода; tasks — список задач (public());
     upcoming — [(время «HH:MM», что)] на ближайшие 2 часа; last_greet — datetime прошлого приветствия или None.
     dstat — done.stats() (сделанные дела), eve_said — дата прошлого итога дня: вечером (с 19:00), если сегодня есть сделанное,
@@ -142,6 +142,8 @@ def plan(gone, since, tasks, upcoming, last_greet, now=None, night=(23, 7), day_
         facts.append("Ждёт ответа пользователя задача: " + "; ".join(f"«{t.get('title', '')}»" for t in wait[:2]) + ".")
     if upcoming:
         facts.append("Скоро: " + "; ".join(f"в {a} — {b}" for a, b in upcoming[:3]) + ".")
+    if news:                                             # обновились — сказать, что нового (news.say_fact), один раз
+        facts.append(news)
     if dstat and dstat.get("today") and now.hour >= 19 and eve_said != now.date():
         from done import dela, dney
         f = (f"Сегодня пользователь отметил сделанными {dstat['today']} {dela(dstat['today'])}: "

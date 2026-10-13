@@ -533,12 +533,22 @@ class MusicMixin:
             done = self.done.stats()
         except Exception:  # noqa: BLE001
             done = None
+        news_fact = ""
+        try:                                             # обновились, а студию с «Что нового» не открывали — скажет сама
+            import news as _news
+            ui = self.s.get("ui") or {}
+            if ui.get("welcome") == "done" and ui.get("news_said") != VERSION and ui.get("news_seen") != VERSION:
+                news_fact = _news.say_fact(_news.releases(ui.get("news_seen") or ui.get("news_said") or "", VERSION, "pc", 3))
+        except Exception:  # noqa: BLE001
+            news_fact = ""
         p = presence.plan(gone, datetime.now() - timedelta(seconds=gone), tasks, upcoming, last, dstat=done,
-                          eve_said=getattr(self, "_eve_said", None))
+                          eve_said=getattr(self, "_eve_said", None), news=news_fact)
         if not p:
             log.info("👋 вернулись через %s — сказать нечего, молчим", presence._hm(gone))
             return False
         self._welcome_at = datetime.now()
+        if news_fact and news_fact in p["facts"]:
+            self.s.update({"ui": {"news_said": VERSION}})
         if p["kind"] == "eve":
             self._eve_said = self._welcome_at.date()
         ctx = ""

@@ -149,6 +149,8 @@ run "телефон: длинная диктовка" $PY "$T/android_dictation_
 run "персонажи не отвечают друг за друга" $PY "$T/team_window_test.py"
 run "маршрут на карте: координаты, адрес, Яндекс и Google" $PY "$T/route_test.py"
 run "персонажи: живые характеры и правило разговора" $PY "$T/personas_talk_test.py"
+run "«Что нового» после обновления: студия, приветствие, телефон" $PY "$T/news_test.py"
+run "честное «готово» у фоновых задач" $PY "$T/task_honest_test.py"
 run "телефон: заметки, фото и файлы" $PY "$T/android_notes_test.py"
 run "студия: заметки и поиск" $PY "$T/studio_notes_test.py"
 run "короткие фразы: спасибо, ослышанное имя" $PY "$T/voice_short_test.py"

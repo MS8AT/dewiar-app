@@ -1034,3 +1034,16 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .cl-send #cl-emo-b { width: 42px; height: 42px; padding: 0; display: grid; place-items: center; flex: none; }
 html.st-light .cl-rx, html.st-light .cl-repick { background: #fff; box-shadow: 0 6px 18px -8px rgba(20,30,60,.35); }
 @media (prefers-reduced-motion: reduce) { .cl-repick { animation: none; } }
+
+/* «Что нового» после обновления (news.js) */
+dialog.nwdlg { margin: auto; width: min(620px, calc(100% - 32px)); max-height: calc(100% - 48px); overflow: auto; padding: 26px 28px 22px; border: 0;
+  border-radius: 24px; color: var(--ink); background: #1b1b2e; box-shadow: 0 30px 90px rgba(0,0,0,.55); }
+dialog.nwdlg::backdrop { background: rgba(6,6,14,.55); backdrop-filter: blur(4px); }
+.nwdlg h2 { font-size: 22px; margin: 0 0 2px; }
+.nwdlg .nwsub { color: var(--muted); font-size: 13.5px; margin: 0 0 16px; }
+.nwi { display: flex; gap: 14px; padding: 14px 16px; border-radius: 16px; background: var(--frost); margin-bottom: 8px; }
+.nwi > i { font-style: normal; font-size: 24px; line-height: 1.15; width: 32px; text-align: center; flex: none; }
+.nwi b { display: block; font-size: 15px; margin-bottom: 3px; }
+.nwi p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+.nwi small { display: block; margin-top: 7px; font-size: 13px; color: var(--accent); }
+html.st-light dialog.nwdlg { background: #fff; }

@@ -1196,13 +1196,17 @@
     </div>
   </section>
 
+  <dialog class="nwdlg" id="news-dlg" aria-labelledby="nw-title">
+    <h2 id="nw-title" tabindex="-1" autofocus>Что нового</h2><p class="nwsub" id="nw-sub"></p><div id="nw-list"></div>
+    <div class="actions" style="margin:16px 0 0;justify-content:flex-end"><button class="btn primary" id="nw-ok">Понятно</button></div>
+  </dialog>
   <section id="p-about">
     <h1 id="ab-title">Dewiar</h1>
     <p class="lead">Ядро работает в фоне, виджет и эта студия подключаются к нему.</p>
     <div class="prof on" style="padding:16px 18px;margin-bottom:18px">
       <h3 style="font-size:15px;margin-bottom:6px">Проверка</h3>
       <p class="hint" style="margin-bottom:12px">Микрофон, мозг, распознавание, голос, интернет, место и версия — по пунктам. Если что-то не так, рядом будет, что сделать.</p>
-      <div class="actions" style="margin:0"><button class="btn primary" id="sc-go">Проверить всё</button><button class="btn" id="ab-intro" title="Персонаж сам расскажет о себе голосом, проверит микрофон и покажет кнопки">👋 Познакомиться заново</button></div>
+      <div class="actions" style="margin:0"><button class="btn primary" id="sc-go">Проверить всё</button><button class="btn" id="ab-news">✨ Что нового</button><button class="btn" id="ab-intro" title="Персонаж сам расскажет о себе голосом, проверит микрофон и покажет кнопки">👋 Познакомиться заново</button></div>
       <div class="sclist" id="sc-list"></div>
     </div>
     <div class="prof on bug" id="bug" style="padding:16px 18px;margin-bottom:18px">
@@ -1347,5 +1351,6 @@
 <script src="studio/close.js"></script>
 <script src="studio/refs.js"></script>
 <script src="studio/notes.js"></script>
+<script src="studio/news.js"></script>
 </body>
 </html>

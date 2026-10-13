@@ -36,7 +36,7 @@ LLM, PORT = free(), free()
 mock = subprocess.Popen([sys.executable, str(TESTS / "mock_llm.py"), str(LLM)])
 cfg = tmp / "cfg"; cfg.mkdir()
 (cfg / "settings.json").write_text(json.dumps({"persona": "dewiar", "audio": {"sounds": True, "follow_up_seconds": 3},
-                                               "ui": {"welcome": "done"}, "stt": {"engine": "vosk"}, "tts": {"engine": "off"},
+                                               "ui": {"news_seen": "99.0.0", "welcome": "done"}, "stt": {"engine": "vosk"}, "tts": {"engine": "off"},
                                                "llm": {"active": "m", "profiles": {"m": {"name": "Мок", "kind": "openai", "base_url": f"http://127.0.0.1:{LLM}/v1", "model": "mock"}}}}))
 env = dict(os.environ, DEWIAR_CONFIG_DIR=str(cfg), DEWIAR_STATE_DIR=str(tmp / "st"), DEWIAR_PORT=str(PORT), DEWIAR_ASSUME_AEC="1",
            DEWIAR_WORKSPACE_DIR=str(tmp / "ws"), DEWIAR_LOG_LEVEL="DEBUG")

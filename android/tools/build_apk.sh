@@ -36,6 +36,8 @@ python3 -c 'import json,sys; print("window.RADIO_LIST = " + json.dumps(json.load
     "$ROOT/data/radio.json" > "$B/assets/www/radio.js"         # свой список радиостанций (тот же, что у компьютера)
 python3 -c 'import json,sys; print("window.DEWIAR_GUIDE = " + json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), ensure_ascii=False) + ";")' \
     "$ROOT/data/guide.json" > "$B/assets/www/guide.js"         # руководство — Лира отвечает «как…» по нему (app_help), как на компьютере
+python3 -c 'import json,sys; print("window.DEWIAR_NEWS = " + json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), ensure_ascii=False) + ";")' \
+    "$ROOT/data/whatsnew.json" > "$B/assets/www/whatsnew.js"   # «Что нового» после обновления — тот же текст, что у компьютера
 
 "$BT/aapt2" compile --dir "$HERE/res" -o "$B/res.zip"
 # Две сборки из одного кода, одной подписью (ставятся друг поверх друга, данные сохраняются):

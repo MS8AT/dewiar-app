@@ -323,6 +323,19 @@ class CommandsMixin:
         if cmd == "skills_folder":
             self.skills.user_dir.mkdir(parents=True, exist_ok=True)
             return str(self.skills.user_dir)
+        if cmd in ("news", "news_seen"):              # «Что нового» после обновления (news.py)
+            import news
+            seen = self.s.get("ui", "news_seen") or ""
+            if cmd == "news_seen":
+                self.s.update({"ui": {"news_seen": VERSION}})
+                return {"ok": True}
+            if a.get("all"):
+                return {"version": VERSION, "releases": news.releases("", VERSION)}
+            if not seen:                              # первый раз с этой функцией: новая установка — молчим, обновились — показываем
+                if (self.s.get("ui", "welcome") or "") != "done":
+                    self.s.update({"ui": {"news_seen": VERSION}})
+                    return {"version": VERSION, "releases": []}
+            return {"version": VERSION, "releases": news.releases(seen, VERSION) if seen != VERSION else []}
         if cmd in ("done", "done_add", "done_undo", "done_reminder"):    # «Дела»: сделанное и достижения (студия, done.py)
             return self._done_cmd(cmd, a)
         if cmd in ("reminders", "reminder_add", "reminder_update", "reminder_cancel", "alarm_ack", "alarm_snooze",

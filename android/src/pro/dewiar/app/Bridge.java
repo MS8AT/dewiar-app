@@ -300,7 +300,13 @@ public final class Bridge {
     // события слуха: stt_start, stt_level, stt_partial, stt_end, stt_result, stt_error (Speech.java); голоса: tts_* (Tts.java)
     @JavascriptInterface public boolean recognizer() { return Speech.systemAvailable(a); }
 
-    @JavascriptInterface public void listen(int g) { a.speech.listenSystem(g); }
+    @JavascriptInterface public void listen(int g) { a.speech.longPause = false; a.speech.listenSystem(g); }
+
+    /** «Удерживайте и говорите»: то же распознавание, но пауза конца фразы — подольше. */
+    @JavascriptInterface public void listenHold(int g) { a.speech.longPause = true; a.speech.listenSystem(g); }
+
+    /** Пока держат кнопку — без «тринька» распознавателя на каждом перезапуске (Speech.quiet). */
+    @JavascriptInterface public void sttQuiet(boolean on) { a.speech.quiet(on); }
 
     @JavascriptInterface public void listenServer(int g, String url, String key, String model) { a.speech.listenServer(g, url, key, model); }
 

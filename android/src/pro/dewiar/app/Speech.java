@@ -3,6 +3,7 @@ package pro.dewiar.app;
 import android.content.Context;
 import android.content.Intent;
 import android.media.AudioFormat;
+import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.Bundle;
@@ -47,6 +48,59 @@ public final class Speech {
      *  Каждый раз создаётся заново, прежний уничтожается. */
     /** Добавка к паузе конца фразы, мс (0…900): app.js учит её, когда человека обрывают на полуслове (pauseExtra). */
     volatile int extraMs = 0;
+    /** «Удерживайте и говорите»: распознаватель просят ждать паузу подольше (меньше перезапусков посреди речи). */
+    volatile boolean longPause = false;
+
+    // ---------- «Триньк» системного распознавателя (отзыв 13.10: «пока держу кнопку — тринькает на каждой паузе») ----------
+    // Google-распознаватель сам играет звук в начале и в конце каждого сеанса, а при удержании сеансы идут один за другим.
+    // Пока держат кнопку, эти звуки глушим: потоки музыки, уведомлений и системный — без звука, а после — как было.
+    // Что заглушили — в pref beep_muted: если приложение закроется посреди удержания, при следующем запуске звук вернётся
+    // (restoreBeeps); дольше 2 минут без звука не бывает.
+    private static final int[] BEEP_STREAMS = { AudioManager.STREAM_MUSIC, AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM };
+    private final java.util.Set<Integer> muted = new java.util.HashSet<>();
+    private final Runnable unmuteR = new Runnable() { @Override public void run() { unmuteNow(); } };
+
+    public void quiet(final boolean on) {
+        main.post(new Runnable() {
+            @Override public void run() {
+                main.removeCallbacks(unmuteR);
+                if (!on) { main.postDelayed(unmuteR, 900); return; }   // последний «триньк» звучит после остановки
+                AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+                for (int st : BEEP_STREAMS) {
+                    try {
+                        if (!muted.contains(st) && !am.isStreamMute(st)) { am.adjustStreamVolume(st, AudioManager.ADJUST_MUTE, 0); muted.add(st); }
+                    } catch (Throwable ignored) { }                   // «Не беспокоить» и т. п. — этот поток не трогаем
+                }
+                saveMuted();
+                main.postDelayed(unmuteR, 120000);
+            }
+        });
+    }
+
+    private void unmuteNow() {
+        AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
+        for (int st : muted) { try { am.adjustStreamVolume(st, AudioManager.ADJUST_UNMUTE, 0); } catch (Throwable ignored) { } }
+        muted.clear();
+        saveMuted();
+    }
+
+    private void saveMuted() {
+        StringBuilder b = new StringBuilder();
+        for (int st : muted) b.append(b.length() > 0 ? "," : "").append(st);
+        ctx.getSharedPreferences("dewiar", Context.MODE_PRIVATE).edit().putString("beep_muted", b.toString()).apply();
+    }
+
+    /** При запуске: звук, заглушенный прошлым удержанием (приложение закрылось на полуслове), — вернуть. */
+    public static void restoreBeeps(Context c) {
+        android.content.SharedPreferences p = c.getSharedPreferences("dewiar", Context.MODE_PRIVATE);
+        String v = p.getString("beep_muted", "");
+        if (v.isEmpty()) return;
+        AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+        for (String x : v.split(",")) { try { am.adjustStreamVolume(Integer.parseInt(x.trim()), AudioManager.ADJUST_UNMUTE, 0); } catch (Throwable ignored) { } }
+        p.edit().putString("beep_muted", "").apply();
+    }
+
+    public void release() { main.removeCallbacks(unmuteR); unmuteNow(); }
 
     public void listenSystem(final int g) {
         gen = g;
@@ -86,8 +140,8 @@ public final class Speech {
                     i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
                     i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
                     // пожелание (не все распознаватели слушают): дать договорить — человек вспоминает имя или слово
-                    i.putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", 2000L + extraMs);
-                    i.putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", 1600L + extraMs);
+                    i.putExtra("android.speech.extra.SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS", longPause ? 8000L : 2000L + extraMs);
+                    i.putExtra("android.speech.extra.SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS", longPause ? 6000L : 1600L + extraMs);
                     i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.getPackageName());
                     rec.startListening(i);
                 } catch (Throwable e) {

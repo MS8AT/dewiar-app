@@ -1141,12 +1141,17 @@ class AnswerMixin:
                 self.set_state("thinking")
             if not turn.cancel.is_set():
                 if not turn.full.strip() and getattr(turn, "tools_ok", None) and not (set(turn.tools_ok) & INFO_TOOLS):
-                    turn.full = "Готово."                     # действие сделано, а слов модель не добавила
+                    # действие сделано, а слов модель не добавила; фоновая задача только началась — не «Готово» (отзыв 13.10)
+                    turn.full = "Задача запущена — сообщу, когда будет готово." if "start_task" in turn.tools_ok else "Готово."
                     sentences.put(turn.full)
                 if not turn.full.strip():
                     raise LLMError("модель вернула пустой ответ")
                 log.info("⏱ ответ целиком за %.1f с (%s, %d симв.)", time.monotonic() - t_start, prof.get("model") or "?",
                          len(turn.full))
+                early = self._early_done(turn)
+                if early:                                 # «Готово!» сразу после start_task — поправиться вслух и в тексте
+                    turn.full = turn.full.rstrip() + " " + early
+                    sentences.put(early)
                 fake = self._fake_reminder(text, turn)
                 if fake:
                     turn.full = turn.full.rstrip() + " " + fake

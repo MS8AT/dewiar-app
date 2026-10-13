@@ -967,6 +967,7 @@ async function listen() {
   plog("info", "слушаю: " + (server ? "сервер " + server.url.replace(/\?.*$/, "") : "распознавание телефона"));
   sttGen++;
   if (server) D.listenServer(sttGen, sttServerUrl(server.url), server.key, server.model);
+  else if (holdTalk && D.listenHold) D.listenHold(sttGen);     // держат кнопку — пауза конца фразы подольше, реже перезапуск
   else D.listen(sttGen);
   sttGuard(server ? 20000 : 4000, "start");
 }
@@ -1719,7 +1720,16 @@ async function ask(text, opts = {}) {
     // истории выпадает, следующий вопрос склеивался с прошлой просьбой («сделай калькулятор»), и модель отвечала только «Готово».
     // «Сделала» — только если хоть одно действие правда удалось; все с ошибкой — честно, что не вышло
     let quiet = "";
-    if (!sink.text().trim()) {
+    // фоновую задачу только передали, а модель уже «Готово! Вот презентация» — результата нет (отзыв 13.10: «говорит
+    // "Сделала!", а результат через 20–60 минут или не появляется») — поправляемся вслух и в тексте
+    if (called.has("start_task") && sink.text().trim() && earlyDone(sink.text())) {
+      const fix = "Поправлюсь: задача только началась — результат появится позже, я пришлю уведомление, когда всё будет готово.";
+      sink.push(" " + fix); sink.flush();
+      plog("warn", "⚠ «готово» сразу после передачи задачи — поправились");
+    }
+    if (!sink.text().trim() && called.has("start_task") && toolOk) {
+      quiet = gfix("Задача передана — пришлю уведомление, когда будет готово. Ход — в «Мой день» → «Сделанное»."); showBot(quiet); say(quiet); }
+    if (!sink.text().trim() && !quiet) {
       quiet = lastDone || (toolOk ? (persona().gender === "female" ? "Сделала, что просили." : "Сделал, что просили.")
         : toolErr ? `Не получилось: ${toolErr.slice(0, 160)}`
         : "Не получилось ответить — переспросите, пожалуйста, иначе.");
@@ -2517,7 +2527,8 @@ async function runTool(name, a) {
     case "start_task": {
       try { taskToPc(a.title || String(a.goal || "").slice(0, 60), a.goal || a.title || ""); } catch (e) { return "Не получилось: " + e.message; }
       return (pcOnline() ? "Задача передана компьютеру — он уже берётся." : "Компьютер сейчас не на связи — задачу делает облако Dewiar.")
-        + " Ход и итог — в «Мой день» → «Сделанное»; когда будет готово, пришлю уведомление, а файлы можно будет открыть и сохранить прямо здесь.";
+        + " Ход и итог — в «Мой день» → «Сделанное»; когда будет готово, пришлю уведомление, а файлы можно будет открыть и сохранить прямо здесь."
+        + " Результата ЕЩЁ НЕТ — он появится через несколько минут или дольше. Скажи одной фразой, что взялась (взялся) и сообщишь, когда будет готово; не говори «готово», «сделала», «вот презентация» — это неправда, пока задача не закончилась.";
     }
     case "smart_home": return await homeTool(a);
     case "send_message": return sendTo(a.app || "max", a.text || "");
@@ -3225,6 +3236,47 @@ async function routeTool(a) {
     + " Скажи коротко, одной-двумя фразами, что маршрут открыт; не выдумывай улицы и время.";
 }
 
+// «готово» о результате фоновой задачи, которой ещё нет; «сообщу, когда будет готово» — честно (как EARLY_DONE_RX в engine_brain.py)
+function earlyDone(t) {
+  t = String(t || "").toLowerCase();
+  return /(?<![а-яё])(готово|готова|готов|сделал[аи]?|сделано|закончил[аи]?|вот\s+(?:она|он|ваш[аи]?|тво[яй]|презентаци|отч[её]т|документ))(?![а-яё])/.test(t)
+    && !/сообщ|пришлю|когда\s+(?:будет|закончу|всё)|как\s+только|в\s+фоне|займ[её]т|начал|взял|приступ|уже\s+работа|работаю|передал/.test(t);
+}
+/* ---------- «Что нового» (отзыв 13.10: «что было в обновлении — непонятно, пришлось догадываться»). После обновления — лист
+   с новым и тем, как попробовать (фраза в «» — нажмите, и Лира её услышит). Текст — data/whatsnew.json (тот же у компьютера,
+   сборка кладёт его в whatsnew.js). Уже виденное — pref news_seen; новая установка листа не показывает. ---------- */
+const verCmp = (a, b) => { const x = String(a || "").split(".").map(Number), y = String(b || "").split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
+function newsList(from, to) {
+  return (window.DEWIAR_NEWS || []).filter(r => (!from || verCmp(r.phone, from) > 0) && verCmp(r.phone, to) <= 0)
+    .map(r => Object.assign({}, r, { items: (r.items || []).filter(i => (i.where || ["phone"]).includes("phone")) })).filter(r => r.items.length).slice(0, 3);
+}
+function newsShow(list) {
+  if (!list.length) return false;
+  const v = list[0].phone;
+  $("#news-body").innerHTML = `<p class="nwsub">Dewiar ${esc(v)} — вот что появилось</p>` + list.map(r => r.items.map(i => {
+    const ph = /^«(.+)»$/.exec(String(i.try || "").trim());
+    return `<div class="nwi"><i aria-hidden="true">${esc(i.icon || "✨")}</i><div><b>${esc(i.title)}</b><p>${esc(i.text)}</p>`
+      + (ph ? `<button class="nwtry" data-say="${esc(ph[1])}">Попробовать: «${esc(ph[1])}»</button>` : i.try ? `<small>${esc(i.try)}</small>` : "") + `</div></div>`; }).join("")).join("")
+    + `<button class="btn p w" id="nw-ok">Понятно</button>`;
+  $("#nw-ok").onclick = () => closeSheets();
+  $$(".nwtry", $("#news-body")).forEach(b => b.onclick = () => { closeSheets(); if (state !== "idle") interrupt(true); ask(b.dataset.say); });
+  openSheet("#sh-news");
+  return true;
+}
+function newsCheck() {
+  let v = ""; try { v = JSON.parse(D.info() || "{}").version || ""; } catch (e) { }
+  if (!v) return false;
+  const seen = prefGet("news_seen");
+  if (seen === v) return false;
+  prefSet("news_seen", v);
+  if (!seen && !(S.llm.base_url || history.length)) return false;     // только что установили — новостей нет, есть знакомство
+  if (seen && verCmp(v, seen) < 0) return false;
+  if ($(".sheet.on") || busy) return false;
+  plog("info", `✨ что нового: ${seen || "?"} → ${v}`);
+  return newsShow(newsList(seen, v));
+}
+
 /* ---------- сделанное: мини-программы и страницы, которые ассистент сделал прямо на телефоне (make_app) ----------
    Программа сразу открывается на экране — иначе после «Готово» непонятно, где её взять; хранится в «Мой день» →
    «Сделанное» (последние 40: файлы app-<id>.html и список apps.json), её можно сохранить в «Загрузки».
@@ -3562,7 +3614,8 @@ function renderSettings() {
       <h3>Руководство</h3><div class="card"><p class="hint" style="margin:0 0 10px">Всё, что умеет Dewiar на телефоне и компьютере: примеры фраз, настройки, «Близкие», сканер, стили. Или просто спросите Лиру: «как…»</p>
         <button class="btn w" id="guide-open">Открыть руководство</button></div>
       <h3>О приложении</h3><div class="card"><div>Dewiar ${esc(info.version || "")} · Android ${esc(info.android || "")}</div><small class="hint" style="margin:2px 0 0;display:block">${esc(info.device || "")}</small>
-      <div class="res" id="upd-res"></div><button class="btn w" id="upd-check" style="margin-top:6px">Проверить обновление</button></div>
+      <div class="res" id="upd-res"></div><button class="btn w" id="upd-check" style="margin-top:6px">Проверить обновление</button>
+      <button class="btn w" id="news-open" style="margin-top:8px">Что нового</button></div>
       <details class="danger"><summary>Начать с чистого листа</summary><p class="hint">Ассистент забудет разговор и всё, что запомнил о вас: имя, привычки, просьбы. Дневник, душа персонажей, напоминания и заметки останутся. Отменить нельзя.</p>
       <button class="btn w" id="reset">Забыть разговор и память</button></details>
       ${info.crash ? `<h3>Последняя ошибка</h3><div class="card"><div class="crash">${esc(info.crash)}</div><div class="row2" style="margin-top:8px"><button class="btn" id="cr-send" style="flex:1">Отправить</button><button class="btn" id="cr-clear" style="flex:1">Очистить</button></div></div>` : ""}`);
@@ -3699,6 +3752,7 @@ function wireSettings(info) {
       b.disabled = false; b.textContent = "Открыть @" + n; b.onclick = () => D.openUrl("https://t.me/" + n); }).catch(() => { if (g("tg-bot")) g("tg-bot").remove(); });
     if (tgOn() && g("tg-card")) tgStatus().then(t => { if (!!t.linked !== !!$("#tg-off") && setTab === "more") renderSettings(); }).catch(() => {});
     g("upd-check").onclick = () => checkUpdate(true);
+    if (g("news-open")) g("news-open").onclick = () => { closeSheets(); setTimeout(() => newsShow(newsList("", JSON.parse(D.info() || "{}").version || "9")), 250); };
     if (g("guide-open")) g("guide-open").onclick = () => D.openUrl(GUIDE_URL);
     if (g("cr-send")) g("cr-send").onclick = () => reportSend("Падение приложения", false, String(info.crash).split("\n")[0]).then(d => toast(`Отчёт №${d.id} отправлен — спасибо!`))
       .catch(e => { toast(e.message); D.share("Dewiar — ошибка:\n" + info.crash); });
@@ -4701,14 +4755,17 @@ for (const t of ["pointerup", "pointercancel"]) $("#mic").addEventListener(t, ()
 async function holdStart() {
   holdT = null; holdTalk = true; holdCancel = false; holdSwallow = true; dict = "";
   $("#mic").classList.add("hold"); D.vibrate(30);
+  if (D.sttQuiet) D.sttQuiet(true);                 // без «тринька» распознавателя на каждой паузе (отзыв 13.10); начало — вибрацией
   if (state !== "idle") interrupt(true);
   plog("info", "🎙 держат кнопку — слушаю, пока не отпустят");
   await listen();
-  if (!sttActive && holdTalk) { holdTalk = false; $("#mic").classList.remove("hold"); }   // не вышло начать (нет микрофона и т. п.)
+  if (!sttActive && holdTalk) { holdTalk = false; $("#mic").classList.remove("hold"); if (D.sttQuiet) D.sttQuiet(false); }   // не вышло начать (нет микрофона и т. п.)
 }
 function holdEnd() {
   const cancel = holdCancel;
   holdTalk = false; holdCancel = false; $("#mic").classList.remove("hold", "holdx");
+  if (D.sttQuiet) D.sttQuiet(false);                // звук вернётся чуть позже — после последнего «тринька» (Speech.quiet)
+  D.vibrate(cancel ? 12 : 22);                      // отпустили — коротко в руку: принято
   if (cancel) { stopListen(); setState("idle"); showYou(""); toast("Отменено"); plog("info", "🎙 отпустили в стороне — отменено"); return; }
   plog("info", `🎙 отпустили — отправляю (${(dict + " " + heardPartial).trim().length} зн.)`);
   if (sttActive) { sttUserStop = true; D.stopListen(); sttGuard(2500, "stop"); return; }     // распознаватель отдаст последнее — уйдёт всё вместе
@@ -5422,6 +5479,7 @@ setInterval(() => { if (!document.hidden) welcomeSeen(); }, 60000);     // по�
   if (S.llm.base_url && !it) needPerm(MIC);
   setTimeout(hReady, 0);                           // экран и персонаж готовы — запуск записан для «Здоровья»
   setTimeout(() => { try { doneInbox(); } catch (e) { } }, 300);   // «Сделано ✓» из уведомлений, пока приложение было закрыто
+  setTimeout(() => { try { newsCheck(); } catch (e) { } }, 1200);  // обновились — «Что нового»
   setTimeout(() => checkUpdate(false), 8000);
   setTimeout(() => accountCheck().then(ensureBrain).then(cloudCaps).then(tgSync), 3000);
   setTimeout(() => syncRun(false), 4000);
