@@ -34,13 +34,20 @@ public final class Compat {
 
     @SuppressWarnings("deprecation")
     public static Notification.Builder builder(Context c, String channel) {
+        Notification.Builder b = null;
         if (Build.VERSION.SDK_INT >= 26) {
             try {
-                return (Notification.Builder) Notification.Builder.class.getConstructor(Context.class, String.class).newInstance(c, channel);
+                b = (Notification.Builder) Notification.Builder.class.getConstructor(Context.class, String.class).newInstance(c, channel);
             } catch (Throwable ignored) { }
         }
-        return new Notification.Builder(c);
+        if (b == null) b = new Notification.Builder(c);
+        // знак Dewiar в уведомлениях — чёрно-белый, как логотип (без цвета система красила его в синий акцент темы)
+        b.setColor(BRAND);
+        return b;
     }
+
+    /** Цвет знака в уведомлениях: почти чёрный (белый знак на нём — как оригинальный логотип). */
+    static final int BRAND = 0xFF111111;
 
     /** Можно ли ставить точные будильники (Android 12+ спрашивает разрешение; USE_EXACT_ALARM из манифеста даёт его
      *  с Android 13 сразу). Не удалось спросить — считаем, что можно. */

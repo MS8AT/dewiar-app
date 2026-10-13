@@ -118,7 +118,7 @@ with sync_playwright() as pw:
     ok(pg.evaluate("newsCheck()") is False, "второй раз — не показывает")
     pg.evaluate("() => openSettings('more')"); pg.wait_for_timeout(400)
     pg.click("#news-open"); pg.wait_for_timeout(500)
-    ok(pg.evaluate("document.getElementById('sh-news').classList.contains('on') && document.querySelectorAll('#news-body .nwi').length >= 6"), "«Ещё» → «Что нового» — открывает с прошлыми выпусками")
+    ok(pg.evaluate("document.getElementById('sh-news').classList.contains('on') && document.querySelectorAll('#news-body .nwi').length === newsList('', JSON.parse(D.info()).version).reduce((a, r) => a + r.items.length, 0) && document.querySelectorAll('#news-body .nwi').length >= 3"), "«Ещё» → «Что нового» — открывает с прошлыми выпусками")
     ok(not errs, f"телефон без ошибок: {errs[:2]}")
     b.close()
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")

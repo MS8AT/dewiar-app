@@ -65,10 +65,7 @@ final class Faces {
         if (pid.isEmpty()) return "";
         Bitmap bm = bitmap(c, pid);
         if (bm != null) b.setLargeIcon(bm);
-        try {
-            String col = s.getString("color_" + pid, "");
-            if (!col.isEmpty()) b.setColor(Color.parseColor(col));
-        } catch (Throwable ignored) { }
+        // цвет знака — чёрно-белый логотип (Compat.BRAND), а не цвет персонажа: персонажа видно по лицу
         return s.getString("name_" + pid, "");
     }
 }
