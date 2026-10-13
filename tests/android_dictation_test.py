@@ -21,7 +21,7 @@ for f in ("entities.js", "skins.css", "skins.js", "privacy.js"):
 (www / "personas.js").write_text(subprocess.run([sys.executable, str(ROOT / "android/tools/personas_json.py"), str(ROOT)],
                                                 capture_output=True, text=True, check=True).stdout, encoding="utf-8")
 src = (ROOT / "android/src/pro/dewiar/app/Speech.java").read_text(encoding="utf-8")
-ok('put("cut", frames > 300)' in src, "запись для сервера сообщает, что оборвалась по лимиту")
+ok('put("cut", !hold && frames > 300)' in src, "запись для сервера сообщает, что оборвалась по лимиту (кроме удержания — там пишем до «отпустили»)")
 with sync_playwright() as p:
     b = p.chromium.launch(); errs = []
     pg = b.new_page(viewport={"width": 393, "height": 820}); pg.on("pageerror", lambda e: errs.append(str(e)))

@@ -66,7 +66,9 @@ for case, ui in (("обновились", {"welcome": "done", "news_seen": "0.38
             pg.goto((ROOT / "ui/settings.html").as_uri() + f"?token={tok}&port={PORT}"); time.sleep(3)
             g = pg.evaluate("() => ({ open: document.getElementById('news-dlg').open, items: [...document.querySelectorAll('#nw-list .nwi b')].map(x => x.textContent) })")
             if case == "обновились":
-                ok(g["open"] and "Отмечайте сделанное — получайте достижения" in g["items"] and "Удерживайте микрофон и говорите" not in g["items"],
+                want = [i["title"] for r_ in news.releases("0.38.20", VERSION, "pc") for i in r_["items"]]
+                phone_only = {i["title"] for r_ in N for i in r_["items"] if i["where"] == ["phone"]}
+                ok(g["open"] and g["items"] == want and not (set(g["items"]) & phone_only),
                    f"студия после обновления: окно «Что нового» — пункты компьютера, без телефонных: {g}")
                 pg.click("#nw-ok"); time.sleep(0.8)
                 ok(json.loads((cfg / "settings.json").read_text())["ui"].get("news_seen") == VERSION, "«Понятно» — запомнено, больше не покажет")

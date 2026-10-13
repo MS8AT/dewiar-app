@@ -966,7 +966,8 @@ async function listen() {
   sttVia = server ? "server" : "system"; sttT0 = Date.now();
   plog("info", "слушаю: " + (server ? "сервер " + server.url.replace(/\?.*$/, "") : "распознавание телефона"));
   sttGen++;
-  if (server) D.listenServer(sttGen, sttServerUrl(server.url), server.key, server.model);
+  if (server && holdTalk && D.listenServerHold) D.listenServerHold(sttGen, sttServerUrl(server.url), server.key, server.model);   // держат — пишем всё до «отпустили»
+  else if (server) D.listenServer(sttGen, sttServerUrl(server.url), server.key, server.model);
   else if (holdTalk && D.listenHold) D.listenHold(sttGen);     // держат кнопку — пауза конца фразы подольше, реже перезапуск
   else D.listen(sttGen);
   sttGuard(server ? 20000 : 4000, "start");
@@ -1023,7 +1024,11 @@ function sttStall(why) {
 }
 const sttAlive = () => { sttStarted = true; sttRetry = 0; if (sttVia === "system" && S.stt.sysFails) { S.stt.sysFails = 0; saveS(); } if (sttActive) sttGuard(15000, "silent"); };
 N.on("stt_start", e => { if (sttMine(e)) sttAlive(); });
-N.on("stt_end", e => { if (sttMine(e) && sttActive) sttGuard(sttVia === "server" ? 30000 : 8000, "end"); });
+N.on("stt_end", e => {
+  if (!sttMine(e) || !sttActive) return;
+  sttGuard(sttVia === "server" ? 60000 : 8000, "end");          // запись уходит на сервер — при слабом интернете это не мгновенно
+  if (sttVia === "server" && !String($("#you").textContent || "").trim()) showYou("распознаю…");
+});
 N.on("stt_level", e => { if (!sttMine(e)) return; if (orb && state === "listening") orb.set({ level: e.v }); if (!sttStarted) sttAlive(); });
 N.on("stt_partial", e => { if (!sttMine(e)) return; heardPartial = e.text; showYou((dict ? dict + " " : "") + e.text); sttAlive(); });
 N.on("stt_result", e => {
@@ -1054,7 +1059,7 @@ N.on("stt_error", e => {
     setTimeout(() => { if (state === "listening") listen(); }, 450 * sttRetry); return;
   }
   sttRetry = 0;
-  plog([6, 7, 5].includes(e.code) ? "info" : "warn", `распознавание (${sttVia}): ${e.code === 6 ? "речи не было" : e.code === 7 ? "не расслышал" : "ошибка " + (e.code ?? "") + " " + (e.msg || "")}`);
+  plog([6, 7, 5].includes(e.code) ? "info" : "warn", `распознавание (${sttVia}): ${e.code === 6 ? "речи не было" + (/громкость/.test(e.msg || "") ? " — " + String(e.msg).replace(/^[^(]*/, "") : "") : e.code === 7 ? "не расслышал" : "ошибка " + (e.code ?? "") + " " + (e.msg || "")}`);
   // распознаватель телефона сломался, не начав слушать (не запустился, нет сервиса, сеть) — слушает сервер Dewiar
   if (sttVia === "system" && !sttStarted && ![6, 7].includes(e.code) && cloudEars()) { sttActive = true; sttStall("start"); return; }
   if (heardPartial || dict) { if (dictMore(heardPartial, false)) return; askHeard(dictTake(heardPartial)); return; }
@@ -2424,7 +2429,7 @@ async function runTool(name, a) {
     case "send_sms": {
       let num = String(a.who || "").replace(/[^\d+]/g, "");
       if (a.who && num.length < 5) { let c = JSON.parse(D.contact(a.who) || "{}"); if (c.need && await needPerm(CONTACTS)) c = JSON.parse(D.contact(a.who) || "{}"); num = c.number || ""; }
-      D.sms(num, a.text || ""); return num ? "Открыл сообщение — пользователь проверит и отправит." : "Открыл сообщение без получателя — пусть выберет сам.";
+      D.sms(num, a.text || ""); return (num ? "Открыл сообщение — пользователь проверит и отправит." : "Открыл сообщение без получателя — пусть выберет сам.") + notCloseHint(a.who);
     }
     case "open_app": {
       const n = openAppSmart(a.name || "");
@@ -2466,7 +2471,8 @@ async function runTool(name, a) {
     case "battery": { const b = JSON.parse(D.battery() || "{}"); return `Заряд ${b.percent}%${b.charging ? ", заряжается" : ""}.`; }
     case "save_note": {
       // стихи, список идей, ответ на вопрос — в чат, а не в заметки без спроса (экзамен 11.10)
-      if (turnAsk && !/заметк|запиш|запис|сохран|запомн|занеси|зафиксир|в\s+файл|конспект/i.test(turnAsk))
+      // «что я записывал про ремонт?» — вопрос, а не просьба записать (экзамен 13.10: найденную заметку сохраняла второй раз)
+      if (turnAsk && !/запиш|записать|сохран|запомн|занеси|зафиксир|в\s+файл|конспект|(?:в|во)\s+заметк|заметк[уа](?![а-яё])|созда\w*\s+заметк|нов\w+\s+заметк|допиши|добавь\s+в/i.test(turnAsk))
         return "Не записано: пользователь не просил сохранять в заметки. Ответь прямо в чате (список — пунктами в самом ответе) и не говори, что записала.";
       const att = noteAttSave(turnAtt); turnAtt = [];             // фото и файлы этого хода — в заметку
       const n = notes(); n.push(Object.assign({ id: "n" + Date.now(), title: a.title, text: a.text, time: Date.now() }, att.length ? { att } : {})); saveNotes(n);
@@ -4935,6 +4941,13 @@ const clInfo = () => { try { return JSON.parse(D.info() || "{}"); } catch (e) { 
 const CL_NICK = { люд: "людмила", тан: "татьяна", саш: "александр", шур: "александр", жен: "евгений", миш: "михаил", лен: "елена", кат: "екатерина", маш: "мария", наташ: "наталья", натах: "наталья", оль: "ольга", свет: "светлана", вов: "владимир", дим: "дмитрий", кол: "николай", сереж: "сергей", серег: "сергей", андрюш: "андрей", ван: "иван", леш: "алексей", юл: "юлия", ир: "ирина", гал: "галина", вал: "валентина", над: "надежда", люб: "любовь", ан: "анна", пет: "петр", паш: "павел", кост: "константин", ген: "геннадий", тол: "анатолий", вит: "виктор", слав: "вячеслав", гош: "георгий", лид: "лидия", том: "тамара", нин: "нина", зин: "зинаида", рит: "маргарита", вик: "виктория" };
 const CL_NICK_RX = new RegExp("^(андрюш|наташ|натах|сереж|серег|свет|кост|слав|люд|тан|саш|шур|жен|миш|лен|кат|маш|оль|вов|дим|кол|ван|леш|гал|вал|над|люб|пет|паш|ген|тол|вит|гош|лид|том|нин|зин|рит|вик|юл|ир|ан)(?:а|я|е|у|ю|ы|и|ой|ей|ою|ею|очк[а-я]*|ечк[а-я]*|оньк[а-я]*|еньк[а-я]*|ик[а-я]*|ок|ул[а-я]*|ус[а-я]*|юш[а-я]*|уш[а-я]*)?$");
 const clNick = (w) => { const m = CL_NICK_RX.exec(w); return m ? CL_NICK[m[1]] : ""; };
+/* Пишут или звонят человеку, которого нет в «Близких», а близкие есть — сказать об этом честно (экзамен 13.10: «Напиши
+   Андрею» — «Готово, открыто в SMS», а что его нет в «Близких», человек так и не узнал). */
+function notCloseHint(who) {
+  try { const ps = clLoad().people || []; if (!who || !ps.length || /^[\d+\s()-]+$/.test(who) || clMatch(who, ps)) return "";
+    return ` Скажи ещё одной фразой, что «${String(who).slice(0, 40)}» нет в «Близких» Dewiar: чтобы переписываться через помощников, его можно пригласить («Близкие» → «Пригласить»).`; }
+  catch (e) { return ""; }
+}
 function clMatch(name, people, all) {                 // «Андрею», «маме», «Исаевой Людмиле» -> человек (по общему началу слов), как match_name в close.py
   const st = (w) => String(w || "").toLowerCase().replace(/ё/g, "е").replace(/[^а-яa-z]/g, "");
   const qs = String(name || "").split(/[\s,]+/).map(st).filter(Boolean); if (!qs.length) return null;

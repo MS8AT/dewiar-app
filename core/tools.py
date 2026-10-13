@@ -399,15 +399,17 @@ def t_play_radio(a, ctx):
         r.play(st)
     except RE as e:
         raise ToolError(str(e)) from e
-    time.sleep(2.5)                                     # станция могла не ответить — проверим сразу и попробуем другую
-    if not r.playing:
+    # станция могла не ответить или зависнуть на подключении (ffmpeg жив, а звука нет) — ждём звук и пробуем другую
+    if not r.wait_sound(6):
+        r.stop()
         alt = next((x for x in found if x is not st), None)
         if alt:
             r.play(alt)
-            time.sleep(2)
-            if r.playing:
+            if r.wait_sound(6):
                 st = alt
-        if not r.playing:
+            else:
+                r.stop()
+        if not r.sounding:
             why = r.failed or "не отвечает"
             fails = ctx.setdefault("radio_fails", [])
             fails.append(time.time())

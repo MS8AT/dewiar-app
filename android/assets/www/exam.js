@@ -186,7 +186,7 @@ function examFakeTool(name, a) {
       if (rel && !known) return `Как ${REL_RU[rel]} записан${/а$|ь$/.test(REL_RU[rel]) ? "а" : ""} у вас в контактах? Скажите имя — запомню.`;
       return `Звоню: ${known ? known.name : who}.`;
     }
-    case "send_sms": return "Открыл сообщение — пользователь проверит и отправит.";
+    case "send_sms": return "Открыл сообщение — пользователь проверит и отправит." + notCloseHint(a.who);
     case "send_message": return `Открыл ${a.app || "мессенджер"} с текстом — пользователь выберет, кому отправить.`;
     case "open_app": return `Открыто приложение «${a.name || ""}».`;
     case "open_url": return "Ссылка открыта в браузере.";

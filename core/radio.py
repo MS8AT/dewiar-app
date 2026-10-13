@@ -224,10 +224,28 @@ class Radio:
         self.failed = None
         self.on_change = None                                     # () -> None: виджету — играет/нет, какая станция
         self.got, self.last = 0, None                             # сколько звука пришло; последняя станция (для «другую»)
+        self.last_at = 0.0                                        # когда пришёл последний кусок звука (sounding)
 
     @property
     def playing(self):
         return self.proc is not None
+
+    @property
+    def sounding(self):
+        """Правда звучит: ffmpeg жив и звук приходил последние 6 с. «playing» без звука — станция зависла на подключении
+        (отзыв 13.10: «включи музыку» — «уже играет», а тишина)."""
+        return self.proc is not None and self.got > 0 and time.monotonic() - self.last_at < 6
+
+    def wait_sound(self, secs=6.0):
+        """Подождать, пока пойдёт звук (или станция отвалится). -> True — звучит."""
+        end = time.monotonic() + secs
+        while time.monotonic() < end:
+            if self.sounding:
+                return True
+            if self.proc is None:
+                return False
+            time.sleep(0.2)
+        return self.sounding
 
     def status(self):
         return {"playing": self.playing, "station": (self.station or {}).get("name", ""),
@@ -283,6 +301,7 @@ class Radio:
                 break
             got += len(chunk)
             self.got = got
+            self.last_at = time.monotonic()
             g = self.volume * self._duck
             if g != 1.0:
                 chunk = (np.frombuffer(chunk, dtype=np.int16).astype(np.float32) * g).clip(-32768, 32767).astype(np.int16).tobytes()

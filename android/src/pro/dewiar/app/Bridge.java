@@ -308,7 +308,10 @@ public final class Bridge {
     /** Пока держат кнопку — без «тринька» распознавателя на каждом перезапуске (Speech.quiet). */
     @JavascriptInterface public void sttQuiet(boolean on) { a.speech.quiet(on); }
 
-    @JavascriptInterface public void listenServer(int g, String url, String key, String model) { a.speech.listenServer(g, url, key, model); }
+    @JavascriptInterface public void listenServer(int g, String url, String key, String model) { a.speech.holdRec = false; a.speech.listenServer(g, url, key, model); }
+
+    /** «Удерживайте и говорите» через сервер: запись, пока держат, целиком — на распознавание (Speech.holdRec). */
+    @JavascriptInterface public void listenServerHold(int g, String url, String key, String model) { a.speech.holdRec = true; a.speech.listenServer(g, url, key, model); }
 
     @JavascriptInterface public void stopListen() { a.speech.stop(); }
 

@@ -192,9 +192,15 @@ public final class Speech {
     /** Запись до паузы после речи (или 15 с) → WAV 16 кГц моно → сервер распознавания (Net.postMultipart, в своём потоке).
      *  Повторный вызов во время записи ничего не делает. Тишину от речи отличает простой порог громкости: первые 0,3 с —
      *  замер шума, речь — громче шума втрое (+200) хотя бы 0,15 с подряд; пока речи не было, порог подстраивается под шум. */
+    /** «Удерживайте и говорите» для сервера (отзыв 13.10, планшет Huawei: «держу, диктую — и ничего»): запись идёт, пока
+     *  держат кнопку (до 2 минут), без проверки «была ли речь» — отпустили, и вся запись уходит на распознавание, как
+     *  голосовое в Telegram; сервер сам скажет, если там тишина. */
+    volatile boolean holdRec = false;
+
     public void listenServer(final int g, final String url, final String key, final String model) {
         if (recording) return;
         gen = g;
+        final boolean hold = holdRec;
         recording = true;
         finish = false;
         new Thread(new Runnable() {
@@ -203,13 +209,13 @@ public final class Speech {
                 try {
                     final int rate = 16000;
                     int min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                    ar = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate, AudioFormat.CHANNEL_IN_MONO,
-                            AudioFormat.ENCODING_PCM_16BIT, Math.max(min, rate));
+                    int source = MediaRecorder.AudioSource.VOICE_RECOGNITION;
+                    ar = new AudioRecord(source, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, rate));
                     ar.startRecording();
                     ev(g, "stt_start", o());
                     ByteArrayOutputStream pcm = new ByteArrayOutputStream();
                     short[] buf = new short[rate / 20];               // 50 мс
-                    double noise = 300;
+                    double noise = 300, peak = 0;
                     int speech = 0, quiet = 0, frames = 0;
                     boolean heard = false;
                     final int endQuiet = 30 + extraMs / 50;          // 1,5 с тишины + добавка под манеру речи
@@ -223,10 +229,22 @@ public final class Speech {
                         for (int i = 0; i < n; i++) { b[2 * i] = (byte) (buf[i] & 0xff); b[2 * i + 1] = (byte) ((buf[i] >> 8) & 0xff); }
                         pcm.write(b);
                         frames++;
+                        peak = Math.max(peak, rms);
                         ev(g, "stt_level", o().put("v", Math.min(1.0, rms / 4000.0)));   // каждые 50 мс — для анимации облика
+                        // источник «для распознавания» на некоторых планшетах (Huawei) отдаёт почти тишину — тогда обычный микрофон
+                        if (frames == 20 && peak < 25 && source == MediaRecorder.AudioSource.VOICE_RECOGNITION) {
+                            try { ar.stop(); ar.release(); } catch (Throwable ignored) { }
+                            source = MediaRecorder.AudioSource.MIC;
+                            ar = new AudioRecord(source, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, rate));
+                            ar.startRecording();
+                            pcm.reset(); frames = 0; peak = 0; noise = 300;
+                            continue;
+                        }
                         if (frames < 6) { noise = Math.max(150, (noise + rms) / 2); continue; }
-                        if (rms > noise * 3 + 200) { speech++; quiet = 0; if (speech >= 3) heard = true; }
+                        // речь — заметно громче шума (было втрое + 200: тихий микрофон планшета «не слышал» речи вовсе)
+                        if (rms > noise * 2.2 + 120) { speech++; quiet = 0; if (speech >= 3) heard = true; }
                         else { quiet++; if (!heard) noise = noise * 0.95 + rms * 0.05; }
+                        if (hold) { if (frames > 2400) break; continue; }   // держат кнопку — пишем до «отпустили» (2 мин максимум)
                         if (heard && quiet >= endQuiet) break;          // 1,5 с тишины после речи (было 0,9 — перебивало на полуслове)
                         if (!heard && frames > 160) break;              // 8 с — так и не заговорили
                         if (frames > 300) break;                        // 15 с максимум
@@ -235,14 +253,20 @@ public final class Speech {
                     ev(g, "stt_end", o());
                     if (!recording) { ev(g, "stt_error", o().put("code", 5).put("msg", "отменено")); return; }
                     recording = false;
-                    if (!heard) { ev(g, "stt_error", o().put("code", 6).put("msg", "не услышал речи")); return; }
+                    if (!heard && hold) heard = frames >= 8 && peak > 40;        // держали кнопку — отправляем всё, сервер решит
+                    if (!heard && peak > noise * 1.8 + 60) heard = true;       // было что-то громче шума — пусть решит сервер
+                    if (!heard) {
+                        ev(g, "stt_error", o().put("code", 6).put("msg", "не услышал речи (громкость " + Math.round(peak) + ", шум " + Math.round(noise)
+                                + (source == MediaRecorder.AudioSource.MIC ? ", микрофон" : "") + ")"));
+                        return;
+                    }
                     byte[] wav = wav(pcm.toByteArray(), rate);
                     // whisper-1 — имя по умолчанию в OpenAI-совместимом API; свой сервер обычно принимает любое
                     JSONObject f = new JSONObject().put("model", model == null || model.isEmpty() ? "whisper-1" : model).put("language", "ru");
                     String r = Net.postMultipart(url, key, wav, "speech.wav", "audio/wav", f);
                     String text;
                     try { text = new JSONObject(r).optString("text", r); } catch (Exception e) { text = r; }   // {"text": …} или просто текст
-                    ev(g, "stt_result", o().put("text", text.trim()).put("cut", frames > 300));   // cut — оборвали по лимиту, человек ещё говорит
+                    ev(g, "stt_result", o().put("text", text.trim()).put("cut", !hold && frames > 300));   // cut — оборвали по лимиту, человек ещё говорит
                 } catch (Throwable e) {
                     try { ev(g, "stt_error", o().put("code", -2).put("msg", String.valueOf(e.getMessage()))); } catch (Exception ignored) { }
                 } finally {

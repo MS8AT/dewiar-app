@@ -188,6 +188,14 @@ class MusicMixin:
         «Играй», «пауза», «следующий трек» — кнопки открытого плеера; «… в Яндекс Музыке» — там."""
         from music import control, genre_tag, parse
         act = control(text)
+        if act == "play" and self.radio.playing and not self.radio.sounding and time.monotonic() - self.radio.last_at > 8:
+            last = self.radio.station or self.radio.last         # «играет», а звука нет — станция зависла: включаем заново
+            log.info("📻 «%s» — радио молчит (звук не приходит), перезапускаю", text)
+            self.radio.stop()
+            if last:
+                rest = [x for x in self.music.stations() if x["url"] != last.get("url")]
+                self._play_station([last] + rest[:3], text, "Радио молчало — включаю заново: «{}».")
+                return True
         if act == "play" and self.radio.playing:          # «играй», а радио уже играет — скажем что и как громко
             st, v = self.radio.station or {}, round(self.radio.volume * 100)
             msg = f"Уже играет «{st.get('name', 'радио')}»" + (f", но тихо — громкость радио {v}%. Скажите «громче»." if v <= 20
