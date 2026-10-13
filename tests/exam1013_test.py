@@ -6,6 +6,7 @@ import os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 ROOT = Path(os.environ.get("DEWIAR_ROOT") or Path(__file__).resolve().parent.parent)
+_d = tempfile.mkdtemp(); os.environ.update(DEWIAR_CONFIG_DIR=_d + "/cfg", DEWIAR_STATE_DIR=_d + "/st")
 sys.path.insert(0, str(ROOT / "core"))
 fails = []
 
@@ -45,9 +46,22 @@ with sync_playwright() as p:
     pg.wait_for_timeout(200)
     g = pg.evaluate("[!!document.querySelector('#card .start'), document.querySelector('#bot').textContent]")
     ok(first and not g[0] and "Готово, всё подключено — аккаунт @superLeha" in g[1], f"вошли аккаунтом — «Подключить бесплатно» уходит, Лира говорит, что готова: {first} {g}")
+    # отзыв 13.10: «открой Gmail и создай письмо» — «Открыла и создала», а ни приложения, ни письма
+    c = pg.evaluate("""() => [claimedAction("Открыла Gmail и создала новое письмо.", new Set(), "открой gmail и создай письмо"),
+        claimedAction("Открыла Gmail.", new Set(["open_app"]), "открой gmail"), claimedAction("Написала письмо маме.", new Set(["phone_type"]), "")].map(x => x && x.tool)""")
+    ok(c[0] and "open_app" in c[0] and c[1] is None and c[2] is None, f"«открыла Gmail, создала письмо» без действий — заметно и требует сделать по-настоящему: {c}")
+    ok("ждать ответа не умеешь" in pg.evaluate("systemPrompt()"), "«позвони, а если не ответит — напиши»: честно, что ждать ответа не умеет")
     ok(not errs, f"без ошибок: {errs[:2]}")
     b.close()
 ex = (ROOT / "android/assets/www/exam.js").read_text(encoding="utf-8")
 ok('notCloseHint(a.who)' in ex, "экзамен: заглушка SMS — с той же подсказкой")
+ok('title: "«Напиши Андрею» — а его нет в «Близких»", seed: { close: ["Миша Исаев", "Людмила Исаева"] }' in ex,
+   "экзамен: «Напиши Андрею» — свои «Близкие» сценария (у человека Андрей может правда быть в «Близких»)")
+import tools as T  # noqa: E402
+import workspace as W  # noqa: E402
+class _WS:
+    def remember(self, f): return "Это я уже знаю."
+out = T.t_remember({"fact": "Бюджет — 65 тысяч"}, {"workspace": _WS()})
+ok("ответь на него по памяти" in out and "не говори «запомнила»" in out, f"remember: уже известное — «ответь на вопрос», а не «запомнила»: {out[:60]}")
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)

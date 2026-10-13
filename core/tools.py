@@ -1573,7 +1573,11 @@ def t_read_file(a, ctx):
 
 
 def t_remember(a, ctx):
-    return _ws_call(lambda: _ws(ctx).remember(a.get("fact", "")))
+    r = _ws_call(lambda: _ws(ctx).remember(a.get("fact", "")))
+    if r == "Это я уже знаю.":                 # экзамен 13.10: на вопрос «сколько раз я менял бюджет?» — «Запомнила» вместо ответа
+        return ("Это уже есть в памяти — ничего нового. Если пользователь задал вопрос, ответь на него по памяти (с прежними "
+                "значениями, если они там есть); не говори «запомнила» и «записала».")
+    return r
 
 
 def t_write_diary(a, ctx):

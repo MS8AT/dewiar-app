@@ -104,10 +104,13 @@ with sync_playwright() as pw:
     pg.goto((www / "index.html").as_uri()); pg.wait_for_timeout(1800)
     ok(not pg.evaluate("document.getElementById('sh-news').classList.contains('on')"), "телефон: новая установка — без листа")
     v = N[0]["phone"]
+    vk = lambda x: tuple(int(p_) for p_ in x.split("."))  # noqa: E731
+    PH_WANT = [i["title"] for r_ in sorted([r_ for r_ in N if vk(r_["phone"]) > vk("0.6.18") and any("phone" in i["where"] for i in r_["items"])],
+                                           key=lambda r_: vk(r_["phone"]), reverse=True)[:3] for i in r_["items"] if "phone" in i["where"]]
     r = pg.evaluate("""(v) => { D.info = () => JSON.stringify({ version: v }); prefSet("news_seen", "0.6.18"); S.llm.base_url = "http://x/v1"; window._asked = []; ask = (t) => _asked.push(t);
         const shown = newsCheck(); return { shown, items: [...document.querySelectorAll('#news-body .nwi b')].map(x => x.textContent), sub: document.querySelector('.nwsub').textContent,
           seen: prefGet("news_seen"), tries: document.querySelectorAll('.nwtry').length }; }""", v)
-    ok(r["shown"] and r["seen"] == v and f"Dewiar {v}" in r["sub"] and any("Удерживайте" in x for x in r["items"]) and "Отмечайте сделанное — получайте достижения" not in r["items"],
+    ok(r["shown"] and r["seen"] == v and f"Dewiar {v}" in r["sub"] and r["items"] == PH_WANT and "Отмечайте сделанное — получайте достижения" not in r["items"],
        f"телефон после обновления с 0.6.18: лист — только новее увиденного: {r}")
     if os.environ.get("NEWS_SHOT"):
         pg.screenshot(path=os.environ["NEWS_SHOT"])
