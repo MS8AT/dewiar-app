@@ -1,5 +1,5 @@
 # ════════════════════════════════════════════════════════════════════════
-#  DEWIAR VOICES — живые голоса персонажей (Qwen3-TTS) для всех приложений
+#  DEWIAR VOICES — живые голоса персонажей (Qwen3-TTS + ESpeech) для всех приложений
 #  Путь на сервере: /app/src/vllm/tts/Dockerfile
 #  Собирает и запускает панель: /vllm/voices.php → «Установить» (lib/ttsctl.php).
 #  Модели держатся в памяти видеокарты → первая фраза звучит через доли секунды.
@@ -21,6 +21,19 @@ RUN pip install torch torchaudio --index-url ${TORCH_INDEX}
 # Версия qwen-tts зафиксирована: обновление — осознанно, сменой здесь.
 ARG QWEN_TTS_VERSION=0.1.1
 RUN pip install "qwen-tts==${QWEN_TTS_VERSION}" numpy soundfile
+
+# Быстрый Qwen (faster-qwen3-tts, CUDA graphs) и русский голос ESpeech (F5-TTS) с ударениями RUAccent — отдельным
+# слоем: torch и qwen-tts выше берутся из кэша. torch и torchaudio не меняются (constraints); torchcodec не нужен —
+# звук читаем сами, а его сборка под другой torch ломает импорт.
+ARG FASTER_QWEN_VERSION=0.3.2
+ARG F5_VERSION=1.1.22
+ARG RUACCENT_VERSION=1.5.8.3
+RUN pip freeze | grep -iE '^(torch|torchaudio)==' > /tmp/keep.txt \
+    && pip install -c /tmp/keep.txt "faster-qwen3-tts==${FASTER_QWEN_VERSION}" "f5-tts==${F5_VERSION}" "ruaccent==${RUACCENT_VERSION}" \
+    && (pip uninstall -y torchcodec || true)
+
+# Словари и модели ударений — в образ: не качаются при каждом запуске
+RUN python -c "from ruaccent import RUAccent; a = RUAccent(); a.load(omograph_model_size='turbo3.1', use_dictionary=True, workdir='/opt/ruaccent'); print(a.process_all('Привет, я голос Девиара.'))"
 
 WORKDIR /opt/voices
 COPY app.py .

@@ -5,6 +5,13 @@ DEWIAR VOICES — живые голоса персонажей на своей �
 Одна служба на сервере, как распознавание GigaAM (dewiar-asr): модель держится в памяти, запросы идут по одному
 на видеокарту, а длинный ответ звучит по фразам — первая фраза начинает играть, пока считаются следующие.
 
+Два движка:
+  • Qwen3-TTS — встроенные дикторы и голос по описанию; ускорен faster-qwen3-tts (CUDA graphs, MIT) — в разы быстрее
+    реального времени. По-русски у встроенных дикторов слышен акцент, ударения бывают неверными;
+  • ESpeech (F5-TTS, обучен на русской речи, Apache-2.0) — свои голоса по образцу; ударения расставляет RUAccent,
+    своё ударение — «+» перед гласной («прив+ет»), знак ударения в тексте (а́) тоже понимается.
+Свои голоса озвучивает ESpeech (TTS_CLONE_ENGINE=espeech, по умолчанию) или Qwen (qwen) — выбирается в панели.
+
 Откуда берутся голоса:
   • встроенные дикторы Qwen (serena, vivian, ono_anna, sohee — женские; aiden, ryan, dylan, eric, uncle_fu — мужские).
     Ими персонажи Dewiar говорят с первого дня, без настройки;
@@ -63,7 +70,13 @@ MODELS = {
     "custom": os.getenv("TTS_CUSTOM_MODEL", "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"),
     "base": os.getenv("TTS_BASE_MODEL", "Qwen/Qwen3-TTS-12Hz-0.6B-Base"),
     "design": os.getenv("TTS_DESIGN_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"),
+    "espeech": os.getenv("TTS_ESPEECH_MODEL", "ESpeech/ESpeech-TTS-1_RL-V2:espeech_tts_rlv2.pt"),
 }
+CLONE_ENGINE = os.getenv("TTS_CLONE_ENGINE", "espeech")             # кто озвучивает свои голоса: espeech | qwen
+QWEN_FAST = os.getenv("TTS_QWEN_FAST", "1") == "1"                  # faster-qwen3-tts, если он стоит
+ESPEECH_NFE = int(os.getenv("TTS_ESPEECH_NFE", "32"))               # шагов: больше — чище, меньше — быстрее (16–48)
+ESPEECH_VOCAB = os.getenv("TTS_ESPEECH_VOCAB", "ESpeech/ESpeech-TTS-1_podcaster:vocab.txt")
+RUACCENT_DIR = os.getenv("TTS_RUACCENT_DIR", "/opt/ruaccent")
 PRELOAD = [x.strip() for x in os.getenv("TTS_PRELOAD", "auto").split(",") if x.strip()]
 MAX_MODELS = max(1, int(os.getenv("TTS_MAX_MODELS", "2")))         # больше — выгружается та, что дольше не звучала
 GPU_MEM_GB = float(os.getenv("TTS_GPU_MEM_GB", "0") or 0)
@@ -73,7 +86,7 @@ OUT_SR = 24000                                                     # pcm без 
 KEY = os.getenv("TTS_KEY", "")                                     # ключ для озвучки (пусто — внутренняя сеть)
 ADMIN_KEY = os.getenv("TTS_ADMIN_KEY", "")                         # ключ для управления голосами
 FAKE = os.getenv("TTS_FAKE", "") == "1"
-REF_MAX_SEC = float(os.getenv("TTS_REF_MAX_SEC", "30"))
+REF_MAX_SEC = float(os.getenv("TTS_REF_MAX_SEC", "12.5"))        # ESpeech берёт образец не длиннее 12 секунд
 DRAFT_TTL = 3600
 
 BUILTIN = {"serena": "female", "vivian": "female", "ono_anna": "female", "sohee": "female",
@@ -175,15 +188,30 @@ def voices_public() -> dict:
                     "builtin": False, "text": v.get("text", ""), "instruct": v.get("instruct", ""),
                     "designed": v.get("designed", ""), "added": v.get("added", 0)})
     return {"object": "list", "voices": out, "data": [{"id": x["id"], "object": "voice"} for x in out],
-            "personas": c["personas"], "aliases": c["aliases"], "default": c["default"]}
+            "personas": c["personas"], "aliases": c["aliases"], "default": c["default"], "clone_engine": CLONE_ENGINE}
 
 
 # ── текст → фразы ────────────────────────────────────────────────────────
+VOWELS = "аеёиоуыэюяАЕЁИОУЫЭЮЯ"
+
+
 def clean(text: str) -> str:
-    text = text.replace("́", "").replace("­", "")              # знаки ударения и мягкие переносы модели не нужны
+    """Текст для голоса: без разметки и мягких переносов. Ударения (а́ и «+а») остаются — ESpeech их понимает,
+    для Qwen их снимает plain()."""
+    text = text.replace("\u00ad", "")
     text = re.sub(r"[*_`#>|~]+", " ", text)                              # разметка из ответа модели
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+
+def plain(text: str) -> str:
+    """Для Qwen: без знаков ударения — модель их не знает и читает как лишние символы."""
+    return re.sub(r"\+(?=[%s])" % VOWELS, "", text.replace("\u0301", ""))
+
+
+def stress_marks(text: str) -> str:
+    """Знак ударения после гласной (Дэвиа́р — так пишет Dewiar для серверных голосов) → «+» перед ней, как у ESpeech."""
+    return re.sub(r"([%s])\u0301" % VOWELS, r"+\1", text)
 
 
 def split_text(text: str, first_max: int = 70, max_len: int = 220):
@@ -324,9 +352,9 @@ def read_audio(data: bytes, max_sec: float = REF_MAX_SEC) -> np.ndarray:
             a = resample(a, sr)
     a = trim(a)
     if a.size < OUT_SR * 3:
-        raise ValueError("в записи меньше 3 секунд речи — нужно 5–30 секунд чистого голоса")
+        raise ValueError("в записи меньше 3 секунд речи — нужно 5–12 секунд чистого голоса")
     if a.size > OUT_SR * max_sec:
-        raise ValueError(f"запись длиннее {int(max_sec)} секунд — возьмите кусок 5–30 секунд, где человек говорит ровно и без музыки")
+        raise ValueError(f"запись длиннее {int(max_sec)} секунд — возьмите кусок 5–12 секунд (одну-две фразы), где человек говорит ровно и без музыки")
     return level(a)
 
 
@@ -334,10 +362,20 @@ def read_audio(data: bytes, max_sec: float = REF_MAX_SEC) -> np.ndarray:
 GPU = threading.Lock()                                   # одна видеокарта — один проход за раз, остальные ждут
 
 
-class QwenEngine:
+def role_for(spec) -> str:
+    """Какая модель озвучивает голос: свои — ESpeech или Qwen Base, по описанию — VoiceDesign, встроенные — CustomVoice."""
+    k = spec.get("kind")
+    if k == "clone":
+        return "espeech" if (spec.get("engine") or CLONE_ENGINE) == "espeech" else "base"
+    return "design" if k == "design" else "custom"
+
+
+class Engine:
     def __init__(self):
         self.models = {}                                 # роль → [модель, когда звучала]
-        self.prompts = {}                                # ключ образца → подсказка клонирования
+        self.prompts = {}                                # ключ образца → подсказка клонирования (Qwen)
+        self.refs = {}                                   # ключ образца → (звук, текст с ударениями) для ESpeech
+        self.fast = set()                                # роли, загруженные через faster-qwen3-tts
         self.sr = OUT_SR
 
     def device(self):
@@ -349,6 +387,47 @@ class QwenEngine:
             dev = "cuda:0"
         return dev
 
+    def _load_qwen(self, role, dev):
+        import torch
+        dtype = getattr(torch, DTYPE) if dev != "cpu" else torch.float32
+        if QWEN_FAST and dev.startswith("cuda"):
+            try:
+                from faster_qwen3_tts import FasterQwen3TTS
+            except ImportError:
+                FasterQwen3TTS = None
+            if FasterQwen3TTS is not None:          # CUDA graphs: в разы быстрее; графы строятся при первом проходе
+                m = FasterQwen3TTS.from_pretrained(MODELS[role], device=dev, dtype=dtype, attn_implementation=ATTN or "sdpa")
+                self.fast.add(role)
+                return m
+        from qwen_tts import Qwen3TTSModel
+        kw = {"device_map": dev, "dtype": dtype}
+        if ATTN:
+            kw["attn_implementation"] = ATTN
+        self.fast.discard(role)
+        return Qwen3TTSModel.from_pretrained(MODELS[role], **kw)
+
+    def _load_espeech(self, dev):
+        import types
+        from huggingface_hub import hf_hub_download
+        from f5_tts.infer.utils_infer import load_model, load_vocoder
+        from f5_tts.model import DiT
+        repo, fn = MODELS["espeech"].split(":", 1)
+        vrepo, vfn = ESPEECH_VOCAB.split(":", 1)
+        ckpt, vocab = hf_hub_download(repo_id=repo, filename=fn), hf_hub_download(repo_id=vrepo, filename=vfn)
+        model = load_model(DiT, dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4), ckpt,
+                           vocab_file=vocab, device=dev)
+        vocoder = load_vocoder(device=dev)
+        accent = None
+        try:                                             # ударения: без RUAccent голос работает, но ударения — на совести модели
+            from ruaccent import RUAccent
+            accent = RUAccent()
+            accent.load(omograph_model_size="turbo3.1", use_dictionary=True, tiny_mode=False,
+                        workdir=RUACCENT_DIR if os.path.isdir(RUACCENT_DIR) else None)
+        except Exception as e:  # noqa: BLE001
+            log.warning("RUAccent не загрузился (%s) — ударения без него", e)
+            accent = None
+        return types.SimpleNamespace(model=model, vocoder=vocoder, accent=accent, device=dev)
+
     def get(self, role):
         if role in self.models:
             self.models[role][1] = time.time()
@@ -357,20 +436,17 @@ class QwenEngine:
             old = min(self.models, key=lambda r: self.models[r][1])
             self.unload(old)
         import torch
-        from qwen_tts import Qwen3TTSModel
         dev = self.device()
         if dev.startswith("cuda") and GPU_MEM_GB > 0 and not self.models:
             total = torch.cuda.get_device_properties(torch.device(dev)).total_memory / 1024 ** 3
             torch.cuda.set_per_process_memory_fraction(min(1.0, GPU_MEM_GB / total), torch.device(dev))
-        kw = {"device_map": dev, "dtype": getattr(torch, DTYPE) if dev != "cpu" else torch.float32}
-        if ATTN:
-            kw["attn_implementation"] = ATTN
+        load = (lambda: self._load_espeech(dev)) if role == "espeech" else (lambda: self._load_qwen(role, dev))
         STATE["loading"] = role
         t0 = time.time()
         log.info("загружаю %s (%s) на %s", role, MODELS[role], dev)
         try:
             try:
-                m = Qwen3TTSModel.from_pretrained(MODELS[role], **kw)
+                m = load()
             except Exception as e:  # noqa: BLE001
                 # Видеокарта общая с vLLM: второй модели может не хватить места — тогда держим одну, а не падаем
                 if "out of memory" not in str(e).lower() or not self.models:
@@ -378,12 +454,12 @@ class QwenEngine:
                 log.warning("для %s не хватило видеопамяти — выгружаю %s и пробую снова", role, ", ".join(self.models))
                 for r in list(self.models):
                     self.unload(r)
-                m = Qwen3TTSModel.from_pretrained(MODELS[role], **kw)
+                m = load()
         finally:
             STATE["loading"] = ""
-        log.info("%s готова за %.1f с", role, time.time() - t0)
+        log.info("%s готова за %.1f с%s", role, time.time() - t0, " (быстрый Qwen)" if role in self.fast else "")
         self.models[role] = [m, time.time()]
-        STATE.update(device=dev, loaded=sorted(self.models), error="")
+        STATE.update(device=dev, loaded=sorted(self.models), error="", fast=sorted(self.fast))
         return m
 
     def unload(self, role):
@@ -391,6 +467,8 @@ class QwenEngine:
             return
         if role == "base":
             self.prompts.clear()
+        if role == "espeech":
+            self.refs.clear()
         gc.collect()
         try:
             import torch
@@ -404,10 +482,30 @@ class QwenEngine:
         key = (path, os.path.getmtime(path), text)
         if key not in self.prompts:
             m = self.get("base")
+            q = m.model if "base" in self.fast else m        # у быстрого Qwen исходная модель — внутри
             a = trim(read_wav(path))
-            self.prompts[key] = m.create_voice_clone_prompt(ref_audio=(a, OUT_SR), ref_text=text or None,
+            self.prompts[key] = q.create_voice_clone_prompt(ref_audio=(a, OUT_SR), ref_text=plain(text) or None,
                                                             x_vector_only_mode=not text)
         return self.prompts[key]
+
+    def accentize(self, e, text):
+        """Ударения для ESpeech: свои («+» или а́) — как есть, остальные слова — RUAccent."""
+        text = stress_marks(text)
+        if e.accent is None:
+            return text
+        try:
+            return e.accent.process_all(text, skip_regex=r"\S*\+\S*") if "+" in text else e.accent.process_all(text)
+        except Exception as x:  # noqa: BLE001
+            log.warning("RUAccent не справился с «%s»: %s", text[:60], x)
+            return text
+
+    def ref(self, e, path, text):
+        key = (path, os.path.getmtime(path), text)
+        if key not in self.refs:
+            import torch
+            a = trim(read_wav(path))[: int(OUT_SR * 12)]
+            self.refs[key] = (torch.from_numpy(np.ascontiguousarray(a)).unsqueeze(0), self.accentize(e, text) or "")
+        return self.refs[key]
 
     def generate(self, spec, texts, lang):
         try:
@@ -419,19 +517,44 @@ class QwenEngine:
             return self._generate(spec, texts, "Auto")
 
     def _generate(self, spec, texts, lang):
+        role = role_for(spec)
+        if role == "espeech":
+            from f5_tts.infer.utils_infer import infer_batch_process
+            e = self.get("espeech")
+            ref_audio, ref_text = self.ref(e, vdir(spec["audio"]), spec.get("text", ""))
+            out, sr = [], OUT_SR
+            for t in texts:
+                wave, sr, _ = next(infer_batch_process((ref_audio, OUT_SR), ref_text, [self.accentize(e, t)], e.model, e.vocoder,
+                                                       nfe_step=ESPEECH_NFE, speed=1.0, device=e.device))
+                out.append(to_mono(wave if wave is not None else np.zeros(1, np.float32)))
+            return out, int(sr)
+        texts = [plain(t) for t in texts]
         n = len(texts)
-        kind = spec.get("kind")
-        if kind == "clone":
+        m = self.get(role)
+        ins = spec.get("instruct") or ""
+        if role in self.fast:                            # быстрый Qwen — по одной фразе, каждая в разы быстрее
+            out, sr = [], OUT_SR
+            for t in texts:
+                if role == "base":
+                    w, sr = m.generate_voice_clone(text=t, language=lang, ref_text=plain(spec.get("text", "")),
+                                                   voice_clone_prompt=self.prompt(vdir(spec["audio"]), spec.get("text", "")))
+                elif role == "design":
+                    w, sr = m.generate_voice_design(text=t, instruct=ins, language=lang)
+                else:
+                    w, sr = m.generate_custom_voice(text=t, speaker=spec["speaker"], language=lang, instruct=ins or None)
+                out.append(to_mono(w[0] if isinstance(w, (list, tuple)) else w))
+            return out, int(sr)
+        if role == "base":
             p = self.prompt(vdir(spec["audio"]), spec.get("text", ""))
-            wavs, sr = self.get("base").generate_voice_clone(text=texts, language=[lang] * n, voice_clone_prompt=p * n)
-        elif kind == "design":
-            wavs, sr = self.get("design").generate_voice_design(text=texts, instruct=[spec.get("instruct", "")] * n,
-                                                                language=[lang] * n)
+            wavs, sr = m.generate_voice_clone(text=texts, language=[lang] * n, voice_clone_prompt=p * n)
+        elif role == "design":
+            wavs, sr = m.generate_voice_design(text=texts, instruct=[ins] * n, language=[lang] * n)
         else:
-            ins = spec.get("instruct") or ""
-            wavs, sr = self.get("custom").generate_custom_voice(text=texts, speaker=[spec["speaker"]] * n,
-                                                                language=[lang] * n, instruct=[ins] * n)
+            wavs, sr = m.generate_custom_voice(text=texts, speaker=[spec["speaker"]] * n, language=[lang] * n, instruct=[ins] * n)
         return [to_mono(w) for w in wavs], int(sr)
+
+
+QwenEngine = Engine                                      # прежнее имя — для проверок
 
 
 class FakeEngine:
@@ -456,9 +579,9 @@ class FakeEngine:
         STATE["loaded"] = sorted(self.models)
 
     def generate(self, spec, texts, lang):
-        role = {"clone": "base", "design": "design"}.get(spec.get("kind"), "custom")
+        role = role_for(spec)
         self.get(role)
-        self.calls.append({"voice": spec.get("id"), "kind": spec.get("kind"), "texts": list(texts), "lang": lang,
+        self.calls.append({"voice": spec.get("id"), "kind": spec.get("kind"), "role": role, "texts": list(texts), "lang": lang,
                            "speaker": spec.get("speaker"), "instruct": spec.get("instruct", "")})
         if self.delay:
             time.sleep(self.delay)
@@ -471,7 +594,7 @@ class FakeEngine:
         return out, sr
 
 
-ENGINE = FakeEngine() if FAKE else QwenEngine()
+ENGINE = FakeEngine() if FAKE else Engine()
 
 
 def read_wav(path) -> np.ndarray:
@@ -518,15 +641,14 @@ def preload():
         c = cfg_load()
         want = ["custom"]
         if any(v.get("kind", "clone") == "clone" for k, v in c["voices"].items() if k not in BUILTIN):
-            want.append("base")
+            want.append(role_for({"kind": "clone"}))         # свои голоса есть — их модель тоже сразу (ESpeech или Qwen Base)
     for role in want[:MAX_MODELS]:
         if role not in MODELS:
             continue
         try:
-            spec = {"kind": "clone" if role == "base" else role if role == "design" else "speaker", "speaker": "serena",
-                    "instruct": "спокойный голос"}
-            if role == "base":
-                on_gpu(lambda: ENGINE.get("base"))
+            spec = {"kind": "design" if role == "design" else "speaker", "speaker": "serena", "instruct": "спокойный голос"}
+            if role in ("base", "espeech"):
+                on_gpu(lambda r=role: ENGINE.get(r))
                 continue
             for _ in synth_iter("Проверка голоса.", spec):                # прогрев: первый проход на CUDA медленный
                 pass
@@ -748,6 +870,7 @@ class H(BaseHTTPRequestHandler):
             info = {"ok": True, **STATE, "uptime": int(time.time() - STATE["started"]), "models": MODELS,
                     "max_models": MAX_MODELS, "voices": len(cfg_load()["voices"]),
                     "instruct_ok": "0.6B" not in MODELS["custom"],          # манеру встроенным дикторам понимает только 1.7B
+                    "clone_engine": CLONE_ENGINE,
                     "ttfa_ms_avg": int(STATE["ttfa_ms_sum"] / STATE["ttfa_n"]) if STATE["ttfa_n"] else 0}
             info.pop("ttfa_ms_sum", None)
             try:

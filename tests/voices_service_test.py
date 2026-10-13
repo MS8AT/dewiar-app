@@ -33,7 +33,8 @@ p = A.split_text("Привет! Сегодня у тебя три дела, и �
 ok(len(p) >= 3 and len(p[0][0]) <= 40 and p[0][0].startswith("Привет"), f"первая фраза короткая: {p[:2]}")
 p = A.split_text("Длинное предложение без точки, " * 12)
 ok(all(len(x) <= 220 for x, _ in p) and len(p) >= 2, f"длинное — по запятым, не длиннее 220: {[len(x) for x, _ in p]}")
-ok(A.clean("**Дэвиа́р** — `код`") == "Дэвиар — код", f"ударение и разметка убраны: {A.clean('**Дэвиа́р** — `код`')!r}")
+ok(A.clean("**Дэвиа\u0301р** — `код`") == "Дэвиа\u0301р — код" and A.plain("Дэвиа\u0301р, прив+ет, 2+2") == "Дэвиар, привет, 2+2"
+   and A.stress_marks("Дэвиа\u0301р") == "Дэви+ар", "разметка убрана; ударения: ESpeech — «+» перед гласной, Qwen — без них (2+2 не трогаем)")
 ok(A.lang_of("Привет") == "Russian" and A.lang_of("Hello") == "Auto" and A.lang_of("x", "en") == "English", "язык по тексту")
 
 # ── кто каким голосом ──
@@ -74,6 +75,79 @@ try:
     QE.get("design"); ok(False, "другая ошибка загрузки — не прячется")
 except RuntimeError as e:
     ok("401" in str(e), "другая ошибка загрузки — не прячется")
+
+# ESpeech (русский движок своих голосов): ударения RUAccent, свои «+» и а́ не трогаются, образец — не длиннее 12 с
+_f5 = {"calls": []}
+
+
+class _Acc:
+    def load(self, **kw):
+        _f5["acc_load"] = kw
+
+    def process_all(self, text, skip_regex=None):
+        _f5.setdefault("acc", []).append((text, skip_regex))
+        return text.replace("голос", "г+олос")
+
+
+def _ibp(ref, ref_text, gens, model, voc, nfe_step=32, speed=1.0, device=None):
+    _f5["calls"].append({"ref_len": ref[0].shape[-1], "ref_text": ref_text, "gen": gens, "nfe": nfe_step, "dev": device})
+    yield np.ones(2400, np.float32) * 0.1, 24000, None
+
+
+class _T:                                                 # torch.from_numpy(...).unsqueeze(0)
+    def __init__(self, a):
+        self.a = a
+        self.shape = (1, len(a))
+
+    def unsqueeze(self, i):
+        return self
+
+
+sys.modules["torch"].from_numpy = _T
+sys.modules["huggingface_hub"] = types.SimpleNamespace(hf_hub_download=lambda repo_id, filename: f"/m/{repo_id}/{filename}")
+sys.modules["f5_tts"] = types.SimpleNamespace()
+sys.modules["f5_tts.infer"] = types.SimpleNamespace()
+sys.modules["f5_tts.infer.utils_infer"] = types.SimpleNamespace(load_model=lambda *a, **k: ("model", a[2], k["vocab_file"]),
+                                                               load_vocoder=lambda **k: "vocos", infer_batch_process=_ibp)
+sys.modules["f5_tts.model"] = types.SimpleNamespace(DiT="DiT")
+sys.modules["ruaccent"] = types.SimpleNamespace(RUAccent=_Acc)
+os.makedirs(A.vdir(), exist_ok=True)
+long_wav = A.vdir("long.wav")
+open(long_wav, "wb").write(A.wav_bytes(np.full(24000 * 15, 0.2, np.float32)))
+E2 = A.Engine()
+outs, sr = E2.generate({"id": "anna", "kind": "clone", "audio": "long.wav", "text": "Это мой голос."}, ["Привет, я голос Дэвиа\u0301ра.", "Скажи «прив+ет»."], "Russian")
+c0 = _f5["calls"]
+ok(len(c0) == 2 and sr == 24000 and c0[0]["ref_len"] <= 24000 * 12 and c0[0]["ref_text"] == "Это мой г+олос." and c0[0]["nfe"] == A.ESPEECH_NFE,
+   f"ESpeech: образец обрезан до 12 с, текст образца — с ударениями, шагов {A.ESPEECH_NFE}: {[(c['ref_len'], c['ref_text']) for c in c0]}")
+ok(c0[0]["gen"] == ["Привет, я г+олос Дэви+ара."] and _f5["acc"][1][1] == r"\S*\+\S*", f"ударения: своё (а́ → +) сохранено, остальное — RUAccent: {c0[0]['gen']}")
+ok(c0[1]["gen"] == ["Скажи «прив+ет»."], f"«+» пользователя не перебивается: {c0[1]['gen']}")
+ok(sorted(E2.models) == ["espeech"] and _f5["acc_load"]["omograph_model_size"] == "turbo3.1", "загружен ESpeech с RUAccent turbo3.1")
+ok(A.role_for({"kind": "clone"}) == "espeech" and A.role_for({"kind": "clone", "engine": "qwen"}) == "base"
+   and A.role_for({"kind": "speaker"}) == "custom" and A.role_for({"kind": "design"}) == "design", "кто что озвучивает: свои — ESpeech, встроенные — Qwen")
+
+# быстрый Qwen (faster-qwen3-tts) — по одной фразе, без знаков ударения
+_fq = []
+
+
+class _FQ:
+    @staticmethod
+    def from_pretrained(name, **kw):
+        _fq.append(("load", name, kw.get("device")))
+        return _FQ()
+
+    def generate_custom_voice(self, text, speaker, language, instruct=None):
+        _fq.append(("custom", text, speaker, language, instruct))
+        return [np.ones(2400, np.float32)], 24000
+
+
+sys.modules["faster_qwen3_tts"] = types.SimpleNamespace(FasterQwen3TTS=_FQ)
+E3 = A.Engine()
+E3.device = lambda: "cuda:0"
+outs, sr = E3.generate({"id": "serena", "kind": "speaker", "speaker": "serena"}, ["Я Дэвиа\u0301р.", "Прив+ет."], "Russian")
+ok(_fq[0][0] == "load" and _fq[0][2] == "cuda:0" and [x[1] for x in _fq[1:]] == ["Я Дэвиар.", "Привет."] and "custom" in E3.fast and len(outs) == 2,
+   f"быстрый Qwen: по фразе, без знаков ударения: {_fq}")
+for k in ("faster_qwen3_tts", "huggingface_hub", "f5_tts", "f5_tts.infer", "f5_tts.infer.utils_infer", "f5_tts.model", "ruaccent"):
+    del sys.modules[k]
 del sys.modules["torch"], sys.modules["qwen_tts"]
 A.STATE["loaded"] = []
 
