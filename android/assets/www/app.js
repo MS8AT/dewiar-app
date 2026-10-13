@@ -350,7 +350,17 @@ const DEF = {
 let S = (() => { try { return Object.assign({}, DEF, JSON.parse(prefGet("settings") || "{}")); } catch (e) { return Object.assign({}, DEF); } })();
 for (const k of ["llm", "stt", "tts", "home", "account", "net", "tg"]) S[k] = Object.assign({}, DEF[k], S[k] || {});
 applyProxy();                                      // прокси для серверов Dewiar — с первого запроса
-function saveS() { prefSet("settings", JSON.stringify(S)); applyProxy(); }
+function saveS() { prefSet("settings", JSON.stringify(S)); applyProxy(); setTimeout(startCardCheck, 0); }
+/* Первый запуск показывает «Подключить бесплатно» / «У меня есть код». Подключились любым путём (вход аккаунтом, ключ,
+   код с другого устройства, одобренная заявка) — карточка уходит, Лира говорит, что готова (отчёт №50, 13.10: вошёл
+   логином и паролем, а на экране всё ещё «Подключить бесплатно» — человек решил, что не подключился). */
+function startCardCheck() {
+  const c = $("#card .start, #card [onclick*='joinPoll']");
+  if (!c || !(S.llm.base_url || loggedIn())) return;
+  showCard("");
+  if (!busy && state === "idle") showBot(`Готово, всё подключено${loggedIn() ? " — аккаунт " + (S.account.login || "") : ""}. Нажмите на микрофон или удерживайте его и говорите.`);
+  plog("info", "🧠 мозг подключён — карточка первого запуска убрана");
+}
 
 /* ---------- отчёты разработчику: кнопка «Отправить отчёт» и тихая отправка при сбое (с согласия) — отчёт сразу виден
    в управлении на сайте. Журнал приложения — в памяти (последние 400 строк, сюда же идёт console.*); ошибки программы

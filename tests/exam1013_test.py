@@ -37,6 +37,14 @@ with sync_playwright() as p:
     h = pg.evaluate("""() => { const st = clLoad(); st.people = [{ pid: "p1", name: "Миша Исаев", devs: [] }]; clSave();
         return [notCloseHint("Андрей"), notCloseHint("Мише"), notCloseHint("+375291234567")]; }""")
     ok("«Андрей» нет в «Близких»" in h[0] and h[1] == "" and h[2] == "", f"SMS не близкому — подсказка сказать об этом; близкому и номеру — нет: {h}")
+    # отчёт №50: вошёл логином и паролем, а на экране всё ещё «Подключить бесплатно»
+    pg.evaluate("() => { localStorage.clear(); }"); pg.reload(); pg.wait_for_timeout(900)
+    first = pg.evaluate("!!document.querySelector('#card .start')")
+    pg.evaluate("""() => { S.account = { server: "https://dewiar.pro", login: "@superLeha", token: "t0k", user: {} };
+        Object.assign(S.llm, { base_url: "https://dewiar.pro/dwrapp/cloud.php?p=", cloud: true, account: true }); saveS(); }""")
+    pg.wait_for_timeout(200)
+    g = pg.evaluate("[!!document.querySelector('#card .start'), document.querySelector('#bot').textContent]")
+    ok(first and not g[0] and "Готово, всё подключено — аккаунт @superLeha" in g[1], f"вошли аккаунтом — «Подключить бесплатно» уходит, Лира говорит, что готова: {first} {g}")
     ok(not errs, f"без ошибок: {errs[:2]}")
     b.close()
 ex = (ROOT / "android/assets/www/exam.js").read_text(encoding="utf-8")

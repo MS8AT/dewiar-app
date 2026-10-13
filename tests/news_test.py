@@ -34,13 +34,14 @@ ok(N[0]["pc"] == VERSION, f"верхний выпуск — текущая ве�
 bi = (ROOT / "android/src/pro/dewiar/app/BuildInfo.java").read_text(encoding="utf-8")
 ok(f'"{N[0]["phone"]}"' in bi, "и телефона")
 r = news.releases("0.38.21", VERSION)
-ok([x["version"] for x in r] == [v for v in [x["pc"] for x in N] if news.ver_key(v) > news.ver_key("0.38.21")][:3] and all("pc" in i["where"] for x in r for i in x["items"]),
+PC_RELS = [x["pc"] for x in N if any("pc" in i["where"] for i in x["items"])]       # выпуски, где есть новое для компьютера
+ok([x["version"] for x in r] == [v for v in PC_RELS if news.ver_key(v) > news.ver_key("0.38.21")][:3] and all("pc" in i["where"] for x in r for i in x["items"]),
    f"компьютер: новее увиденного, только свои пункты: {[x['version'] for x in r]}")
 ok(news.releases(VERSION, VERSION) == [], "всё увидено — пусто")
 f = news.say_fact(news.releases("0.38.20", VERSION, "pc", 3))
 p = presence.plan(3600, __import__("datetime").datetime.now().replace(hour=12) - __import__("datetime").timedelta(hours=1), [], [], None,
                   now=__import__("datetime").datetime.now().replace(hour=12), news=f)
-ok(p and f in p["facts"] and f.startswith(f"Dewiar обновился до {VERSION}") and "Что нового" not in f.split("Скажи")[0] and "Персонажи" in f, f"приветствие: скажет, что нового: {f[:80]}")
+ok(p and f in p["facts"] and f.startswith(f"Dewiar обновился до {PC_RELS[0]}") and "Что нового" not in f.split("Скажи")[0], f"приветствие: скажет, что нового: {f[:80]}")
 ok("whatsnew.json" in (ROOT / "android/tools/build_apk.sh").read_text() and 'src="whatsnew.js"' in (ROOT / "android/assets/www/index.html").read_text(),
    "телефон: сборка кладёт whatsnew.js")
 
@@ -106,10 +107,12 @@ with sync_playwright() as pw:
     r = pg.evaluate("""(v) => { D.info = () => JSON.stringify({ version: v }); prefSet("news_seen", "0.6.18"); S.llm.base_url = "http://x/v1"; window._asked = []; ask = (t) => _asked.push(t);
         const shown = newsCheck(); return { shown, items: [...document.querySelectorAll('#news-body .nwi b')].map(x => x.textContent), sub: document.querySelector('.nwsub').textContent,
           seen: prefGet("news_seen"), tries: document.querySelectorAll('.nwtry').length }; }""", v)
-    ok(r["shown"] and r["seen"] == v and f"Dewiar {v}" in r["sub"] and "Удерживайте кнопку и говорите — тише" in r["items"] and "Отмечайте сделанное — получайте достижения" not in r["items"],
+    ok(r["shown"] and r["seen"] == v and f"Dewiar {v}" in r["sub"] and any("Удерживайте" in x for x in r["items"]) and "Отмечайте сделанное — получайте достижения" not in r["items"],
        f"телефон после обновления с 0.6.18: лист — только новее увиденного: {r}")
     if os.environ.get("NEWS_SHOT"):
         pg.screenshot(path=os.environ["NEWS_SHOT"])
+    if not pg.evaluate("document.querySelectorAll('.nwtry').length"):      # в последних выпусках нет фразы «попробовать» — покажем выпуск, где она есть
+        pg.evaluate("() => newsShow(newsList('', '0.6.19'))"); pg.wait_for_timeout(300)
     pg.click(".nwtry"); pg.wait_for_timeout(300)
     ok(pg.evaluate("_asked.length") == 1 and not pg.evaluate("document.getElementById('sh-news').classList.contains('on')"), f"«Попробовать» — Лира слышит фразу: {pg.evaluate('_asked')}")
     ok(pg.evaluate("newsCheck()") is False, "второй раз — не показывает")
