@@ -113,6 +113,12 @@ body.radio-on #state.idle { display: none; }      /* в покое вместо 
 #mic.on .ring { border-color: rgba(165,180,252,.55); animation: pulse 1.4s ease-in-out infinite; }
 #mic.on { background: linear-gradient(135deg, #ff6b8a, #b45cff); }
 #mic.busy { background: linear-gradient(135deg, #3a3f63, #4b3b6b); }
+/* «удерживайте и говорите»: кнопка крупнее, пока палец на ней; увели в сторону — серая (отпустить = отменить) */
+#mic { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; transition: transform .15s, background .2s; }
+#mic.hold { transform: scale(1.18); }
+#mic.hold .ring { border-color: rgba(255,255,255,.5); animation: pulse 1s ease-in-out infinite; }
+#mic.holdx { background: linear-gradient(135deg, #5b5f72, #44475a); transform: scale(1.05); }
+@media (prefers-reduced-motion: reduce) { #mic.hold .ring { animation: none; } }
 @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.08); opacity: .6; } }
 #typebox { display: none; gap: 8px; margin-bottom: 10px; }
 #typebox.on { display: flex; }
@@ -604,3 +610,53 @@ body.neu .clsend textarea, body.neu #cl-name { background: var(--glass); box-sha
   #orbwrap, #stage.long #orbwrap { width: min(100%, 50vh, 360px); }
   #talk { padding: 16px 0; }
 }
+
+/* «Дела»: сделано сегодня, серия и значки (renderDay → doneHead), праздник (celebrate) */
+.donehd { display: flex; gap: 16px; align-items: center; padding: 16px 16px 14px; border-radius: 20px; margin-bottom: 10px;
+  background: radial-gradient(120% 140% at 0% 0%, rgba(75,227,161,.17), transparent 62%), var(--frost); }
+.dnum { min-width: 76px; text-align: center; }
+.dnum b { display: block; font: 600 44px/1.05 "Unbounded", sans-serif; color: var(--good); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.dnum small { color: var(--muted); font-size: 12px; }
+.dside { flex: 1; min-width: 0; }
+.dstreak { display: block; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.achs { display: flex; flex-wrap: wrap; gap: 6px; }
+.ach { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px 5px 7px; border-radius: 999px; background: rgba(255,255,255,.06); font-size: 12.5px; color: var(--dim); }
+.ach span { font-variant-numeric: tabular-nums; }
+.ach:not(.on) { filter: grayscale(1); }
+.ach.on { background: rgba(255,201,120,.14); color: #FFE1B0; }
+.doneadd { display: flex; gap: 8px; margin: 0 0 12px; }
+.doneadd input { flex: 1; min-width: 0; padding: 12px 14px; border: 0; border-radius: 14px; background: var(--field); color: var(--ink); font: inherit; font-size: 15px; outline: none; }
+.doneadd input:focus-visible { box-shadow: 0 0 0 2px rgba(139,140,247,.55); }
+.doneadd .ib { width: 46px; height: 46px; border-radius: 14px; background: var(--brand); color: #fff; font-size: 19px; font-weight: 700; flex: none; display: grid; place-items: center; }
+.it.dn .ok { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: rgba(75,227,161,.16); color: var(--good); font-weight: 700; flex: none; }
+.it .x.ok { background: rgba(75,227,161,.16); color: var(--good); font-size: 16px; font-weight: 700; }
+.achc { display: flex; gap: 14px; align-items: center; padding: 14px 16px; border-radius: 20px; text-align: left;
+  background: radial-gradient(120% 160% at 0% 0%, rgba(255,201,120,.2), transparent 62%), var(--frost); animation: achin .5s cubic-bezier(.2,1.4,.4,1); }
+.achc i { font-style: normal; font-size: 40px; line-height: 1; }
+.achc b { display: block; font-size: 17px; } .achc small { color: var(--muted); font-size: 13px; }
+.confetti { position: fixed; inset: 0; pointer-events: none; z-index: 9999; overflow: hidden; }
+.confetti i { position: absolute; top: -14px; height: 10px; border-radius: 2px; animation: cf 1.7s cubic-bezier(.25,.6,.4,1) forwards; }
+@keyframes cf { to { transform: translate(var(--dx), 105vh) rotate(var(--r)); } }
+@keyframes achin { from { transform: scale(.86); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .achc { animation: none; } }
+
+/* «Близкие»: эмодзи и реакции (clReBind, clReact) */
+.clm { position: relative; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }   /* долгое нажатие — реакции и «Копировать» */
+.clm.rx { margin-bottom: 12px; }
+.clm.emo { background: none !important; box-shadow: none !important; padding: 0 2px; }
+.clm.emo > div:first-child { font-size: 40px; line-height: 1.15; }
+.clrx { position: absolute; bottom: -13px; right: 10px; padding: 2px 7px; border-radius: 999px; font-size: 14px; line-height: 1.35; background: #26263a; box-shadow: 0 4px 10px -4px rgba(0,0,0,.6); }
+.clm:not(.out) .clrx { right: auto; left: 10px; }
+.clm.emo.rx { margin-bottom: 0; } .clm.emo .clrx { position: static; align-self: flex-end; } .clm.emo:not(.out) .clrx { align-self: flex-start; }
+.clrepick { position: fixed; z-index: 60; display: flex; gap: 2px; padding: 6px; border-radius: 999px; background: #22223a; box-shadow: 0 14px 34px -10px rgba(0,0,0,.8); animation: clre .18s ease-out; }
+.clrepick button { width: 36px; height: 36px; border-radius: 50%; font-size: 21px; display: grid; place-items: center; transition: transform .12s; }
+.clrepick button:active { transform: scale(1.3); }
+.clrepick button.on { background: rgba(139,140,247,.3); }
+.clrepick .cp { color: var(--muted); } .clrepick .cp svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+@keyframes clre { from { transform: translateY(6px) scale(.94); opacity: 0; } }
+.clemo { display: flex; justify-content: space-between; gap: 2px; margin-top: 8px; padding: 4px; border-radius: 16px; background: var(--field); }
+.clemo[hidden] { display: none; }
+.clemo button { flex: 1; height: 40px; border-radius: 12px; font-size: 21px; }
+.clemo button:active { background: var(--frost-hi); }
+body.light .clrx, body.light .clrepick { background: #fff; box-shadow: 0 6px 18px -8px rgba(20,30,60,.35); }
+@media (prefers-reduced-motion: reduce) { .clrepick { animation: none; } }

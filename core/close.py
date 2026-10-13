@@ -33,6 +33,14 @@ FILE_MAX = 10 * 1024 * 1024
 NATT_WAIT = 7 * 86400                 # вложения заметки с телефона ждут саму заметку (синхронизацию) не дольше недели
 
 
+def _rx_text(rx, name):
+    """Реакции на сообщение — для модели (close_read): « [реакции: Мама ❤️, вы 👍]»."""
+    rx = rx or {}
+    parts = [f"{name} {rx['them']}" if rx.get("them") else "", f"вы {rx['me']}" if rx.get("me") else ""]
+    parts = [x for x in parts if x]
+    return f" [реакции: {', '.join(parts)}]" if parts else ""
+
+
 def _int(v):
     """Число из чужих данных: не число — 0 (кривое сообщение не должно ронять приём)."""
     try:
@@ -433,6 +441,42 @@ class Close:
         log.info("💌 Близким: %s ← %s", p["name"], f"текст, {len(body['t'])} зн." if body["t"] else "файл")   # содержимое — не в журнал
         return item
 
+    # ---------- реакции (отзыв 13.10: 👍🤝✋😁😊😂😳🤔😱❤️ на сообщения) ----------
+    # Реакция — обычное сообщение {re: mid, e, t: e}: новые программы (здесь и app.js на телефоне) ставят её значком на
+    # сообщение mid, а старые покажут просто «👍». В истории: item["rx"] = {"me": …, "them": …}.
+    def react(self, who, mid, e):
+        p = self.person(who)
+        e = str(e or "")[:8]
+        priv, _ = self._keys()
+        if not p.get("devs"):
+            raise CloseError(f"У {p['name']} Dewiar ещё не открывался — реакция не дойдёт.")
+        was = ((next((x for x in self.st["hist"].get(p["pid"]) or [] if x.get("mid") == mid), None) or {}).get("rx") or {}).get("me", "")
+        if not self._react(p["pid"], mid, "me", e):
+            raise CloseError("такого сообщения нет")
+        body = {"re": mid, "e": e, "t": e, "ts": int(time.time() * 1000), "mid": uuid.uuid4().hex[:16], "name": (self.st.get("me") or {}).get("name", "")}
+        try:
+            env = CC.encrypt_for(body, priv, self.st["dev"], self._targets(p))
+            self._req("POST", "/close/send", {"to": p["pid"], "env": env, "kind": "msg"})
+        except Exception:
+            self._react(p["pid"], mid, "me", was)
+            raise
+        return {"ok": True}
+
+    def _react(self, pid, mid, who, e):
+        with self._lock:
+            m = next((x for x in self.st["hist"].get(pid) or [] if x.get("mid") == mid), None)
+            if m is None:
+                return False
+            rx = dict(m.get("rx") or {})
+            if e:
+                rx[who] = e
+            else:
+                rx.pop(who, None)
+            m["rx"] = rx
+            self._save()
+        self.host.emit("close", state=self.state())
+        return True
+
     def _upload(self, p, path):
         data = path.read_bytes()
         if len(data) > FILE_MAX:
@@ -511,6 +555,10 @@ class Close:
                         threading.Thread(target=self._own_quiet, args=(snap,), daemon=True).start()
                 except Exception:  # noqa: BLE001
                     log.exception("свои устройства: не применилось")
+            return 0, refreshed
+        if body.get("re"):                              # реакция на сообщение — значком на нём, а не новым сообщением
+            if self._react(peer, str(body["re"]), "me" if it.get("out") else "them", str(body.get("e") or "")[:8]) and not it.get("out"):
+                self.host.emit("close_react", pid=peer, mid=str(body["re"]), e=str(body.get("e") or "")[:8], name=it.get("name") or "")
             return 0, refreshed
         item = {"mid": body.get("mid") or str(it.get("id")), "ts": _int(body.get("ts")) or _int(it.get("ts")) * 1000, "out": bool(it.get("out")),
                 "t": str(body.get("t") or "")[:20000], "f": [x for x in body.get("f") or [] if isinstance(x, dict)][:10]}
@@ -724,7 +772,8 @@ class Close:
             for m in (self.st["hist"].get(p["pid"]) or [])[-n:]:
                 out.append((m.get("ts", 0), f"{time.strftime('%d.%m %H:%M', time.localtime(m.get('ts', 0) / 1000))} "
                                             f"{'вы → ' + p['name'] if m.get('out') else p['name']}: {m.get('t') or ''}"
-                                            + (f" [файлы: {', '.join(x.get('name', '') for x in m.get('f') or [])}]" if m.get("f") else "")))
+                                            + (f" [файлы: {', '.join(x.get('name', '') for x in m.get('f') or [])}]" if m.get("f") else "")
+                                            + _rx_text(m.get("rx"), p["name"])))
             self.st["unread"].pop(p["pid"], None)
         self._save()
         out.sort()

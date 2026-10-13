@@ -397,6 +397,39 @@ class ToolsMixin:
                 "title": {"alarm": "Будильник", "timer": "Таймер"}.get(kind, "Напоминание"),
                 "repeat_text": describe_repeat(it.get("repeat"))}
 
+    def _done_cmd(self, cmd, a):
+        """Студия → «Дела»: список и достижения, отметить сделанное (в том числе напоминание), снять отметку."""
+        dn = self.done
+        if cmd == "done":
+            return dn.public()
+        r = None
+        if cmd == "done_add":
+            title = str(a.get("title") or "").strip()
+            if not title:
+                raise ValueError("напишите, что сделано")
+            import done as D
+            m = D.reminder_match(title, list(self.reminders.items))
+            if m and not m.get("repeat"):
+                self.reminders.remove(m["id"])
+            r = dn.add([{"title": m.get("text"), "rid": m["id"]} if m else title], "pc")
+        elif cmd == "done_reminder":
+            x = self.reminders.get(a.get("id") or "")
+            if not x:
+                raise ValueError("такого напоминания уже нет")
+            if not x.get("repeat"):
+                self.reminders.remove(x["id"])
+            r = dn.add([{"title": x.get("text") or "Дело", "rid": x["id"]}], "pc")
+        elif cmd == "done_undo":
+            if not dn.undo(a.get("id") or ""):
+                raise ValueError("такой отметки уже нет")
+        pub = dn.public()
+        extra = {}
+        if r:
+            extra = {"fresh": [{"icon": x[3], "name": x[4], "what": x[5]} for x in r["fresh"]], "mile": r["mile"],
+                     "added": [x["title"] for x in r["items"]]}
+        self.emit("done", **pub, **extra)
+        return dict(pub, **extra)
+
     def _reminder_cmd(self, cmd, a):
         """Студия и окно-будильник: список, добавить (словами или датой), изменить, удалить, «Готово», «Отложить»."""
         from tools import ToolError, _when

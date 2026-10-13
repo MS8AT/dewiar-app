@@ -158,6 +158,10 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         from close import Close
         self.close = Close(self)                       # «Близкие»: переписка с помощниками других людей (сквозное шифрование)
         self.money.on_change = self.sync.soon.set
+        from done import Done
+        self.done = Done(_CFG / "done.json")             # «Дела»: сделанное и достижения (done.py), синхронизация — вид «done»
+        self.done.on_change = self.sync.soon.set
+        self.toolbox.hooks["done"] = self.done
         self.toolbox.hooks["engine"] = self
         self.toolbox.hooks["close"] = self.close
         import guard

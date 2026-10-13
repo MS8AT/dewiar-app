@@ -99,6 +99,26 @@ def t_open_url(a, ctx):
     return f"Открыл в браузере: {url}"
 
 
+def t_route(a, ctx):
+    """Маршрут на карте в браузере (route.py): пешком по умолчанию, Яндекс Карты (или Google, если просят)."""
+    import route as RT
+    to = str(a.get("to") or "").strip()
+    if not to:
+        raise ToolError("не понял, куда — спроси адрес или место")
+    app = "google" if re.search(r"google|гугл", str(a.get("app") or ""), re.I) else "yandex"
+
+    def resolve(u):
+        import httpx
+        return str(httpx.get(u, headers=UA, timeout=10, follow_redirects=True).url)
+    r = RT.plan(to, str(a.get("from") or ""), str(a.get("mode") or "walk"), app, resolve=resolve)
+    try:
+        launch(["xdg-open", r["url"]])
+        opened = True
+    except (ToolError, OSError):
+        opened = False
+    return RT.say(r, opened)
+
+
 def parse_ddg(page):
     """HTML-выдача html.duckduckgo.com -> [{title, url, snippet}]. Ссылки там — переходы с настоящим адресом в uddg=…"""
     out = []
@@ -1289,6 +1309,65 @@ def t_cancel_reminder(a, ctx):
     return "Отменил." if ctx["reminders"].cancel(a.get("id") or a.get("text") or "") else "Не нашёл такого напоминания."
 
 
+def _items_arg(v):
+    if isinstance(v, (list, tuple)):
+        return [str(x).strip() for x in v if str(x or "").strip()][:12]
+    return [x.strip() for x in re.split(r"\s*[;\n]\s*", str(v or "")) if x.strip()][:12]
+
+
+def t_mark_done(a, ctx):
+    """Отметить дела сделанными (done.py): подходящее разовое напоминание на сегодня закрывается, повторяющееся остаётся."""
+    import done as D
+    dn = ctx.get("done")
+    if dn is None:
+        raise ToolError("журнал дел недоступен")
+    items = _items_arg(a.get("items") or a.get("text"))
+    if not items:
+        raise ToolError("не понял, какое дело отметить — спроси коротко")
+    eng = ctx.get("engine")
+    if a.get("undo"):
+        today, gone = list(reversed(dn.stats()["items"])), []
+        for t in items:
+            w = D.stems(t)
+            x = next((i for i in today if i not in gone and any(s in w for s in D.stems(i["title"]))), None) \
+                or (next((i for i in today if i not in gone), None) if len(items) == 1 else None)
+            if x:
+                dn.undo(x["id"])
+                gone.append(x)
+        if eng is not None and gone:
+            eng.emit("done", **dn.public())
+        return (f"Отметка снята: {', '.join('«' + x['title'] + '»' for x in gone)}. Сегодня сделано {dn.stats()['today']}."
+                if gone else "Среди сегодняшних отметок такого нет.")
+    rem = ctx.get("reminders")
+    closed, lst = [], []
+    for t in items:
+        m = D.reminder_match(t, list(rem.items) if rem is not None else [])
+        if m:
+            if not m.get("repeat"):
+                rem.remove(m["id"])
+                closed.append(m.get("text") or "")
+            lst.append({"title": m.get("text") or t, "rid": m["id"]})
+        else:
+            lst.append({"title": t})
+    r = dn.add(lst, "pc")
+    if eng is not None:
+        eng.emit("done", **dn.public(), fresh=[{"icon": x[3], "name": x[4], "what": x[5]} for x in r["fresh"]], mile=r["mile"],
+                 added=[x["title"] for x in r["items"]])
+    return D.say(r, closed)
+
+
+def t_done_report(a, ctx):
+    import done as D
+    dn = ctx.get("done")
+    if dn is None:
+        raise ToolError("журнал дел недоступен")
+    try:
+        days = int(float(a.get("days") or 1))
+    except (TypeError, ValueError):
+        days = 1
+    return D.report(dn, days)
+
+
 # ---------- папка ассистента ----------
 
 def _ws(ctx):
@@ -1760,6 +1839,12 @@ def S(props, req=()):
 
 # имя: (описание для модели, схема, риск, обработчик, название в студии)
 TOOLS = {
+    "route": ("Маршрут на карте: «как дойти до…», «проложи маршрут», «построй пешком дворами», геоточка или ссылка на карту. "
+              "to — куда: адрес с городом, место или координаты, ссылка на карту; from — откуда (пусто — от того места, где "
+              "пользователь сейчас); mode — walk (пешком, по умолчанию) | transit | car | bike; app — yandex (по умолчанию) | google. "
+              "Карта сама строит кратчайший путь (пешком — и дворами); не выдумывай улицы и время.",
+              S({"to": {"type": "string"}, "from": {"type": "string"}, "mode": {"type": "string", "enum": ["walk", "transit", "car", "bike"]},
+                 "app": {"type": "string", "enum": ["yandex", "google"]}}, ["to"]), "safe", t_route, "Карта: маршрут"),
     "open_url": ("Открыть сайт в браузере по умолчанию.", S({"url": {"type": "string", "description": "адрес сайта"}}, ["url"]), "safe", t_open_url, "Браузер: открыть сайт"),
     "web_search": ("Найти в интернете свежую информацию (новости, погода, курсы, факты). Возвращает список результатов со ссылками.", S({"query": {"type": "string"}}, ["query"]), "safe", t_web_search, "Поиск в интернете"),
     "read_webpage": ("Прочитать текст веб-страницы по адресу (например, из результатов поиска).", S({"url": {"type": "string"}}, ["url"]), "safe", t_read_webpage, "Чтение веб-страниц"),
@@ -1795,6 +1880,12 @@ TOOLS = {
              "weekday(\"2026-10-14\") — день недели, date_add(\"2026-10-10\", 30) — дата через 30 дней.",
              S({"expression": {"type": "string", "description": "выражение"}}, ["expression"]), "safe", t_calc, "Калькулятор"),
     "cancel_reminder": ("Отменить напоминание по id или тексту.", S({"id": {"type": "string"}}, ["id"]), "safe", t_cancel_reminder, "Напоминания: отмена"),
+    "mark_done": ("Отметить дела сделанными: пользователь говорит, что сделал («я позвонил Игорю и сделал тренировку», «отметь как "
+                  "исполненное», «готово, купил хлеб»). items — каждое дело отдельно и коротко, как оно называется («Позвонить Игорю», "
+                  "«Тренировка»); подходящее напоминание на сегодня закроется само. undo: true — снять отметку, если отметили по ошибке.",
+                  S({"items": {"type": "array", "items": {"type": "string"}}, "undo": {"type": "boolean"}}, ["items"]), "safe", t_mark_done, "Дела: сделано"),
+    "done_report": ("Что пользователь сделал и его достижения: days — за сколько дней (1 — сегодня, 7 — неделя). Для «что я сегодня "
+                    "сделал», «сколько дел за неделю», «какие у меня достижения».", S({"days": {"type": "number"}}), "safe", t_done_report, "Дела: итог"),
     "look_at_screen": ("Посмотреть на экран пользователя (снимок придёт картинкой; нужна модель со зрением). Когда спрашивают, что на "
                        "экране, просят посмотреть на ошибку, окно, текст, график.", S({"question": {"type": "string"}}),
                        "safe", t_look_screen, "Смотрю на экран"),

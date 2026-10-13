@@ -58,6 +58,11 @@ const EXAM_PHONE = [
   { id: "stop_misheard", group: "Разговор", title: "«Стоп», распознанный с ошибкой, — всё равно стоп",
     steps: ["Ctop.", "Сстоп!", "Паузу."], expect: { any: ["хорошо", "пауза"], none: ["слушаю"] },
     judge: "На «стоп», распознанное с ошибкой («Ctop», «Сстоп», «Паузу»), коротко замолчал («Хорошо.»), не продолжил разговор и не ответил «слушаю»." },
+  { id: "team_own_topic", group: "Разговор", title: "Лира не продолжает разговор, начатый с Патриком",
+    steps: ["Патрик, давай обсудим ремонт ванной: плитка, сантехника, бюджет три тысячи долларов. Коротко — план в три пункта.",
+      "Отлично, договорились, завтра начнём.", "Лира, помоги придумать короткое тёплое поздравление для мамы с днём рождения."],
+    expect: { any: ["мам"], none: ["плитк", "сантехник", "ванн"] },
+    judge: "Отвечает Лира: только поздравление маме — тёплое и короткое. Не продолжает разговор о ремонте, который вёлся с Патриком, и не отвечает за Патрика. Упомянуть ремонт — 0 баллов." },
   { id: "list_inline", group: "Разговор", title: "Список — прямо в ответе",
     steps: ["Составь список из пяти идей подарка для мамы на день рождения."],
     expect: { regex: "(?:^|\\n)\\s*(?:[-*•]|\\d+[.)])\\s+\\S[\\s\\S]*(?:\\n\\s*(?:[-*•]|\\d+[.)])\\s+\\S[\\s\\S]*){4}" },
@@ -119,6 +124,10 @@ const EXAM_PHONE = [
   { id: "reminders_show", group: "Заметки", title: "«Какие у меня напоминания» — а они есть", seed: { alarms: [{ title: "позвонить маме", in_h: 0.2 }] },
     steps: ["Какие у меня напоминания?"], expect: { any: ["мам"], none: ["напоминаний нет", "нет напоминаний", "чистый лист", "ничего не запланировано"] },
     judge: "Назвал напоминание «позвонить маме» и когда оно. Сказать, что напоминаний нет, — 0 баллов." },
+  { id: "done_mark", group: "Заметки", title: "«Я позвонила Игорю и сделала тренировку — отметь как исполненное»", seed: { alarms: [{ title: "позвонить Игорю", in_h: 0.3 }] },
+    steps: ["Лира, я позвонила Игорю и сделала тренировку. Отметь как исполненное"], expect: { none: ["не могу отметить", "нет такой возможности", "не умею"] },
+    done: { min: 2, all: ["игор", "трениров"], reminder_gone: "игор" }, tool: { mark_done: {} },
+    judge: "Отметил оба дела сделанными (mark_done): звонок Игорю и тренировку; напоминание «позвонить Игорю» закрыто; коротко и тепло похвалил. Сказать «не могу отметить» или «отметил», не вызвав инструмент, — 0 баллов." },
   { id: "note_photo", group: "Заметки", title: "Фото к заметке — в заметке", steps: [{ say: "Сохрани в заметки: чек за краску для кухни", image: true }],
     note: { any: ["краск"], att: 1 }, expect: { none: ["…"] },
     judge: "Сохранил заметку про чек за краску вместе с фото и коротко подтвердил. Не пересказывал заметку обрезанной фразой с многоточием." },
@@ -135,6 +144,9 @@ const EXAM_PHONE = [
   { id: "close_msg_voice", group: "Близкие", title: "«Отправь Людмиле Исаевой — привет» — через Dewiar", seed: { close: ["Миша Исаев", "Людмила Исаева"] },
     steps: ["Отправь Исаевой Людмиле - привет, как дела!"], tool: { close_send: {} },
     judge: "Отправил сообщение близкой через Dewiar (close_send) с текстом «привет, как дела» и коротко подтвердил. Мессенджеры и SMS — 0 баллов." },
+  { id: "route_walk", group: "Телефон", title: "«Построй пешком до Красной площади» — открывает маршрут на карте",
+    steps: ["Лира, построй пешеходный маршрут до Красной площади в Москве, можно дворами"], tool: { route: {} }, expect: { none: ["не могу", "нет доступа к карт"] },
+    judge: "Открыл маршрут пешком на карте (route) до Красной площади и коротко сказал об этом. Выдуманные улицы, повороты и минуты в пути или «не умею строить маршруты» — 0 баллов." },
   { id: "scanner_open", group: "Телефон", title: "«Лира, открой сканер» — правда открывает",
     steps: ["Лира, открой сканер"], tool: { scan_code: {} },
     judge: "Открыл сканер (scan_code) и попросил навести камеру на код. Сказать «открыла», не открыв, — 0 баллов." },
@@ -144,7 +156,7 @@ let EXAM = null;
 // действия, которые трогают телефон, — в экзамене только записываются
 // (будильник ставит addAlarm, фонарик и громкость — devTorch/devVolume: они сами пишут в песочницу)
 const EXAM_FAKE = new Set(["close_call", "close_send", "list_reminders", "cancel_reminder", "call", "send_sms", "send_message", "open_app", "open_url",
-  "play_radio", "radio_control", "take_photo", "show_photo", "make_app", "open_made", "start_task", "smart_home"]);
+  "play_radio", "radio_control", "take_photo", "show_photo", "make_app", "open_made", "start_task", "smart_home", "route"]);
 
 function examFill(t) {
   return String(t).replace(/\{date\+(\d+)\}/g, (_, n) => { const d = new Date(); d.setDate(d.getDate() + +n); return `${d.getDate()} ${MON_GEN[d.getMonth()]}`; });
@@ -180,6 +192,7 @@ function examFakeTool(name, a) {
     case "open_made": return "Открыто.";
     case "start_task": return "Задача передана компьютеру.";
     case "smart_home": return "Готово.";
+    case "route": return `Открыла маршрут ${ROUTE_RU[a.mode] || "пешком"} до «${a.to || ""}» в Яндекс Картах, от того места, где пользователь сейчас. Скажи коротко, что маршрут открыт; не выдумывай улицы и время.`;
     // как настоящие: кого нет в «Близких» — ошибка (экзамен 11.10: «Напиши Андрею» — заглушка ответила «Отправлено»,
     // и модель доложила об отправке человеку, которого нет)
     case "close_call": return `Звоню через Dewiar: ${clPerson(a.to || "").name}.`;
@@ -273,6 +286,11 @@ function examChecks(sc, last, toolsAll, t0) {
     const w = sc.note, fresh = notes().filter(n => (+n.time || 0) >= t0 - 1000);
     const hit = fresh.find(n => (!w.any || w.any.some(x => (n.title + " " + n.text).toLowerCase().includes(x))) && (!w.att || (n.att || []).length >= w.att));
     out.push({ name: "заметка записана" + (w.att ? " с вложением" : ""), ok: !!hit, detail: fresh.map(n => `${n.title} (${(n.att || []).length} влож.)`).join("; ").slice(0, 300) });
+  }
+  if (sc.done) {                                         // дела правда отмечены (отчёт №14: «Отметь как исполненное»)
+    const w = sc.done, got = doneList().filter(x => x.at >= t0 - 1000), tl = got.map(x => x.title.toLowerCase());
+    out.push({ name: "дела отмечены сделанными", ok: got.length >= (w.min || 1) && (w.all || []).every(k => tl.some(t => t.includes(k))), detail: got.map(x => x.title).join("; ") || "отметок нет" });
+    if (w.reminder_gone) out.push({ name: "напоминание о сделанном закрыто", ok: !EXAM.alarms.some(a => a.title.toLowerCase().includes(w.reminder_gone)), detail: EXAM.alarms.map(a => a.title).join("; ") });
   }
   for (const [name, want] of Object.entries(sc.tool || {})) {
     const dev = (SANDBOX.dev || []).filter(x => x.t >= t0 && x.name === name && (!x.argsObj || Object.entries(want).every(([k, v]) => x.argsObj[k] === v)));    // быстрые ответы без модели

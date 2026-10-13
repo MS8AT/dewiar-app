@@ -30,7 +30,7 @@ const D = window.Dewiar || (() => {
           const rd = r.body.getReader(), dec = new TextDecoder();
           for (;;) { const { value, done } = await rd.read(); if (done) break; ev({ type: "http_chunk", id, text: dec.decode(value) }); }
           ev({ type: "http_done", id, status: r.status, body: "" });
-        } else ev({ type: "http_done", id, status: r.status, body: await r.text() });
+        } else ev({ type: "http_done", id, status: r.status, body: await r.text(), url: r.url });
       }).catch(e => ev({ type: "http_error", id, error: String(e) }));
     },
     snapshot: () => window._snap || "",
@@ -42,7 +42,7 @@ const D = window.Dewiar || (() => {
     alarmCancel(id) { const i = alarms.findIndex(a => a.id === id); if (i >= 0) alarms.splice(i, 1); return i >= 0; },
     alarms: () => JSON.stringify(alarms), alarmHistory: () => "[]", exactAlarms: () => true,
     contact: () => "", call: (n) => { (window._calls = window._calls || []).push(n); return true; }, sms: () => true, openApp: (n) => (/телеграм|telegram/i.test(n) ? "Telegram" : ""), apps: () => "[]",
-    openUrl: () => true, torch: () => true, volume: (op, v) => { (window._vol = window._vol || []).push([op, v]); return 50; }, battery: () => JSON.stringify({ percent: 80, charging: false }),
+    openUrl: () => true, torch: () => true, volume: (op, v) => { if (op !== "get") (window._vol = window._vol || []).push([op, v]); return 50; }, battery: () => JSON.stringify({ percent: 80, charging: false }),
     files: (n) => (n in files ? files[n] : (localStorage.getItem("f_" + n) || "")),
     saveFile: (n, t) => { files[n] = t; try { localStorage.setItem("f_" + n, t); } catch (e) {} return true; },
     saveDownload: (n, m, t) => { (window._downloads = window._downloads || []).push([n, t]); return "Загрузки/Dewiar/" + n; },
@@ -290,7 +290,7 @@ const radio = (() => {
 let httpN = 0;
 const pendingHttp = {};
 N.on("http_chunk", e => { const p = pendingHttp[e.id]; if (p && p.onChunk) p.onChunk(e.text); });
-N.on("http_done", e => { const p = pendingHttp[e.id]; if (p) { delete pendingHttp[e.id]; p.resolve({ status: e.status, body: e.body }); } });
+N.on("http_done", e => { const p = pendingHttp[e.id]; if (p) { delete pendingHttp[e.id]; p.resolve({ status: e.status, body: e.body, url: e.url || "" }); } });
 N.on("http_error", e => { const p = pendingHttp[e.id]; if (p) { delete pendingHttp[e.id];
   const err = new Error(netErr(e.error, p.url)); err.net = true; err.raw = String(e.error || ""); err.url = p.url || ""; p.reject(err); } });
 /* idle — поток ответа молчит дольше idle мс (мобильная связь «зависла», а соединение не рвётся) — обрываем сами
@@ -486,6 +486,9 @@ let bugSnap = null, thanksCache = null, bugWait = 0;
 function hLoad() { try { return JSON.parse(prefGet("health") || "{}") || {}; } catch (e) { return {}; } }
 function hSave(h) { try { prefSet("health", JSON.stringify(h)); } catch (e) { } }
 function hCount(k, n = 1) { const h = hLoad(); h[k] = (h[k] || 0) + n; hSave(h); }
+/* Голос по всем телефонам (отзыв 13.10: «у многих голосом не выходит, ответы только текстом», а объяснить не могут):
+   счётчики слуха и голоса уходят в пульс (voice) — в «Здоровье» видно, у скольких и почему молчит. Только числа. */
+function vCount(k, n = 1) { const h = hLoad(); h.voice = h.voice || {}; h.voice[k] = (h.voice[k] || 0) + n; hSave(h); }
 function hClean(t) {
   return String(t || "").replace(/(Bearer\s+)[\w.-]+/g, "$1***").replace(/\bdw-[a-z0-9-]{6,}/gi, "dw-***").replace(/(:\/\/[^/\s:@]+:)[^@\s/]+@/g, "$1***@")
     .replace(/\b[\w.+-]+@[\w-]+\.[\w.]+\b/g, "<почта>").replace(/\b(?!127\.0\.0\.1\b)\d{1,3}(?:\.\d{1,3}){3}\b/g, "<ip>").trim().slice(0, 300);
@@ -519,12 +522,15 @@ async function pulseSend() {
   const h = hLoad();
   const body = { dev: devId(), app: "phone", version: info.version || "", os: "Android " + (info.android || ""), hw: { device: info.device || "", webview: webviewVer().replace(/^ · /, "") },
     brain: brainKind(), uptime_h: Math.round((Date.now() - H_T0) / 36e4) / 10, starts: h.starts || [], turns: h.turns || 0, net_ok: h.net_ok || 0,
-    net_fail: h.net_fail || 0, errors: h.errors || 0, rude: h.rude || 0, refused: h.refused || 0, problems: Object.entries(h.problems || {}).map(([sig, p]) => ({ sig, text: p.text, n: p.n })) };
+    net_fail: h.net_fail || 0, errors: h.errors || 0, rude: h.rude || 0, refused: h.refused || 0, problems: Object.entries(h.problems || {}).map(([sig, p]) => ({ sig, text: p.text, n: p.n })),
+    voice: Object.assign({}, h.voice || {}, { tts_engine: S.tts.engine || "", tts_ready: D.ttsReady() ? 1 : 0, text_mode: S.textMode ? 1 : 0,
+      stt_engine: S.stt.engine || "", recognizer: D.recognizer() ? 1 : 0, vol: (() => { try { return D.volume("get", 0); } catch (e) { return -1; } })() }) };
   let r; try { r = await http("POST", healthBase() + "?p=/pulse", { headers: { "Content-Type": "application/json" }, body, timeout: 20000 }); }
   catch (e) { console.log("💓 пульс не ушёл: " + (e.message || e)); return false; }
   if (r.status >= 400) return false;
   const now = hLoad();                                        // вычесть отправленное: пока шёл запрос, могло прибавиться
   for (const k of ["turns", "net_ok", "net_fail", "errors", "rude", "refused"]) now[k] = Math.max(0, (now[k] || 0) - (body[k] || 0));
+  if (now.voice) { for (const k of Object.keys(body.voice)) if (typeof now.voice[k] === "number" && !/^(tts_ready|text_mode|recognizer|vol)$/.test(k)) now.voice[k] = Math.max(0, now.voice[k] - (body.voice[k] || 0)); }
   for (const p of body.problems) if (now.problems && now.problems[p.sig]) { now.problems[p.sig].n -= p.n; if (now.problems[p.sig].n <= 0) delete now.problems[p.sig]; }
   now.starts = (now.starts || []).slice(body.starts.length);
   hSave(now); prefSet("pulse_at", String(Date.now()));
@@ -815,7 +821,7 @@ function applyLook(fromPersona) {
 
 /* ---------- состояние разговора ---------- */
 let state = "idle";
-const STATE_RU = { idle: "Нажмите и говорите", listening: "Слушаю", thinking: "Думаю", speaking: "Говорю" };
+const STATE_RU = { idle: "Нажмите или удерживайте", listening: "Слушаю", thinking: "Думаю", speaking: "Говорю" };
 /* Звук «больше не слушаю»: ожидание кончилось без вопроса (или его отменили) — колокольчик вниз, как на компьютере
    (core/audio_io.py tone("sleep")). Начало слушания звучит у распознавателя телефона и вибрацией. */
 let earCtx = null;
@@ -836,7 +842,8 @@ function setState(s) {
   if (state === "listening" && s === "idle" && S.sounds !== false) earcon("sleep");
   state = s;
   if (orb) orb.set({ state: s, level: s === "speaking" ? 0.3 : 0 });
-  $("#state").textContent = STATE_RU[s] || ""; $("#state").classList.toggle("idle", s === "idle");
+  $("#state").textContent = holdTalk && s === "listening" ? (holdCancel ? "Отпустите — отменить" : "Говорите · отпустите — отправлю") : STATE_RU[s] || "";
+  $("#state").classList.toggle("idle", s === "idle");
   const rb = $("#radiobox"); if (rb) rb.classList.toggle("talking", s !== "idle");   // подсказка про голос — только в покое
   const m = $("#mic"); m.classList.toggle("on", s === "listening"); m.classList.toggle("busy", s === "thinking" || s === "speaking");
   D.keepScreen(s !== "idle" || !!(window.DewiarCall && DewiarCall.active()));     // идёт звонок «Близким» — экран не гаснет
@@ -967,7 +974,16 @@ async function listen() {
    Оборвалось на лимите, а не на паузе, — копим сказанное в dict и тихо слушаем дальше; всё вместе уходит, когда человек
    замолчит по-настоящему (или следующий отрезок окажется пустым). */
 let dict = "", sttUserStop = false;
+/* «Удерживайте и говорите» (как голосовое в Telegram, отзыв 13.10): пока палец на кнопке, слушаем сколько угодно —
+   паузы, обрывы распознавателя и тишина не заканчивают запись, сказанное копится в dict; отпустили — всё уходит
+   помощнику; увели палец далеко от кнопки — «отпустите — отменить». Обычное нажатие — как раньше. */
+var holdTalk = false, holdCancel = false;
 function dictMore(t, cut) {
+  if (holdTalk) {                                     // держат кнопку — копим и слушаем дальше, что бы ни было
+    if (t) dict = (dict ? dict + " " : "") + t;
+    showYou(dict ? dict + " …" : "…"); setTimeout(() => { if (holdTalk) listen(); }, 60);
+    return true;
+  }
   const dur = Date.now() - sttT0, user = sttUserStop; sttUserStop = false;
   if (user || !t || !(cut || (sttVia === "system" && dur >= 45000)) || dict.length > 12000) return false;
   dict = (dict ? dict + " " : "") + t;
@@ -1000,10 +1016,11 @@ function sttStall(why) {
     showBot("Распознавание речи этого устройства не отвечает. Войдите аккаунтом dewiar.pro (Настройки → Мозг) — слушать будет сервер Dewiar. Или напишите текстом.", "err");
     return;
   }
+  if (holdTalk) { dictMore(heardPartial, true); return; }
   if (heardPartial || dict) { if (dictMore(heardPartial, false)) return; askHeard(dictTake(heardPartial)); return; }
   setState("idle"); showYou("");
 }
-const sttAlive = () => { sttStarted = true; if (sttVia === "system" && S.stt.sysFails) { S.stt.sysFails = 0; saveS(); } if (sttActive) sttGuard(15000, "silent"); };
+const sttAlive = () => { sttStarted = true; sttRetry = 0; if (sttVia === "system" && S.stt.sysFails) { S.stt.sysFails = 0; saveS(); } if (sttActive) sttGuard(15000, "silent"); };
 N.on("stt_start", e => { if (sttMine(e)) sttAlive(); });
 N.on("stt_end", e => { if (sttMine(e) && sttActive) sttGuard(sttVia === "server" ? 30000 : 8000, "end"); });
 N.on("stt_level", e => { if (!sttMine(e)) return; if (orb && state === "listening") orb.set({ level: e.v }); if (!sttStarted) sttAlive(); });
@@ -1014,16 +1031,28 @@ N.on("stt_result", e => {
   if (!sttActive) return; sttActive = false;
   let t = (e.text || heardPartial || "").trim();
   plog("info", `📝 ${t ? clip(t) : "(пусто)"} (${sttVia === "server" ? "сервер" : "телефон"}, ${((Date.now() - sttT0) / 1000).toFixed(1)} с)`);
+  vCount((t ? "stt_ok_" : "stt_none_") + (sttVia === "server" ? "srv" : "sys")); sttRetry = 0;
   if (dictMore(t, !!e.cut)) return;
   t = dictTake(t);
   if (t && pausePrefix && Date.now() - pausePrefix.at < 30000) t = pausePrefix.text + " " + t;   // договорил после обрыва — один вопрос
   pausePrefix = null;
   if (t) { lastStt = { at: Date.now(), text: t, cut: false }; askHeard(t); } else { setState("idle"); showYou(""); }
 });
+let sttRetry = 0;
 N.on("stt_error", e => {
   if (!sttMine(e)) return;
   sttGuard(0);
   if (!sttActive) return; sttActive = false;
+  vCount(e.code === 11 ? "stt_e11" : [6, 7].includes(e.code) ? "stt_none_" + (sttVia === "server" ? "srv" : "sys") : "stt_err_" + (sttVia === "server" ? "srv" : "sys"));
+  // 11 — распознаватель ещё отключается от прошлого раза, 8 — занят (Samsung и др. сразу после ответа, отчёт №14): это не
+  // поломка — через полсекунды он слушает. Раньше уходили на запись для сервера, та писала «речи не было», человек не
+  // понимал, что случилось. Теперь — тихо пробуем ещё раз (до двух раз), и только потом — сервер.
+  if (holdTalk && [6, 7, 11, 8].includes(e.code)) { dictMore(heardPartial, true); return; }   // держат кнопку — тишина не конец
+  if (sttVia === "system" && !sttStarted && [11, 8].includes(e.code) && sttRetry < 2) {
+    sttRetry++; plog("info", `распознавание телефона ещё занято (${e.code}) — пробую снова`);
+    setTimeout(() => { if (state === "listening") listen(); }, 450 * sttRetry); return;
+  }
+  sttRetry = 0;
   plog([6, 7, 5].includes(e.code) ? "info" : "warn", `распознавание (${sttVia}): ${e.code === 6 ? "речи не было" : e.code === 7 ? "не расслышал" : "ошибка " + (e.code ?? "") + " " + (e.msg || "")}`);
   // распознаватель телефона сломался, не начав слушать (не запустился, нет сервиса, сеть) — слушает сервер Dewiar
   if (sttVia === "system" && !sttStarted && ![6, 7].includes(e.code) && cloudEars()) { sttActive = true; sttStall("start"); return; }
@@ -1090,8 +1119,14 @@ function sysVoiceFor(gender) {
   else if (!S.tts.sys_voice) { const v = pick(false); if (v) return { name: v.name, pitch: 1.0 }; }
   return { name: S.tts.sys_voice || "", pitch: male ? 0.92 : 1.12 };
 }
+let volWarned = false;
 function say(text) {
-  const t = speechText(text); if (!t || S.textMode) return;     // текстовый режим — ответ только на экране
+  const t = speechText(text); if (!t) return;
+  if (S.textMode) { vCount("tts_text"); return; }            // текстовый режим — ответ только на экране
+  if (!volWarned && !D.mock) {                                // звук на нуле — голос есть, но его не слышно: так и говорим
+    let v = -1; try { v = D.volume("get", 0); } catch (e) { }
+    if (v === 0) { volWarned = true; vCount("tts_vol0"); plog("warn", "голос: громкость звука на нуле"); toast("Звук на телефоне на нуле — прибавьте громкость, чтобы слышать ответы", 6000); }
+  }
   const id = "s" + (++sayN); sayLeft++;
   const cv = (S.tts.engine === "cloud" || (S.tts.engine === "system" && !D.ttsReady())) ? cloudVoice() : null;
   const fem = persona().gender === "female";
@@ -1106,7 +1141,7 @@ function say(text) {
     D.speakRemote(id, url, cv ? cv.key : (S.tts.key || ""), JSON.stringify(body));
   } else {
     if (!D.ttsReady()) {
-      sayLeft--;
+      sayLeft--; vCount("tts_none");
       if (!voiceWarned && !D.mock) { voiceWarned = true; plog("warn", "голоса нет: в устройстве нет русского синтеза речи, озвучка облака " + (cloudVoice() ? "есть, но не выбрана" : "не включена") + " — отвечаю текстом"); toast("В устройстве нет русского голоса — отвечаю текстом. Как включить голос — Настройки → Слух и голос.", 6000); }
       return;
     }
@@ -1115,12 +1150,13 @@ function say(text) {
   }
   if (state !== "speaking" && state !== "listening") setState("speaking");
 }
-N.on("tts_start", () => { if (state === "thinking") setState("speaking"); });
+N.on("tts_start", () => { vCount("tts_ok"); if (state === "thinking") setState("speaking"); });
+N.on("tts_fail", e => { vCount("tts_err"); plog("warn", "голос устройства не сказал фразу (код " + (e.code ?? "?") + ")"); });
 N.on("tts_done", () => {
   sayLeft = Math.max(0, sayLeft - 1);
   if (sayLeft === 0 && state === "speaking" && !busy) finishTurn();
 });
-N.on("tts_error", e => { plog("warn", "голос сервера: " + e.error); toast("Голос сервера: " + e.error); });
+N.on("tts_error", e => { vCount("tts_err"); plog("warn", "голос сервера: " + e.error); toast("Голос сервера: " + e.error); });
 function stopVoice() { sayLeft = 0; D.stopSpeak(); }
 function finishTurn() {
   setState("idle");
@@ -1170,10 +1206,11 @@ function privacyRule() {
 function systemPrompt() {
   const p = persona(), others = PERSONAS.filter(x => x.id !== p.id).map(x => `${x.name} — ${(x.role || "").toLowerCase()}`).join("; ");
   const parts = [p.character, (window.DEWIAR_GENDER_RULES || {})[p.gender] || "", p.focus, window.DEWIAR_VOICE_RULES || "Отвечай коротко, живой речью, по-русски.",
-    `Ты — один из команды помощников: ${others}. Позвать коллегу — инструмент call_persona.`,
+    `Ты — один из команды помощников: ${others}. Позвать коллегу — инструмент call_persona. Разговор пользователя с коллегой приходит тебе справкой «[До этого пользователь говорил не с тобой…]»: это их разговор — не продолжай его и не отвечай за коллегу, пока пользователь сам об этом не попросит; отвечай на то, что он говорит тебе.`,
     "Ты работаешь на телефоне пользователя (Android). Когда просят что-то сделать — вызывай инструмент, а не объясняй, как это сделать: "
     + "напоминания, будильники и таймеры (set_reminder; время — точной датой ISO, ты знаешь, который час), звонки (call), SMS (send_sms — откроется сообщение, отправит пользователь), "
     + "радио прямо здесь, в приложении (play_radio, radio_control — на любую просьбу про радио или «включи музыку», не сайты и не приложения), "
+    + "маршрут на карте — «как дойти», «проложи пешком», геоточка или ссылка на карту (route: карта сама ведёт кратчайшим путём, дворами), "
     + "приложения (open_app), сайты (open_url), поиск в интернете (web_search, read_webpage), погода (weather), фонарик, громкость, заметки (save_note, find_notes), "
     + "память о пользователе (remember), деньги (money_add, money_report), сообщения в MAX, Telegram, WhatsApp (send_message), "
     + "мини-программы, страницы и презентации — калькулятор, игра, конвертер, таймер, слайды (make_app: сделай сам, она сразу откроется здесь; код программы не сохраняй заметкой; никогда не говори «готово», не вызвав make_app)" + (S.home.token ? ", умный дом Яндекса (smart_home)" : "")
@@ -1206,6 +1243,7 @@ function systemPrompt() {
   { const rl = Object.entries(S.relations || {}).filter(([, v]) => v && v.name); if (rl.length) parts.push("Кто есть кто в контактах (для звонков и сообщений): " + rl.map(([k, v]) => `${REL_RU[k] || k} — «${v.name}»`).join(", ") + "."); }
   const mp = mindPrompt(); if (mp) parts.push(mp.trim());
   try { const rp = recentPrompt(); if (rp) parts.push(rp); } catch (e) { }
+  try { parts.push(donePrompt()); } catch (e) { }
   if (S.sync.on && syncCred() && pcSeen()) parts.push("Большую задачу (исследование с отчётом, документ, презентация, работа с файлами или кодом) не делай в разговоре — передай компьютеру пользователя (start_task) и скажи, что взялся: ход и итог появятся здесь, в «Мой день» → «Сделанное».");
   try { parts.push(clPrompt()); } catch (e) { }
   parts.push(convPrompt());
@@ -1463,18 +1501,28 @@ async function llmStream(messages, tools, onText, signal, opt = {}) {
 /* История для модели — как на компьютере: реплики других персонажей приходят от «пользователя» с пометкой, две реплики
    одной роли подряд склеиваются, разговор начинается с пользователя. Иначе строгие шаблоны (Gemma, Mistral, Llama на
    vLLM/llama.cpp) отвечают 400 «roles must alternate» — например, после неудачного ответа в истории два «user» подряд. */
+/* Реплики для модели нынешнего персонажа. Разговор человека с другим персонажем (Патриком) — не его: сворачивается в одну
+   справку «пользователь говорил с коллегой Патрик, не продолжай их тему» (отзыв 13.10: обсудила задачу с Патриком,
+   переключилась на Лиру — а Лира отвечает про задачу Патрика). Реплика человека относится к тому, кто на неё ответил;
+   последняя — к нынешнему. Как team_window в core/engine_answer.py. */
 function chatHistory(hist, text) {
   const out = [], me = persona().id;
-  hist.concat([{ role: "user", content: text }]).forEach(m => {
-    if (!m || !m.content || (m.role !== "user" && m.role !== "assistant")) return;
-    const other = m.role === "assistant" && m.who && m.who !== me;
-    const x = other ? { role: "user", content: `[${(PERSONAS.find(p => p.id === m.who) || {}).name || "Коллега"} ответил(а)]: ${m.content}` }
-                    : { role: m.role, content: String(m.content) + (m.note ? "\n" + m.note : "") };
-    const last = out[out.length - 1];
-    if (last && last.role === x.role) last.content += "\n\n" + x.content; else out.push(x);
-  });
+  const msgs = hist.filter(m => m && m.content && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"));
+  const owner = new Array(msgs.length); let nxt = me;
+  for (let i = msgs.length - 1; i >= 0; i--) { if (msgs[i].role === "assistant") nxt = msgs[i].who || me; owner[i] = nxt; }
+  const push = (x) => { const last = out[out.length - 1]; if (last && last.role === x.role) { last.content += "\n\n" + x.content; last.team = x.team; } else out.push(x); };
+  for (let i = 0; i < msgs.length;) {
+    if (owner[i] === me) { const m = msgs[i++]; push({ role: m.role, content: String(m.content) + (m.note ? "\n" + m.note : "") }); continue; }
+    let j = i; const who = owner[i]; while (j < msgs.length && owner[j] === who) j++;
+    const name = (PERSONAS.find(p => p.id === who) || {}).name || "коллега";
+    const lines = msgs.slice(i, j).map(m => (m.role === "user" ? "Пользователь: " : name + ": ") + String(m.content).replace(/\s+/g, " ").slice(0, 400)).slice(-8);
+    push({ role: "user", team: true, content: `[До этого пользователь говорил не с тобой, а с коллегой по имени ${name}. Это для справки: не продолжай их тему и не отвечай за коллегу, пока пользователь сам тебя об этом не попросит.]\n` + lines.join("\n") });
+    i = j;
+  }
+  const lastT = out[out.length - 1];
+  push({ role: "user", content: (lastT && lastT.team ? "[Теперь пользователь обращается к тебе:]\n" : "") + text });
   while (out.length && out[0].role === "assistant") out.shift();
-  return out;
+  return out.map(m => ({ role: m.role, content: m.content }));
 }
 /* Функции текстом: описание — в системное сообщение, прошлые вызовы и результаты — обычными репликами
    (сервер, не принимающий tools, обычно не принимает и роль tool). */
@@ -2244,9 +2292,14 @@ function toolSpecs() {
     { name: "calc", description: "Посчитать точно: любые вычисления (проценты, суммы, скидки, деление) и даты. Считай ВСЕГДА этим инструментом, не в уме. Выражение: 2350 * 17 / 100, (1200 - 15%) * 3; даты ГГГГ-ММ-ДД: days_until(\"2027-01-01\") — сколько дней до даты, days_between(\"2026-10-01\", \"2026-12-31\"), weekday(\"2026-10-14\").",
       parameters: O({ expression: STR }, ["expression"]) },
     { name: "cancel_reminder", description: "Отменить напоминание или будильник (id из list_reminders или слова из текста).", parameters: O({ id: STR }, ["id"]) },
+    { name: "mark_done", description: "Отметить дела сделанными: пользователь говорит, что сделал («я позвонила Игорю и сделала тренировку», «отметь как исполненное», «готово, купил хлеб»). items — каждое дело отдельно и коротко, как оно называется («Позвонить Игорю», «Тренировка»); подходящее напоминание на сегодня закроется само. undo: true — снять отметку, если отметили по ошибке.",
+      parameters: O({ items: { type: "array", items: STR }, undo: { type: "boolean" } }, ["items"]) },
+    { name: "done_report", description: "Что пользователь сделал и его достижения: days — за сколько дней (1 — сегодня, 7 — неделя). Для «что я сегодня сделал», «сколько дел за неделю», «какие у меня достижения».", parameters: O({ days: NUM }) },
     { name: "call", description: "Позвонить по телефону: who — имя из контактов («мама», «Лёша») или номер. Человеку из «Близких» звони через close_call.", parameters: O({ who: STR }, ["who"]) },
     { name: "send_sms", description: "Подготовить SMS: who — имя или номер, text — текст. Откроется приложение сообщений, отправит пользователь.", parameters: O({ who: STR, text: STR }, ["text"]) },
     { name: "open_app", description: "Открыть приложение на телефоне по названию.", parameters: O({ name: STR }, ["name"]) },
+    { name: "route", description: "Маршрут на карте: «как дойти до…», «проложи маршрут», «построй пешком дворами», геоточка или ссылка на карту. to — куда: адрес с городом, место или координаты, ссылка на карту; from — откуда (пусто — от того места, где пользователь сейчас); mode — walk (пешком, по умолчанию) | transit | car | bike; app — yandex | google (пусто — какие карты стоят). Карта сама строит кратчайший путь (пешком — и дворами); не выдумывай улицы и время.",
+      parameters: O({ to: STR, from: STR, mode: { type: "string", enum: ["walk", "transit", "car", "bike"] }, app: { type: "string", enum: ["yandex", "google"] } }, ["to"]) },
     { name: "open_url", description: "Открыть сайт или ссылку в браузере (YouTube, карты, поиск). Не для радио — для него play_radio.", parameters: O({ url: STR }, ["url"]) },
     { name: "play_radio", description: "Включить радио онлайн прямо здесь, в приложении: query — название станции («Европа Плюс», «Маяк», «Рекорд»), жанр или настроение («джаз», «рок», «классика», «что-нибудь спокойное»), пусто — на мой вкус. На любую просьбу про радио или «включи музыку» — только этот инструмент: не открывай сайты, Яндекс Музыку и другие приложения.",
       parameters: O({ query: STR }) },
@@ -2343,6 +2396,20 @@ async function runTool(name, a) {
       if (!x) return "Такого напоминания нет.";
       D.alarmCancel(x.id); syncSoon(); return `Отменено: ${x.title}.`;
     }
+    case "mark_done": {
+      const items = (Array.isArray(a.items) ? a.items : String(a.items || a.text || "").split(/\s*[;\n]\s*/)).map(x => String(x || "").trim()).filter(Boolean).slice(0, 12);
+      if (!items.length) return "Ошибка: не понял, какое дело отметить — спроси коротко.";
+      if (a.undo) {
+        const today = doneStats().items.slice().reverse(), gone = [];
+        for (const t of items) { const w = stems(t), x = today.find(i => !gone.includes(i) && stems(i.title).some(s => w.includes(s))) || (items.length === 1 && today.find(i => !gone.includes(i))); if (x) { doneUndo(x.id); gone.push(x); } }
+        if ($("#sh-day.on") && dayTab === "rem") renderDay();
+        return gone.length ? `Отметка снята: ${gone.map(x => "«" + x.title + "»").join(", ")}. Сегодня сделано ${doneStats().today}.` : "Среди сегодняшних отметок такого нет.";
+      }
+      const r = markDone(items, "voice");
+      if ($("#sh-day.on") && dayTab === "rem") renderDay();
+      return doneSay(r);
+    }
+    case "done_report": return doneReport(a.days);
     case "call": { const r = await doCall(a.who || ""); return r.text; }
     case "send_sms": {
       let num = String(a.who || "").replace(/[^\d+]/g, "");
@@ -2357,6 +2424,7 @@ async function runTool(name, a) {
       const scr = D.handsScreen();
       return `Открыто: ${n}.` + (scr && scr !== "OFF" ? "\n\nНа экране:\n" + scr : "");
     }
+    case "route": return routeTool(a);
     case "open_url": { let u = String(a.url || ""); if (!/^https?:|^[a-z]+:/.test(u)) u = "https://" + u; return D.openUrl(u) ? "Открыто." : "Не открылось."; }
     case "play_radio": {
       const r = await radio.play(a.query || "");
@@ -2887,18 +2955,42 @@ $("#b-voice").onclick = () => {
 };
 voiceBtn();
 const X_SVG = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+/* шапка «Дела»: сколько сделано сегодня, серия и значки (полученные — ярко, следующий в каждой группе — бледно, с прогрессом) */
+function doneHead(s) {
+  const chips = [];
+  for (const g of ["day", "streak", "total"]) {
+    const all = ACHIEVE.filter(a => a.g === g), got = all.filter(a => achVal(a, s) >= a.n), next = all.find(a => achVal(a, s) < a.n);
+    got.forEach(a => chips.push(`<button class="ach on" data-tip="${esc(a.icon + " " + a.name + " — " + a.what + " · получено")}">${a.icon}<span>${esc(a.name)}</span></button>`));
+    if (next) chips.push(`<button class="ach" data-tip="${esc(next.icon + " " + next.name + " — " + next.what + " · сейчас " + achVal(next, s) + " из " + next.n)}">${next.icon}<span>${Math.min(achVal(next, s), next.n)}/${next.n}</span></button>`);
+  }
+  return `<div class="donehd"><div class="dnum"><b>${s.today}</b><small>${s.today ? delaRu(s.today) + " сегодня" : "дел сегодня"}</small></div><div class="dside">`
+    + `<span class="dstreak">${s.streak >= 2 ? `🔥 ${s.streak} ${dnRu(s.streak)} подряд` : s.today ? "Первый день серии" : s.total ? "Отметьте дело — серия продолжится" : "Сделали дело — отметьте его"}</span>`
+    + `<div class="achs">${chips.join("")}</div></div></div>`
+    + `<form class="doneadd" id="done-add"><input placeholder="Что уже сделали?" maxlength="120" enterkeyhint="done" aria-label="Что сделали"><button class="ib" aria-label="Отметить сделанным">✓</button></form>`;
+}
 function renderDay() {
   const box = $("#day-body");
   if (dayTab === "rem") {
-    const l = JSON.parse(D.alarms() || "[]").sort((a, b) => a.at - b.at);
+    const l = JSON.parse(D.alarms() || "[]").sort((a, b) => a.at - b.at), ds = doneStats();
     const jobs = (mind().jobs || []).filter(j => !j.paused);       // дела по расписанию — их делает компьютер (утренняя сводка, итоги)
-    box.innerHTML = (l.length ? l.map(x => { const d = new Date(x.at); return `<div class="it"><div class="tm">${pad(d.getHours())}:${pad(d.getMinutes())}</div><div class="bd"><b>${esc(x.title)}</b><small>${x.kind === "alarm" ? "⏰ будильник" : x.kind === "timer" ? "⏱ таймер" : "🔔 напоминание"} · ${esc(whenText(d))}${x.repeat ? " · " + REP_RU[x.repeat] : ""}</small></div><button class="x" data-id="${esc(x.id)}">${X_SVG}</button></div>`; }).join("")
-      : jobs.length ? "" : `<div class="empty">Напоминаний нет.<br>Скажите: «напомни завтра в 9 позвонить маме» или «будильник на 7».</div>`)
+    box.innerHTML = doneHead(ds)
+      + (ds.items.length ? `<div class="bugh">Сделано сегодня</div>` + ds.items.slice().reverse().map(x => { const d = new Date(x.at);
+          return `<div class="it dn"><div class="ok">✓</div><div class="bd"><b>${esc(x.title)}</b><small>${pad(d.getHours())}:${pad(d.getMinutes())}${x.src === "pc" ? " · на компьютере" : x.src === "alarm" ? " · из напоминания" : ""}</small></div><button class="x" data-undo="${esc(x.id)}" title="Снять отметку" aria-label="Снять отметку">${X_SVG}</button></div>`; }).join("") : "")
+      + (l.length ? `<div class="bugh">Напоминания</div>` + l.map(x => { const d = new Date(x.at), task = x.kind !== "alarm" && x.kind !== "timer";
+          return `<div class="it"><div class="tm">${pad(d.getHours())}:${pad(d.getMinutes())}</div><div class="bd"><b>${esc(x.title)}</b><small>${x.kind === "alarm" ? "⏰ будильник" : x.kind === "timer" ? "⏱ таймер" : "🔔 напоминание"} · ${esc(whenText(d))}${x.repeat ? " · " + REP_RU[x.repeat] : ""}</small></div>`
+            + (task ? `<button class="x ok" data-done="${esc(x.id)}" title="Сделано" aria-label="Сделано">✓</button>` : "") + `<button class="x" data-id="${esc(x.id)}" title="Удалить" aria-label="Удалить">${X_SVG}</button></div>`; }).join("")
+      : jobs.length || ds.items.length ? "" : `<div class="empty">Напоминаний нет.<br>Скажите: «напомни завтра в 9 позвонить маме» или «будильник на 7».<br>Сделали дело — скажите «я позвонила маме, отметь» или впишите его выше.</div>`)
       + (jobs.length ? `<div class="bugh">По расписанию — делает компьютер</div>` + jobs.map(j => { const d = new Date(j.at);
           return `<div class="it job"><div class="tm">${pad(d.getHours())}:${pad(d.getMinutes())}</div><div class="bd"><b>${esc(String(j.text).split(":")[0].slice(0, 80))}</b><small>${esc(j.repeat || whenText(d))}</small></div></div>`; }).join("")
         + `<p class="hint" style="margin:6px 4px 0">Изменить или выключить — на компьютере: студия → «Напоминания».</p>` : "")
       + (D.exactAlarms() ? "" : `<div class="card"><b>Будильники могут опаздывать</b><p class="hint">Разрешите точное время: «Будильники и напоминания».</p><button class="btn p" onclick="Dewiar.openSettings('alarms')">Разрешить</button></div>`);
-    $$(".x", box).forEach(b => b.onclick = () => { D.alarmCancel(b.dataset.id); syncSoon(); renderDay(); });
+    $$("[data-id]", box).forEach(b => b.onclick = () => { D.alarmCancel(b.dataset.id); syncSoon(); renderDay(); });
+    $$("[data-done]", box).forEach(b => b.onclick = () => { const x = l.find(i => i.id === b.dataset.done); if (!x) return;
+      if (!x.repeat) { D.alarmCancel(x.id); syncSoon(); } celebrate(Object.assign(doneAdd([{ title: x.title, rid: x.id }], "tap"), { closed: [] })); renderDay(); });
+    $$("[data-undo]", box).forEach(b => b.onclick = () => { const x = doneUndo(b.dataset.undo); renderDay(); if (x) toast("Отметка снята: " + x.title, 2000); });
+    $$(".ach", box).forEach(b => b.onclick = () => toast(b.dataset.tip, 2600));
+    const f = $("#done-add", box);
+    f.onsubmit = (e) => { e.preventDefault(); const t = $("input", f).value.trim(); if (!t) { $("input", f).focus(); return; } markDone([t], "tap"); renderDay(); };
   } else if (dayTab === "notes") {
     const n = notes().slice().sort((a, b) => (+b.time || 0) - (+a.time || 0));          // новые сверху — и с компьютера тоже
     box.innerHTML = `<button class="btn p ntnew" id="nt-new">Новая заметка</button>` + (n.length ? n.map(x => {
@@ -2922,6 +3014,215 @@ function renderDay() {
       : `<div class="empty">Записей нет.<br>Скажите: «купил кофе за восемь пятьдесят».</div>`);
     $$(".x", box).forEach(b => b.onclick = () => { saveMoney(money().filter(x => x.id !== b.dataset.id)); renderDay(); });
   }
+}
+
+/* ---------- дела: «сделано» и достижения (отзыв 13.10: «геймификация — выполнил 3 дела, значки и достижения, в конце дня
+   "ты сегодня сделал 5–7 дел"»; отчёт №14: «Отметь как исполненное» — нечем было отметить).
+   Журнал done.json: {id, title, at (мс), src: voice|tap|alarm|pc, rid — напоминание, если закрыто им}. Он же уходит в
+   синхронизацию видом «done» (core/done.py на компьютере — тот же формат и те же достижения: меняешь здесь — меняй и там).
+   Достижения не хранятся — считаются по журналу (doneStats): так они одинаковы на телефоне и компьютере. Дневные рубежи
+   (3, 5, 7, 10 дел за день) поздравляют каждый день; значки (ACHIEVE) — один раз, когда получены впервые. */
+const DONE_F = "done.json", DONE_MAX = 1500, DAY_MILES = [3, 5, 7, 10];
+const ACHIEVE = [
+  { id: "d3", g: "day", n: 3, icon: "🥉", name: "Тройка", what: "3 дела за день" },
+  { id: "d5", g: "day", n: 5, icon: "🥈", name: "Пятёрка", what: "5 дел за день" },
+  { id: "d10", g: "day", n: 10, icon: "🥇", name: "Десятка", what: "10 дел за день" },
+  { id: "s3", g: "streak", n: 3, icon: "🔥", name: "Три дня подряд", what: "дела три дня подряд" },
+  { id: "s7", g: "streak", n: 7, icon: "⭐", name: "Неделя", what: "дела семь дней подряд" },
+  { id: "s30", g: "streak", n: 30, icon: "🏆", name: "Месяц", what: "дела тридцать дней подряд" },
+  { id: "t10", g: "total", n: 10, icon: "✨", name: "Первые десять", what: "10 дел всего" },
+  { id: "t50", g: "total", n: 50, icon: "💪", name: "Полсотни", what: "50 дел всего" },
+  { id: "t100", g: "total", n: 100, icon: "💯", name: "Сотня", what: "100 дел всего" },
+  { id: "t500", g: "total", n: 500, icon: "👑", name: "Пятьсот", what: "500 дел всего" }];
+const achVal = (a, s) => a.g === "day" ? s.bestDay : a.g === "streak" ? s.bestStreak : s.total;
+function doneList() { try { const l = JSON.parse(fileGet(DONE_F) || "[]"); return Array.isArray(l) ? l : []; } catch (e) { return []; } }
+function saveDone(l) {
+  l = l.filter(x => x && x.id && x.title && +x.at).sort((a, b) => a.at - b.at).slice(-DONE_MAX);
+  fileSave(DONE_F, JSON.stringify(l)); return l;
+}
+const dayKey = (t) => { const d = new Date(t); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
+const delaRu = (n) => n % 10 === 1 && n % 100 !== 11 ? "дело" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "дела" : "дел";
+const dnRu = (n) => n % 10 === 1 && n % 100 !== 11 ? "день" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "дня" : "дней";
+function doneStats(l = doneList(), now = Date.now()) {
+  const by = {}; l.forEach(x => { const k = dayKey(x.at); by[k] = (by[k] || 0) + 1; });
+  const today = dayKey(now);
+  let streak = 0, d = new Date(now); d.setHours(12, 0, 0, 0);
+  if (!by[today]) d = new Date(d.getTime() - 864e5);                 // сегодня ещё пусто — серия идёт со вчера
+  while (by[dayKey(d)]) { streak++; d = new Date(d.getTime() - 864e5); d.setHours(12, 0, 0, 0); }
+  let best = 0, run = 0, prev = null;
+  for (const k of Object.keys(by).sort()) { const t = new Date(k + "T12:00").getTime(); run = prev !== null && Math.round((t - prev) / 864e5) === 1 ? run + 1 : 1; prev = t; best = Math.max(best, run); }
+  const s = { today: by[today] || 0, items: l.filter(x => dayKey(x.at) === today), streak, bestStreak: best, bestDay: Math.max(0, ...Object.values(by)), total: l.length, byDay: by };
+  s.earned = ACHIEVE.filter(a => achVal(a, s) >= a.n);
+  return s;
+}
+/* Записать сделанное: list — [{title, rid}] или строки. -> {items, stats, fresh (новые значки), mile (дневной рубеж или 0)} */
+function doneAdd(list, src = "tap", at = Date.now()) {
+  const l = doneList(), before = doneStats(l, at), items = [];
+  for (const it of [].concat(list)) {
+    const o = typeof it === "string" ? { title: it } : it, title = String(o.title || "").replace(/\s+/g, " ").trim().slice(0, 120);
+    if (!title) continue;
+    const t = title[0].toUpperCase() + title.slice(1);
+    items.push({ id: "d" + at.toString(36) + Math.random().toString(36).slice(2, 7), title: t, at: +o.at || at + items.length, src, rid: o.rid || "" });
+  }
+  const after = doneStats(saveDone(l.concat(items)), at);
+  const fresh = ACHIEVE.filter(a => achVal(a, after) >= a.n && achVal(a, before) < a.n);
+  const mile = DAY_MILES.filter(m => before.today < m && after.today >= m).pop() || 0;
+  if (items.length) syncSoon();
+  return { items, stats: after, fresh, mile };
+}
+function doneUndo(id) { const l = doneList(), x = l.find(i => i.id === id); if (!x) return null; saveDone(l.filter(i => i.id !== id)); syncSoon(); return x; }
+// напоминание на сегодня, которое и есть это дело: «я позвонила Игорю» ↔ «позвонить Игорю» (основы слов по 4 буквы)
+const stems = (t) => String(t || "").toLowerCase().replace(/ё/g, "е").split(/[^a-zа-я0-9]+/).filter(w => w.length > 2 && !/^(это|как|для|что|все|уже|мне|меня|надо|нужно|сделал[аи]?|сделать)$/.test(w)).map(w => w.slice(0, 4));
+// в экзамене напоминания — его песочница (exam.js), не настоящие
+const examOn = () => typeof EXAM !== "undefined" && !!EXAM;
+function remDrop(id) { if (examOn()) { EXAM.alarms = EXAM.alarms.filter(x => x.id !== id); return; } D.alarmCancel(id); syncSoon(); }
+function remMatch(title, now = Date.now()) {
+  const w = stems(title); if (!w.length) return null;
+  const end = new Date(now); end.setHours(23, 59, 59, 0);
+  let best = null, bs = 0;
+  for (const x of alarmsNow()) {
+    if (x.kind === "timer" || x.kind === "alarm" || (!x.repeat && x.at > end.getTime())) continue;
+    const r = stems(x.title); if (!r.length) continue;
+    const hit = r.filter(s => w.includes(s)).length, sc = hit / r.length;
+    if (hit && sc >= 0.5 && sc > bs) { best = x; bs = sc; }
+  }
+  return best;
+}
+/* Отметить дела (инструмент и кнопки): подходящее разовое напоминание на сегодня закрывается, повторяющееся остаётся. */
+function markDone(titles, src) {
+  const closed = [], list = [];
+  for (const t of titles) {
+    const m = remMatch(t);
+    if (m) { if (!m.repeat) { remDrop(m.id); closed.push(m.title); } list.push({ title: m.title, rid: m.id }); }
+    else list.push({ title: t });
+  }
+  const r = doneAdd(list, src); r.closed = closed;
+  celebrate(r);
+  return r;
+}
+function doneSay(r) {
+  const s = r.stats, ach = r.fresh.map(a => `${a.icon} «${a.name}» — ${a.what}`).join("; ");
+  return `Отмечено сделанным: ${r.items.map(x => "«" + x.title + "»").join(", ")}.` + (r.closed.length ? ` Напоминание закрыто: ${r.closed.join(", ")}.` : "")
+    + ` Сегодня сделано ${s.today} ${delaRu(s.today)}` + (s.streak >= 2 ? `, ${s.streak} ${dnRu(s.streak)} подряд` : "") + ", всего " + s.total + "."
+    + (ach ? ` Новое достижение: ${ach}.` : r.mile ? ` Рубеж дня: ${r.mile} ${delaRu(r.mile)}!` : "")
+    + " Похвали коротко и тепло, одной фразой" + (ach ? ", назови достижение" : "") + "; не перечисляй дела заново.";
+}
+/* Праздник: короткий тост на каждое дело; рубеж дня и новый значок — конфетти, вибрация и карточка. */
+function celebrate(r) {
+  if (!r.items.length) return;
+  const s = r.stats, big = r.fresh.length || r.mile;
+  toast(`✓ ${r.items.length === 1 ? r.items[0].title : r.items.length + " " + delaRu(r.items.length)} — сегодня ${s.today}`, 2600);
+  try { D.vibrate(big ? 60 : 25); } catch (e) { }
+  if (!big) return;
+  confetti();
+  const a = r.fresh[r.fresh.length - 1];
+  showCard(`<div class="achc">${a ? `<i>${a.icon}</i><div><b>${esc(a.name)}</b><small>Новое достижение · ${esc(a.what)}</small></div>`
+    : `<i>🎉</i><div><b>${r.mile} ${delaRu(r.mile)} за сегодня</b><small>${s.streak >= 2 ? s.streak + " " + dnRu(s.streak) + " подряд · " : ""}так держать</small></div>`}</div>`);
+}
+function confetti() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const box = document.createElement("div"); box.className = "confetti"; box.setAttribute("aria-hidden", "true");
+  const col = ["#8B8CF7", "#4BE3A1", "#FFC978", "#FF8FA8", "#7FD4FF", "#fff"];
+  for (let i = 0; i < 36; i++) {
+    const p = document.createElement("i");
+    p.style.cssText = `left:${(Math.random() * 100).toFixed(1)}%;background:${col[i % col.length]};animation-delay:${(Math.random() * .35).toFixed(2)}s;`
+      + `--dx:${(Math.random() * 120 - 60).toFixed(0)}px;--r:${(Math.random() * 720 - 360).toFixed(0)}deg;width:${6 + (i % 3) * 2}px`;
+    box.appendChild(p);
+  }
+  document.body.appendChild(box); setTimeout(() => box.remove(), 2200);
+}
+/* «Сделано ✓» в уведомлении напоминания (AlarmReceiver) — телефон кладёт в pref done_inbox, здесь забираем. */
+function doneInbox() {
+  let q = []; try { q = JSON.parse(prefGet("done_inbox") || "[]") || []; } catch (e) { }
+  if (!q.length) return;
+  let rest = []; try { rest = (JSON.parse(prefGet("done_inbox") || "[]") || []).filter(x => !q.some(y => y.id === x.id && y.at === x.at)); } catch (e) { }
+  prefSet("done_inbox", JSON.stringify(rest));                       // уведомление могло добавить ещё одно, пока читали
+  const r = doneAdd(q.map(x => ({ title: x.title, rid: x.id, at: +x.at || Date.now() })), "alarm");
+  if (r.fresh.length || r.mile) celebrate(r);
+  if ($("#sh-day.on") && dayTab === "rem") renderDay();
+}
+N.on("done_inbox", () => doneInbox());
+function doneReport(days) {
+  const d = Math.max(1, Math.min(60, +days || 1)), l = doneList(), s = doneStats(l), from = new Date(); from.setHours(0, 0, 0, 0); from.setDate(from.getDate() - d + 1);
+  const it = l.filter(x => x.at >= from.getTime()), by = {};
+  it.forEach(x => (by[dayKey(x.at)] = by[dayKey(x.at)] || []).push(x.title));
+  const next = ["day", "streak", "total"].map(g => ACHIEVE.find(a => a.g === g && achVal(a, s) < a.n)).filter(Boolean);
+  return (it.length ? (d === 1 ? `Сегодня сделано ${it.length} ${delaRu(it.length)}: ` + by[dayKey(Date.now())].join("; ")
+      : `За ${d} ${dnRu(d)} сделано ${it.length} ${delaRu(it.length)}:\n` + Object.entries(by).map(([k, v]) => `${k.slice(8)}.${k.slice(5, 7)}: ${v.join("; ")}`).join("\n"))
+    : (d === 1 ? "Сегодня пока ничего не отмечено." : `За ${d} ${dnRu(d)} ничего не отмечено.`))
+    + `\nСерия: ${s.streak} ${dnRu(s.streak)} подряд (лучшая — ${s.bestStreak}). Всего: ${s.total}. Лучший день: ${s.bestDay}.`
+    + `\nДостижения: ${s.earned.length ? s.earned.map(a => a.icon + " " + a.name).join(", ") : "пока нет"}.`
+    + (next.length ? ` Следующие: ${next.map(a => `${a.icon} ${a.name} (${a.what}, сейчас ${achVal(a, s)})`).join("; ")}.` : "");
+}
+function donePrompt() {
+  const s = doneStats();
+  return "ДЕЛА И ДОСТИЖЕНИЯ. Пользователь говорит, что сделал дело («я позвонила Игорю и сделала тренировку», «отметь как исполненное», «готово, купил хлеб») — "
+    + "вызови mark_done (каждое дело — отдельной строкой, коротко: «Позвонить Игорю», «Тренировка»), подходящее напоминание закроется само; потом похвали коротко, одной фразой. "
+    + "Отметил по ошибке — mark_done с undo. «Что я сегодня сделал», «мои достижения» — done_report. "
+    + `Сейчас: сегодня сделано ${s.today} ${delaRu(s.today)}` + (s.items.length ? ` (${s.items.slice(-6).map(x => x.title).join("; ")})` : "")
+    + (s.streak >= 2 ? `, серия ${s.streak} ${dnRu(s.streak)} подряд` : "") + `, всего ${s.total}.`;
+}
+
+/* ---------- маршрут на карте (отзыв 13.10: «Лира берёт геоточку, открывает карту и предлагает короткий пешеходный маршрут
+   дворами»). Куда — адрес, место, координаты или ссылка на карту (Яндекс, Google, geo:, короткая — по переадресации).
+   Адрес → координаты через OpenStreetMap (Nominatim); маршрут строит приложение карт от того места, где человек сейчас —
+   пешком оно и ведёт кратчайшим путём, дворами. Яндекс Карты, если стоят (иначе Google). Как core/route.py. ---------- */
+const ROUTE_MODES = { walk: ["pd", "walking"], transit: ["mt", "transit"], car: ["auto", "driving"], bike: ["bc", "bicycling"] };
+const ROUTE_RU = { walk: "пешком", transit: "на транспорте", car: "на машине", bike: "на велосипеде" };
+const geoOk = (a, b) => a >= -90 && a <= 90 && b >= -180 && b <= 180 && !(a === 0 && b === 0);
+function parseCoords(text) {
+  let t = String(text || ""); try { t = decodeURIComponent(t); } catch (e) { }
+  const NR = "(-?\\d{1,3}\\.\\d{3,})", AN = "(-?\\d{1,3}(?:\\.\\d+)?)";   // голые числа — с 3+ знаками; в ссылке — любые
+  if (/yandex/i.test(t)) {                            // сначала сама точка (pt, «что здесь»), потом маршрут, потом центр карты
+    for (const p of ["(?:[?&]pt=|whatshere\\[point\\]=)", "rtext=[^&]*~", "[?&]ll="]) {
+      const m = t.match(new RegExp(p + AN + "\\s*,\\s*" + AN));
+      if (m) { const a = +m[1], b = +m[2]; if (p.startsWith("rtext")) return geoOk(a, b) ? [a, b] : null; return geoOk(b, a) ? [b, a] : null; }
+    }
+  }
+  for (const p of ["geo:" + AN + ",\\s*" + AN, "@" + AN + "," + AN, "[?&](?:q|query|destination|daddr|ll)=" + AN + "\\s*,\\s*" + AN, "(?<![\\d.])" + NR + "\\s*[,; ]\\s*" + NR + "(?![\\d.])"]) {
+    const m = t.match(new RegExp(p)); if (m && geoOk(+m[1], +m[2])) return [+m[1], +m[2]];
+  }
+  return null;
+}
+const isShortMap = (t) => /https?:\/\/(?:yandex\.\w+\/maps\/-\/|maps\.app\.goo\.gl\/|goo\.gl\/maps\/|go\.2gis\.com\/)\S+/.test(String(t || ""));
+async function geocode(q) {
+  q = String(q || "").trim(); if (!q) return null;
+  try {
+    const r = await http("GET", "https://nominatim.openstreetmap.org/search?" + new URLSearchParams({ q, format: "jsonv2", limit: "1", "accept-language": "ru" }),
+      { headers: { "User-Agent": "Dewiar/1 (https://dewiar.pro)" }, timeout: 12000 });
+    const x = (JSON.parse(r.body || "[]") || [])[0]; if (!x) return null;
+    const a = +x.lat, b = +x.lon; return geoOk(a, b) ? [a, b, String(x.display_name || q)] : null;
+  } catch (e) { return null; }
+}
+function routeUrl(app, dest, origin, mode, scheme) {
+  const [yrt, gm] = ROUTE_MODES[mode] || ROUTE_MODES.walk, pt = (p) => Array.isArray(p) ? `${(+p[0]).toFixed(6)},${(+p[1]).toFixed(6)}` : String(p);
+  if (app === "yandex" && Array.isArray(dest) && (!origin || Array.isArray(origin)))
+    return (scheme ? "yandexmaps://maps.yandex.ru/" : "https://yandex.ru/maps/") + `?rtext=${origin ? pt(origin) : ""}~${pt(dest)}&rtt=${yrt}`;
+  if (app === "yandex") return (scheme ? "yandexmaps://maps.yandex.ru/" : "https://yandex.ru/maps/") + "?" + new URLSearchParams({ text: pt(dest) });
+  const q = { api: "1", destination: pt(dest), travelmode: gm }; if (origin) q.origin = pt(origin);
+  return "https://www.google.com/maps/dir/?" + new URLSearchParams(q);
+}
+async function routeTool(a) {
+  const to = String(a.to || "").trim(); if (!to) return "Ошибка: не понял, куда — спроси адрес или место.";
+  const mode = ROUTE_MODES[a.mode] ? a.mode : "walk";
+  let apps = []; try { apps = JSON.parse(D.apps() || "[]"); } catch (e) { }
+  const hasY = apps.some(n => /яндекс.?карты|yandex.?maps/i.test(n));
+  const app = a.app === "google" || a.app === "yandex" ? a.app : (hasY || !apps.some(n => /^(карты|maps|google maps)$/i.test(n)) ? "yandex" : "google");
+  let src = to;
+  if (isShortMap(to)) { try { const r = await http("GET", to.match(/https?:\/\/\S+/)[0], { timeout: 12000 }); src = (r.url || "") + " " + (r.body || "").slice(0, 200000); } catch (e) { } }
+  let c = parseCoords(src), name = c ? "" : to;
+  if (!c && !/^https?:\/\//.test(to)) { const g = await geocode(to); if (g) { c = [g[0], g[1]]; name = g[2]; } }
+  let o = null;
+  if (a.from) { o = parseCoords(a.from); if (!o) { const g = await geocode(a.from); o = g ? [g[0], g[1]] : a.from; } }
+  const dest = c || to, url = routeUrl(app, dest, o, mode, false);
+  const opened = (app === "yandex" && hasY && D.openUrl(routeUrl(app, dest, o, mode, true))) || D.openUrl(url);
+  const where = name ? name.split(",").slice(0, 3).join(",") : c ? `${c[0].toFixed(5)}, ${c[1].toFixed(5)}` : "";
+  const appRu = app === "yandex" ? "Яндекс Картах" : "Google Картах";
+  if (!opened) return "Ошибка: карта не открылась — скажи об этом и предложи открыть ссылку: " + url;
+  if (!c && app === "yandex") return `Открыла поиск «${where}» в ${appRu}: точное место не нашлось — пусть выберет его на карте и нажмёт «Маршрут». Скажи это одной-двумя фразами.`;
+  return `Открыла маршрут ${ROUTE_RU[mode]} до «${where}» в ${appRu}, от того места, где пользователь сейчас.`
+    + (mode === "walk" ? " Пешком карта ведёт кратчайшим путём — и дворами, и тропинками; время в пути видно на карте." : "")
+    + " Скажи коротко, одной-двумя фразами, что маршрут открыт; не выдумывай улицы и время.";
 }
 
 /* ---------- сделанное: мини-программы и страницы, которые ассистент сделал прямо на телефоне (make_app) ----------
@@ -3429,8 +3730,8 @@ function wireSettings(info) {
    (отпечатки — в pref «sync»), и забираем чужое. Одну запись правили на двух устройствах — остаётся более поздняя правка.
    Запись, которой больше нет в syncSnapshot(), уходит как удаление — и другие устройства её тоже удалят.
    Формат записей, виды (SYNC_KINDS) и порядок обмена — общие с core/sync.py (компьютер) и ?p=/sync в cloud.php:
-   меняешь здесь — меняй и там. Дополнительные виды (soul, mind, diary, dayturn, taskreq, task) шлём, только если их знает сервер. */
-const SYNC_KINDS = ["reminder", "note", "money", "memory", "soul", "mind", "diary", "dayturn", "taskreq", "task"];
+   меняешь здесь — меняй и там. Дополнительные виды (soul, mind, diary, dayturn, taskreq, task, done) шлём, только если их знает сервер. */
+const SYNC_KINDS = ["reminder", "note", "money", "memory", "soul", "mind", "diary", "dayturn", "taskreq", "task", "done"];
 let syncTimer = null, syncBusy = false, syncStatus = { ok: null, at: 0, error: "", devices: [], counts: {} };
 /* Чьи данные: аккаунт dewiar.pro (если вошли) или ключ Dewiar (dw-…). Есть и то и другое — ключ уходит в link
    (X-Sync-Link): сервер связывает их в одно пространство. -> {token, link, base, via} или null — синхронизировать нечем. */
@@ -3567,6 +3868,7 @@ function syncSnapshot() {
   }
   if (ks.includes("dayturn")) qGet("dayq").forEach(x => { out["dayturn:" + x.id] = { ts: x.ts, who: x.who, you: x.you, bot: x.bot }; });
   if (ks.includes("taskreq")) qGet("taskq").forEach(x => { out["taskreq:" + x.id] = { title: x.title, goal: x.goal, ts: x.ts, cloud: !!x.cloud }; });
+  if (ks.includes("done")) doneList().forEach(x => { out["done:" + x.id] = { title: x.title, at: +x.at, src: x.src || "", rid: x.rid || "" }; });   // сделанные дела (core/done.py)
   return out;
 }
 const TASK_RU = { running: "в работе", waiting: "ждёт ответа", paused: "на паузе", done: "готово", failed: "не вышло", sleeping: "ждёт времени", stopped: "остановлена" };
@@ -3616,6 +3918,11 @@ function syncApply(it) {
       return false;
     } else return false;
     saveMind(m);
+  } else if (it.kind === "done") {
+    const l = doneList().filter(x => x.id !== it.id);
+    if (!del && d.title && +d.at) l.push({ id: it.id, title: String(d.title).slice(0, 120), at: +d.at, src: d.src || "", rid: d.rid || "" });
+    saveDone(l);
+    if ($("#sh-day.on") && dayTab === "rem") renderDay();
   } else if (it.kind === "dayturn" || it.kind === "taskreq") {
     return false;                                            // очередь для компьютера — не наше
   }
@@ -3689,7 +3996,7 @@ function syncCard() {
     <button class="btn w" id="sy-now" style="margin-top:6px">Синхронизировать сейчас</button>`;
 }
 setInterval(() => { if (!document.hidden) syncRun(false); }, 60000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) syncSoon(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { syncSoon(); doneInbox(); } });
 
 /* ---------- Dewiar Облако (server/dwrapp/cloud.php): ключ dw-… или вход аккаунтом, заряд в талерах ----------
    Пути — параметром ?p=: /balance, /models, /usage, /topup, /netcfg, /report, /sync. Для модели base_url облака
@@ -4377,7 +4684,39 @@ function pauseOk() {
   lastStt.ok = true; S.stt.pauseExtra = Math.max(0, +S.stt.pauseExtra - 10); saveS(); pauseSync();
 }
 setTimeout(pauseSync, 0);
+let holdT = null, holdXY = null, holdSwallow = false;
+const HOLD_MS = 320;
+$("#mic").addEventListener("pointerdown", (e) => {
+  if (state === "listening" || e.button > 0) return;            // слушаем — нажатие значит «хватит», как раньше
+  holdXY = [e.clientX, e.clientY];
+  try { $("#mic").setPointerCapture(e.pointerId); } catch (x) { }
+  clearTimeout(holdT); holdT = setTimeout(holdStart, HOLD_MS);
+});
+$("#mic").addEventListener("pointermove", (e) => {
+  if (!holdTalk || !holdXY) return;
+  const far = Math.hypot(e.clientX - holdXY[0], e.clientY - holdXY[1]) > 110;
+  if (far !== holdCancel) { holdCancel = far; $("#mic").classList.toggle("holdx", far); if (state === "listening") setState("listening"); if (far) D.vibrate(12); }
+});
+for (const t of ["pointerup", "pointercancel"]) $("#mic").addEventListener(t, () => { clearTimeout(holdT); holdT = null; if (holdTalk) holdEnd(); });
+async function holdStart() {
+  holdT = null; holdTalk = true; holdCancel = false; holdSwallow = true; dict = "";
+  $("#mic").classList.add("hold"); D.vibrate(30);
+  if (state !== "idle") interrupt(true);
+  plog("info", "🎙 держат кнопку — слушаю, пока не отпустят");
+  await listen();
+  if (!sttActive && holdTalk) { holdTalk = false; $("#mic").classList.remove("hold"); }   // не вышло начать (нет микрофона и т. п.)
+}
+function holdEnd() {
+  const cancel = holdCancel;
+  holdTalk = false; holdCancel = false; $("#mic").classList.remove("hold", "holdx");
+  if (cancel) { stopListen(); setState("idle"); showYou(""); toast("Отменено"); plog("info", "🎙 отпустили в стороне — отменено"); return; }
+  plog("info", `🎙 отпустили — отправляю (${(dict + " " + heardPartial).trim().length} зн.)`);
+  if (sttActive) { sttUserStop = true; D.stopListen(); sttGuard(2500, "stop"); return; }     // распознаватель отдаст последнее — уйдёт всё вместе
+  const t = dictTake(heardPartial); heardPartial = "";
+  if (t) askHeard(t); else { setState("idle"); showYou(""); }
+}
 $("#mic").onclick = () => {
+  if (holdSwallow) { holdSwallow = false; return; }            // это было удержание — уже обработано
   if (state === "thinking") pauseCut();
   if (state === "listening") {                    // «хватит слушать»: запись кончается сразу (stt_end продлит ожидание на распознавание); ни звука 2 с — заканчиваем сами
     if (!sttActive) { setState("idle"); return; }
@@ -4590,6 +4929,27 @@ function clAdd(pid, it) {
   if (h.some(x => x.mid === it.mid)) return false;
   h.push(it); h.sort((a, b) => a.ts - b.ts); if (h.length > CLH_MAX) h.splice(0, h.length - CLH_MAX); clSave(); return true;
 }
+/* Эмодзи и реакции в «Близких» (отзыв 13.10: 👍🤝✋😁😊😂😳🤔😱❤️ — отмечать сообщения и отправлять).
+   Реакция — обычное сообщение {re: mid, e, t: e}: новые программы (здесь и core/close.py) ставят её значком на сообщение
+   mid, а старые покажут просто «👍» — ничего не теряется. В истории: m.rx = {me, them}. */
+const CL_EMO = ["👍", "🤝", "✋", "😁", "😊", "😂", "😳", "🤔", "😱", "❤️"];
+function clReAt(pid, mid, who, e) {
+  const st = clLoad(), m = (st.hist[pid] || []).find(x => x.mid === mid);
+  if (!m) return false;
+  m.rx = Object.assign({}, m.rx || {}); if (e) m.rx[who] = e; else delete m.rx[who];
+  clSave(); return true;
+}
+async function clReact(pid, mid, e) {
+  clLoad(); if (!CLS.me.pid || Date.now() - (CLS.hello || 0) > 600000) await clHello();
+  const p = clPerson(pid), k = clKeys();
+  if (!(p.devs || []).length) throw new Error(`У ${p.name} Dewiar ещё не открывался — реакция не дойдёт.`);
+  const was = (((clLoad().hist[p.pid] || []).find(x => x.mid === mid) || {}).rx || {}).me || "";
+  clReAt(p.pid, mid, "me", e);
+  try {
+    const body = { re: mid, e, t: e, ts: Date.now(), mid: Math.random().toString(36).slice(2, 12) + Date.now().toString(36), name: CLS.me.name || "" };
+    await clReq("POST", "/close/send", { to: p.pid, env: DC().encryptFor(body, DC().b64d(k.priv), k.dev, clTargets(p)), kind: "msg" });
+  } catch (x) { clReAt(p.pid, mid, "me", was); throw x; }
+}
 function clPubOf(peer, dev, out) {
   const st = clLoad(), who = out ? st.me : st.people.find(p => p.pid === peer), d = ((who || {}).devs || []).find(x => x.dev === dev);
   if (d) return DC().b64d(d.pub);
@@ -4612,6 +4972,14 @@ async function clPoll() {
       let body; try { body = DC().decryptFrom(env, DC().b64d(k.priv), k.dev, pub); } catch (e) { plog("warn", "близкие: не открылось — " + e.message); continue; }
       if (it.kind === "sig") { try { clSig(it.peer, it.name, body.s || {}); } catch (e) { } continue; }
       if (it.kind === "own") { if (it.out && env.fd !== k.dev) ownApply(body); continue; }   // от своего же устройства
+      if (body.re) {                                        // реакция на сообщение — значком на нём, не новым сообщением
+        const e = CL_EMO.includes(body.e) ? body.e : String(body.e || "").slice(0, 8);
+        if (clReAt(it.peer, String(body.re), it.out ? "me" : "them", e) && !it.out) {
+          if (clCur === it.peer && $("#sh-close").classList.contains("on")) clRender();
+          else if (!document.hidden && e) toast(`${it.name || "Близкий"}: ${e} на ваше сообщение`, 2600);
+        }
+        continue;
+      }
       const m = { mid: body.mid || String(it.id), ts: +body.ts || it.ts * 1000, out: !!it.out, t: String(body.t || "").slice(0, 20000), f: (body.f || []).filter(x => x && typeof x === "object").slice(0, 10) };
       if (!clAdd(it.peer, m) || m.out) continue;
       got++;
@@ -4655,7 +5023,7 @@ function clPrompt() {
 }
 function clRecent(who, n = 8) {
   const st = clLoad(), ps = who ? [clPerson(who)] : st.people, out = [];
-  for (const p of ps) { (st.hist[p.pid] || []).slice(-n).forEach(m => out.push([m.ts, `${new Date(m.ts).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} ${m.out ? "вы → " + p.name : p.name}: ${m.t || ""}${(m.f || []).length ? " [файлы: " + m.f.map(x => x.name).join(", ") + "]" : ""}`])); delete st.unread[p.pid]; }
+  for (const p of ps) { (st.hist[p.pid] || []).slice(-n).forEach(m => out.push([m.ts, `${new Date(m.ts).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} ${m.out ? "вы → " + p.name : p.name}: ${m.t || ""}${(m.f || []).length ? " [файлы: " + m.f.map(x => x.name).join(", ") + "]" : ""}${m.rx && (m.rx.me || m.rx.them) ? ` [реакции: ${[m.rx.them && p.name + " " + m.rx.them, m.rx.me && "вы " + m.rx.me].filter(Boolean).join(", ")}]` : ""}`])); delete st.unread[p.pid]; }
   clSave(); clBadge(); out.sort((a, b) => a[0] - b[0]);
   return out.slice(-n * 2).map(x => x[1]).join("\n") || "Сообщений пока нет.";
 }
@@ -4826,10 +5194,11 @@ function clRender() {
         <div style="flex:1;min-width:0"><b>${esc(p.name)}</b><small>${(p.devs || []).length ? "сообщения шифруются" : "ещё не открывал Dewiar"}</small></div>
         ${(p.devs || []).length && window.DewiarCall ? `<button class="ib soft" id="cl-call" title="Позвонить"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg></button>
           <button class="ib soft" id="cl-vcall" title="Видеозвонок"><svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="13" height="11" rx="2.5"/><path d="m15.5 10.5 6-3.5v10l-6-3.5"/></svg></button>` : ""}</div>
-      <div class="clmsgs" id="cl-msgs">${h.map((m, i) => `<div class="clm ${m.out ? "out" : ""}">${m.t ? `<div>${esc(m.t)}</div>` : ""}${(m.f || []).map((f, j) => `<button class="clf" data-i="${i}" data-j="${j}"><svg viewBox="0 0 24 24"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg><span>${esc(f.name)}</span><small>${f.saved ? "сохранён" : clKb(f.size || 0)}</small></button>`).join("")}<time>${clTime(m.ts)}</time></div>`).join("")
+      <div class="clmsgs" id="cl-msgs">${h.map((m, i) => `<div class="clm ${m.out ? "out" : ""}${m.rx && (m.rx.me || m.rx.them) ? " rx" : ""}${clEmoOnly(m.t) ? " emo" : ""}" data-i="${i}">${m.t ? `<div>${esc(m.t)}</div>` : ""}${(m.f || []).map((f, j) => `<button class="clf" data-i="${i}" data-j="${j}"><svg viewBox="0 0 24 24"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg><span>${esc(f.name)}</span><small>${f.saved ? "сохранён" : clKb(f.size || 0)}</small></button>`).join("")}<time>${clTime(m.ts)}</time>${m.rx && (m.rx.me || m.rx.them) ? `<span class="clrx">${esc([m.rx.them, m.rx.me].filter(Boolean).join(""))}</span>` : ""}</div>`).join("")
         || `<p class="hint" style="text-align:center;margin:24px 8px">Напишите первое сообщение — или скажите: «Напиши ${esc(p.name)}, …»</p>`}</div>
       <div class="clatts" id="cl-atts">${clFiles.map((f, i) => `<span>${esc(f.name)} <button data-i="${i}">✕</button></span>`).join("")}</div>
-      <div class="clsend"><label class="ib att"><input type="file" id="cl-file" multiple hidden><svg viewBox="0 0 24 24"><path d="M20.5 11.5 12.6 19.4a5 5 0 0 1-7.1-7.1l8.3-8.3a3.4 3.4 0 0 1 4.8 4.8l-8.3 8.3a1.7 1.7 0 0 1-2.4-2.4l7.6-7.6"/></svg></label>
+      <div class="clemo" id="cl-emo" hidden>${CL_EMO.map(e => `<button data-e="${e}" aria-label="Вставить ${e}">${e}</button>`).join("")}</div>
+      <div class="clsend"><button class="ib att" id="cl-emo-b" aria-label="Эмодзи" aria-expanded="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14a4.2 4.2 0 0 0 7 0"/><path d="M9 9.6v.01M15 9.6v.01"/></svg></button><label class="ib att"><input type="file" id="cl-file" multiple hidden><svg viewBox="0 0 24 24"><path d="M20.5 11.5 12.6 19.4a5 5 0 0 1-7.1-7.1l8.3-8.3a3.4 3.4 0 0 1 4.8 4.8l-8.3 8.3a1.7 1.7 0 0 1-2.4-2.4l7.6-7.6"/></svg></label>
         <textarea id="cl-text" rows="1" placeholder="Сообщение…"></textarea><button class="ib" id="cl-go"><svg viewBox="0 0 24 24"><path d="M4 12 20 4l-6 16-2.5-6.5z"/></svg></button></div>`;
     const msgs = $("#cl-msgs"); msgs.scrollTop = msgs.scrollHeight;
     $("#cl-back").onclick = () => { clCur = ""; clRender(); };
@@ -4841,6 +5210,11 @@ function clRender() {
     const go = async () => { const t = $("#cl-text").value.trim(); if (!t && !clFiles.length) return; const b = $("#cl-go"); b.disabled = true;
       try { await clSend(p.pid, t, clFiles); clFiles = []; clRender(); } catch (e) { toast(e.message, 4000); b.disabled = false; } };
     $("#cl-go").onclick = go;
+    $("#cl-emo-b").onclick = () => { const e = $("#cl-emo"); e.hidden = !e.hidden; $("#cl-emo-b").setAttribute("aria-expanded", String(!e.hidden)); };
+    $$("#cl-emo button").forEach(b => b.onclick = () => {           // вставить в текст там, где курсор
+      const ta = $("#cl-text"), a = ta.selectionStart ?? ta.value.length, z = ta.selectionEnd ?? a;
+      ta.value = ta.value.slice(0, a) + b.dataset.e + ta.value.slice(z); ta.selectionStart = ta.selectionEnd = a + b.dataset.e.length; ta.focus(); });
+    clReBind(p, h);
     return;
   }
   const tabs = `<div class="tabs" id="cl-tabs"><button data-t="close" class="${clTab === "close" ? "on" : ""}">Близкие</button><button data-t="ref" class="${clTab === "ref" ? "on" : ""}">Рефералы</button></div>`;
@@ -4878,6 +5252,38 @@ function clRender() {
   $("#cl-speak").onchange = () => { S.close = Object.assign({}, S.close, { speak: $("#cl-speak").checked }); saveS(); };
   $("#cl-link-go").onclick = () => clAcceptLink($("#cl-link").value);
 }
+// сообщение только из эмодзи — крупно, как в мессенджерах
+const clEmoOnly = (t) => !!t && t.length <= 12 && /^(?:\p{Extended_Pictographic}|\u200d|\ufe0f|\s)+$/u.test(t);
+/* реакция: долгое нажатие (или правая кнопка) на сообщение — ряд эмодзи над ним; та же — снять */
+function clReBind(p, h) {
+  let t = 0, sx = 0, sy = 0;
+  const open = (el) => {
+    clReClose(); const m = h[+el.dataset.i]; if (!m || !m.mid) return;
+    D.vibrate(15);
+    const pop = document.createElement("div"); pop.className = "clrepick"; pop.setAttribute("role", "menu");
+    pop.innerHTML = CL_EMO.map(e => `<button role="menuitem" data-e="${e}" class="${(m.rx || {}).me === e ? "on" : ""}" aria-label="Реакция ${e}">${e}</button>`).join("")
+      + (m.t ? `<button role="menuitem" class="cp" aria-label="Копировать текст"><svg viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></svg></button>` : "");
+    document.body.appendChild(pop);
+    const r = el.getBoundingClientRect(), w = pop.offsetWidth;
+    pop.style.left = Math.max(8, Math.min(innerWidth - w - 8, m.out ? r.right - w : r.left)) + "px";
+    pop.style.top = Math.max(8, r.top - pop.offsetHeight - 8) + "px";
+    const cp = $(".cp", pop); if (cp) cp.onclick = () => { clReClose(); copyText(m.t).then(okc => toast(okc ? "Скопировано" : "Не скопировалось")); };
+    $$("button[data-e]", pop).forEach(b => b.onclick = async () => {
+      const e = (m.rx || {}).me === b.dataset.e ? "" : b.dataset.e; clReClose();
+      try { await clReact(p.pid, m.mid, e); } catch (x) { toast(x.message, 4000); }
+      clRender();
+    });
+    setTimeout(() => document.addEventListener("pointerdown", clReOut, true), 0);
+  };
+  $$("#cl-msgs .clm").forEach(el => {
+    el.addEventListener("pointerdown", (e) => { sx = e.clientX; sy = e.clientY; clearTimeout(t); t = setTimeout(() => open(el), 450); });
+    el.addEventListener("pointermove", (e) => { if (Math.hypot(e.clientX - sx, e.clientY - sy) > 10) clearTimeout(t); });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(k => el.addEventListener(k, () => clearTimeout(t)));
+    el.addEventListener("contextmenu", (e) => { e.preventDefault(); clearTimeout(t); open(el); });
+  });
+}
+function clReOut(e) { if (!e.target.closest(".clrepick")) clReClose(); }
+function clReClose() { $$(".clrepick").forEach(x => x.remove()); document.removeEventListener("pointerdown", clReOut, true); }
 let clInvOpen = false;
 const clLiveOn = () => !(S.close && S.close.live === false);
 function clLiveCard() {
@@ -4940,7 +5346,7 @@ setTimeout(() => { clLoad(); clBadge(); if (S.closePending && syncCred()) clAcce
    короткая сводка дня; после 30 минут — только если есть что сказать: готовые с тех пор задачи, задача ждёт ответа, скоро
    напоминание. Ночью (23–7), чаще раза в 40 минут, если человек сам заговорил или приложение открыли кнопкой помощника — молчим. */
 let lastUserAct = 0;
-function welcomePlan(now, seen, lastGreet, tasks, alarms) {
+function welcomePlan(now, seen, lastGreet, tasks, alarms, dstat, eveSaid) {
   const h = new Date(now).getHours();
   if (!seen || h >= 23 || h < 7) return null;
   if (lastGreet && now - lastGreet < 40 * 60000) return null;
@@ -4954,6 +5360,12 @@ function welcomePlan(now, seen, lastGreet, tasks, alarms) {
   const hm = (t) => { const d = new Date(t); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
   if (soon.length) facts.push("Скоро: " + soon.slice(0, 3).map(a => `в ${hm(a.at)} — ${a.title}`).join("; ") + ".");
   const goneTxt = gone < 3600000 ? Math.round(gone / 60000) + " мин" : Math.floor(gone / 3600000) + " ч";
+  // вечер (с 19:00) и сегодня есть сделанные дела — итог дня, один раз за вечер (отзыв 13.10: «в конце дня — ты сегодня сделал 5–7 дел»)
+  if (dstat && dstat.today && h >= 19 && eveSaid !== dayKey(now)) {
+    facts.unshift(`Сегодня пользователь отметил сделанными ${dstat.today} ${delaRu(dstat.today)}: ${dstat.items.slice(-7).map(x => "«" + x.title + "»").join(", ")}.`
+      + (dstat.streak >= 2 ? ` Серия: ${dstat.streak} ${dnRu(dstat.streak)} подряд.` : ""));
+    return { kind: "eve", facts, gone: goneTxt };
+  }
   const firstToday = (!lastGreet || new Date(lastGreet).toDateString() !== new Date(now).toDateString()) && gone >= 3 * 3600000;
   if (firstToday) {
     const today = alarms.filter(a => a.kind !== "timer" && a.at > now && new Date(a.at).toDateString() === new Date(now).toDateString()).sort((a, b) => a.at - b.at);
@@ -4964,6 +5376,7 @@ function welcomePlan(now, seen, lastGreet, tasks, alarms) {
 }
 function welcomePrompt(p) {
   const d = new Date(), wd = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"][d.getDay()];
+  if (p.kind === "eve") return p.facts.join("\n") + `\n\n[Вечер, пользователь вернулся в приложение, не было ${p.gone}] Подведи итог дня: скажи, сколько дел он сегодня сделал, похвали тепло и конкретно (назови одно-два дела своими словами); если есть другие новости отсюда — одной фразой. 2–3 коротких предложения, без списков, без вопросов в конце, без инструментов.`;
   if (p.kind === "day") return `Сегодня ${d.toLocaleDateString("ru-RU")}, ${wd}, сейчас ${pad(d.getHours())}:${pad(d.getMinutes())}.\n` + p.facts.join("\n")
     + `\n\n[Пользователь открыл приложение — первый раз за день, не было ${p.gone}] Поздоровайся первым (в своём роде), по имени, если знаешь, и коротко скажи главное на сегодня из этих данных. 2–3 коротких предложения, живо и тепло, без списков, без вопросов в конце, без инструментов.`;
   return p.facts.join("\n") + `\n\n[Пользователь вернулся в приложение, не было ${p.gone}] Коротко поприветствуй и скажи главное из этого — 1–2 коротких предложения, живо, без списков и без вопросов в конце, без инструментов.`;
@@ -4971,12 +5384,12 @@ function welcomePrompt(p) {
 async function welcomeCheck(shownAt) {
   const w = S.welcome || {};
   if (w.on === false || busy || state !== "idle" || lastUserAct > shownAt || document.hidden) return false;
-  const p = welcomePlan(Date.now(), w.seen, w.at, Object.values(mind().tasks || {}), JSON.parse(D.alarms() || "[]"));
+  const p = welcomePlan(Date.now(), w.seen, w.at, Object.values(mind().tasks || {}), JSON.parse(D.alarms() || "[]"), doneStats(), w.eve);
   if (!p) return false;
   await ensureBrain();
   if (!S.llm.base_url || busy || lastUserAct > shownAt) return false;
-  S.welcome = Object.assign({}, w, { at: Date.now() }); saveS();
-  plog("info", `👋 ${p.kind === "day" ? "сводка дня" : "с возвращением"} (не было ${p.gone})`);
+  S.welcome = Object.assign({}, w, { at: Date.now() }, p.kind === "eve" ? { eve: dayKey(Date.now()) } : {}); saveS();
+  plog("info", `👋 ${p.kind === "day" ? "сводка дня" : p.kind === "eve" ? "итог дня" : "с возвращением"} (не было ${p.gone})`);
   ask(welcomePrompt(p), { hidden: true });
   return true;
 }
@@ -5008,6 +5421,7 @@ setInterval(() => { if (!document.hidden) welcomeSeen(); }, 60000);     // по�
   welcomeArm(!!it);                                // открыли кнопкой помощника — сразу слушаем, не здороваемся
   if (S.llm.base_url && !it) needPerm(MIC);
   setTimeout(hReady, 0);                           // экран и персонаж готовы — запуск записан для «Здоровья»
+  setTimeout(() => { try { doneInbox(); } catch (e) { } }, 300);   // «Сделано ✓» из уведомлений, пока приложение было закрыто
   setTimeout(() => checkUpdate(false), 8000);
   setTimeout(() => accountCheck().then(ensureBrain).then(cloudCaps).then(tgSync), 3000);
   setTimeout(() => syncRun(false), 4000);

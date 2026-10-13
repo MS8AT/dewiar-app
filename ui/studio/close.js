@@ -64,14 +64,40 @@ async function clOpen(pid) {
   try { CL.hist = await core.call("close_history", { pid }); } catch (e) { CL.hist = []; }
   clMsgs();
 }
+/* эмодзи и реакции (отзыв 13.10): ряд над полем ввода — вставить; у сообщения — «☺» (и правая кнопка): реакция, та же — снять.
+   Реакция уходит сообщением {re, e} (core/close.py react), у старых программ покажется просто «👍». */
+const CL_EMO = ["👍", "🤝", "✋", "😁", "😊", "😂", "😳", "🤔", "😱", "❤️"];
+const clEmoOnly = (t) => !!t && t.length <= 12 && /^(?:\p{Extended_Pictographic}|\u200d|\ufe0f|\s)+$/u.test(t);
+function clReClose() { $$(".cl-repick").forEach(x => x.remove()); }
+function clRePick(el, m) {
+  clReClose();
+  const pop = document.createElement("div"); pop.className = "cl-repick"; pop.setAttribute("role", "menu");
+  pop.innerHTML = CL_EMO.map(e => `<button role="menuitem" data-e="${e}" class="${(m.rx || {}).me === e ? "on" : ""}" title="Реакция ${e}">${e}</button>`).join("");
+  document.body.appendChild(pop);
+  const r = el.getBoundingClientRect(), w = pop.offsetWidth;
+  pop.style.left = Math.max(8, Math.min(innerWidth - w - 8, m.out ? r.right - w : r.left)) + "px";
+  pop.style.top = Math.max(8, r.top - pop.offsetHeight - 6) + "px";
+  $$("button", pop).forEach(b => b.onclick = async () => {
+    const e = (m.rx || {}).me === b.dataset.e ? "" : b.dataset.e; clReClose();
+    try { await core.call("close_react", { pid: CL.cur, mid: m.mid, e }); CL.hist = await core.call("close_history", { pid: CL.cur }); clMsgs(); }
+    catch (x) { toast(x.message, 4000); }
+  });
+  setTimeout(() => document.addEventListener("pointerdown", function out(ev) { if (!ev.target.closest(".cl-repick")) { clReClose(); document.removeEventListener("pointerdown", out, true); } }, true), 0);
+}
 function clMsgs() {
   const box = $("#cl-msgs");
-  box.innerHTML = CL.hist.map(m => `<div class="cl-m ${m.out ? "out" : ""}">${m.t ? `<div class="tx">${clEsc(m.t)}</div>` : ""}
+  box.innerHTML = CL.hist.map((m, i) => `<div class="cl-m ${m.out ? "out" : ""}${m.rx && (m.rx.me || m.rx.them) ? " rx" : ""}${clEmoOnly(m.t) ? " emo" : ""}" data-i="${i}">${m.t ? `<div class="tx">${clEsc(m.t)}</div>` : ""}
       ${(m.f || []).map(f => `<button class="cl-f" data-path="${clEsc(f.path || "")}" ${f.path ? "" : "disabled"}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg><span>${clEsc(f.name)}</span><small>${f.error ? "не скачался" : clSize(f.size || 0)}</small></button>`).join("")}
-      <time>${clTime(m.ts)}</time></div>`).join("") || `<p class="hint" style="text-align:center;margin:30px 0">Напишите первое сообщение — или скажите помощнице: «Напиши ${clEsc((((CL.st || {}).people || []).find(x => x.pid === CL.cur) || {}).name || "")}, …»</p>`;
+      <time>${clTime(m.ts)}</time>${m.rx && (m.rx.me || m.rx.them) ? `<span class="cl-rx">${clEsc([m.rx.them, m.rx.me].filter(Boolean).join(""))}</span>` : ""}
+      ${m.mid ? `<button class="cl-reb" title="Реакция" aria-label="Реакция"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14a4.2 4.2 0 0 0 7 0M9 9.6v.01M15 9.6v.01"/></svg></button>` : ""}</div>`).join("") || `<p class="hint" style="text-align:center;margin:30px 0">Напишите первое сообщение — или скажите помощнице: «Напиши ${clEsc((((CL.st || {}).people || []).find(x => x.pid === CL.cur) || {}).name || "")}, …»</p>`;
   $$("#cl-msgs .cl-f[data-path]").forEach(b => b.onclick = () => {
     const path = b.dataset.path, i = path.indexOf("/Близкие/"), rel = i >= 0 ? path.slice(path.lastIndexOf("Близкие/")) : "";
     if (rel) core.call("ws_open", { path: rel }).catch(e => toast(e.message));
+  });
+  $$("#cl-msgs .cl-m").forEach(el => {
+    const m = CL.hist[+el.dataset.i]; if (!m || !m.mid) return;
+    const rb = $(".cl-reb", el); if (rb) rb.onclick = (e) => { e.stopPropagation(); clRePick(el, m); };
+    el.addEventListener("contextmenu", (e) => { if (getSelection().toString()) return; e.preventDefault(); clRePick(el, m); });
   });
   box.scrollTop = box.scrollHeight;
 }
@@ -119,6 +145,11 @@ async function clAccept() {
 }
 
 $("#cl-go").onclick = clSend;
+$("#cl-emo-b").onclick = () => { const r = $("#cl-emo"); r.hidden = !r.hidden; $("#cl-emo-b").setAttribute("aria-expanded", String(!r.hidden)); };
+$("#cl-emo").innerHTML = CL_EMO.map(e => `<button data-e="${e}" title="Вставить ${e}">${e}</button>`).join("");
+$$("#cl-emo button").forEach(b => b.onclick = () => {            // вставить в текст там, где курсор
+  const ta = $("#cl-text"), x = ta.selectionStart ?? ta.value.length, z = ta.selectionEnd ?? x;
+  ta.value = ta.value.slice(0, x) + b.dataset.e + ta.value.slice(z); ta.selectionStart = ta.selectionEnd = x + b.dataset.e.length; ta.focus(); });
 $("#cl-text").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); clSend(); } };
 $("#cl-file").onchange = () => {
   [...$("#cl-file").files].forEach(f => {
@@ -142,4 +173,5 @@ $("#cl-del").onclick = async () => {
 };
 core.on("close", e => { CL.st = e.state; if ($("#p-close").classList.contains("cur")) clRender(); else clDot(CL.st); })
   .on("close_msg", e => { if ($("#p-close").classList.contains("cur") && e.pid === CL.cur) clOpen(CL.cur); })
+  .on("close_react", e => { if ($("#p-close").classList.contains("cur") && e.pid === CL.cur) clOpen(CL.cur); else if (e.e) toast(`${e.name || "Близкий"}: ${e.e} на ваше сообщение`, 2600); })
   .on("hello", () => core.call("close_state").then(st => { CL.st = st; clDot(st); }).catch(() => {}));

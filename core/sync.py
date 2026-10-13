@@ -37,7 +37,7 @@ from settings import STATE_DIR
 log = logging.getLogger("dewiar.sync")
 
 BASE_KINDS = ("reminder", "note", "money", "memory")          # знает любой сервер
-EXTRA_KINDS = ("soul", "mind", "diary", "dayturn", "taskreq", "task", "vault")   # тот же список $extra в cloud.php
+EXTRA_KINDS = ("soul", "mind", "diary", "dayturn", "taskreq", "task", "vault", "done")   # тот же список $extra в cloud.php
 VAULT_MAX = 300_000                               # сервер не принимает запись больше 300 КБ — такие заметки не шлём
 VAULT_FILES = 15000
 CHUNK = 400                                       # изменений за один запрос (сервер берёт до 2000; первая отправка большого хранилища — частями)
@@ -226,6 +226,11 @@ class Sync:
         ob = getattr(h, "obsidian", None)
         if ob is not None and "vault" in ok and ob.sync_all():
             self._snap_vault(out, ob)
+        dn = getattr(h, "done", None)
+        if dn is not None and "done" in ok:            # сделанные дела (done.py) — как doneList() на телефоне
+            with dn._lock:
+                for x in dn.items:
+                    out["done:" + x["id"]] = {"title": x["title"], "at": int(x["at"]), "src": x.get("src") or "", "rid": x.get("rid") or ""}
         tasks = getattr(h, "tasks", None)
         if tasks is not None and "task" in ok:
             for t in sorted(tasks.tasks.values(), key=lambda x: str(x.data.get("updated", "")), reverse=True)[:TASKS_SHOWN]:
@@ -357,7 +362,7 @@ class Sync:
                 return False
             rel = self.state.get("vmap", {}).get(iid)
             return not (rel and (v / rel).exists())
-        if kind in ("soul", "mind", "diary", "task") and self.state.get("_extra_failed"):
+        if kind in ("soul", "mind", "diary", "task", "done") and self.state.get("_extra_failed"):
             return False
         return True
 
@@ -468,6 +473,20 @@ class Sync:
                 self._claims[iid] = (dict(d), int(it_updated or 0))
         elif kind == "task" or (kind == "mind" and iid.startswith("jobs")):
             return False                                   # ход задач и дела по расписанию другого компьютера — для телефона
+        elif kind == "done":
+            dn = getattr(h, "done", None)
+            if dn is None:
+                return False
+            if deleted:
+                dn.delete(iid)
+            else:
+                dn.upsert(iid, d)
+            emit = getattr(h, "emit", None)
+            if emit is not None:
+                try:
+                    emit("done", **dn.public())
+                except Exception:  # noqa: BLE001
+                    log.debug("дела: emit", exc_info=True)
         return None
 
     def _upload_outputs(self, url, token):

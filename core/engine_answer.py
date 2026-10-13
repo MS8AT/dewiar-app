@@ -12,6 +12,35 @@ INFO_TOOLS = {"web_search", "read_webpage", "find_notes", "read_file", "calc", "
               "look_through_camera"}
 
 
+
+def team_window(hist, me, name_of):
+    """Реплики для модели персонажа me. Разговор пользователя с другим персонажем (Патриком) — не её: он сворачивается
+    в одну справку «пользователь говорил с коллегой Патрик, не продолжай их тему». Отзыв 13.10: обсудила задачу с Патриком,
+    переключилась на Лиру — а Лира отвечает про задачу Патрика. Своё — дословно, как раньше. Реплика человека
+    относится к тому, кто на неё ответил; последняя (без ответа) — к me. -> [{role, content[, team]}]"""
+    msgs = [m for m in hist if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str)]
+    owner, nxt = [None] * len(msgs), me
+    for i in range(len(msgs) - 1, -1, -1):
+        if msgs[i]["role"] == "assistant":
+            nxt = msgs[i].get("who") or me
+        owner[i] = nxt
+    out, i = [], 0
+    while i < len(msgs):
+        if owner[i] == me:
+            out.append({"role": msgs[i]["role"], "content": msgs[i]["content"]})
+            i += 1
+            continue
+        j, who = i, owner[i]
+        while j < len(msgs) and owner[j] == who:
+            j += 1
+        name = name_of(who)
+        lines = [("Пользователь: " if m["role"] == "user" else f"{name}: ") + " ".join(m["content"].split())[:400] for m in msgs[i:j]][-8:]
+        out.append({"role": "user", "team": True,
+                    "content": f"[До этого пользователь говорил не с тобой, а с коллегой по имени {name}. Это для справки: не продолжай "
+                               "их тему и не отвечай за коллегу, пока пользователь сам тебя об этом не попросит.]\n" + "\n".join(lines)})
+        i = j
+    return out
+
 class AnswerMixin:
     # ---------- ответ ----------
 
@@ -127,18 +156,15 @@ class AnswerMixin:
         turns = int(self.s.get("llm", "history_turns") or 0)
         me = self.s.get("persona")
         out = []
-        for m in (self.conv.window(self.history, turns) if turns > 0 else []):
-            who = m.get("who")
-            if m["role"] == "assistant" and who and who != me:
-                # реплика другого персонажа: видна как часть разговора, но не как «свои» слова
-                name = self.personas.get(who)["name"]
-                m = {"role": "user", "content": f"[{name} ответил(а)]: {m['content']}"}
-            else:
-                m = {"role": m["role"], "content": m["content"]}
+        for m in team_window(self.conv.window(self.history, turns) if turns > 0 else [], me,
+                             lambda pid: (self.personas.get(pid) or {}).get("name") or "коллега"):     # чужой разговор — справкой
             if out and out[-1]["role"] == m["role"] == "user" and isinstance(out[-1]["content"], str):
                 out[-1] = {"role": "user", "content": out[-1]["content"] + "\n\n" + m["content"]}
             else:
                 out.append(m)
+        if out and out[-1].get("team"):                 # перед вопросом — чужой разговор: явно отделяем, к кому обращаются
+            text = "[Теперь пользователь обращается к тебе:]\n" + text
+        out = [{"role": m["role"], "content": m["content"]} for m in out]
         cur = user_message(prof or {}, text, images)
         if out and out[-1]["role"] == "user" and isinstance(cur["content"], str) and isinstance(out[-1]["content"], str):
             out[-1] = {"role": "user", "content": out[-1]["content"] + "\n\n" + cur["content"]}
@@ -219,6 +245,11 @@ class AnswerMixin:
                  "Dewiar в меню приложений).")
         if with_tools:
             base += self.skills.prompt()
+            try:
+                import done as _done
+                base += _done.prompt(self.done)        # «Дела»: отметить сделанное, сколько сегодня (done.py)
+            except Exception:  # noqa: BLE001
+                log.debug("дела: подсказка", exc_info=True)
             try:
                 base += self.close.prompt()            # «Близкие»: кому можно написать (close.py)
             except Exception:  # noqa: BLE001

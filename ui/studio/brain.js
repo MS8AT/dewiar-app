@@ -187,7 +187,8 @@ function renderTools(list) {
 /* ---------- напоминания ---------- */
 const RI = { pause: '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>',
   play: '<path d="M7 5v14l11-7z"/>', edit: '<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="m13.5 6.5 4 4"/>',
-  del: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>' };
+  del: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>', ok: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>' };
 let remItems = [];
 function remGroup(x) {
   if (x.repeat) return "Повторяющиеся";
@@ -214,6 +215,8 @@ function renderReminders(items) {
       const act = $(".ract", el);
       const btn = (icon, title, fn) => { const b = document.createElement("button"); b.title = title; b.innerHTML = `<svg viewBox="0 0 24 24">${RI[icon]}</svg>`; b.onclick = fn; act.appendChild(b); };
       if (x.repeat) btn(x.paused ? "play" : "pause", x.paused ? "Возобновить" : "Пауза", () => core.call("reminder_update", { id: x.id, patch: { paused: !x.paused } }).then(loadReminders).catch(e => toast(e.message)));
+      if (x.kind !== "job" && x.kind !== "alarm" && x.kind !== "timer")
+        btn("ok", "Сделано", () => core.call("done_reminder", { id: x.id }).then((r) => { doneCelebrate(r); loadReminders(); }).catch(e => toast(e.message)));
       btn("edit", "Изменить", () => editReminder(el, x));
       btn("del", "Удалить", () => core.call("reminder_cancel", { id: x.id }).then(() => { toast("Удалено"); loadReminders(); }).catch(e => toast(e.message)));
       box.appendChild(el);
@@ -286,7 +289,53 @@ function renderPresets() {
     box.appendChild(el);
   });
 }
-async function loadReminders() { try { renderReminders(await core.call("reminders")); } catch (e) { $("#r-list").textContent = e.message; } }
+async function loadReminders() {
+  try { renderDone(await core.call("done")); } catch (e) { $("#d-list").textContent = e.message; }
+  try { renderReminders(await core.call("reminders")); } catch (e) { $("#r-list").textContent = e.message; }
+}
+/* ---------- дела: сделано сегодня, серия, значки и неделя (core/done.py; то же на телефоне — «Мой день» → «Дела») ---------- */
+const dEsc = (t) => String(t == null ? "" : t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const dela = (n) => n % 10 === 1 && n % 100 !== 11 ? "дело" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "дела" : "дел";
+const dney = (n) => n % 10 === 1 && n % 100 !== 11 ? "день" : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? "дня" : "дней";
+function renderDone(d) {
+  if (!d) return;
+  const head = $("#d-head"), max = Math.max(1, ...d.week.map(w => w.n)), WD = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+  const chips = [];
+  for (const g of ["day", "streak", "total"]) {
+    const all = d.achievements.filter(a => a.group === g), next = all.find(a => !a.got);
+    all.filter(a => a.got).forEach(a => chips.push(`<span class="dach on" title="${dEsc(a.what)} · получено">${a.icon} ${dEsc(a.name)}</span>`));
+    if (next) chips.push(`<span class="dach" title="${dEsc(next.what)} · сейчас ${next.val} из ${next.n}">${next.icon} ${Math.min(next.val, next.n)}/${next.n}</span>`);
+  }
+  head.innerHTML = `<div class="dnum"><b>${d.today}</b><span>${d.today ? dela(d.today) + " сегодня" : "дел сегодня"}</span></div>`
+    + `<div class="dmid"><div class="dstreak">${d.streak >= 2 ? `🔥 ${d.streak} ${dney(d.streak)} подряд` : d.today ? "Первый день серии" : d.total ? "Отметьте дело — серия продолжится" : "Сделали дело — отметьте его"}`
+    + `<small>всего ${d.total} · лучший день ${d.best_day} · лучшая серия ${d.best_streak}</small></div><div class="dachs">${chips.join("")}</div></div>`
+    + `<div class="dweek" aria-label="Дела за неделю">${d.week.map((w, i) => `<div title="${w.day}: ${w.n}"><i style="height:${Math.round(6 + 52 * w.n / max)}px"${i === 6 ? ' class="now"' : ""}></i><small>${WD[new Date(w.day + "T12:00").getDay()]}</small></div>`).join("")}</div>`;
+  const box = $("#d-list"); box.innerHTML = "";
+  if (d.items.length) { const h = document.createElement("div"); h.className = "rgroup"; h.textContent = "Сделано сегодня"; box.appendChild(h); }
+  d.items.slice().reverse().forEach(x => {
+    const el = document.createElement("div"); el.className = "ritem dn";
+    const t = new Date(x.at);
+    el.innerHTML = `<div class="dok"><svg viewBox="0 0 24 24">${RI.ok}</svg></div><div class="rbody"><div class="rtext"></div><div class="rmeta"><span></span></div></div><div class="ract"></div>`;
+    $(".rtext", el).textContent = x.title;
+    $(".rmeta span", el).textContent = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}` + (x.src && x.src !== "pc" ? " · на телефоне" : "");
+    const b = document.createElement("button"); b.title = "Снять отметку"; b.innerHTML = `<svg viewBox="0 0 24 24">${RI.undo}</svg>`;
+    b.onclick = () => core.call("done_undo", { id: x.id }).then(() => { toast("Отметка снята"); loadReminders(); }).catch(e => toast(e.message));
+    $(".ract", el).appendChild(b); box.appendChild(el);
+  });
+}
+function doneCelebrate(r) {
+  if (!r || !r.added) return;
+  const a = (r.fresh || [])[r.fresh.length - 1];
+  toast(a ? `${a.icon} Новое достижение: ${a.name} — ${a.what}` : r.mile ? `🎉 ${r.mile} ${dela(r.mile)} за сегодня — так держать` : `✓ ${r.added.join(", ")} — сегодня ${r.today}`);
+  if ((a || r.mile) && !matchMedia("(prefers-reduced-motion: reduce)").matches) { const h = $("#d-head"); h.classList.remove("cheer"); void h.offsetWidth; h.classList.add("cheer"); }
+}
+async function doneAdd() {
+  const v = $("#d-phrase").value.trim(); if (!v) { $("#d-phrase").focus(); return; }
+  try { const r = await core.call("done_add", { title: v }); $("#d-phrase").value = ""; doneCelebrate(r); loadReminders(); } catch (e) { toast(e.message); }
+}
+$("#d-add").onclick = doneAdd;
+$("#d-phrase").onkeydown = (e) => { if (e.key === "Enter") doneAdd(); };
+core.on("done", e => { if ($("#p-reminders").classList.contains("cur")) renderDone(e); });
 let rpT = null;
 // пока пишут — показываем, как ядро поняло фразу (тот же разбор, что у голосовой команды)
 $("#r-phrase").oninput = () => { clearTimeout(rpT); const v = $("#r-phrase").value.trim(); const el = $("#r-parse");

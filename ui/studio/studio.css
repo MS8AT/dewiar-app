@@ -983,3 +983,54 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .nt-drop:hover, .nt-drop.over { background: rgba(139,140,247,.16); color: var(--ink); }
 .nt-drop svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
 @media (max-width: 900px) { .nt-cols { grid-template-columns: 1fr; } .nt-list { max-height: 40vh; } }
+
+/* «Дела»: сделано сегодня, серия, значки и неделя (brain.js → renderDone) */
+.dbanner { display: grid; grid-template-columns: auto 1fr auto; gap: 22px; align-items: center; padding: 18px 20px; border-radius: 20px; margin: 4px 0 12px;
+         background: radial-gradient(120% 160% at 0% 0%, rgba(75,227,161,.16), transparent 60%), var(--frost); }
+.dbanner.cheer { animation: dcheer .7s cubic-bezier(.2,1.4,.4,1); }
+@keyframes dcheer { 40% { transform: scale(1.015); background-color: rgba(255,201,120,.12); } }
+.dnum { text-align: center; min-width: 84px; }
+.dnum b { display: block; font: 600 46px/1.05 "Unbounded", "Manrope", sans-serif; color: #3fd497; font-variant-numeric: tabular-nums; }
+.dnum span { font-size: 12.5px; color: var(--muted); }
+.dmid { min-width: 0; }
+.dstreak { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+.dstreak small { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.dachs { display: flex; flex-wrap: wrap; gap: 6px; }
+.dach { padding: 4px 10px; border-radius: 999px; font-size: 12.5px; background: rgba(127,127,127,.12); color: var(--muted); filter: grayscale(1); cursor: default; }
+.dach.on { filter: none; background: rgba(255,181,71,.16); color: #E9A640; }
+.dweek { display: flex; gap: 7px; align-items: flex-end; height: 78px; }
+.dweek div { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.dweek i { width: 12px; border-radius: 6px; background: rgba(127,127,127,.28); }
+.dweek i.now { background: #3fd497; }
+.dweek small { font-size: 11px; color: var(--muted); }
+.ritem.dn .dok { flex: none; width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: rgba(75,227,161,.14); color: #3fd497; }
+.ritem.dn .dok svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 720px) { .dbanner { grid-template-columns: auto 1fr; } .dweek { display: none; } }
+@media (prefers-reduced-motion: reduce) { .dbanner.cheer { animation: none; } }
+
+/* «Близкие»: эмодзи и реакции (close.js → clRePick) */
+.cl-m { position: relative; }
+.cl-m.rx { margin-bottom: 12px; }
+.cl-m.emo { background: none !important; padding: 0 2px; }
+.cl-m.emo .tx { font-size: 40px; line-height: 1.15; }
+.cl-rx { position: absolute; bottom: -13px; right: 10px; padding: 2px 7px; border-radius: 999px; font-size: 14px; line-height: 1.35; background: #2a2a40; box-shadow: 0 4px 10px -4px rgba(0,0,0,.55); }
+.cl-m:not(.out) .cl-rx { right: auto; left: 10px; }
+.cl-m.emo.rx { margin-bottom: 0; } .cl-m.emo .cl-rx { position: static; align-self: flex-end; } .cl-m.emo:not(.out) .cl-rx { align-self: flex-start; }
+.cl-reb { position: absolute; top: 50%; translate: 0 -50%; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: var(--muted);
+          background: var(--frost); opacity: 0; transition: opacity .15s; }
+.cl-m:not(.out) .cl-reb { right: -36px; } .cl-m.out .cl-reb { left: -36px; }
+.cl-m:hover .cl-reb, .cl-reb:focus-visible { opacity: 1; }
+.cl-repick { position: fixed; z-index: 90; display: flex; gap: 2px; padding: 5px; border-radius: 999px; background: #232338; box-shadow: 0 14px 34px -10px rgba(0,0,0,.7); animation: clre .16s ease-out; }
+.cl-repick button { width: 34px; height: 34px; border-radius: 50%; font-size: 19px; display: grid; place-items: center; transition: transform .12s; }
+.cl-repick button:hover { transform: scale(1.22); }
+.cl-repick button.on { background: rgba(139,140,247,.3); }
+@keyframes clre { from { transform: translateY(5px) scale(.95); opacity: 0; } }
+.cl-emo { display: flex; gap: 2px; margin: 0 14px; padding: 4px; border-radius: 14px; background: rgba(127,127,127,.12); }
+.cl-emo[hidden] { display: none; }
+.cl-emo button, .cl-repick button, .cl-reb { border: 0; padding: 0; background: transparent; color: inherit; cursor: pointer; font-family: inherit; }
+.cl-reb { background: var(--frost); color: var(--muted); }
+.cl-emo button { flex: 1; height: 38px; border-radius: 10px; font-size: 20px; }
+.cl-emo button:hover { background: rgba(127,127,127,.18); }
+.cl-send #cl-emo-b { width: 42px; height: 42px; padding: 0; display: grid; place-items: center; flex: none; }
+html.st-light .cl-rx, html.st-light .cl-repick { background: #fff; box-shadow: 0 6px 18px -8px rgba(20,30,60,.35); }
+@media (prefers-reduced-motion: reduce) { .cl-repick { animation: none; } }

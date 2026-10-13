@@ -323,6 +323,8 @@ class CommandsMixin:
         if cmd == "skills_folder":
             self.skills.user_dir.mkdir(parents=True, exist_ok=True)
             return str(self.skills.user_dir)
+        if cmd in ("done", "done_add", "done_undo", "done_reminder"):    # «Дела»: сделанное и достижения (студия, done.py)
+            return self._done_cmd(cmd, a)
         if cmd in ("reminders", "reminder_add", "reminder_update", "reminder_cancel", "alarm_ack", "alarm_snooze",
                    "alarm_get", "alarm_test", "reminder_parse", "job_add", "job_run"):
             return self._reminder_cmd(cmd, a)
@@ -776,6 +778,8 @@ class CommandsMixin:
                             (out / name).write_bytes(_b64.b64decode(f.get("b64") or ""))
                             files.append(str(out / name))
                     return c.send(a.get("pid", ""), a.get("text", ""), files)
+                if cmd == "close_react":            # реакция на сообщение (👍 ❤️ …)
+                    return c.react(a.get("pid", ""), a.get("mid", ""), a.get("e", ""))
                 if cmd == "close_call":
                     return c.call(a.get("pid", ""), bool(a.get("video")))
                 if cmd == "close_name":

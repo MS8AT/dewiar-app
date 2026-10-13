@@ -81,8 +81,12 @@ public class AlarmActivity extends Activity {
         text.setTextSize(26);
         text.setGravity(Gravity.CENTER);
         text.setPadding(0, dp(18), 0, dp(40));
-        Button ok = button("Понял", 0xFF667EEA, 0xFF764BA2);
+        // напоминание о деле — главная кнопка «Сделано ✓» (дело уходит в журнал «Дела»), «Понял» — просто закрыть
+        boolean task = !"alarm".equals(kind) && !"timer".equals(kind);
+        Button made = task ? button("Сделано ✓", 0xFF2FB67E, 0xFF1F8F86) : null;
+        Button ok = task ? button("Понял", 0x22FFFFFF, 0x22FFFFFF) : button("Понял", 0xFF667EEA, 0xFF764BA2);
         Button snooze = button("Отложить на 10 минут", 0x22FFFFFF, 0x22FFFFFF);
+        if (made != null) made.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { AlarmReceiver.made(AlarmActivity.this, id, title); done(); } });
         ok.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { done(); } });
         snooze.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { snooze(); } });
         root.addView(head);
@@ -90,6 +94,7 @@ public class AlarmActivity extends Activity {
         root.addView(text);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
         lp.bottomMargin = dp(12);
+        if (made != null) root.addView(made, lp);
         root.addView(ok, lp);
         root.addView(snooze, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58)));
         setContentView(root);

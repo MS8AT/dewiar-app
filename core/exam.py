@@ -693,6 +693,16 @@ async def check_state(core, state, t_start):
         hit = [x for x in fresh if fits(x)]
         out.append({"name": "напоминание поставлено как надо", "ok": bool(hit),
                     "detail": "; ".join(f"{x.get('text')} — {x.get('at')}" for x in fresh[:4]) or "напоминаний нет"})
+    if "done" in state:                                   # «отметь как исполненное» — дела правда в журнале «Дела» (отчёт №14)
+        want = state["done"]
+        d = await core.call("done") or {}
+        titles = [str(x.get("title") or "").lower() for x in d.get("items") or []]
+        ok = len(titles) >= int(want.get("min", 1)) and all(any(w.lower() in t for t in titles) for w in want.get("all", []))
+        out.append({"name": "дела отмечены сделанными", "ok": ok, "detail": "; ".join(titles[:6]) or "отметок нет"})
+        if want.get("reminder_gone"):
+            items = await core.call("reminders") or []
+            left = [x for x in items if want["reminder_gone"].lower() in (x.get("text") or "").lower()]
+            out.append({"name": "напоминание о сделанном закрыто", "ok": not left, "detail": "; ".join(x.get("text", "") for x in left)})
     if "money" in state:
         rows = await core.call("money_list") or []
         rows = rows.get("items", rows) if isinstance(rows, dict) else rows
@@ -903,6 +913,8 @@ async def _run_scenario(core, sc, judge_prof, work, log, t0):
                 if stp.get("image") and img is None:
                     res["skipped"] = "нет шрифта с кириллицей для картинки"
                     return res
+                if stp.get("persona"):                  # кто отвечает на этот шаг (команда: Лира, Патрик)
+                    await core.call("persona_set", id=stp["persona"])
                 said = fill(stp["say"])
                 ans, ev = await core.say(said, img)
                 res["steps"].append({"say": said, "image": stp.get("image"), "answer": ans[:2000], "tools": tools_of(ev)})

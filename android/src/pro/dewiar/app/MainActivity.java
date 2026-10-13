@@ -37,6 +37,7 @@ public class MainActivity extends Activity implements Net.Sink {
     @SuppressWarnings("deprecation")
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        live = new java.lang.ref.WeakReference<>(this);
         Window w = getWindow();
         w.setStatusBarColor(Color.parseColor("#0B0B10"));
         w.setNavigationBarColor(Color.parseColor("#0B0B10"));
@@ -235,7 +236,16 @@ public class MainActivity extends Activity implements Net.Sink {
         if (pageReady) event("pause", new JSONObject());
     }
 
+    /** Открытое окно приложения — чтобы уведомление («Сделано ✓» у напоминания) могло сразу сказать интерфейсу. */
+    static java.lang.ref.WeakReference<MainActivity> live = new java.lang.ref.WeakReference<>(null);
+
+    static void poke(String type) {
+        MainActivity m = live.get();
+        if (m != null) m.event(type, new JSONObject());
+    }
+
     @Override protected void onDestroy() {
+        if (live.get() == this) live.clear();
         if (speech != null) speech.cancel();
         if (tts != null) tts.shutdown();
         if (radio != null && isFinishing()) radio.stop();          // закрыли приложение — радио тоже; при пересоздании экрана играет дальше

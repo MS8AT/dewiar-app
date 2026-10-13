@@ -43,6 +43,10 @@ public final class Tts {
                         @Override public void onStart(String id) { ev("tts_start", id); }
                         @Override public void onDone(String id) { ev("tts_done", id); }
                         @Override public void onError(String id) { ev("tts_done", id); }
+                        @Override public void onError(String id, int code) {      // в пульс: у кого голос устройства не говорит
+                            try { sink.event("tts_fail", new JSONObject().put("id", id).put("code", code)); } catch (Exception ignored) { }
+                            ev("tts_done", id);
+                        }
                         @Override public void onStop(String id, boolean interrupted) { ev("tts_done", id); }
                     });
                 }

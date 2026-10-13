@@ -121,10 +121,12 @@ def _hm(sec):
     return f"{h} ч" + (f" {m} мин" if m else "")
 
 
-def plan(gone, since, tasks, upcoming, last_greet, now=None, night=(23, 7), day_brief=True):
+def plan(gone, since, tasks, upcoming, last_greet, now=None, night=(23, 7), day_brief=True, dstat=None, eve_said=None):
     """Что сказать вернувшемуся. gone — секунд отлучки, since — datetime ухода; tasks — список задач (public());
     upcoming — [(время «HH:MM», что)] на ближайшие 2 часа; last_greet — datetime прошлого приветствия или None.
-    -> None (молчим) или {"kind": "day" | "back", "facts": [...], "gone": "1 ч 20 мин"}."""
+    dstat — done.stats() (сделанные дела), eve_said — дата прошлого итога дня: вечером (с 19:00), если сегодня есть сделанное,
+    один раз — итог дня (отзыв 13.10: «в конце дня — ты сегодня сделал 5–7 дел»).
+    -> None (молчим) или {"kind": "day" | "back" | "eve", "facts": [...], "gone": "1 ч 20 мин"}."""
     now = now or dt.datetime.now()
     if night and (now.hour >= night[0] or now.hour < night[1]):
         return None                                      # ночью не заговариваем
@@ -140,6 +142,13 @@ def plan(gone, since, tasks, upcoming, last_greet, now=None, night=(23, 7), day_
         facts.append("Ждёт ответа пользователя задача: " + "; ".join(f"«{t.get('title', '')}»" for t in wait[:2]) + ".")
     if upcoming:
         facts.append("Скоро: " + "; ".join(f"в {a} — {b}" for a, b in upcoming[:3]) + ".")
+    if dstat and dstat.get("today") and now.hour >= 19 and eve_said != now.date():
+        from done import dela, dney
+        f = (f"Сегодня пользователь отметил сделанными {dstat['today']} {dela(dstat['today'])}: "
+             + ", ".join(f"«{x['title']}»" for x in dstat.get("items", [])[-7:]) + ".")
+        if dstat.get("streak", 0) >= 2:
+            f += f" Серия: {dstat['streak']} {dney(dstat['streak'])} подряд."
+        return {"kind": "eve", "facts": [f] + facts, "gone": _hm(gone)}
     first_today = day_brief and (last_greet is None or last_greet.date() < now.date()) and gone >= 3 * 3600
     if first_today:
         return {"kind": "day", "facts": facts, "gone": _hm(gone)}
@@ -155,6 +164,11 @@ def prompt(p, brief_context=""):
                 f"\n\n[Пользователь вернулся к компьютеру — первый раз за день, не было {p['gone']}] Поздоровайся первым (в своём роде), "
                 "по имени, если знаешь, и коротко скажи главное на сегодня из этих данных: дела, встречи, что готово. "
                 "2–4 коротких предложения, живо и тепло, без списков, без вопросов в конце, без инструментов.")
+    if p["kind"] == "eve":
+        return ("\n".join(p["facts"]) +
+                f"\n\n[Вечер, пользователь вернулся к компьютеру, не было {p['gone']}] Подведи итог дня: скажи, сколько дел он "
+                "сегодня сделал, похвали тепло и конкретно (назови одно-два дела своими словами); если есть другие новости отсюда — "
+                "одной фразой. 2–3 коротких предложения, без списков, без вопросов в конце, без инструментов.")
     return ("\n".join(p["facts"]) +
             f"\n\n[Пользователь вернулся к компьютеру, не было {p['gone']}] Коротко поприветствуй его и скажи главное из "
             "этого — 1–2 коротких предложения, живо, без списков и без вопросов в конце, без инструментов. Названия задач "

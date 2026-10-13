@@ -64,8 +64,10 @@ I = R["instream"]
 ok(I["text"].strip() == "Привет! Всё хорошо." and I["n"] == 2 and not I["second_tools"] and I["prompt"],
    f"«upstream returned HTTP 400» внутри потока — повтор с функциями текстом, ответ пришёл: {I}")
 roles = [m["role"] for m in H]
-ok(roles == ["user", "assistant", "user"] and H[0]["content"].startswith("Привет\n\nКак дела?") and "[Патрик ответил(а)]: Хорошо!" in H[0]["content"]
-   and H[-1]["content"] == "Отлично", f"история: роли чередуются, начинается с пользователя, чужие реплики — с пометкой: {H}")
+ok(roles == ["user", "assistant", "user"] and H[0]["content"].startswith("[До этого пользователь говорил не с тобой, а с коллегой по имени Патрик")
+   and "Пользователь: Привет" in H[0]["content"] and "Патрик: Хорошо!" in H[0]["content"] and H[-1]["content"] == "Отлично",
+   f"история: роли чередуются, начинается с пользователя, разговор с коллегой — справкой (отзыв 13.10): {H}")
+
 seen = R["seen"]
 ok(seen[0].get("tools") and not seen[1].get("tools"), "сервер отклонил функции полем — повтор без поля tools")
 ok("# Инструменты" in seen[1]["messages"][0]["content"] and "get_time" in seen[1]["messages"][0]["content"], "функции описаны в системном сообщении")

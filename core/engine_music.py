@@ -529,18 +529,25 @@ class MusicMixin:
         except Exception:  # noqa: BLE001
             upcoming = []
         last = getattr(self, "_welcome_at", None)
-        p = presence.plan(gone, datetime.now() - timedelta(seconds=gone), tasks, upcoming, last)
+        try:
+            done = self.done.stats()
+        except Exception:  # noqa: BLE001
+            done = None
+        p = presence.plan(gone, datetime.now() - timedelta(seconds=gone), tasks, upcoming, last, dstat=done,
+                          eve_said=getattr(self, "_eve_said", None))
         if not p:
             log.info("👋 вернулись через %s — сказать нечего, молчим", presence._hm(gone))
             return False
         self._welcome_at = datetime.now()
+        if p["kind"] == "eve":
+            self._eve_said = self._welcome_at.date()
         ctx = ""
         if p["kind"] == "day":
             try:
                 ctx = self._brief_context()
             except Exception:  # noqa: BLE001
                 ctx = ""
-        log.info("👋 вернулись через %s — %s", p["gone"], "сводка дня" if p["kind"] == "day" else "; ".join(p["facts"]))
+        log.info("👋 вернулись через %s — %s", p["gone"], "сводка дня" if p["kind"] == "day" else "итог дня" if p["kind"] == "eve" else "; ".join(p["facts"]))
         self.ask(presence.prompt(p, ctx), raw=True, shown="👋 С возвращением")
         return True
 

@@ -69,7 +69,8 @@ public final class Net {
                         sink.event("http_done", new JSONObject().put("id", id).put("status", code).put("body", ""));
                     } else {
                         String text = in == null ? "" : readAll(in);
-                        sink.event("http_done", new JSONObject().put("id", id).put("status", code).put("body", text));
+                        // url — куда привели переадресации (короткая ссылка на карту → полный адрес с координатами)
+                        sink.event("http_done", new JSONObject().put("id", id).put("status", code).put("body", text).put("url", c.getURL().toString()));
                     }
                 } catch (Throwable e) {
                     try { sink.event("http_error", new JSONObject().put("id", id).put("error", String.valueOf(e.getMessage() == null ? e : e.getMessage()))); }

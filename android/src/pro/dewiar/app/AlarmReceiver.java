@@ -12,13 +12,14 @@ import org.json.JSONObject;
  *  (повтор — на следующий раз, разовое — убрать) и показать уведомление поверх всего с полноэкранным окном будильника
  *  (AlarmActivity) — даже на заблокированном экране. Номер уведомления — id.hashCode(): по нему AlarmActivity его убирает. */
 public class AlarmReceiver extends BroadcastReceiver {
-    static final String DONE = "pro.dewiar.ALARM_DONE", SNOOZE = "pro.dewiar.ALARM_SNOOZE";
+    static final String DONE = "pro.dewiar.ALARM_DONE", SNOOZE = "pro.dewiar.ALARM_SNOOZE", MADE = "pro.dewiar.ALARM_MADE";
 
     @Override public void onReceive(Context c, Intent in) {
         String id = in.getStringExtra("id");
         if (id == null) return;
         // кнопки уведомления — на телефоне и на часах (Honor/Huawei, Wear OS и другие повторяют кнопки уведомления)
-        if (DONE.equals(in.getAction()) || SNOOZE.equals(in.getAction())) {
+        if (DONE.equals(in.getAction()) || SNOOZE.equals(in.getAction()) || MADE.equals(in.getAction())) {
+            if (MADE.equals(in.getAction())) made(c, id, in.getStringExtra("title"));
             if (SNOOZE.equals(in.getAction())) AlarmActivity.snoozeLater(c, id, in.getStringExtra("title"), in.getStringExtra("kind"), in.getStringExtra("who"));
             ((NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(id.hashCode());
             AlarmActivity.closeIfOpen(id);
@@ -58,8 +59,10 @@ public class AlarmReceiver extends BroadcastReceiver {
                 .setOnlyAlertOnce(!loud)
                 .setContentIntent(fp);
         if (loud) b.setFullScreenIntent(fp, true);
-        b.addAction(action(c, DONE, id, title, kind, who, "Понял"));
+        boolean task = !"alarm".equals(kind) && !"timer".equals(kind);      // напоминание о деле — его можно отметить сделанным
+        if (task) b.addAction(action(c, MADE, id, title, kind, who, "Сделано ✓"));
         if (!"timer".equals(kind)) b.addAction(action(c, SNOOZE, id, title, kind, who, "Через 10 минут"));
+        b.addAction(action(c, DONE, id, title, kind, who, "Понял"));
         if (!name.isEmpty()) b.setSubText(head.substring(head.indexOf(' ') + 1));
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         // тихое — обновлением того же уведомления, а не снятием: часы (Honor/Huawei Health) видят одно уведомление,
@@ -68,6 +71,20 @@ public class AlarmReceiver extends BroadcastReceiver {
         if (!loud) return;
         // приложение на экране — окно сразу; из фона Android 10+ окно не откроет — тогда остаётся уведомление
         try { c.startActivity(full); } catch (Throwable ignored) { }
+    }
+
+    /** «Сделано ✓» — дело в очередь done_inbox (SharedPreferences "dewiar"): приложение заберёт её в журнал дел
+     *  (doneInbox в app.js) — сразу, если открыто, иначе при следующем открытии. */
+    static synchronized void made(Context c, String id, String title) {
+        try {
+            android.content.SharedPreferences p = c.getSharedPreferences("dewiar", Context.MODE_PRIVATE);
+            org.json.JSONArray q;
+            try { q = new org.json.JSONArray(p.getString("done_inbox", "[]")); } catch (Exception e) { q = new org.json.JSONArray(); }
+            String base = id.replaceAll("-s\\d+$", "");                 // отложенное «через 10 минут» — то же дело
+            q.put(new JSONObject().put("id", base).put("title", title == null ? "Дело" : title).put("at", System.currentTimeMillis()));
+            p.edit().putString("done_inbox", q.toString()).commit();
+        } catch (Exception ignored) { }
+        MainActivity.poke("done_inbox");
     }
 
     @SuppressWarnings("deprecation")

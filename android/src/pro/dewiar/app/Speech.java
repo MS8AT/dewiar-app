@@ -54,6 +54,7 @@ public final class Speech {
             @Override public void run() {
                 try {
                     if (rec != null) { rec.destroy(); rec = null; }
+                    if (g != gen) return;                      // пока ждали — начали новый сеанс
                     rec = SpeechRecognizer.createSpeechRecognizer(ctx);
                     rec.setRecognitionListener(new RecognitionListener() {
                         @Override public void onReadyForSpeech(Bundle b) { ev(g, "stt_start", o()); }
