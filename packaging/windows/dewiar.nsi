@@ -208,7 +208,7 @@ Section "Dewiar" SecMain
 SectionEnd
 
 Section "Запускать вместе с Windows" SecAuto
-  WriteRegStr HKCU "${RUNKEY}" "Dewiar" '"${PYW}" -X utf8 "${APPPY}"'
+  WriteRegStr HKCU "${RUNKEY}" "Dewiar" '"${PYW}" -X utf8 "${APPPY}" --autostart'
 SectionEnd
 
 Section "Ярлык на рабочем столе" SecDesk

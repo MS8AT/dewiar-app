@@ -228,7 +228,12 @@
   #b-voice .x { display: none; } #b-voice.on .x { display: inline; } #b-voice.on .w1 { display: none; }
   .sep { width: 1px; height: 16px; background: rgba(255,255,255,.1); margin: 0 3px; }
   #b-team { width: auto; padding: 0 4px 0 6px; gap: 1px; display: inline-flex; align-items: center; }
-  #team-dot { width: 13px; height: 13px; border-radius: 50%; background: var(--persona); box-shadow: 0 0 10px var(--persona); display: block; }
+  /* кто отвечает — лицо персонажа, а не цветной кружок: кружок читался как «в сети / не в сети» (тестировщик 14.10) */
+  .pav { width: 20px; height: 20px; border-radius: 50%; flex: none; display: grid; place-items: center; overflow: hidden;
+         background: rgba(255,255,255,.12) center 22% / cover no-repeat; box-shadow: 0 0 0 1.5px rgba(255,255,255,.22);
+         font: 600 10.5px/1 "Unbounded", "Ubuntu", sans-serif; color: var(--ink); text-transform: uppercase; }
+  .pav.ph { color: transparent; }
+  body.light .pav { background-color: rgba(20,20,40,.08); box-shadow: 0 0 0 1.5px rgba(20,20,40,.14); }
   #b-team svg.chev { width: 13px; height: 13px; opacity: .7; }
   #team { position: absolute; left: 12px; right: 12px; bottom: 58px; max-height: 236px; overflow-y: auto; z-index: 20; display: none;
           padding: 6px; border-radius: 18px; background: #16161c;
@@ -239,7 +244,7 @@
                  background: none; color: var(--ink); cursor: pointer; text-align: left; font: inherit; }
   #team button:hover { background: rgba(255,255,255,.07); }
   #team button.cur { background: rgba(255,255,255,.1); }
-  #team i { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+  #team .pav { width: 24px; height: 24px; font-size: 11px; }
   #team b { font-weight: 600; font-size: 13px; }
   #team span { color: var(--muted); font-size: 11.5px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
   #team::-webkit-scrollbar { width: 6px; } #team::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
@@ -373,7 +378,7 @@
     <button class="btn" id="b-mic" title="Выключить микрофон"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
     <button class="btn" id="b-voice" title="Отвечать только текстом"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
     <button class="btn" id="b-type" title="Написать вопрос"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
-    <span class="sep"></span><button class="btn" id="b-team" title="Кто отвечает — выбрать персонажа"><i id="team-dot"></i><svg class="chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button><span class="sep"></span>
+    <span class="sep"></span><button class="btn" id="b-team" title="Кто отвечает — выбрать персонажа"><i id="team-dot" class="pav"></i><svg class="chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button><span class="sep"></span>
     <button class="btn" id="b-chat" title="Чат — вся переписка: голосом и текстом"><svg viewBox="0 0 24 24"><path d="M20.5 11.5a7.5 7.5 0 0 1-11.2 6.5L4 19.5l1.6-4.6A7.5 7.5 0 1 1 20.5 11.5z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/></svg></button>
     <button class="btn" id="b-cal" title="Календарь: дела, деньги, напоминания"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/></svg></button>
     <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg></button>
@@ -456,17 +461,23 @@ function applyPersona(pid) {
     entity.configure({ style: p.avatar_url && p.style !== "aura" ? "photo" : p.style, color: p.color, image: p.avatar_url || null, live: p.live || "" });
   renderDots(); setState(state);
 }
+function paintAv(el, p) {                     // лицо персонажа (фото) или первая буква имени — в кружке
+  el.classList.add("pav"); el.classList.toggle("ph", !!(p && p.avatar_url));
+  el.style.backgroundImage = p && p.avatar_url ? `url(${JSON.stringify(String(p.avatar_url))})` : "";
+  el.textContent = p && !p.avatar_url ? String(p.name || "?").trim().charAt(0) : "";
+}
 function renderDots() {                       // список команды — во всплывающем меню, панель не растёт с числом персонажей
   const box = $("team"); box.innerHTML = "";
   personas.forEach(p => {
     const b = document.createElement("button");
     b.className = current && p.id === current.id ? "cur" : "";
     b.innerHTML = "<i></i><b></b><span></span>";
-    b.querySelector("i").style.background = p.color; b.querySelector("b").textContent = p.name;
+    paintAv(b.querySelector("i"), p); b.querySelector("b").textContent = p.name;
     b.querySelector("span").textContent = (p.role || "").toLowerCase();
     b.onclick = guard(b, () => { box.classList.remove("show"); return core.call("persona_set", { id: p.id }).catch(showErr); });
     box.appendChild(b);
   });
+  if (current) paintAv($("team-dot"), current);
   $("b-team").title = current ? `Сейчас: ${current.name}${current.role ? " — " + current.role.toLowerCase() : ""}. Нажмите, чтобы выбрать другого` : "Выбрать персонажа";
 }
 let radioNow = "";                           // играет радио — в покое вместо персонажа крутится пластинка

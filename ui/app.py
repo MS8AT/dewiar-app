@@ -45,6 +45,54 @@ CARD_RADIUS = 28
 ZOOM = [1.0]                            # масштаб интерфейса: студия «Оформление» → «Масштаб», Ctrl + / Ctrl −
 
 
+def relaunch_script(installer_pid, inst_dir, exe, app, wait_s=10):
+    """PowerShell-сторож обновления: дождаться конца установщика, подождать wait_s и, если Dewiar из папки установки
+    так и не запущен, запустить его. Установщик сам запускает новую версию (NSIS LaunchApp), но у тестировщика 14.10
+    после «Обновить» программа не открылась — сторож страхует. Пути — в одинарных кавычках PowerShell (' удваивается):
+    пробелы и кириллица в имени пользователя не мешают. -> текст скрипта."""
+    q = lambda s: "'" + str(s).replace("'", "''") + "'"  # noqa: E731
+    return ("$ErrorActionPreference = 'SilentlyContinue'\n"
+            f"Wait-Process -Id {int(installer_pid)} -Timeout 1800\n"
+            f"Start-Sleep -Seconds {int(wait_s)}\n"
+            f"$dir = {q(str(inst_dir).rstrip(chr(92)) + chr(92))}\n"
+            "$up = Get-Process pythonw, python | Where-Object { $_.Path -and $_.Path.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) }\n"
+            f"if (-not $up) {{ Start-Process -FilePath {q(exe)} -ArgumentList @('-X', 'utf8', {q(chr(34) + str(app) + chr(34))}) }}\n")
+
+
+def relaunch_after(installer_pid, inst_dir, exe, app):
+    """Запустить сторожа (powershell -EncodedCommand — без кавычек в командной строке), отдельным процессом."""
+    import base64
+    enc = base64.b64encode(relaunch_script(installer_pid, inst_dir, exe, app).encode("utf-16-le")).decode("ascii")
+    subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", enc],
+                     creationflags=winshell.DETACHED, close_fds=True)
+
+
+def uptime_s():
+    """Сколько секунд работает система (Windows — GetTickCount64, Linux — /proc/uptime); не узнали — None."""
+    try:
+        if WIN:
+            import ctypes
+            f = ctypes.windll.kernel32.GetTickCount64
+            f.restype = ctypes.c_ulonglong
+            return f() / 1000.0
+        return float(Path("/proc/uptime").read_text().split()[0])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def start_in_tray(uis, args, uptime=None):
+    """Начать в трее? Только если человек сам убрал виджет в трей (ui.hud_tray) И программу запустил автозапуск —
+    флаг --autostart (Run в реестре Windows, /etc/xdg/autostart в Linux) или запуск в первые 3 минуты после включения
+    (старые установки без флага). Запустил сам — значит, хочет видеть виджет (тестировщик 14.10: «после перезагрузки
+    без автозапуска открывается свёрнутой»)."""
+    if not uis.get("hud_tray") or getattr(args, "settings", False):
+        return False
+    if getattr(args, "autostart", False):
+        return True
+    up = uptime_s() if uptime is None else uptime
+    return up is not None and up < 180
+
+
 def zoom_of(v):
     """ui.zoom из настроек -> число 0.7…1.5 (как ui/assets/zoom.js)."""
     try:
@@ -883,9 +931,14 @@ class Api:
             pass
         _notify("Dewiar обновляется — через минуту-две откроется сам.")
         try:
-            subprocess.Popen([str(p), "/S", "/UPDATE"], creationflags=winshell.DETACHED, close_fds=True)
+            inst = subprocess.Popen([str(p), "/S", "/UPDATE"], creationflags=winshell.DETACHED, close_fds=True)
         except OSError as e:
             return {"ok": False, "error": f"установщик не запустился: {e}"}
+        try:                                     # страховка: установщик не запустил новую версию — запустит сторож
+            exe = winshell.pythonw()
+            relaunch_after(inst.pid, Path(exe).resolve().parent.parent, exe, Path(__file__).resolve())
+        except Exception as e:  # noqa: BLE001
+            _ui_log(f"сторож обновления не запущен: {e}")
         import threading
         threading.Timer(1.0, lambda: os._exit(0)).start()
         return {"ok": True}
@@ -948,14 +1001,14 @@ class Api:
         """Перезапустить интерфейс новой версией (после обновления)."""
         _notify("Dewiar обновлён.")
         if WIN:
-            subprocess.Popen([winshell.pythonw(), "-X", "utf8", str(Path(__file__).resolve())],
+            subprocess.Popen([winshell.pythonw(), "-X", "utf8", str(Path(__file__).resolve()), "--autostart"],   # убранный в трей — остаётся в трее
                              creationflags=winshell.DETACHED, close_fds=True)
             os._exit(0)
         launcher = ROOT / "dewiar"               # /opt/dewiar/dewiar: донастроит службу ядра и откроет виджет
         try:                                     # DEWIAR_UPDATE_CMD — проверка: перезапускаем этот же файл, без пускача
             if launcher.is_file() and not os.environ.get("DEWIAR_UPDATE_CMD"):
-                os.execv("/bin/sh", ["/bin/sh", str(launcher)])
-            os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve())])
+                os.execv("/bin/sh", ["/bin/sh", str(launcher), "--autostart"])
+            os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), "--autostart"])
         except OSError as e:
             print(f"Перезапуск не удался: {e}", file=sys.stderr)
 
@@ -1685,6 +1738,7 @@ def _own_box():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--settings", action="store_true")
+    ap.add_argument("--autostart", action="store_true", help="запуск вместе с системой: убранный в трей виджет остаётся в трее")
     ap.add_argument("target", nargs="?", help="файл .dewiar или ссылка dewiar://connect?server=…")
     args = ap.parse_args()
     from urllib.parse import quote
@@ -1765,7 +1819,7 @@ def main():
             return False
         from gi.repository import GLib
         GLib.idle_add(make_tray)
-        if uis.get("hud_tray") and not args.settings:
+        if start_in_tray(uis, args):
             api.to_tray(quiet=True)
         if args.settings:
             api.open_settings("connect" if extra else "", extra)
@@ -1887,7 +1941,7 @@ def main_win(args, extra):
         started.set()
         try:
             api.start_hud(mode, x, y)
-            if uis.get("hud_tray") and not args.settings:
+            if start_in_tray(uis, args):
                 api.to_tray(quiet=True)
         except Exception as e:  # noqa: BLE001
             print(f"Виджет не показан: {e}", file=sys.stderr)
