@@ -22,7 +22,7 @@ function chatBubble(x, lastWho) {
   // вложения: картинки — миниатюрами, файлы — плашками; нажать — открыть из «Входящих» папки ассистента
   // картинки к рассказу (show_images) — миниатюры со ссылкой на источник, лентой; свои вложения — из «Входящих»
   const web = (x.att || []).filter(a => a.kind === "image" && a.url && !a.path);
-  const gal = web.length && window.DewiarRich ? DewiarRich.gallery(web.map(a => ({ src: a.thumb, page: a.url, full: a.full, title: a.name, author: a.author, license: a.license }))) : "";
+  const gal = web.length && window.DewiarRich ? DewiarRich.gallery(web.map(a => ({ src: a.thumb, page: a.url, full: a.full, title: a.name, author: a.author, license: a.license, site: a.site, source: a.source }))) : "";
   const att = (x.att || []).filter(a => !web.includes(a)).map(a => a.kind === "image" && a.thumb
     ? `<button class="ch-img" data-path="${escH(a.path || "")}" title="${escH(a.name)} — открыть"><img src="${escH(a.thumb)}" alt="${escH(a.name)}"></button>`
     : `<button class="cl-f" data-path="${escH(a.path || "")}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg><span>${escH(a.name)}</span><small>${a.size ? chatSize(a.size) : ""}</small></button>`).join("");
@@ -83,7 +83,7 @@ core.on("answer", e => {
 });
 // картинки к рассказу появляются, пока персонаж ещё говорит, — сразу в живом пузыре
 core.on("media", e => {
-  if (!CH.loaded || e.source !== "commons") return;
+  if (!CH.loaded || e.source !== "pics") return;
   CH.live = Object.assign(CH.live || { text: "" }, { media: (CH.live && CH.live.media || []).concat(e.items || []).slice(0, 12) });
   if ($("#p-chat").classList.contains("cur")) chatRender("stay");
 });

@@ -627,12 +627,15 @@ core.on("hello", d => {
                        если имя почудилось (шум, телевизор), не останется висящих точек */ })
 .on("heard", e => { if (e.text) showCap(e.text, WAIT); else showCap("", "Слушаю…"); })
 .on("media", e => {                       // картинки из базы знаний персонажа (гравюры, схемы) и к рассказу (show_images)
-  const box = $("media"); if (e.source !== "commons" || !TL.media) box.innerHTML = "";
-  if (e.source === "commons") { TL.media = (TL.media || []).concat(e.items || []).slice(0, 12); moreBtn(); }
-  (e.items || []).slice(0, e.source === "commons" ? 4 : 3).forEach(m => { const im = document.createElement("img"); im.src = m.src; im.title = (m.title || "") + (m.author ? " — " + m.author : "");
-    im.referrerPolicy = "no-referrer";
-    im.onclick = (ev) => { ev.stopPropagation(); const lb = $("lightbox"); lb.querySelector("img").src = m.full || m.src;
-      lb.querySelector("span").textContent = (m.title || "") + (m.author ? " · " + m.author : "") + (m.license ? " · " + m.license : ""); lb.classList.add("on"); }; box.appendChild(im); });
+  const pics = e.source === "pics";                     // show_images: поисковик картинок (или Commons)
+  const box = $("media"); if (!pics || !TL.media) box.innerHTML = "";
+  if (pics) { TL.media = (TL.media || []).concat(e.items || []).slice(0, 12); moreBtn(); }
+  (e.items || []).slice(0, pics ? 4 : 3).forEach(m => { const im = document.createElement("img"); im.src = m.src; im.title = (m.title || "") + (m.author ? " — " + m.author : m.site ? " — " + m.site : "");
+    im.referrerPolicy = "no-referrer"; im.onerror = () => im.remove();
+    im.onclick = (ev) => { ev.stopPropagation(); const lb = $("lightbox"), big = lb.querySelector("img");
+      big.referrerPolicy = "no-referrer"; big.onerror = () => { if (big.src !== m.src) big.src = m.src; };   // оригинал с сайта не дался — миниатюра
+      big.src = m.full || m.src;
+      lb.querySelector("span").textContent = (m.title || "") + (m.author ? " · " + m.author : "") + (m.license ? " · " + m.license : "") + (m.site && !m.author ? " · " + m.site : ""); lb.classList.add("on"); }; box.appendChild(im); });
   if (box.children.length) { $("cap").classList.add("show"); hideCapLater(30000); }
 })
 .on("answer", e => {

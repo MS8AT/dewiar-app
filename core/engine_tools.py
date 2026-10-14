@@ -138,13 +138,13 @@ class ToolsMixin:
         return token, (key if acc else ""), base_of(url)
 
     def _dewiar_web(self, kind, value):
-        """Поиск (kind="search") или текст страницы (kind="fetch") через cloud.php — когда провайдер режет поисковик или сайт.
+        """Поиск (kind="search"), картинки (kind="images") или текст страницы (kind="fetch") через cloud.php — когда провайдер режет поисковик или сайт.
         Нужен вход в аккаунт dewiar.pro или ключ Dewiar, иначе RuntimeError. -> список результатов / текст."""
         import httpx
         token, _, url = self.credentials()
         if not token:
             raise RuntimeError("нет входа в аккаунт dewiar.pro и ключа Dewiar")
-        p = {"p": "/search", "q": value} if kind == "search" else {"p": "/fetch", "url": value}
+        p = {"p": "/" + kind, "q": value} if kind in ("search", "images") else {"p": "/fetch", "url": value}
         r = httpx.get(url, params=p, headers={"Authorization": "Bearer " + token}, timeout=40)
         try:
             d = r.json()
@@ -152,7 +152,7 @@ class ToolsMixin:
             d = {}
         if r.status_code != 200:
             raise RuntimeError((d.get("error") or {}).get("message") or f"сервер ответил {r.status_code}")
-        return (d.get("results") or []) if kind == "search" else str(d.get("text") or "")
+        return (d.get("results") or []) if kind in ("search", "images") else str(d.get("text") or "")
 
     # ---------- общее для своих устройств (close.own_send, сквозное шифрование): ключ умного дома ----------
     def own_snapshot(self):

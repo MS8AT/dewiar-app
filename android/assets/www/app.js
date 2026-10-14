@@ -2756,53 +2756,85 @@ async function takePhoto(facing) {
 async function dewiarWeb(kind, value) {
   const c = syncCred();
   if (!c) throw new Error("нет входа в аккаунт dewiar.pro и ключа Dewiar");
-  const r = await http("GET", c.base + "?p=/" + kind + "&" + (kind === "search" ? "q=" : "url=") + encodeURIComponent(value), { headers: { Authorization: "Bearer " + c.token }, timeout: 40000 });
+  const r = await http("GET", c.base + "?p=/" + kind + "&" + (kind === "search" || kind === "images" ? "q=" : "url=") + encodeURIComponent(value), { headers: { Authorization: "Bearer " + c.token }, timeout: 40000 });
   let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
   if (r.status !== 200) throw new Error((d.error && d.error.message) || "сервер ответил " + r.status);
   return d;
 }
-/* Картинки к рассказу (как core/images.py на компьютере): Wikimedia Commons — свободные изображения с автором и
-   лицензией, без ключей. Показываются под ответом (frameAnswer) и остаются в истории разговора. */
-const COMMONS = "https://commons.wikimedia.org/w/api.php";
-async function webImages(q, count) {
-  q = String(q || "").trim(); if (!q) return "Ошибка: пустой запрос — что показать?";
-  const n = Math.max(1, Math.min(6, +count || 4));
+/* Картинки к рассказу (как core/images.py на компьютере): ищем как поисковик картинок — DuckDuckGo Картинки (тот же
+   поисковик, что у web_search, безопасный поиск), не открылся — через сервер Dewiar, запасной путь — Wikimedia Commons
+   (свободные изображения с автором и лицензией). Показываются под ответом (frameAnswer) и остаются в истории. */
+const COMMONS = "https://commons.wikimedia.org/w/api.php", DDG_IMG = "https://duckduckgo.com";
+const PIC_SKIP = /\b(?:logo|icon|flag of|coat of arms|map of|locator|signature)\b/i;
+const picSite = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return ""; } };
+const picClean = (v) => String(v || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/\s+/g, " ").trim();
+const webPic = (src, full, page, title) => ({ src, full: full || src, page: page || full || src, title: picClean(title).slice(0, 120) || picSite(page) || "картинка",
+  desc: "", author: "", license: "", site: picSite(page || full), source: "web" });
+async function ddgImages(q, n) {
+  const base = window.DEWIAR_DDG || DDG_IMG, UA = { "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Mobile Safari/537.36", "Accept-Language": "ru-RU,ru;q=0.9" };
+  const r = await http("GET", base + "/?" + new URLSearchParams({ q, iax: "images", ia: "images", kp: "1" }), { headers: UA, timeout: 15000 });
+  const m = /vqd=["']?([\d-]+)/.exec(r.body || "");
+  if (!m) throw new Error("поисковик картинок не дал ключ");
+  const r2 = await http("GET", base + "/i.js?" + new URLSearchParams({ l: "ru-ru", o: "json", q, vqd: m[1], f: ",,,,,", p: "1" }), { headers: Object.assign({ Referer: base + "/", Accept: "application/json" }, UA), timeout: 15000 });
+  const out = [];
+  for (const x of (JSON.parse(r2.body || "{}").results || [])) {
+    if (!x.thumbnail || (x.width || 999) < 200 || /\.svg$/i.test(x.image || "") || PIC_SKIP.test(x.title || "")) continue;
+    out.push(webPic(x.thumbnail, x.image, x.url, x.title)); if (out.length >= n) break;
+  }
+  return out;
+}
+async function commonsImages(q, n) {
   const p = new URLSearchParams({ action: "query", format: "json", generator: "search", gsrnamespace: "6", gsrlimit: "16",
     gsrsearch: q + " filetype:bitmap", prop: "imageinfo", iiprop: "url|extmetadata|mime|size", iiurlwidth: "480",
     iiextmetadatafilter: "ObjectName|ImageDescription|Artist|LicenseShortName", iiextmetadatalanguage: "ru" });
-  let j;
-  try { j = JSON.parse((await http("GET", (window.DEWIAR_COMMONS || COMMONS) + "?" + p, { headers: { "User-Agent": "Dewiar-Android (voice assistant; https://dewiar.pro)" }, timeout: 15000 })).body || "{}"); }
-  catch (e) { return "Картинки сейчас не загрузились (" + e.message + ") — скажи об этом коротко."; }
-  const clean = (v) => String(v || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/\s+/g, " ").trim();
+  const j = JSON.parse((await http("GET", (window.DEWIAR_COMMONS || COMMONS) + "?" + p, { headers: { "User-Agent": "Dewiar-Android (voice assistant; https://dewiar.pro)" }, timeout: 15000 })).body || "{}");
   const items = [];
   for (const pg of Object.values((j.query || {}).pages || {}).sort((a, b) => (a.index || 0) - (b.index || 0))) {
     const ii = (pg.imageinfo || [])[0] || {}, meta = ii.extmetadata || {};
     if (!ii.thumburl || !/^image\//.test(ii.mime || "") || ii.mime === "image/svg+xml" || (ii.width || 0) < 200) continue;
     const name = String(pg.title || "").replace(/^File:|\.[a-z0-9]+$/gi, "").replace(/_/g, " ");
-    if (/\b(?:logo|icon|flag of|coat of arms|map of|locator|signature)\b/i.test(name)) continue;
+    if (PIC_SKIP.test(name)) continue;
     items.push({ src: ii.thumburl, full: (ii.width || 0) > 1280 ? ii.thumburl.replace(/\/\d+px-/, "/1280px-") : (ii.url || ii.thumburl), page: ii.descriptionurl || "",
-      title: (clean((meta.ObjectName || {}).value) || name).slice(0, 120), desc: clean((meta.ImageDescription || {}).value).slice(0, 200),
-      author: clean((meta.Artist || {}).value).slice(0, 80), license: clean((meta.LicenseShortName || {}).value).slice(0, 40) });
+      title: (picClean((meta.ObjectName || {}).value) || name).slice(0, 120), desc: picClean((meta.ImageDescription || {}).value).slice(0, 200),
+      author: picClean((meta.Artist || {}).value).slice(0, 80), license: picClean((meta.LicenseShortName || {}).value).slice(0, 40), site: "commons.wikimedia.org", source: "commons" });
     if (items.length >= n) break;
   }
-  if (!items.length) return "Картинок по этому запросу не нашлось. Не говори, что показала их; можно попробовать запрос по-английски или проще.";
+  return items;
+}
+async function webImages(q, count) {
+  q = String(q || "").trim(); if (!q) return "Ошибка: пустой запрос — что показать?";
+  const n = Math.max(1, Math.min(6, +count || 4));
+  const ways = [["DuckDuckGo", () => ddgImages(q, n)],
+    ["сервер Dewiar", async () => ((await dewiarWeb("images", q)).results || []).filter(x => x.src).slice(0, n).map(x => webPic(x.src, x.full, x.page, x.title))],
+    ["Wikimedia Commons", () => commonsImages(q, n)]];
+  let items = [], err = null, answered = false, via = "";
+  for (const [name, fn] of ways) {
+    try { items = await fn(); answered = true; } catch (e) { err = e; plog("info", `🖼 картинки: ${name} не ответил (${e.message})`); continue; }
+    if (items.length) { via = name; break; }
+  }
+  if (!items.length && !answered && err) return "Картинки сейчас не загрузились (" + err.message + ") — скажи об этом коротко.";
+  if (!items.length) return "Картинок по этому запросу не нашлось. Не говори, что показала их; можно попробовать запрос проще или по-английски.";
   turnMedia = (turnMedia || []).concat(items).slice(0, 12);
-  plog("info", `🖼 картинки: «${clip(q)}» — ${items.length}`);
-  return `На экране показано картинок: ${items.length} (Wikimedia Commons). Что на них:\n` + items.map((x, i) => `${i + 1}. ${x.title}${x.desc ? " — " + x.desc.slice(0, 120) : ""}`).join("\n")
-    + "\nГовори о них как о показанных («на второй картинке…»), но описывай только то, что следует из подписей; не выдумывай деталей.";
+  plog("info", `🖼 картинки: «${clip(q)}» — ${items.length} (${via})`);
+  const sites = [...new Set(items.map(x => x.site).filter(Boolean))].slice(0, 4);
+  const from = items.every(x => x.source === "commons") ? "Wikimedia Commons" : "поиск картинок" + (sites.length ? " (сайты: " + sites.join(", ") + ")" : "");
+  return `На экране показано картинок: ${items.length} (${from}). Что на них (подписи с сайтов):\n` + items.map((x, i) => `${i + 1}. ${x.title}${x.desc ? " — " + x.desc.slice(0, 120) : ""}${x.source !== "commons" && x.site ? " [" + x.site + "]" : ""}`).join("\n")
+    + "\nГовори о них как о показанных («на второй картинке…»), но описывай только то, что следует из подписей; не выдумывай деталей. Подпись не о том — не выдавай картинку за нужную.";
 }
 /* картинка в ответе: нажали — на весь экран (без ухода в браузер), долгое нажатие — источник в браузере */
 function wirePics(root) {
   if (!root) return;
   root.querySelectorAll(".dw-pic").forEach(a => {
-    a.onclick = (e) => { e.preventDefault(); picView(a.dataset.full || a.querySelector("img").src, a.title || "", a.href); };
+    a.onclick = (e) => { e.preventDefault(); picView(a.dataset.full || a.querySelector("img").src, a.title || "", a.href, a.dataset.src || a.querySelector("img").src); };
   });
 }
-function picView(src, title, page) {
+function picView(src, title, page, thumb) {
   let v = $("#picview");
   if (!v) { v = document.createElement("div"); v.id = "picview"; v.innerHTML = `<img alt=""><div class="pv-t"></div><button class="btn" id="pv-src">Источник</button>`; document.body.appendChild(v);
     v.onclick = (e) => { if (e.target.id !== "pv-src") v.classList.remove("on"); }; }
-  v.querySelector("img").src = src; v.querySelector(".pv-t").textContent = title;
+  const im = v.querySelector("img"); im.referrerPolicy = "no-referrer";
+  im.onerror = () => { if (thumb && im.src !== thumb) im.src = thumb; };      // оригинал с сайта не дался — миниатюра поисковика
+  im.src = src; v.querySelector(".pv-t").textContent = title;
   v.querySelector("#pv-src").onclick = () => { if (page) D.openUrl(page); };
   v.classList.add("on");
 }

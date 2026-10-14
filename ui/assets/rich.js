@@ -5,7 +5,8 @@
    блоки узнаются по первой строке (graph, flowchart, sequenceDiagram, mindmap…) и заменяются картинкой. Mermaid
    (vendor/mermaid.min.js, ~2,7 МБ, лицензия MIT) грузится только при первой диаграмме; готовые картинки кешируются по
    тексту, поэтому поток ответа их не перерисовывает. Не нарисовалось — остаётся текст схемы с подсказкой.
-   Картинки: gallery(items) — HTML ленты миниатюр с подписью и ссылкой на источник (show_images, Wikimedia Commons). */
+   Картинки: gallery(items) — HTML ленты миниатюр с подписью и ссылкой на источник (show_images: поисковик картинок,
+   запасной — Wikimedia Commons). Миниатюра не загрузилась — убирается. */
 (function () {
   const BASE = (() => { try { const s = document.currentScript && document.currentScript.src; return s ? s.replace(/[^/]*$/, "") : ""; } catch (e) { return ""; } })();
   const SRC = window.DEWIAR_MERMAID_SRC || BASE + "vendor/mermaid.min.js";
@@ -81,13 +82,21 @@
     return done;
   }
 
-  /** Лента картинок: [{src, page, title, author, license}] -> HTML (миниатюра — ссылка на источник). */
+  const isCommons = (x) => x.source ? x.source === "commons" : /commons\.wikimedia\.org/.test(x.page || "");
+  const siteOf = (x) => x.site || (() => { try { return new URL(x.page || x.full || x.src).hostname.replace(/^www\./, ""); } catch (e) { return ""; } })();
+  function credit(list) {
+    if (list.every(isCommons))
+      return "Картинки: Wikimedia Commons" + (list.some(x => x.license) ? " · " + [...new Set(list.map(x => x.license).filter(Boolean))].slice(0, 3).join(", ") : "");
+    const sites = [...new Set(list.map(siteOf).filter(Boolean))].slice(0, 3);
+    return "Картинки из поиска" + (sites.length ? " · " + sites.join(", ") : "") + " — нажмите, чтобы открыть";
+  }
+  /** Лента картинок: [{src, full, page, title, author, license, site, source}] -> HTML (миниатюра — ссылка на источник). */
   function gallery(items, opts) {
     const list = (items || []).filter(x => x && x.src).slice(0, (opts && opts.max) || 6);
     if (!list.length) return "";
-    return `<div class="dw-gallery">${list.map(x => `<a class="dw-pic" href="${esc(x.page || x.full || x.src)}" target="_blank" rel="noopener" data-full="${esc(x.full || x.src)}" title="${esc(x.title || "")}${x.author ? " — " + esc(x.author) : ""}">`
-      + `<img src="${esc(x.src)}" alt="${esc(x.title || "картинка")}" loading="lazy" referrerpolicy="no-referrer"><span>${esc(x.title || "")}</span></a>`).join("")}`
-      + `<small class="dw-credit">Картинки: Wikimedia Commons${list.some(x => x.license) ? " · " + esc([...new Set(list.map(x => x.license).filter(Boolean))].slice(0, 3).join(", ")) : ""}</small></div>`;
+    return `<div class="dw-gallery">${list.map(x => `<a class="dw-pic" href="${esc(x.page || x.full || x.src)}" target="_blank" rel="noopener" data-full="${esc(x.full || x.src)}" data-src="${esc(x.src)}" title="${esc(x.title || "")}${x.author ? " — " + esc(x.author) : siteOf(x) ? " — " + esc(siteOf(x)) : ""}">`
+      + `<img src="${esc(x.src)}" alt="${esc(x.title || "картинка")}" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.remove()"><span>${esc(x.title || "")}</span></a>`).join("")}`
+      + `<small class="dw-credit">${esc(credit(list))}</small></div>`;
   }
 
   const css = document.createElement("style");

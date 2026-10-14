@@ -548,7 +548,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
     def show_media(self, items, caption=""):
         """Картинки к рассказу (show_images): сразу в виджет и окно чата (событие media), а к готовому ответу — в ленту
         «Чата» (миниатюры со ссылкой на источник)."""
-        self.emit("media", items=items, caption=caption, source="commons")
+        self.emit("media", items=items, caption=caption, source="pics")
         prev = getattr(self, "_turn_media", None)
         keep = prev[1] if prev and time.monotonic() - prev[0] < 300 else []
         self._turn_media = (time.monotonic(), (keep + list(items))[:12])
@@ -571,7 +571,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
                 at, media = getattr(self, "_turn_media", None) or (0, [])
                 if media and time.monotonic() - at < 300:
                     att, self._turn_media = [{"kind": "image", "name": m.get("title", ""), "thumb": m.get("src", ""), "url": m.get("page", ""),
-                                              "full": m.get("full", ""), "author": m.get("author", ""), "license": m.get("license", "")}
+                                              "full": m.get("full", ""), "author": m.get("author", ""), "license": m.get("license", ""),
+                                              "site": m.get("site", ""), "source": m.get("source", "")}
                                              for m in media], None
             item = self.chatlog.add("user" if type_ == "heard" else "assistant", text,
                                     who=None if type_ == "heard" else self.s.get("persona"), via=via, att=att)

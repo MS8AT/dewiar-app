@@ -172,26 +172,28 @@ def t_web_search(a, ctx):
 
 
 def t_show_images(a, ctx):
-    """Показать картинки к рассказу (images.py, Wikimedia Commons) — в виджете, «Чате» студии; модели — что показано."""
+    """Показать картинки к рассказу (images.py: поисковик картинок, запасной — Wikimedia Commons) — в виджете, «Чате»
+    студии; модели — что показано."""
     import images as IM
     q = (a.get("query") or "").strip()
     if not q:
         raise ToolError("пустой запрос — что показать?")
     n = max(1, min(6, int(a.get("count") or 4)))
     try:
-        items = IM.search(q, n)
+        items = IM.search(q, n, searx_url=ctx["settings"].get("tools", "search_url") or "", via=ctx.get("dewiar_web"))
     except httpx.HTTPError as e:
         raise ToolError(f"картинки сейчас не загрузились ({e}) — скажи об этом коротко") from e
     if not items:
-        return ("Картинок по этому запросу не нашлось. Не говори, что показала их; можно попробовать запрос по-английски "
-                "или проще (одно-два слова).")
+        return ("Картинок по этому запросу не нашлось. Не говори, что показала их; можно попробовать запрос проще (одно-два "
+                "слова) или по-английски.")
     eng = ctx.get("engine")
     if eng is not None and hasattr(eng, "show_media"):
         eng.show_media(items, str(a.get("caption") or ""))
-    return (f"На экране показано картинок: {len(items)} (Wikimedia Commons). Что на них:\n"
-            + "\n".join(f"{i + 1}. {x['title']}" + (f" — {x['desc'][:120]}" if x.get("desc") else "") for i, x in enumerate(items))
+    return (f"На экране показано картинок: {len(items)} ({IM.credit(items)}). Что на них (подписи с сайтов):\n"
+            + "\n".join(f"{i + 1}. {x['title']}" + (f" — {x['desc'][:120]}" if x.get("desc") else "")
+                        + (f" [{x['site']}]" if x.get("site") and x.get("source") != "commons" else "") for i, x in enumerate(items))
             + "\nГовори о них как о показанных («на второй картинке…»), но описывай только то, что следует из подписей; "
-              "не выдумывай деталей.")
+              "не выдумывай деталей. Подпись не о том — не выдавай картинку за нужную.")
 
 
 def html_to_text(page):
@@ -1979,8 +1981,8 @@ TOOLS = {
                     "сделал», «сколько дел за неделю», «какие у меня достижения».", S({"days": {"type": "number"}}), "safe", t_done_report, "Дела: итог"),
     "show_images": ("Показать пользователю картинки к тому, о чём рассказываешь (руны и орнаменты, животные и растения, "
                     "картины, здания, места, устройство вещей) — они появятся на экране рядом с ответом. Вызывай, когда "
-                    "рассказ о том, что лучше увидеть, или просят «покажи». query — 2–5 ключевых слов, лучше по-английски "
-                    "(«Urnes style runestone», «Celtic knotwork animal»); count — сколько (1–6, обычно 3–4); caption — подпись. "
+                    "рассказ о том, что лучше увидеть, или просят «покажи». Ищет как поисковик картинок. query — 2–5 ключевых слов "
+                    "(«руническая вязь камень», «Urnes style runestone»); count — сколько (1–6, обычно 3–4); caption — подпись. "
                     "Не говори «вот изображение», не вызвав инструмент.",
                     S({"query": {"type": "string"}, "count": {"type": "integer"}, "caption": {"type": "string"}}, ["query"]),
                     "safe", t_show_images, "Картинки к рассказу"),
