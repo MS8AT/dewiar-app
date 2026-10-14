@@ -445,12 +445,14 @@ def make_repo(kind, where):
 
 
 def run_tests(folder, extra=None):
-    """Тесты проекта (unittest). extra — скрытый тест: {имя файла: текст}. -> (прошли ли, хвост вывода)."""
+    """Тесты проекта (unittest). extra — скрытый тест: {имя файла: текст}; тогда запускается только он (экзамен 14.10:
+    свой тест модели на pytest, которого нет, ронял и скрытую проверку, хотя server.py был верен). -> (прошли ли, хвост вывода)."""
     folder = Path(folder)
     for name, text in (extra or {}).items():
         (folder / "tests" / name).write_text(text, encoding="utf-8")
+    cmd = TEST_CMD + (["-p", "test_hidden_*.py"] if extra else [])
     try:
-        r = subprocess.run(TEST_CMD, cwd=folder, capture_output=True, text=True, timeout=120)
+        r = subprocess.run(cmd, cwd=folder, capture_output=True, text=True, timeout=120)
         return r.returncode == 0, (r.stdout + r.stderr)[-600:]
     except subprocess.TimeoutExpired:
         return False, "тесты не уложились в 2 минуты"

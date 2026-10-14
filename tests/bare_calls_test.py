@@ -106,6 +106,14 @@ txt, calls = run('<tool_call>\n{"tool_name": "show", "arguments": {"path": "c"}}
 ok(calls and calls[0]["name"] == "show", f"в тегах с ключом tool_name: {calls}")
 ok(llm.parse_tool_call('{"tool_name": "use_skill", "arguments": {"name": "slides"}}') == {"name": "use_skill", "args": {"name": "slides"}},
    "parse_tool_call понимает tool_name")
+# экзамен 14.10 (Qwen в облаке): перевод строки в ключе и имя функции первой строкой — раньше «не разобран» и пустой ответ
+ok(llm.parse_tool_call('\n{"\n\nname": "code_run", "arguments": {"command": "python3 -m pytest -q"}}\n') == {"name": "code_run", "args": {"command": "python3 -m pytest -q"}},
+   "вызов с переводом строки внутри ключа «name»")
+ok(llm.parse_tool_call('\n{"\n\nname": "code_diff", "arguments": {}}\n') == {"name": "code_diff", "args": {}}, "то же без аргументов")
+ok(llm.parse_tool_call('\n{"use_skill", "name": "letters"}\n') == {"name": "use_skill", "args": {"name": "letters"}},
+   "{\"use_skill\", \"name\": …} — имя функции первой строкой")
+txt, calls = run('<tool_call>\n{"\n\nname": "show", "arguments": {"path": "q"}}\n</tool_call>')
+ok(calls and calls[0]["args"] == {"path": "q"} and not txt.strip(), f"в потоке — тоже вызов, а не пустой ответ: {calls} {txt!r}")
 
 
 # ---------- 2. задача, как у пользователя ----------

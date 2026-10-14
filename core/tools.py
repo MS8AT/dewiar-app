@@ -203,8 +203,67 @@ def html_to_text(page):
     return re.sub(r"\n\s*\n+", "\n", text).strip()
 
 
+PAGE_MAX = 6000
+PAGE_EMPTY = ("Страница открылась, но текста на ней нет (скорее всего, он подгружается скриптом). Ничего не пересказывай "
+              "за неё и не придумывай — открой другой адрес из поиска или честно скажи, что страница не прочиталась.")
+_STOP = set("какой какая какие каков сегодня сейчас завтра вчера скажи покажи найди пожалуйста можно нужно этот этого "
+            "много очень только было будет есть где когда почему зачем сколько".split())
+
+
+def _terms(text):
+    """Слова вопроса для поиска по странице: основа (5 букв) — «доллара» найдёт «Доллар США»."""
+    out = []
+    for w in re.findall(r"[A-Za-zА-Яа-яЁё0-9]{4,}", text or ""):
+        w = w.lower()
+        if w not in _STOP and not w.isdigit() and w[:5] not in out:
+            out.append(w[:5])
+    return out[:8]
+
+
+def page_excerpt(text, find="", question=""):
+    """Длинная страница -> начало и куски вокруг слов find (или вопроса), всё в PAGE_MAX. Экзамен 14.10: строка
+    «Доллар США» на странице ЦБ стояла после шести тысяч знаков — модель её не увидела и выдумала курс;
+    пустая страница журнала — выдумала фильм."""
+    text = (text or "").strip()
+    if len(re.sub(r"\s+", "", text)) < 80:
+        return PAGE_EMPTY
+    if len(text) <= PAGE_MAX:
+        return text
+    terms = _terms(find) or _terms(question)
+    low = text.lower()
+    spans = []
+    for t in terms:
+        for m in re.finditer(re.escape(t), low):
+            if m.start() < 1500:
+                continue
+            spans.append((max(1500, m.start() - 500), min(len(text), m.end() + 700)))
+            if len(spans) > 40:
+                break
+    spans.sort()
+    merged = []
+    for a_, b_ in spans:
+        if merged and a_ <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b_))
+        else:
+            merged.append((a_, b_))
+    if not merged:
+        return (text[:PAGE_MAX] + f"…\n[Страница длиннее: показано {PAGE_MAX} из {len(text)} знаков. Если нужного здесь нет — "
+                "вызови read_webpage ещё раз с find (что ищешь на странице, например «Доллар США»); не додумывай.]")
+    out, left = [text[:1500]], PAGE_MAX - 1500
+    for a_, b_ in merged:
+        if left <= 200:
+            break
+        piece = text[a_:min(b_, a_ + left)]
+        out.append(piece); left -= len(piece)
+    return ("\n…\n".join(out) + f"\n[Страница длинная ({len(text)} знаков): выше начало и места со словами "
+            f"«{', '.join(terms)}». Чего здесь нет — того на странице не видно; не додумывай.]")
+
+
 def t_read_webpage(a, ctx):
-    """Текст страницы, не больше 6000 символов — чтобы одна страница не съела контекст модели."""
+    """Текст страницы, не больше PAGE_MAX символов — чтобы одна страница не съела контекст модели; длинная — начало и
+    куски вокруг нужных слов (find или слова вопроса), пустая — честно «текста нет»."""
+    eng = ctx.get("engine")
+    find, question = (a.get("find") or "").strip(), getattr(eng, "_turn_text", "") if eng else ""
     url = (a.get("url") or "").strip()
     if not re.match(r"^https?://", url):
         raise ToolError("нужен полный адрес страницы")
@@ -219,12 +278,12 @@ def t_read_webpage(a, ctx):
             try:
                 text = via("fetch", url)
                 log.info("Страница через сервер Dewiar (напрямую: %s)", e)
-                return text[:6000] + ("…" if len(text) > 6000 else "")
+                return page_excerpt(text, find, question)
             except Exception as e2:  # noqa: BLE001
                 log.info("Страница через сервер Dewiar не открылась: %s", e2)
         raise ToolError(f"страница не открылась: {e}") from e
     text = html_to_text(r.text) if "html" in r.headers.get("content-type", "html") else r.text
-    return text[:6000] + ("…" if len(text) > 6000 else "")
+    return page_excerpt(text, find, question)
 
 
 def desktop_apps():
@@ -1877,7 +1936,9 @@ TOOLS = {
                  "app": {"type": "string", "enum": ["yandex", "google"]}}, ["to"]), "safe", t_route, "Карта: маршрут"),
     "open_url": ("Открыть сайт в браузере по умолчанию.", S({"url": {"type": "string", "description": "адрес сайта"}}, ["url"]), "safe", t_open_url, "Браузер: открыть сайт"),
     "web_search": ("Найти в интернете свежую информацию (новости, погода, курсы, факты). Возвращает список результатов со ссылками.", S({"query": {"type": "string"}}, ["query"]), "safe", t_web_search, "Поиск в интернете"),
-    "read_webpage": ("Прочитать текст веб-страницы по адресу (например, из результатов поиска).", S({"url": {"type": "string"}}, ["url"]), "safe", t_read_webpage, "Чтение веб-страниц"),
+    "read_webpage": ("Прочитать текст веб-страницы по адресу (например, из результатов поиска). Длинная страница — начало и "
+                     "места со словами find (или вопроса).", S({"url": {"type": "string"}, "find": {"type": "string", "description":
+                     "что ищешь на странице, если она длинная: «Доллар США», «15 октября»"}}, ["url"]), "safe", t_read_webpage, "Чтение веб-страниц"),
     "open_app": ("Запустить установленную программу по названию (Firefox, Терминал, Telegram, Калькулятор…).", S({"name": {"type": "string"}}, ["name"]), "safe", t_open_app, "Запуск программ"),
     "open_path": ("Открыть файл или папку (можно «загрузки», «документы», «рабочий стол» или путь).", S({"path": {"type": "string"}}, ["path"]), "safe", t_open_path, "Открытие файлов и папок"),
     "play_music": ("Включить музыку: открывает поиск в YouTube Music.", S({"query": {"type": "string", "description": "исполнитель, песня или настроение"}}), "safe", t_play_music, "Музыка в YouTube Music"),

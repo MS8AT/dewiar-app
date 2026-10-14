@@ -310,6 +310,41 @@ def promise_nudge(deliverable):
              if deliverable else "Если нужны данные — вызови поиск или другой инструмент и ответь по результату."))
 
 
+# Экзамен 14.10: «посчитай дни до Нового года и поставь таймер на столько же минут» — посчитала 79, вызвала set_reminder
+# с in_minutes 59 и сказала «Таймер на 79 минут поставила». Число минут в ответе не совпадает с поставленным — просим исправить.
+_MIN_SAID = re.compile(r"\b(?:на|через)\s+(\d{1,4})\s*(мин\w*|час\w*|ч\b)|\b(?:на|через)\s+(полчаса|час)\b", re.I)
+
+
+def number_mismatch(text, calls):
+    """Ответ называет минуты таймера/напоминания, а set_reminder поставлен на другое число -> подсказка модели или ""."""
+    actual = []
+    for c in calls or []:
+        if c.get("name") != "set_reminder" or str(c.get("result") or "").startswith(("Ошибка", "Инструмент")):
+            continue
+        v = (c.get("args") or {}).get("in_minutes")
+        try:
+            actual.append(int(float(v)))
+        except (TypeError, ValueError):
+            m = re.search(r"через\s+(\d+)\s*мин", str(c.get("result") or ""))
+            if m:
+                actual.append(int(m.group(1)))
+    if not actual:
+        return ""
+    said = []
+    for m in _MIN_SAID.finditer(text or ""):
+        if m.group(3):
+            said.append((m.group(0), 30 if m.group(3).lower() == "полчаса" else 60))
+        else:
+            n = int(m.group(1))
+            said.append((m.group(0), n * 60 if m.group(2).lower().startswith("ч") else n))
+    if not said or any(n in actual for _, n in said):
+        return ""
+    claim, n = said[0]
+    return (f"ПРОВЕРКА: в ответе ты сказал(а) «{claim}», а напоминание поставлено через {actual[0]} мин — числа не совпадают. "
+            f"Если нужно {n} мин — поставь set_reminder заново на {n} мин и отмени неверное (cancel_reminder); если верно "
+            f"{actual[0]} — так и скажи. Одной короткой фразой скажи, что исправил(а).")
+
+
 # ---------------- независимая проверка итога ----------------
 
 CRITIC = (

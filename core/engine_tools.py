@@ -620,7 +620,11 @@ class ToolsMixin:
     AGENDA_Q = re.compile(r"по\s+плану|\bплан(?:ы|ов)?\s+(?:на|у\s+(?:нас|меня))|как(?:ие|ой)\s+(?:у\s+(?:нас|меня)\s+)?(?:сегодня\s+|завтра\s+)?(?:план|дела)"
                           r"|что\s+(?:у\s+(?:нас|меня)\s+)?(?:на\s+|в\s+)?(?:сегодня|завтра|послезавтра|эт\w+\s+недел\w+)(?:\s*\?|\s*$|\s+(?:по\s+плану|запланирован|в\s+календаре))"
                           r"|расписани\w+|что\s+(?:у\s+(?:нас|меня)\s+)?запланирован|мои\s+дела|чем\s+(?:я\s+)?занят|повестк\w+\s+дня"
-                          r"|что\s+мне\s+(?:сегодня\s+|завтра\s+)?(?:надо|нужно)\s+(?:сделать|успеть)", re.I)
+                          r"|что\s+мне\s+(?:сегодня\s+|завтра\s+)?(?:надо|нужно)\s+(?:сделать|успеть)"
+                          # экзамен 14.10: «что у меня в среду?» — день недели (и память «встреча в среду» тоже)
+                          r"|(?:что|какие\s+планы|как\w*\s+дела)\s+(?:у\s+(?:нас|меня)\s+)?(?:на\s+|в\s+|во\s+)"
+                          r"(?:понедельник|вторник|сред\w|четверг|пятниц\w|суббот\w|воскресень\w)", re.I)
+    WEEKDAY_Q = (("понедельник", 0), ("вторник", 1), ("сред", 2), ("четверг", 3), ("пятниц", 4), ("суббот", 5), ("воскресен", 6))
 
     def agenda_context(self, text):
         """Вопрос о планах («что у нас по плану», «какие дела на завтра», «расписание на неделю») — дела, напоминания и
@@ -637,12 +641,24 @@ class ToolsMixin:
             days = [today + timedelta(days=1)]
         elif "недел" in low:
             days = [today + timedelta(days=i) for i in range(7)]
+        elif any(w in low for w, _ in self.WEEKDAY_Q):
+            wd = next(n for w, n in self.WEEKDAY_Q if w in low)
+            first = today + timedelta(days=(wd - today.weekday()) % 7)
+            days = [first] + ([first + timedelta(days=7)] if first == today else [])   # в саму среду «в среду» — и сегодня, и через неделю
         else:
             days = [today] + ([today + timedelta(days=1)] if datetime.now().hour >= 18 else [])
         names = {today: "сегодня", today + timedelta(days=1): "завтра", today + timedelta(days=2): "послезавтра"}
         months, lines = {}, []
         now_hm = datetime.now().strftime("%H:%M")
+        try:                                             # память: «в среду в 15:00 встреча» записана с датой «(на 14.10.2026, среда)»
+            mem = [x.strip(" -*\t") for x in (self.workspace.memory_text() or "").splitlines() if x.strip()]
+        except Exception:  # noqa: BLE001
+            mem = []
         for d in days:
+            head0 = f"{d.strftime('%d.%m')} ({names.get(d) or ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'][d.weekday()]})"
+            remembered = [x for x in mem if d.strftime("%d.%m.%Y") in x]
+            for x in remembered[:6]:
+                lines.append(f"{head0} из твоей памяти: {x[:200]}")
             key = (d.year, d.month)
             if key not in months:
                 try:
@@ -654,7 +670,8 @@ class ToolsMixin:
             items.sort(key=lambda x: x.get("time") or "")
             head = f"{d.strftime('%d.%m')} ({names.get(d) or ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'][d.weekday()]})"
             if not items:
-                lines.append(f"{head}: ничего не запланировано")
+                if not remembered:
+                    lines.append(f"{head}: ничего не запланировано")
                 continue
             for x in items:
                 kind = {"event": "встреча" + (f" ({x['cal']})" if x.get("cal") else ""), "task": "задача"}.get(x["type"]) or \
@@ -665,7 +682,8 @@ class ToolsMixin:
                              + (" — уже прошло" if past else "") + (", повторяется" if x.get("repeat") else ""))
         log.info("📅 Вопрос о планах — даю модели дела и календарь (%d стр.)", len(lines))
         return ("\n\nПЛАНЫ ПОЛЬЗОВАТЕЛЯ (напоминания, дела по расписанию и встречи календаря — уже получены, это свежие данные): "
-                "отвечай по ним сразу, без вызова инструментов и без «сейчас посмотрю». Сначала то, что впереди, по времени; "
+                "отвечай по ним сразу, без вызова инструментов и без «сейчас посмотрю». Записанное в твоей памяти — тоже планы, называй их. "
+                "Сначала то, что впереди, по времени; "
                 "прошедшее — одной фразой или не упоминай; ничего нет — так и скажи. Ничего не выдумывай.\n" + "\n".join(lines))
 
     def calendar_month(self, year, month):

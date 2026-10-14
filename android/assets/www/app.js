@@ -875,6 +875,7 @@ function showYou(t) { $("#you").textContent = t ? "«" + t + "»" : ""; quietChe
    ввода, а сохранить его было нечем. */
 const LONG_ANSWER = 160;
 let turnMedia = null;                            // картинки этого ответа (show_images) — под ответом и в истории
+let turnQ = "";                                 // вопрос этого хода: длинная страница (readPage) — куски по его словам
 const isLongAnswer = (t) => String(t || "").length >= LONG_ANSWER || /\n\s*(?:[-*•]|\d+[.)])\s|\n\s*\||```/.test(String(t || "")) || !!(turnMedia && turnMedia.length);
 function showBot(t, cls) {
   const b = $("#bot"), long = !cls && isLongAnswer(t);
@@ -1690,7 +1691,7 @@ async function ask(text, opts = {}) {
   busy = true;
   const t0 = Date.now();
   turnT = { t0, word: 0, said: 0, logged: false };
-  turnMedia = null;
+  turnMedia = null; turnQ = opts.hidden ? turnQ : text;
   plog("info", `❓ ${clip(text)} → ${S.llm.cloud ? "Dewiar Облако" : (S.llm.name || S.llm.model || "модель")}`);
   const ctl = turnAbort = new AbortController();
   const sink = sentenceSink();
@@ -1737,6 +1738,7 @@ async function ask(text, opts = {}) {
         }
       }
     };
+    const doneCalls = []; let numChecked = false;      // вызовы с результатами — сверить числа ответа (numberMismatch)
     for (let round = 0; round < maxRounds; round++) {
       let r;
       try {
@@ -1771,6 +1773,8 @@ async function ask(text, opts = {}) {
         else if (claim.tool.startsWith("take_photo")) sink.push(" Секунду — включаю камеру. ");
         continue;
       }
+      const fix = !r.calls.length && !numChecked ? numberMismatch(r.text || "", doneCalls) : "";
+      if (fix) { numChecked = true; msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: fix }); sink.push(" "); continue; }   // «на 79 минут», а поставлено 59
       if (!r.calls.length && round === 0 && REFUSAL_RX.test(r.text || "") && String(r.text).length < 1200) {
         // «у меня нет доступа к интернету», а поиск есть — один раз просим поискать (как в задачах на компьютере)
         msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: REFUSAL_NUDGE });
@@ -1794,6 +1798,7 @@ async function ask(text, opts = {}) {
           res = String(res) + " (Твой ответ оборвался по лимиту длины, и вызов пришёл не целиком. Сделай короче: меньше текста и "
             + "комментариев, компактный код — и вызови снова.)";
         msgs.push({ role: "tool", tool_call_id: c.id, name: c.name, content: String(res).slice(0, 8000) });
+        doneCalls.push({ name: c.name, args: safeJSON(c.args), result: String(res).slice(0, 300) });
       }
       if (shots.length) {                            // снимок с камеры — модели картинкой (сама модель со зрением, если есть)
         msgs.push({ role: "user", content: [{ type: "text", text: "Снимок с камеры телефона:" }, ...shots.map(u => ({ type: "image_url", image_url: { url: u } }))] });
@@ -2277,6 +2282,26 @@ const CLAIMS = [
 ];
 /* -> обещание из CLAIMS, инструмент которого в этом ходе так и не вызывали (called — вызванные), или null.
    asked — просьба человека: у части обещаний («смотрю», «вот») смысл есть только при просьбе про камеру (c.user) */
+/* Экзамен 14.10: посчитала 79 дней, поставила таймер на 59 минут и сказала «на 79» — число минут в ответе не совпадает
+   с поставленным: просим исправить (как quality.number_mismatch на компьютере). -> подсказка модели или "". */
+function numberMismatch(text, calls) {
+  const actual = [];
+  for (const c of calls || []) {
+    if (c.name !== "set_reminder" || /^(Ошибка|Инструмент)/.test(String(c.result || ""))) continue;
+    const v = parseFloat((c.args || {}).in_minutes);
+    if (isFinite(v)) actual.push(Math.round(v));
+    else { const m = String(c.result || "").match(/через\s+(\d+)\s*мин/); if (m) actual.push(+m[1]); }
+  }
+  if (!actual.length) return "";
+  const said = [];
+  for (const m of String(text || "").matchAll(/(?:^|[^\p{L}])(?:на|через)\s+(?:(\d{1,4})\s*(мин\p{L}*|час\p{L}*|ч(?!\p{L}))|(полчаса|час)(?!\p{L}))/giu)) {
+    if (m[3]) said.push([m[0].trim(), m[3].toLowerCase() === "полчаса" ? 30 : 60]);
+    else said.push([m[0].trim(), /^ч/i.test(m[2]) ? +m[1] * 60 : +m[1]]);
+  }
+  if (!said.length || said.some(([, n]) => actual.includes(n))) return "";
+  const [claim, n] = said[0];
+  return `ПРОВЕРКА: в ответе ты сказал(а) «${claim}», а напоминание поставлено через ${actual[0]} мин — числа не совпадают. Если нужно ${n} мин — поставь set_reminder заново на ${n} мин и отмени неверное (cancel_reminder); если верно ${actual[0]} — так и скажи. Одной короткой фразой скажи, что исправил(а).`;
+}
 function claimedAction(text, called, asked) {
   const t = String(text || "").trim();
   // работал(а) пальцами в другом приложении — «открылось на экране», «включаю» там правда: не путаем с make_app и радио
@@ -2429,7 +2454,8 @@ function toolSpecs() {
     { name: "web_search", description: "Найти в интернете свежие сведения. Не выдумывай результаты.", parameters: O({ query: STR }, ["query"]) },
     { name: "show_images", description: "Показать картинки к тому, о чём рассказываешь (руны и орнаменты, животные, растения, картины, здания, места) — появятся на экране под ответом. Вызывай, когда это лучше увидеть или просят «покажи». query — 2–5 ключевых слов, лучше по-английски; count — 1–6 (обычно 3–4). Не говори «вот изображение», не вызвав инструмент.",
       parameters: O({ query: STR, count: NUM, caption: STR }, ["query"]) },
-    { name: "read_webpage", description: "Прочитать страницу по ссылке (текст).", parameters: O({ url: STR }, ["url"]) },
+    { name: "read_webpage", description: "Прочитать страницу по ссылке (текст). Длинная — начало и места со словами find (или вопроса).",
+      parameters: O({ url: STR, find: { type: "string", description: "что ищешь на длинной странице: «Доллар США», «15 октября»" } }, ["url"]) },
     { name: "weather", description: "Погода сейчас и на ближайшие дни: city — город (если пользователь не назвал — из памяти о нём).", parameters: O({ city: STR, days: NUM }, ["city"]) },
     { name: "flashlight", description: "Фонарик: on true/false.", parameters: O({ on: { type: "boolean" } }, ["on"]) },
     { name: "take_photo", description: "Сфотографировать камерой телефона и посмотреть на снимок: camera front — фронтальная (на пользователя: «сфотографируй меня», «как я выгляжу»), back — основная (на то, что перед телефоном: «что это», «прочитай надпись»). Снимок придёт следующим сообщением — опиши его или ответь на вопрос.",
@@ -2567,7 +2593,7 @@ async function runTool(name, a) {
     }
     case "web_search": return await webSearch(a.query || "");
     case "show_images": return await webImages(a.query || "", a.count);
-    case "read_webpage": return await readPage(a.url || "");
+    case "read_webpage": return await readPage(a.url || "", a.find || "");
     case "weather": return await weather(a.city || "", a.days || 3);
     case "flashlight": return devTorch(!!a.on) ? (a.on ? "Фонарик включён." : "Фонарик выключен.") : "Фонарика нет.";
     case "take_photo": {
@@ -2801,14 +2827,37 @@ async function webSearch(q) {
   }
   return out.length ? out.join("\n\n") : "Поиск ничего не дал.";
 }
-async function readPage(url) {
+/* Длинная страница — начало и куски вокруг слов find (или вопроса); пустая — честно «текста нет» (экзамен 14.10: курс
+   доллара стоял дальше 7000 знаков — модель его выдумала; пустая страница журнала — выдумала фильм). Как page_excerpt на компьютере. */
+const PAGE_MAX = 7000, PAGE_EMPTY = "Страница открылась, но текста на ней нет (скорее всего, он подгружается скриптом). Ничего не пересказывай за неё и не придумывай — открой другой адрес из поиска или честно скажи, что страница не прочиталась.";
+const PAGE_STOP = new Set("какой какая какие каков сегодня сейчас завтра вчера скажи покажи найди пожалуйста можно нужно этот этого много очень только было будет есть где когда почему зачем сколько".split(" "));
+function pageTerms(t) {
+  const out = [];
+  for (const w0 of String(t || "").match(/[A-Za-zА-Яа-яЁё0-9]{4,}/g) || []) { const w = w0.toLowerCase(); if (!PAGE_STOP.has(w) && !/^\d+$/.test(w) && !out.includes(w.slice(0, 5))) out.push(w.slice(0, 5)); }
+  return out.slice(0, 8);
+}
+function pageExcerpt(text, find, question) {
+  text = String(text || "").trim();
+  if (text.replace(/\s+/g, "").length < 80) return PAGE_EMPTY;
+  if (text.length <= PAGE_MAX) return text;
+  const terms = pageTerms(find).length ? pageTerms(find) : pageTerms(question), low = text.toLowerCase(), spans = [];
+  for (const t of terms) { let i = low.indexOf(t, 1500); while (i >= 0 && spans.length <= 40) { spans.push([Math.max(1500, i - 500), Math.min(text.length, i + t.length + 700)]); i = low.indexOf(t, i + t.length); } }
+  spans.sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const [a, b] of spans) { if (merged.length && a <= merged[merged.length - 1][1]) merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], b); else merged.push([a, b]); }
+  if (!merged.length) return text.slice(0, PAGE_MAX) + `…\n[Страница длиннее: показано ${PAGE_MAX} из ${text.length} знаков. Если нужного здесь нет — вызови read_webpage ещё раз с find (что ищешь, например «Доллар США»); не додумывай.]`;
+  const out = [text.slice(0, 1500)]; let left = PAGE_MAX - 1500;
+  for (const [a, b] of merged) { if (left <= 200) break; const piece = text.slice(a, Math.min(b, a + left)); out.push(piece); left -= piece.length; }
+  return out.join("\n…\n") + `\n[Страница длинная (${text.length} знаков): выше начало и места со словами «${terms.join(", ")}». Чего здесь нет — того на странице не видно; не додумывай.]`;
+}
+async function readPage(url, find) {
   if (!/^https?:/.test(url)) url = "https://" + url;
   try {
     const r = await http("GET", url, { headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 14) Dewiar" }, timeout: 20000 });
     if (r.status === 403 || r.status === 451) throw new Error("сайт не пускает (" + r.status + ")");
-    return stripHtml(r.body || "").slice(0, 7000) || "Страница пустая.";
+    return pageExcerpt(stripHtml(r.body || ""), find, turnQ);
   } catch (e) {
-    try { return String((await dewiarWeb("fetch", url)).text || "").slice(0, 7000) || "Страница пустая."; }
+    try { return pageExcerpt(String((await dewiarWeb("fetch", url)).text || ""), find, turnQ); }
     catch (e2) { return `Ошибка: страница не открылась (${e.message}).`; }
   }
 }

@@ -47,7 +47,15 @@ class H(BaseHTTPRequestHandler):
 
         def send(delta, fin=None):
             self.wfile.write(f"data: {json.dumps({'choices': [{'delta': delta, 'finish_reason': fin}]}, ensure_ascii=False)}\n\n".encode())
-        if msgs[-1]["role"] == "tool" or user.startswith("<tool_response>"):   # без инструментов история — текстом
+        if "Поставь таймер" in first_q or user.startswith("ПРОВЕРКА"):          # экзамен 14.10: «на 79», а поставлено 59
+            if user.startswith("ПРОВЕРКА"):
+                send({"content": "Поправка: верно 59 минут."}); send({}, "stop")
+            elif msgs[-1]["role"] == "tool":
+                send({"content": "Таймер на 79 минут поставила."}); send({}, "stop")
+            else:
+                send({"tool_calls": [{"index": 0, "id": "t1", "type": "function", "function": {"name": "set_reminder",
+                      "arguments": json.dumps({"text": "Таймер", "in_minutes": 59})}}]}); send({}, "tool_calls")
+        elif msgs[-1]["role"] == "tool" or user.startswith("<tool_response>"):   # без инструментов история — текстом
             send({"content": "Взялась за презентацию — сообщу, когда будет готово."}); send({}, "stop")
         elif user.startswith("СТОП") and "start_task" in user:
             send({"tool_calls": [{"index": 0, "id": "c1", "type": "function", "function": {"name": "start_task",
@@ -132,7 +140,7 @@ async def session():
         await call("reminder_add", phrase="через 30 минут полить цветы")
         for q, key in (("Сделай мне презентацию о завтрашней погоде", "pres"), ("Какая погода завтра?", "promise"),
                        ("Какая погода в моём городе?", "ask"), ("Привет", "plain"), ("Что у нас по плану?", "plan"),
-                       ("А я что у тебя просил?", "asked")):
+                       ("А я что у тебя просил?", "asked"), ("Поставь таймер на столько минут, сколько дней до Нового года", "timer")):
             m = len(events)
             await call("say", text=q)
             R[key] = await final(m)
@@ -164,6 +172,8 @@ ok(R["plain"].startswith("Привет"), "обычный ответ не тро
 ok("полить цветы" in R["plan"] and "секунду" not in R["plan_all"], f"«что у нас по плану» — дела уже перед моделью, ответ сразу: {R['plan_all'][:120]}")
 ok("+12" in R["asked"], f"«достаю календарь — одну секунду» без действия → доделала: {R['asked_all'][-80:]}")
 ok(log.count("✋ Модель") == 3, f"просили доделать трижды (презентация, погода, «одну секунду»): {log.count('✋ Модель')}")
+ok("Поправка: верно 59" in R["timer_all"] and "✋ Число в ответе не совпадает" in log,
+   f"«таймер на 79 минут», а поставлено 59 — модель поправилась: {R['timer_all'][-120:]}")
 ok("📅 Вопрос о планах" in log, "в журнале: вопрос о планах — дела и календарь в подсказке")
 print("ИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)

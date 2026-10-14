@@ -965,6 +965,7 @@ class AnswerMixin:
         В конце: ответ в мессенджер (turn.via["done"]), история, «продолжение разговора», возврат к главному
         персонажу после специалиста и передача слова, если её попросил инструмент. Отменённый ход в историю не идёт."""
         prof = self.s.active_llm()
+        self._turn_text = text                       # read_webpage: длинная страница — куски по словам вопроса
         sentences = queue.Queue()
         silent = bool(turn.via) and not turn.via.get("speak")
         speaker = threading.Thread(target=self._drain_worker if silent else self._speak_worker, args=(turn, sentences),
@@ -1049,7 +1050,7 @@ class AnswerMixin:
                 sentences.put(s_)
             blind_key = f"{prof.get('base_url')}|{prof.get('model')}"
             t_start = time.monotonic()
-            from quality import DELIVERABLE, REFUSAL_NUDGE, looks_like_promise, looks_like_refusal, promise_nudge
+            from quality import DELIVERABLE, REFUSAL_NUDGE, looks_like_promise, looks_like_refusal, number_mismatch, promise_nudge
             called, nudged = set(), 0                    # какие действия уже были; сколько раз просили «сделай, а не обещай»
             deliver = bool(DELIVERABLE.search(text)) and any(x.get("name") == "start_task" for x in specs or [])
             # отговорку «нет доступа к интернету» на шаге 0 (когда есть поиск) просим переделать (ниже) — значит, первую
@@ -1064,6 +1065,7 @@ class AnswerMixin:
                 hold[0] = False
                 speak(s_)
             seen_calls = {}                              # одинаковый вызов в одном ходе — не повторяем (результат уже есть)
+            done_calls, checked = [], False                  # что вызвано с результатами — сверить числа ответа (number_mismatch)
             for step in range(6):                       # модель → действия → результаты → модель…
                 calls, step_text = [], ""
                 if step == 5 and specs:                  # последний шаг — только слова: ответить тем, что уже узнал
@@ -1148,6 +1150,15 @@ class AnswerMixin:
                             turn.full += " "
                         self.set_state("thinking")
                         continue
+                    fix = "" if checked else number_mismatch(step_text, done_calls)
+                    if fix:                                 # «таймер на 79 минут», а поставлено 59 (экзамен 14.10)
+                        checked = True
+                        log.info("✋ Число в ответе не совпадает с поставленным — прошу исправить")
+                        msgs = msgs + [{"role": "assistant", "content": step_text or "…"}, {"role": "user", "content": fix}]
+                        if turn.full.strip() and not turn.full.endswith(" "):
+                            turn.full += " "
+                        self.set_state("thinking")
+                        continue
                 if turn.cancel.is_set() or not calls:
                     break
                 results = []
@@ -1161,6 +1172,7 @@ class AnswerMixin:
                     r_ = self._use_tool(turn, c, sentences)
                     seen_calls[key] = True
                     results.append(r_)
+                    done_calls.append({"name": c.get("name"), "args": c.get("args") or {}, "result": str(r_)[:300]})
                 if turn.cancel.is_set():
                     break
                 if any(c.get("name") == "start_task" and not str(r).startswith(("Ошибка", "Инструмент")) for c, r in zip(calls, results)):

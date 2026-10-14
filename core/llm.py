@@ -557,6 +557,16 @@ def parse_tool_call(raw):
     if m and "<arg_key>" in m.group(2):
         pairs = re.findall(r"<arg_key>\s*(.*?)\s*</arg_key>\s*<arg_value>(.*?)</arg_value>", m.group(2), re.S)
         return {"name": m.group(1), "args": {k: _arg_value(v) for k, v in pairs}}
+    # экзамен 14.10 (Qwen): перевод строки внутри ключа — {"\n\nname": …}; имя функции первой строкой — {"use_skill", "name": …}
+    raw = re.sub(r'"\s+(name|arguments|parameters|function)"(\s*:)', r'"\1"\2', raw)
+    bare = re.match(r'\{\s*"([A-Za-z_][\w.\-]*)"\s*,\s*(.*)\}\s*$', raw, re.S)
+    if bare:
+        try:
+            rest = json.loads("{" + bare.group(2) + "}")
+            if isinstance(rest, dict):
+                return {"name": bare.group(1), "args": rest}
+        except ValueError:
+            pass
     j = re.search(r"\{.*\}", raw, re.S)
     obj = None
     if j:
