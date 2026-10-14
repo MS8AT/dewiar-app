@@ -545,6 +545,14 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         if (type_ == "heard" or (type_ == "answer" and kw.get("done"))) and kw.get("text") and getattr(self, "chatlog", None) is not None:
             self._chat_add(type_, kw)
 
+    def show_media(self, items, caption=""):
+        """Картинки к рассказу (show_images): сразу в виджет и окно чата (событие media), а к готовому ответу — в ленту
+        «Чата» (миниатюры со ссылкой на источник)."""
+        self.emit("media", items=items, caption=caption, source="commons")
+        prev = getattr(self, "_turn_media", None)
+        keep = prev[1] if prev and time.monotonic() - prev[0] < 300 else []
+        self._turn_media = (time.monotonic(), (keep + list(items))[:12])
+
     def _chat_add(self, type_, kw):
         """Реплика — в ленту «Чата» студии (chatlog.py) и сразу в открытое окно чата (событие chat)."""
         try:
@@ -559,6 +567,12 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
                 from engine_answer import ATT_DEFAULT_Q
                 if text.strip() == ATT_DEFAULT_Q:
                     text = ""
+            if type_ == "answer":                          # картинки, показанные в этом ответе, — к нему в ленту
+                at, media = getattr(self, "_turn_media", None) or (0, [])
+                if media and time.monotonic() - at < 300:
+                    att, self._turn_media = [{"kind": "image", "name": m.get("title", ""), "thumb": m.get("src", ""), "url": m.get("page", ""),
+                                              "full": m.get("full", ""), "author": m.get("author", ""), "license": m.get("license", "")}
+                                             for m in media], None
             item = self.chatlog.add("user" if type_ == "heard" else "assistant", text,
                                     who=None if type_ == "heard" else self.s.get("persona"), via=via, att=att)
             if item:

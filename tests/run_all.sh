@@ -160,6 +160,7 @@ run "диктовка удержанием на компьютере: держи
 run "телефон: первая фраза ответа — в голос по запятой, раньше" $PY "$T/android_first_phrase_test.py"
 run "студия: «Чат» — вся переписка, писать текстом; в виджете вместо «Памяти»" $PY "$T/studio_chat_test.py"
 run "телефон: микрофон Bluetooth-наушников (SCO) на время слушания" $PY "$T/android_btmic_test.py"
+run "картинки к рассказу (Wikimedia Commons) и схемы mermaid — компьютер и телефон" $PY "$T/rich_answers_test.py"
 run "экзамен 13.10: заметки, близкие, правдивые советы" $PY "$T/exam1013_test.py"
 run "телефон: заметки, фото и файлы" $PY "$T/android_notes_test.py"
 run "студия: заметки и поиск" $PY "$T/studio_notes_test.py"

@@ -920,6 +920,10 @@ async def _run_scenario(core, sc, judge_prof, work, log, t0):
                 res["steps"].append({"say": said, "image": stp.get("image"), "answer": ans[:2000], "tools": tools_of(ev)})
             last = res["steps"][-1]["answer"]
             res["checks"] += check_answer(sc.get("expect"), last)
+            for name in sc.get("tool") or {}:              # действие правда выполнено (как на телефоне): show_images, mark_done…
+                used = [x["name"] for s in res["steps"] for x in s.get("tools") or []]
+                res["checks"].append({"name": f"действие {name} выполнено", "ok": any(x["name"] == name and x["ok"] for s in res["steps"]
+                                                                                   for x in s.get("tools") or []), "detail": ", ".join(used)})
             if (sc.get("expect") or {}).get("sleep"):       # «стоп» (и ослышанное «Ctop.») — замолчать, а не «Хорошо, я слушаю»
                 res["checks"].append({"name": "замолчала до имени, без ответа", "ok": any(e.get("type") == "sleep" for e in ev) and not last.strip(),
                                       "detail": last[:120]})

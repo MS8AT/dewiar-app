@@ -384,6 +384,7 @@
 <script src="assets/entities.js"></script>
 <script src="assets/skins.js"></script>
 <script src="assets/dewiar.js"></script>
+<script src="assets/rich.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 // карточка сама непрозрачная — диск-подложка не нужен; портрет сдержанный (белый край), голос — лучами (ui.voice_fx)
@@ -481,7 +482,7 @@ document.getElementById("rem-undo").onclick = async () => {
 };
 /* в подписи — без разметки: код коротко «⟨код⟩» (целиком — «Открыть целиком») */
 function capText(t) {
-  return String(t || "").replace(/```[\s\S]*?(```|$)/g, " ⟨код⟩ ").replace(/`([^`\n]+)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1")
+  return String(t || "").replace(/```\s*mermaid[\s\S]*?(```|$)/g, " ⟨схема — «Открыть целиком»⟩ ").replace(/```[\s\S]*?(```|$)/g, (m) => window.DewiarRich && DewiarRich.isDiagram(m.replace(/^```\w*\n?/, "")) ? " ⟨схема — «Открыть целиком»⟩ " : " ⟨код⟩ ").replace(/`([^`\n]+)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/^\s*#{1,6}\s+/gm, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 }
 function showCap(you, bot, err) {
@@ -625,11 +626,13 @@ core.on("hello", d => {
 .on("wake", () => { /* имя услышано — об этом говорит надпись «Я вас слушаю»; карточку не открываем:
                        если имя почудилось (шум, телевизор), не останется висящих точек */ })
 .on("heard", e => { if (e.text) showCap(e.text, WAIT); else showCap("", "Слушаю…"); })
-.on("media", e => {                       // картинки из базы знаний персонажа (гравюры, схемы)
-  const box = $("media"); box.innerHTML = "";
-  (e.items || []).slice(0, 3).forEach(m => { const im = document.createElement("img"); im.src = m.src; im.title = m.title || "";
-    im.onclick = (ev) => { ev.stopPropagation(); const lb = $("lightbox"); lb.querySelector("img").src = m.src;
-      lb.querySelector("span").textContent = m.title || ""; lb.classList.add("on"); }; box.appendChild(im); });
+.on("media", e => {                       // картинки из базы знаний персонажа (гравюры, схемы) и к рассказу (show_images)
+  const box = $("media"); if (e.source !== "commons" || !TL.media) box.innerHTML = "";
+  if (e.source === "commons") { TL.media = (TL.media || []).concat(e.items || []).slice(0, 12); moreBtn(); }
+  (e.items || []).slice(0, e.source === "commons" ? 4 : 3).forEach(m => { const im = document.createElement("img"); im.src = m.src; im.title = (m.title || "") + (m.author ? " — " + m.author : "");
+    im.referrerPolicy = "no-referrer";
+    im.onclick = (ev) => { ev.stopPropagation(); const lb = $("lightbox"); lb.querySelector("img").src = m.full || m.src;
+      lb.querySelector("span").textContent = (m.title || "") + (m.author ? " · " + m.author : "") + (m.license ? " · " + m.license : ""); lb.classList.add("on"); }; box.appendChild(im); });
   if (box.children.length) { $("cap").classList.add("show"); hideCapLater(30000); }
 })
 .on("answer", e => {
@@ -1095,9 +1098,9 @@ function mdLite(t) {
     return out.join("");
   }).join("");
 }
-function tlReset(you) { TL.you = you || ""; TL.steps = []; TL.answer = ""; moreBtn(); }
+function tlReset(you) { TL.you = you || ""; TL.steps = []; TL.answer = ""; TL.media = null; moreBtn(); }
 function moreBtn() {
-  const a = TL.answer || "", long = a.length > 260 || a.includes("```") || a.split("\n").length > 5;
+  const a = TL.answer || "", long = a.length > 260 || a.includes("```") || a.split("\n").length > 5 || !!(TL.media && TL.media.length);
   const n = TL.steps.length;
   $("more").textContent = n ? `Ход работы (${n}) и ответ` : "Открыть целиком";
   $("more").classList.toggle("on", long || n > 0);
@@ -1110,8 +1113,10 @@ function renderReader() {
     + (x.detail ? `<div class="sd">${escR(x.detail)}</div>` : "") + (x.error ? `<div class="se">${escR(x.error)}</div>` : "")
     + (x.result ? `<details><summary>что получил</summary><pre><button class="cp">Копировать</button><code>${escR(x.result)}</code></pre></details>` : "") + `</li>`).join("");
   box.innerHTML = (TL.you ? `<div class="q">${escR(TL.you)}</div>` : "") + (st ? `<h4>Ход работы</h4><ul class="steps">${st}</ul>` : "")
-    + (TL.answer ? `${st ? "<h4>Ответ</h4>" : ""}<div class="md">${mdLite(TL.answer)}</div>` : "");
+    + (TL.answer ? `${st ? "<h4>Ответ</h4>" : ""}<div class="md">${mdLite(TL.answer)}</div>` : "")
+    + (TL.media && window.DewiarRich ? DewiarRich.gallery(TL.media) : "");
   $("rd-title").textContent = TL.steps.length && !TL.answer ? "Ход работы" : "Ответ целиком";
+  if (window.DewiarRich) DewiarRich.diagrams(box).then(n => { if (n && atEnd) box.scrollTop = box.scrollHeight; });   // ```mermaid — схемой
   if (atEnd) box.scrollTop = box.scrollHeight;
 }
 function copyText(t, btn) {

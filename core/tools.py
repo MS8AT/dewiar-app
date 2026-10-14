@@ -171,6 +171,29 @@ def t_web_search(a, ctx):
     return "\n".join(f"{i + 1}. {x['title']} — {x['snippet']} ({x['url']})" for i, x in enumerate(res[:6]))
 
 
+def t_show_images(a, ctx):
+    """Показать картинки к рассказу (images.py, Wikimedia Commons) — в виджете, «Чате» студии; модели — что показано."""
+    import images as IM
+    q = (a.get("query") or "").strip()
+    if not q:
+        raise ToolError("пустой запрос — что показать?")
+    n = max(1, min(6, int(a.get("count") or 4)))
+    try:
+        items = IM.search(q, n)
+    except httpx.HTTPError as e:
+        raise ToolError(f"картинки сейчас не загрузились ({e}) — скажи об этом коротко") from e
+    if not items:
+        return ("Картинок по этому запросу не нашлось. Не говори, что показала их; можно попробовать запрос по-английски "
+                "или проще (одно-два слова).")
+    eng = ctx.get("engine")
+    if eng is not None and hasattr(eng, "show_media"):
+        eng.show_media(items, str(a.get("caption") or ""))
+    return (f"На экране показано картинок: {len(items)} (Wikimedia Commons). Что на них:\n"
+            + "\n".join(f"{i + 1}. {x['title']}" + (f" — {x['desc'][:120]}" if x.get("desc") else "") for i, x in enumerate(items))
+            + "\nГовори о них как о показанных («на второй картинке…»), но описывай только то, что следует из подписей; "
+              "не выдумывай деталей.")
+
+
 def html_to_text(page):
     """Грубо: HTML -> текст для модели (без скриптов, стилей, навигации, шапки и подвала)."""
     page = re.sub(r"(?is)<(script|style|noscript|svg|nav|footer|header)[^>]*>.*?</\1>", " ", page)
@@ -1893,6 +1916,13 @@ TOOLS = {
                   S({"items": {"type": "array", "items": {"type": "string"}}, "undo": {"type": "boolean"}}, ["items"]), "safe", t_mark_done, "Дела: сделано"),
     "done_report": ("Что пользователь сделал и его достижения: days — за сколько дней (1 — сегодня, 7 — неделя). Для «что я сегодня "
                     "сделал», «сколько дел за неделю», «какие у меня достижения».", S({"days": {"type": "number"}}), "safe", t_done_report, "Дела: итог"),
+    "show_images": ("Показать пользователю картинки к тому, о чём рассказываешь (руны и орнаменты, животные и растения, "
+                    "картины, здания, места, устройство вещей) — они появятся на экране рядом с ответом. Вызывай, когда "
+                    "рассказ о том, что лучше увидеть, или просят «покажи». query — 2–5 ключевых слов, лучше по-английски "
+                    "(«Urnes style runestone», «Celtic knotwork animal»); count — сколько (1–6, обычно 3–4); caption — подпись. "
+                    "Не говори «вот изображение», не вызвав инструмент.",
+                    S({"query": {"type": "string"}, "count": {"type": "integer"}, "caption": {"type": "string"}}, ["query"]),
+                    "safe", t_show_images, "Картинки к рассказу"),
     "look_at_screen": ("Посмотреть на экран пользователя (снимок придёт картинкой; нужна модель со зрением). Когда спрашивают, что на "
                        "экране, просят посмотреть на ошибку, окно, текст, график.", S({"question": {"type": "string"}}),
                        "safe", t_look_screen, "Смотрю на экран"),

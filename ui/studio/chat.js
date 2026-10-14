@@ -20,10 +20,13 @@ function chatBubble(x, lastWho) {
     ? `<div class="ch-who"><i style="background:${escH((p && p.color) || "#8A9BFF")}"></i>${escH((p && p.name) || "Ассистент")}</div>` : "";
   const body = !x.text ? "" : out ? `<div class="tx">${escH(x.text)}</div>` : `<div class="tx md">${md(x.text)}</div>`;
   // вложения: картинки — миниатюрами, файлы — плашками; нажать — открыть из «Входящих» папки ассистента
-  const att = (x.att || []).map(a => a.kind === "image" && a.thumb
+  // картинки к рассказу (show_images) — миниатюры со ссылкой на источник, лентой; свои вложения — из «Входящих»
+  const web = (x.att || []).filter(a => a.kind === "image" && a.url && !a.path);
+  const gal = web.length && window.DewiarRich ? DewiarRich.gallery(web.map(a => ({ src: a.thumb, page: a.url, full: a.full, title: a.name, author: a.author, license: a.license }))) : "";
+  const att = (x.att || []).filter(a => !web.includes(a)).map(a => a.kind === "image" && a.thumb
     ? `<button class="ch-img" data-path="${escH(a.path || "")}" title="${escH(a.name)} — открыть"><img src="${escH(a.thumb)}" alt="${escH(a.name)}"></button>`
     : `<button class="cl-f" data-path="${escH(a.path || "")}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg><span>${escH(a.name)}</span><small>${a.size ? chatSize(a.size) : ""}</small></button>`).join("");
-  return `${head}<div class="cl-m${out ? " out" : ""}" data-id="${escH(x.id)}">${x.via ? `<small class="ch-via">из мессенджера</small>` : ""}${att ? `<div class="ch-att">${att}</div>` : ""}${body}<time>${hm}</time></div>`;
+  return `${head}<div class="cl-m${out ? " out" : ""}${gal ? " wide" : ""}" data-id="${escH(x.id)}">${x.via ? `<small class="ch-via">из мессенджера</small>` : ""}${att ? `<div class="ch-att">${att}</div>` : ""}${body}${gal}<time>${hm}</time></div>`;
 }
 function chatRender(keep) {
   const box = $("#ch-msgs"); if (!box) return;
@@ -35,17 +38,18 @@ function chatRender(keep) {
     html += chatBubble(x, lastWho);
     if (x.role === "assistant") lastWho = x.who || "";
   });
-  if (CH.live && lastWho === active) html += `<div class="cl-m ch-live">${CH.live.text ? `<div class="tx md">${md(CH.live.text)}</div>` : `<div class="ch-dots"><i></i><i></i><i></i></div>`}</div>`;
+  if (CH.live && lastWho === active) html += `<div class="cl-m ch-live${CH.live.media ? " wide" : ""}">${CH.live.text ? `<div class="tx md">${md(CH.live.text)}</div>` : `<div class="ch-dots"><i></i><i></i><i></i></div>`}${CH.live.media && window.DewiarRich ? DewiarRich.gallery(CH.live.media) : ""}</div>`;
   else if (CH.live) {
     const p = chatWho(active);
     html += `<div class="ch-who"><i style="background:${escH((p && p.color) || "#8A9BFF")}"></i>${escH((p && p.name) || "Ассистент")}</div>`
-      + `<div class="cl-m ch-live">${CH.live.text ? `<div class="tx md">${md(CH.live.text)}</div>` : `<div class="ch-dots"><i></i><i></i><i></i></div>`}</div>`;
+      + `<div class="cl-m ch-live${CH.live.media ? " wide" : ""}">${CH.live.text ? `<div class="tx md">${md(CH.live.text)}</div>` : `<div class="ch-dots"><i></i><i></i><i></i></div>`}${CH.live.media && window.DewiarRich ? DewiarRich.gallery(CH.live.media) : ""}</div>`;
   }
   $("#ch-empty").style.display = CH.items.length || CH.live ? "none" : "";
   box.innerHTML = html;
   if (keep === "older") box.scrollTop = box.scrollHeight - oldH + oldTop;   // подгрузили раньше — лента не прыгает
   else if (keep !== "stay" || atBottom) box.scrollTop = box.scrollHeight;
   const o = $("#ch-older"); if (o) o.onclick = chatOlder;
+  if (window.DewiarRich) DewiarRich.diagrams(box);      // ```mermaid в ответах — схемами
   $$("#ch-msgs [data-path]").forEach(b => b.onclick = () => { if (b.dataset.path) core.call("ws_open", { path: b.dataset.path }).catch(e => { $("#ch-res").textContent = e.message; }); });
   const p = chatWho(active);
   $("#ch-text").placeholder = `Сообщение — ответит ${p ? p.name : "ассистент"}. Enter — отправить, Shift+Enter — новая строка`;
@@ -77,10 +81,16 @@ core.on("answer", e => {
   CH.live = { text: e.text || "" };
   if ($("#p-chat").classList.contains("cur")) chatRender("stay");
 });
+// картинки к рассказу появляются, пока персонаж ещё говорит, — сразу в живом пузыре
+core.on("media", e => {
+  if (!CH.loaded || e.source !== "commons") return;
+  CH.live = Object.assign(CH.live || { text: "" }, { media: (CH.live && CH.live.media || []).concat(e.items || []).slice(0, 12) });
+  if ($("#p-chat").classList.contains("cur")) chatRender("stay");
+});
 core.on("state", e => {
   if (!CH.loaded) return;
   if (e.state === "thinking" && !CH.live) { CH.live = { text: "" }; if ($("#p-chat").classList.contains("cur")) chatRender("stay"); }
-  if ((e.state === "idle" || e.state === "listening") && CH.live && !CH.live.text) { CH.live = null; if ($("#p-chat").classList.contains("cur")) chatRender("stay"); }
+  if ((e.state === "idle" || e.state === "listening") && CH.live && !CH.live.text && !CH.live.media) { CH.live = null; if ($("#p-chat").classList.contains("cur")) chatRender("stay"); }
 });
 /* вложения к сообщению: скрепка, перетащить в ленту, Ctrl+V; картинки уменьшаются до 1600 px (как в виджете),
    файлы — до 11 МБ; ядро кладёт всё во «Входящие» папки ассистента и показывает модели (текст документов, картинки) */

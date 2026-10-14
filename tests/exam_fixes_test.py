@@ -55,7 +55,8 @@ async def main():
         a, _ = await core.say("Запомни, пожалуйста: в среду в 15:00 у меня встреча с подрядчиком по кухне.")
         today = dt.date.today()
         wed = today + dt.timedelta(days=(2 - today.weekday()) % 7)
-        ok("Запомнил" in a and "сред" in a and str(wed.day) in a, f"запомнил и назвал день: {a}")
+        named = ("сегодня" in a.lower()) if wed == today else ("сред" in a and str(wed.day) in a)   # в саму среду — «сегодня»
+        ok("Запомнил" in a and named, f"запомнил и назвал день: {a}")
         mem = (core.tmp / "ws" / "Память" / "Обо мне.md").read_text(encoding="utf-8")
         ok(f"(на {wed:%d.%m.%Y}, среда)" in mem and "Пожалуйста" not in mem, f"в памяти — с точной датой: {mem.strip().splitlines()[-1]}")
         cal = await core.call("calendar_month", year=wed.year, month=wed.month)

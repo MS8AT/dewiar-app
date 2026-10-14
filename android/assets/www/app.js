@@ -874,7 +874,8 @@ function showYou(t) { $("#you").textContent = t ? "«" + t + "»" : ""; quietChe
    (frameAnswer) — разметка и кнопки «Копировать», «В заметки», «Скачать». Отзыв: длинный ответ налезал на облик и поле
    ввода, а сохранить его было нечем. */
 const LONG_ANSWER = 160;
-const isLongAnswer = (t) => String(t || "").length >= LONG_ANSWER || /\n\s*(?:[-*•]|\d+[.)])\s|\n\s*\|/.test(String(t || ""));
+let turnMedia = null;                            // картинки этого ответа (show_images) — под ответом и в истории
+const isLongAnswer = (t) => String(t || "").length >= LONG_ANSWER || /\n\s*(?:[-*•]|\d+[.)])\s|\n\s*\||```/.test(String(t || "")) || !!(turnMedia && turnMedia.length);
 function showBot(t, cls) {
   const b = $("#bot"), long = !cls && isLongAnswer(t);
   b.className = cls || (long ? "framed" : ""); b.textContent = t || "";
@@ -893,8 +894,15 @@ function mdAnswer(t) {         // ответ модели → HTML: экрани
     out.push(`<div class="tbl"><table>${rows.map((r, i) => `<tr>${r.map(c => i ? `<td>${c}</td>` : `<th>${c}</th>`).join("")}</tr>`).join("")}</table></div>`);
     table = [];
   };
+  let code = null;                                   // внутри ``` … ``` — код или схема (```mermaid — рисует rich.js)
   for (const raw of lines) {
     const l = raw.trim(); let m;
+    if (/^```/.test(l)) {
+      if (code === null) { flushList(); flushTable(); code = { lang: l.slice(3).trim(), rows: [] }; }
+      else { out.push(`<pre><code class="language-${code.lang.replace(/[^\w-]/g, "")}">${code.rows.join("\n")}</code></pre>`); code = null; }
+      continue;
+    }
+    if (code !== null) { code.rows.push(raw); continue; }
     if (/^\|.*\|$/.test(l)) { flushList(); table.push(l); continue; }
     flushTable();
     if ((m = l.match(/^#{1,4}\s+(.*)$/))) { flushList(); out.push(`<h4>${inl(m[1])}</h4>`); }
@@ -903,6 +911,7 @@ function mdAnswer(t) {         // ответ модели → HTML: экрани
     else if (!l) flushList();
     else { flushList(); out.push(`<p>${inl(l)}</p>`); }
   }
+  if (code !== null) out.push(`<pre><code>${code.rows.join("\n")}</code></pre>`);   // ответ оборвался внутри блока
   flushList(); flushTable();
   return out.join("");
 }
@@ -914,7 +923,9 @@ function frameAnswer(t) {      // ответ готов: длинный — с �
   t = String(t || "").trim(); const b = $("#bot");
   if (!t || !isLongAnswer(t) || b.className && b.className !== "framed") return;
   b.className = "framed"; $("#stage").classList.add("long");
-  b.innerHTML = `<div class="ans">${mdAnswer(t)}</div><div class="acts"><button data-a="copy">${ICON_COPY}Копировать</button><button data-a="note">${ICON_NOTE}В заметки</button><button data-a="save">${ICON_SAVE}Скачать</button></div>`;
+  b.innerHTML = `<div class="ans">${mdAnswer(t)}${turnMedia && window.DewiarRich ? DewiarRich.gallery(turnMedia) : ""}</div><div class="acts"><button data-a="copy">${ICON_COPY}Копировать</button><button data-a="note">${ICON_NOTE}В заметки</button><button data-a="save">${ICON_SAVE}Скачать</button></div>`;
+  if (window.DewiarRich) DewiarRich.diagrams(b.querySelector(".ans"));   // ```mermaid — схемой
+  wirePics(b);
   const title = t.replace(/[#*_`|]/g, "").split(/[.!?\n]/)[0].trim().slice(0, 60) || "Ответ";
   b.querySelector('[data-a="copy"]').onclick = () => copyText(t).then(ok => toast(ok ? "Скопировано" : "Не получилось скопировать"));
   b.querySelector('[data-a="note"]').onclick = () => { const n = notes(); n.push({ id: "n" + Date.now(), title, text: t, time: Date.now() }); saveNotes(n); toast(`В заметках: «${title}»`, 2800); };
@@ -1266,6 +1277,7 @@ function systemPrompt() {
     + "не говори «сохранила», «записала», «теперь она в заметках», если в этом ходе не вызвала save_note. Не нашла заметку — так и скажи и покажи содержимое в ответе.",
     BOUNDARY_RULE, privacyRule(),
     "Никогда не говори, что у тебя нет доступа к интернету или свежим данным: погода, новости, курсы — ищи (web_search) и отвечай по найденному. "
+    + "КАРТИНКИ И СХЕМЫ: рассказываешь о том, что лучше увидеть (руны и орнаменты, животные, растения, картины, здания, места), или просят «покажи» — покажи картинки (show_images) и говори о них как о показанных; не пиши «вот изображение», не вызвав его. Процесс, связи, устройство, план понятнее схемой — нарисуй её блоком ```mermaid (flowchart, mindmap, timeline): схема появится на экране, вслух её не читают — словами скажи главное. "
     + "У тебя есть камера телефона (take_photo): «сфотографируй меня», «посмотри, что это», «прочитай надпись» — снимай и описывай. "
     + "«Посмотри, как я выгляжу», «покажи мне моё лицо» — take_photo с camera: front (камера на человека); «где я», «что вокруг», «другой камерой» — camera: back. "
     + "Снимок уже сделан и его просят показать снова («покажи фото», «покажи на экране») — show_photo. Не отвечай «Вот» и «Смотрю», не вызвав камеру: без вызова ничего не покажется.",
@@ -1615,11 +1627,23 @@ function turnTime(stage) {
   }
 }
 function sentenceSink() {
-  let pending = "", shown = "", first = true;
+  let pending = "", shown = "", first = true, raw = "", inCode = false;
+  // блоки ``` … ``` (код, схемы) вслух не читаем: они приходят кусками, поэтому граница блока ищется в потоке;
+  // придерживаем только хвост из одной-двух ` (вдруг это начало ```), остальное — сразу в голос
+  const speakable = (fin) => {
+    let out = "";
+    for (;;) {
+      const i = raw.indexOf("```");
+      if (i < 0) { const keep = fin ? 0 : (raw.match(/`{1,2}$/) || [""])[0].length; if (!inCode) out += raw.slice(0, raw.length - keep); raw = raw.slice(raw.length - keep); break; }
+      if (!inCode) out += raw.slice(0, i);
+      raw = raw.slice(i + 3); inCode = !inCode;
+    }
+    return out;
+  };
   return {
     push(piece) {
       if (piece) turnTime("word");
-      shown += piece; showBot(gfix(shown)); pending += piece;    // героиня, а модель сбилась на «рад», «понял» — правим сами
+      shown += piece; showBot(gfix(shown)); raw += piece; pending += speakable(false);    // героиня, а модель сбилась на «рад», «понял» — правим сами
       for (;;) {
         const m = pending.match(/^([\s\S]*?[.!?…](?:["»)]?)(?:\s+|$)|[\s\S]*?\n)/);
         if (m && m[0].length >= 2 && !(!/\s$/.test(m[0]) && m[0].length === pending.length)) {   // иначе конец ещё может продолжиться
@@ -1633,7 +1657,7 @@ function sentenceSink() {
         break;
       }
     },
-    flush() { if (pending.trim()) say(gfix(pending)); pending = ""; },
+    flush() { pending += speakable(true); if (pending.trim()) say(gfix(pending)); pending = ""; },
     text: () => gfix(shown),
   };
 }
@@ -1666,6 +1690,7 @@ async function ask(text, opts = {}) {
   busy = true;
   const t0 = Date.now();
   turnT = { t0, word: 0, said: 0, logged: false };
+  turnMedia = null;
   plog("info", `❓ ${clip(text)} → ${S.llm.cloud ? "Dewiar Облако" : (S.llm.name || S.llm.model || "модель")}`);
   const ctl = turnAbort = new AbortController();
   const sink = sentenceSink();
@@ -1805,7 +1830,8 @@ async function ask(text, opts = {}) {
     plog("info", `💬 ответ ${((sink.text() || final).trim() || quiet).length} симв.${quiet ? " (сам: " + clip(quiet) + ")" : ""} за ${((Date.now() - t0) / 1000).toFixed(1)} с`);
     if (!opts.hidden) history.push({ role: "user", content: text + (att.length ? ` [приложено: ${att.map(a => a.kind === "image" ? "фото" : "файл «" + a.name + "»").join(", ")}]` : "") });
     history.push(Object.assign({ role: "assistant", content: (sink.text() || final).trim() || quiet, who: persona().id },
-      photoTurn ? { note: "[снимок с камеры показан на экране; показать снова — show_photo, новый — take_photo]" } : {})); saveH(); convAfter();
+      photoTurn ? { note: "[снимок с камеры показан на экране; показать снова — show_photo, новый — take_photo]" } : {},
+      turnMedia && turnMedia.length ? { img: turnMedia.map(x => ({ src: x.src, full: x.full, page: x.page, title: x.title, author: x.author, license: x.license })) } : {})); saveH(); convAfter();
     if (!opts.hidden) { dayTurn(text, (sink.text() || final).trim() || quiet); try { dayLogAdd(text, (sink.text() || final).trim() || quiet); } catch (x) { } }
     if (turnAbort === ctl) frameAnswer(sink.text() || final);
     netRecovered(); hCount("turns"); hCount("net_ok"); pauseOk();
@@ -2242,6 +2268,9 @@ const CLAIMS = [
   // «Достаю календарь и напоминания — одну секунду», «Сейчас гляну, что по плану» — и ход кончился без данных (отчёт 14.10)
   { rx: /(?:достаю|открываю|смотрю|посмотрю|гляну|загляну|проверяю|проверю|поднимаю|собираю|сверяюсь|уточню|узнаю)(?![а-яё])[^.!?]{0,40}(?:календар|напоминани|план|дел[ауо]?(?![а-яё])|расписани|встреч)/i,
     tool: "list_reminders|calendar_list", what: "смотришь календарь и напоминания" },
+  // «Вот смотри, такое-то изображение…» — а картинки нет (отзыв 14.10): без show_images на экране ничего не появилось
+  { rx: /(?:^|[.!?—–-]\s*|,\s*)(?:вот|смотри|посмотри(?:те)?|взгляни(?:те)?|показываю|покажу)(?![а-яё])[^.!?]{0,40}(?:изображени|картинк|рисун|фото(?!граф)|иллюстрац)/i,
+    tool: "show_images", what: "показываешь картинку" },
   // «Записала встречу в календарь» — а calendar_add не вызван или только спросил «записать?» (записано — calendar_write)
   { rx: /(?:записал[аи]?|добавил[аи]?|внес(?:ла|ли)?|занес(?:ла|ли)?|поставил[аи]?|запланировал[аи]?)(?![а-яё])[^.!?]{0,60}\sв\s+(?:твой\s+|ваш\s+)?календар/i,
     tool: "calendar_write", what: "записал(а) в календарь" },
@@ -2398,6 +2427,8 @@ function toolSpecs() {
     { name: "radio_control", description: "Радио, которое уже играет здесь: pause — пауза, resume — продолжить, stop — выключить, next — другая станция.",
       parameters: O({ action: { type: "string", enum: ["pause", "resume", "stop", "next"] } }, ["action"]) },
     { name: "web_search", description: "Найти в интернете свежие сведения. Не выдумывай результаты.", parameters: O({ query: STR }, ["query"]) },
+    { name: "show_images", description: "Показать картинки к тому, о чём рассказываешь (руны и орнаменты, животные, растения, картины, здания, места) — появятся на экране под ответом. Вызывай, когда это лучше увидеть или просят «покажи». query — 2–5 ключевых слов, лучше по-английски; count — 1–6 (обычно 3–4). Не говори «вот изображение», не вызвав инструмент.",
+      parameters: O({ query: STR, count: NUM, caption: STR }, ["query"]) },
     { name: "read_webpage", description: "Прочитать страницу по ссылке (текст).", parameters: O({ url: STR }, ["url"]) },
     { name: "weather", description: "Погода сейчас и на ближайшие дни: city — город (если пользователь не назвал — из памяти о нём).", parameters: O({ city: STR, days: NUM }, ["city"]) },
     { name: "flashlight", description: "Фонарик: on true/false.", parameters: O({ on: { type: "boolean" } }, ["on"]) },
@@ -2535,6 +2566,7 @@ async function runTool(name, a) {
       radio.pause(); return "Радио на паузе.";
     }
     case "web_search": return await webSearch(a.query || "");
+    case "show_images": return await webImages(a.query || "", a.count);
     case "read_webpage": return await readPage(a.url || "");
     case "weather": return await weather(a.city || "", a.days || 3);
     case "flashlight": return devTorch(!!a.on) ? (a.on ? "Фонарик включён." : "Фонарик выключен.") : "Фонарика нет.";
@@ -2702,6 +2734,51 @@ async function dewiarWeb(kind, value) {
   let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
   if (r.status !== 200) throw new Error((d.error && d.error.message) || "сервер ответил " + r.status);
   return d;
+}
+/* Картинки к рассказу (как core/images.py на компьютере): Wikimedia Commons — свободные изображения с автором и
+   лицензией, без ключей. Показываются под ответом (frameAnswer) и остаются в истории разговора. */
+const COMMONS = "https://commons.wikimedia.org/w/api.php";
+async function webImages(q, count) {
+  q = String(q || "").trim(); if (!q) return "Ошибка: пустой запрос — что показать?";
+  const n = Math.max(1, Math.min(6, +count || 4));
+  const p = new URLSearchParams({ action: "query", format: "json", generator: "search", gsrnamespace: "6", gsrlimit: "16",
+    gsrsearch: q + " filetype:bitmap", prop: "imageinfo", iiprop: "url|extmetadata|mime|size", iiurlwidth: "480",
+    iiextmetadatafilter: "ObjectName|ImageDescription|Artist|LicenseShortName", iiextmetadatalanguage: "ru" });
+  let j;
+  try { j = JSON.parse((await http("GET", (window.DEWIAR_COMMONS || COMMONS) + "?" + p, { headers: { "User-Agent": "Dewiar-Android (voice assistant; https://dewiar.pro)" }, timeout: 15000 })).body || "{}"); }
+  catch (e) { return "Картинки сейчас не загрузились (" + e.message + ") — скажи об этом коротко."; }
+  const clean = (v) => String(v || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/\s+/g, " ").trim();
+  const items = [];
+  for (const pg of Object.values((j.query || {}).pages || {}).sort((a, b) => (a.index || 0) - (b.index || 0))) {
+    const ii = (pg.imageinfo || [])[0] || {}, meta = ii.extmetadata || {};
+    if (!ii.thumburl || !/^image\//.test(ii.mime || "") || ii.mime === "image/svg+xml" || (ii.width || 0) < 200) continue;
+    const name = String(pg.title || "").replace(/^File:|\.[a-z0-9]+$/gi, "").replace(/_/g, " ");
+    if (/\b(?:logo|icon|flag of|coat of arms|map of|locator|signature)\b/i.test(name)) continue;
+    items.push({ src: ii.thumburl, full: (ii.width || 0) > 1280 ? ii.thumburl.replace(/\/\d+px-/, "/1280px-") : (ii.url || ii.thumburl), page: ii.descriptionurl || "",
+      title: (clean((meta.ObjectName || {}).value) || name).slice(0, 120), desc: clean((meta.ImageDescription || {}).value).slice(0, 200),
+      author: clean((meta.Artist || {}).value).slice(0, 80), license: clean((meta.LicenseShortName || {}).value).slice(0, 40) });
+    if (items.length >= n) break;
+  }
+  if (!items.length) return "Картинок по этому запросу не нашлось. Не говори, что показала их; можно попробовать запрос по-английски или проще.";
+  turnMedia = (turnMedia || []).concat(items).slice(0, 12);
+  plog("info", `🖼 картинки: «${clip(q)}» — ${items.length}`);
+  return `На экране показано картинок: ${items.length} (Wikimedia Commons). Что на них:\n` + items.map((x, i) => `${i + 1}. ${x.title}${x.desc ? " — " + x.desc.slice(0, 120) : ""}`).join("\n")
+    + "\nГовори о них как о показанных («на второй картинке…»), но описывай только то, что следует из подписей; не выдумывай деталей.";
+}
+/* картинка в ответе: нажали — на весь экран (без ухода в браузер), долгое нажатие — источник в браузере */
+function wirePics(root) {
+  if (!root) return;
+  root.querySelectorAll(".dw-pic").forEach(a => {
+    a.onclick = (e) => { e.preventDefault(); picView(a.dataset.full || a.querySelector("img").src, a.title || "", a.href); };
+  });
+}
+function picView(src, title, page) {
+  let v = $("#picview");
+  if (!v) { v = document.createElement("div"); v.id = "picview"; v.innerHTML = `<img alt=""><div class="pv-t"></div><button class="btn" id="pv-src">Источник</button>`; document.body.appendChild(v);
+    v.onclick = (e) => { if (e.target.id !== "pv-src") v.classList.remove("on"); }; }
+  v.querySelector("img").src = src; v.querySelector(".pv-t").textContent = title;
+  v.querySelector("#pv-src").onclick = () => { if (page) D.openUrl(page); };
+  v.classList.add("on");
 }
 async function webSearch(q) {
   q = String(q || "").trim();
@@ -3027,8 +3104,11 @@ $("#who").onclick = () => {
 /* разговор */
 $("#b-hist").onclick = () => {
   const h = history.slice(-40);
-  $("#hlist").innerHTML = h.length ? h.map(m => `<div class="msg ${m.role === "user" ? "u" : "a"}"><div>${esc(m.content)}</div>${m.role !== "user" && m.who ? `<small>${esc((PERSONAS.find(p => p.id === m.who) || {}).name || "")}</small>` : ""}</div>`).join("")
+  $("#hlist").innerHTML = h.length ? h.map(m => `<div class="msg ${m.role === "user" ? "u" : "a"}">${m.role === "user" ? `<div>${esc(m.content)}</div>`
+      : `<div class="ans">${mdAnswer(m.content)}${m.img && window.DewiarRich ? DewiarRich.gallery(m.img) : ""}</div>`}${m.role !== "user" && m.who ? `<small>${esc((PERSONAS.find(p => p.id === m.who) || {}).name || "")}</small>` : ""}</div>`).join("")
     : `<div class="empty">Разговор пуст. Нажмите микрофон и спросите что-нибудь.</div>`;
+  if (window.DewiarRich) DewiarRich.diagrams($("#hlist"));
+  wirePics($("#hlist"));
   openSheet("#sh-hist"); setTimeout(() => $("#sh-hist").scrollTop = 1e6, 50);
 };
 $("#h-clear").onclick = () => { history = []; saveH(); convReset(); $("#b-hist").onclick(); toast("Начинаем заново"); };

@@ -1189,6 +1189,7 @@ class CodeFilter:
 
     def __init__(self):
         self.pend, self.code, self.told, self.skip, self.start = "", False, False, False, True
+        self.want, self.lang = False, ""                 # открыли ```: язык ещё читается; схема (mermaid) — молча
 
     def _note(self):
         if self.told:
@@ -1210,7 +1211,7 @@ class CodeFilter:
                 if lead.startswith("```"):
                     self.code, self.start, self.skip, self.pend = not self.code, False, True, ""
                     if self.code:
-                        out += self._note()
+                        self.want, self.lang = True, ""   # «Команды и код — на экране» — когда станет ясен язык блока
                     continue
                 if self.code:
                     if len(lead) >= 3 or (lead and not "```".startswith(lead)):
@@ -1228,13 +1229,22 @@ class CodeFilter:
                     self.pend, self.start = "", False
                 continue
             if ch == "\n":
+                if self.want:
+                    out += self._lang_note()
                 if not self.skip and not self.code:
                     out += ch
                 self.start, self.skip = True, False
                 continue
             if not self.skip and not self.code:
                 out += ch
+            elif self.want:
+                self.lang += ch
         return out
+
+    def _lang_note(self):
+        """Строка открытия блока прочитана: схема (```mermaid) — на экране картинкой, о ней молчим; код — одна фраза."""
+        self.want = False
+        return "" if self.lang.strip().lower() == "mermaid" else self._note()
 
     def flush(self):
         p, self.pend = self.pend, ""
