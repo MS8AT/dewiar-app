@@ -4305,6 +4305,10 @@ function syncApply(it) {
    сервер отвечает more (не больше 20 порций). Состояние (rev, отпечатки idx, id устройства) — в pref «sync»; сменился
    аккаунт или ключ (who) — начинаем с нуля. manual — ошибку показать человеку. */
 async function syncRun(manual) {
+  // Экзамен (песочница) — никакого обмена: снимок собирался из песочницы, а состояние обмена — настоящее, и записанное
+  // экзаменом (память «в среду встреча с подрядчиком», заметки, расход 450, сделанные дела) уходило в аккаунт и
+  // возвращалось людям как своё (отчёт №52, 14.10). Следы прошлых экзаменов убирает examCleanCheck (exam.js).
+  if (SANDBOX) return;
   if ((S.tg || {}).linked && Date.now() - (S.tg.at || 0) > 600000) tgSync();      // ключ и персонаж для бота — раз в 10 минут
   if (syncBusy) return; const c = syncCred();
   if (!c || !S.sync.on) { syncStatus = Object.assign(syncStatus, { ok: null, error: "" }); return; }
@@ -4358,7 +4362,7 @@ async function syncRun(manual) {
     if (manual) toast("Синхронизация: " + e.message);
   } finally { syncBusy = false; }
 }
-function syncSoon() { clearTimeout(syncTimer); syncTimer = setTimeout(() => syncRun(false), 3000); }   // несколько правок подряд — один обмен
+function syncSoon() { if (SANDBOX) return; clearTimeout(syncTimer); syncTimer = setTimeout(() => syncRun(false), 3000); }   // экзамен — без обмена   // несколько правок подряд — один обмен
 function syncCard() {
   const c = syncCred(), s = syncStatus, t = s.at ? new Date(s.at) : null;
   if (!c) return `<p class="hint" style="margin-top:0">Напоминания, заметки, расходы и память — одинаковые на телефоне и компьютере. Нужен ключ Dewiar или вход аккаунтом dewiar.pro (Настройки → Мозг) — тот же, что на компьютере.</p>`;
@@ -5815,6 +5819,7 @@ setInterval(() => { if (!document.hidden) welcomeSeen(); }, 60000);     // по�
   setTimeout(hReady, 0);                           // экран и персонаж готовы — запуск записан для «Здоровья»
   setTimeout(() => { try { doneInbox(); } catch (e) { } }, 300);   // «Сделано ✓» из уведомлений, пока приложение было закрыто
   setTimeout(() => { try { newsCheck(); } catch (e) { } }, 1200);  // обновились — «Что нового»
+  setTimeout(() => { try { if (!document.querySelector(".sheet.on") && window.examCleanCheck) examCleanCheck(); } catch (e) { } }, 4000);   // следы старых экзаменов
   setTimeout(() => checkUpdate(false), 8000);
   setTimeout(() => accountCheck().then(ensureBrain).then(cloudCaps).then(tgSync), 3000);
   setTimeout(() => syncRun(false), 4000);

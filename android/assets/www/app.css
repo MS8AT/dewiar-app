@@ -663,6 +663,11 @@ body.light .clrx, body.light .clrepick { background: #fff; box-shadow: 0 6px 18p
 
 /* «Что нового» после обновления (newsShow) */
 .nwsub { color: var(--muted); font-size: 14px; margin: -6px 2px 12px; }
+/* «Записи экзамена»: что старый экзамен оставил в данных — отметить и убрать (exam.js examCleanCheck) */
+.xc-g { font-size: 13px; color: var(--muted); margin: 14px 4px 6px; }
+.xc-i { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 16px; background: var(--frost); margin-bottom: 6px; font-size: 14.5px; line-height: 1.45; }
+.xc-i input { width: 20px; height: 20px; flex: none; margin: 1px 0 0; accent-color: var(--accent, #8B8CF7); }
+.xc-btns { display: flex; gap: 10px; margin-top: 16px; } .xc-btns .btn { flex: 1; }
 .nwi { display: flex; gap: 14px; padding: 14px; border-radius: 18px; background: var(--frost); margin-bottom: 8px; }
 .nwi > i { font-style: normal; font-size: 26px; line-height: 1.1; flex: none; width: 34px; text-align: center; }
 .nwi b { display: block; font-size: 15.5px; margin-bottom: 4px; }

@@ -506,3 +506,71 @@ async function examStart(job) {
   $("#exam-stop").textContent = "Готово";
   $("#exam-stop").onclick = examFinish;
 }
+
+/* ---------- Следы прошлых экзаменов (отчёт №52, 14.10) ----------
+   До 0.6.37 экзамен на телефоне синхронизировался: то, что он записал в песочнице, — память («в среду в 15:00 встреча
+   с подрядчиком по кухне», бюджет на мебель, дни рождения Ани и Пети), заметки («Список покупок…», «Чек за краску»),
+   расход 450 на продукты, сделанные дела («позвонить Игорю») — уходило в аккаунт и возвращалось как своё, и на
+   компьютер тоже. Один раз после обновления: находим записи, похожие на фразы экзамена, и показываем списком —
+   человек отмечает и убирает (удаление уходит обменом и на компьютер). Сами ничего не удаляем. */
+const EXAM_STOP = new Set(["запом", "пожал", "запиш", "сохра", "лира", "помощ", "польз", "напом", "этого", "чтобы", "00"]);
+const EXAM_MONTHS = "января февраля марта апреля мая июня июля августа сентября октября ноября декабря";
+function examStems(t) {
+  t = String(t || "").replace(/\(на \d{1,2}\.\d{1,2}\.\d{2,4}[^)]*\)/g, " ").replace(/_\(\d{1,2}\.\d{1,2}\.\d{4}\)_/g, " ");   // «(на 14.10.2026, среда)» — приписка памяти
+  return [...new Set((t.toLowerCase().replace(/ё/g, "е").match(/[a-zа-я0-9]+/g) || [])
+    .filter(w => /^\d+$/.test(w) || w.length >= 4).map(w => /^\d+$/.test(w) ? w : w.slice(0, 5)).filter(w => !EXAM_STOP.has(w)))];
+}
+function examTraceSets() {
+  const texts = [];
+  for (const sc of EXAM_PHONE) {
+    for (const st of sc.steps || []) { const s = st && (typeof st === "string" ? st : st.say); if (s) texts.push(String(s).replace(/\{date[^}]*\}/g, " " + EXAM_MONTHS + " ")); }
+    ((sc.seed || {}).alarms || []).forEach(a => texts.push(a.title));
+  }
+  EXAM_SEED_NOTES.forEach(n => texts.push(n.title + " " + n.text));
+  return texts.map(t => new Set(examStems(t)));
+}
+/** Похожа ли запись на фразу экзамена: ≥2 общих слова и ≥60 % её слов — из одной фразы. */
+function examLike(text, sets) {
+  const f = examStems(text); if (f.length < 2) return false;
+  return (sets || examTraceSets()).some(e => { const n = f.filter(w => e.has(w)).length; return n >= 2 && n / f.length >= 0.6; });
+}
+function examTraces() {
+  const sets = examTraceSets(), like = (t) => examLike(t, sets);
+  return {
+    memory: (S.memory || []).filter(like),
+    notes: notes().filter(n => like((n.title || "") + " " + String(n.text || "").replace(/^#.*$|^\*[^*\n]+\*\s*$/gm, " "))),   // без заголовка и даты компьютера
+    money: money().filter(m => like(`${m.amount} ${m.category || ""} ${m.note || ""}`)),
+    done: doneList().filter(d => like(d.title)),
+  };
+}
+function examCleanCheck(force) {
+  if (!force && prefGet("exam_clean") === "1") return false;
+  const t = examTraces(), n = t.memory.length + t.notes.length + t.money.length + t.done.length;
+  if (!n) { prefSet("exam_clean", "1"); return false; }
+  const row = (k, i, txt) => `<label class="xc-i"><input type="checkbox" checked data-k="${k}" data-i="${i}"><span>${esc(txt)}</span></label>`;
+  const grp = (title, list, k, f) => list.length ? `<div class="xc-g">${title}</div>` + list.map((x, i) => row(k, i, f(x))).join("") : "";
+  $("#clean-body").innerHTML = `<p class="nwsub">Раньше экзамен на этом телефоне записывал свои проверочные фразы в ваши данные — и они попали на компьютер. Похоже, это они. Снимите галочку с того, что ваше, и уберите остальное.</p>`
+    + grp("Память", t.memory, "memory", x => x)
+    + grp("Заметки", t.notes, "notes", x => [x.title, x.text].filter(Boolean).join(" — ").slice(0, 160))
+    + grp("Расходы", t.money, "money", x => `${x.amount} ${x.currency || ""} · ${x.category || ""}${x.note ? " · " + x.note : ""} · ${x.date || ""}`)
+    + grp("Сделано", t.done, "done", x => x.title)
+    + `<div class="xc-btns"><button class="btn" id="xc-keep">Оставить всё</button><button class="btn p" id="xc-go">Убрать отмеченное</button></div>`;
+  $("#xc-keep").onclick = () => { prefSet("exam_clean", "1"); closeSheets(); };
+  $("#xc-go").onclick = () => {
+    const pick = (k) => new Set($$(`#clean-body input[data-k="${k}"]:checked`).map(x => +x.dataset.i));
+    const m = pick("memory"), nt = pick("notes"), mo = pick("money"), dn = pick("done");
+    const gone = (k, set) => new Set(t[k].filter((_, i) => set.has(i)));
+    const gm = gone("memory", m), gn = new Set([...gone("notes", nt)].map(x => x.id)), gmo = new Set([...gone("money", mo)].map(x => x.id)), gd = new Set([...gone("done", dn)].map(x => x.id));
+    if (gm.size) { S.memory = (S.memory || []).filter(f => !gm.has(f)); saveS(); }
+    if (gn.size) saveNotes(notes().filter(x => !gn.has(x.id)));
+    if (gmo.size) saveMoney(money().filter(x => !gmo.has(x.id)));
+    if (gd.size) saveDone(doneList().filter(x => !gd.has(x.id)));
+    syncSoon();                                    // удаление — и на компьютер, и в аккаунт
+    prefSet("exam_clean", "1"); closeSheets();
+    const k = gm.size + gn.size + gmo.size + gd.size;
+    plog("info", `🧹 записи экзамена убраны: ${k}`); toast(k ? `Убрано записей: ${k}` : "Ничего не убрано");
+  };
+  openSheet("#sh-clean");
+  return true;
+}
+window.examCleanCheck = examCleanCheck;
