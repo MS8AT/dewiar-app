@@ -59,6 +59,7 @@
   <div class="brand"><canvas id="brand"></canvas><div><b id="bname">Dewiar</b><span id="bsub">голосовой ассистент</span></div></div>
   <button class="cchip" id="nav-cloud" style="display:none" title="ИИ-баланс: на сколько хватит моделей Dewiar. Нажмите — подробности и пополнение"><span>ИИ-баланс</span><em></em><i><b></b></i></button>
   <button data-p="personas" class="cur">Персонажи</button>
+  <button data-p="chat" title="Вся переписка с персонажами — голосом и текстом">Чат</button>
   <div class="ng">Мой день</div>
   <button data-p="calendar">Календарь</button>
   <button data-p="reminders">Дела и напоминания</button>
@@ -195,6 +196,17 @@
       <div class="rf-list" id="rf-list"></div>
       <p class="hint" style="max-width:62ch;margin-top:12px">Переписываться и созваниваться можно с теми, кого пригласили вы, и с тем, кто пригласил вас, — когда оба согласны:
         «Позвать в Близкие» — друг увидит приглашение и примет его или откажется.</p>
+    </div>
+  </section>
+  <section id="p-chat" class="wide">
+    <h1>Чат</h1>
+    <p class="lead">Вся переписка с персонажами: что вы сказали голосом или написали и что они ответили. Удобнее текстом — пишите здесь:
+      ответ появится в ленте и прозвучит голосом, если голос не выключен в виджете.</p>
+    <div class="cl-chat ch-chat">
+      <div class="ch-bar"><span class="hint" id="ch-res" style="margin:0;flex:1"></span><button class="btn small" id="ch-clear">Очистить</button></div>
+      <div class="cl-empty" id="ch-empty"><b>Здесь будет ваша переписка</b><span>Скажите «Лира, …» или напишите ниже — разговор появится в ленте.</span></div>
+      <div class="cl-msgs" id="ch-msgs"></div>
+      <div class="cl-send"><textarea id="ch-text" rows="1" placeholder="Сообщение…"></textarea><button class="btn primary" id="ch-go">Отправить</button></div>
     </div>
   </section>
   <section id="p-close" class="wide">
@@ -1360,6 +1372,7 @@
 <script src="studio/close.js"></script>
 <script src="studio/refs.js"></script>
 <script src="studio/notes.js"></script>
+<script src="studio/chat.js"></script>
 <script src="studio/news.js"></script>
 </body>
 </html>

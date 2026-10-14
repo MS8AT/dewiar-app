@@ -617,6 +617,57 @@ class ToolsMixin:
             return True
         return False
 
+    AGENDA_Q = re.compile(r"по\s+плану|\bплан(?:ы|ов)?\s+(?:на|у\s+(?:нас|меня))|как(?:ие|ой)\s+(?:у\s+(?:нас|меня)\s+)?(?:сегодня\s+|завтра\s+)?(?:план|дела)"
+                          r"|что\s+(?:у\s+(?:нас|меня)\s+)?(?:на\s+|в\s+)?(?:сегодня|завтра|послезавтра|эт\w+\s+недел\w+)(?:\s*\?|\s*$|\s+(?:по\s+плану|запланирован|в\s+календаре))"
+                          r"|расписани\w+|что\s+(?:у\s+(?:нас|меня)\s+)?запланирован|мои\s+дела|чем\s+(?:я\s+)?занят|повестк\w+\s+дня"
+                          r"|что\s+мне\s+(?:сегодня\s+|завтра\s+)?(?:надо|нужно)\s+(?:сделать|успеть)", re.I)
+
+    def agenda_context(self, text):
+        """Вопрос о планах («что у нас по плану», «какие дела на завтра», «расписание на неделю») — дела, напоминания и
+        встречи календаря на эти дни сразу в подсказку модели. Раньше модель отвечала «достаю календарь — одну секунду»
+        и не вызывала инструменты (отчёт 14.10): данные уже перед ней — отвечать есть чем. -> текст для системной подсказки или ""."""
+        t = (text or "").split("\n\nВложения:")[0]
+        if not self.AGENDA_Q.search(t):
+            return ""
+        today = datetime.now().date()
+        low = t.lower()
+        if "послезавтра" in low:
+            days = [today + timedelta(days=2)]
+        elif "завтра" in low:
+            days = [today + timedelta(days=1)]
+        elif "недел" in low:
+            days = [today + timedelta(days=i) for i in range(7)]
+        else:
+            days = [today] + ([today + timedelta(days=1)] if datetime.now().hour >= 18 else [])
+        names = {today: "сегодня", today + timedelta(days=1): "завтра", today + timedelta(days=2): "послезавтра"}
+        months, lines = {}, []
+        now_hm = datetime.now().strftime("%H:%M")
+        for d in days:
+            key = (d.year, d.month)
+            if key not in months:
+                try:
+                    months[key] = self.calendar_month(d.year, d.month)["days"]
+                except Exception as e:  # noqa: BLE001
+                    log.info("План на день: календарь не прочитался: %s", e)
+                    months[key] = {}
+            items = [x for x in months[key].get(d.isoformat(), []) if x.get("type") in ("reminder", "event", "task") and not x.get("paused")]
+            items.sort(key=lambda x: x.get("time") or "")
+            head = f"{d.strftime('%d.%m')} ({names.get(d) or ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'][d.weekday()]})"
+            if not items:
+                lines.append(f"{head}: ничего не запланировано")
+                continue
+            for x in items:
+                kind = {"event": "встреча" + (f" ({x['cal']})" if x.get("cal") else ""), "task": "задача"}.get(x["type"]) or \
+                    ("дело по расписанию (выполнится само)" if x.get("kind") in ("job", "brief") else "напоминание")
+                tm = (x.get("time") or "") + (f"–{x['end']}" if x.get("end") else "")
+                past = d == today and (x.get("done") or (x.get("time") and x["time"] < now_hm))
+                lines.append(f"{head} {tm} {kind}: {x.get('title', '')}" + (f", {x['place']}" if x.get("place") else "")
+                             + (" — уже прошло" if past else "") + (", повторяется" if x.get("repeat") else ""))
+        log.info("📅 Вопрос о планах — даю модели дела и календарь (%d стр.)", len(lines))
+        return ("\n\nПЛАНЫ ПОЛЬЗОВАТЕЛЯ (напоминания, дела по расписанию и встречи календаря — уже получены, это свежие данные): "
+                "отвечай по ним сразу, без вызова инструментов и без «сейчас посмотрю». Сначала то, что впереди, по времени; "
+                "прошедшее — одной фразой или не упоминай; ничего нет — так и скажи. Ничего не выдумывай.\n" + "\n".join(lines))
+
     def calendar_month(self, year, month):
         """Всё по дням месяца: напоминания (будущие и сработавшие), деньги, заметки, дневник, задачи."""
         import calendar as _cal

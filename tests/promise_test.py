@@ -1,6 +1,9 @@
 """«Обещал, но не сделал»: модель отвечает «сейчас посмотрю и расскажу» и не вызывает ни одного действия, а на просьбу
 о презентации не запускает задачу — ядро просит её сделать (quality.promise_nudge), и задача запускается. Обычный ответ и
-уточняющий вопрос («Какой город?») не трогаем. Настоящее ядро по wav-файлу и своя модель-заглушка."""
+уточняющий вопрос («Какой город?») не трогаем. Настоящее ядро по wav-файлу и своя модель-заглушка.
+Отчёт 14.10: «что у нас по плану?» → «Достаю календарь и напоминания — одну секунду» — и всё:
+— вопрос о планах: дела и календарь уже в подсказке модели (ПЛАНЫ ПОЛЬЗОВАТЕЛЯ) — отвечает сразу по ним;
+— «достаю … одну секунду» без действия (вопрос без слова «план») — тоже обещание: ядро просит сделать."""
 import asyncio, json, os, re, socket, subprocess, sys, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -54,6 +57,10 @@ class H(BaseHTTPRequestHandler):
             send({"content": "Завтра в Минске +12 и облачно."}); send({}, "stop")
         elif msgs[-1]["role"] == "tool":
             send({"content": "Взялась за презентацию — сообщу, когда будет готово."}); send({}, "stop")
+        elif "ПЛАНЫ ПОЛЬЗОВАТЕЛЯ" in str(msgs[0].get("content")) and "полить цветы" in str(msgs[0].get("content")).lower():
+            send({"content": "Сегодня впереди — полить цветы."}); send({}, "stop")
+        elif "план" in first_q or "просил" in first_q:
+            send({"content": "Ты спросил, что у нас по плану. Достаю календарь и напоминания — одну секунду."}); send({}, "stop")
         elif "город" in first_q:
             send({"content": "Какой город?"}); send({}, "stop")
         elif "презентац" in first_q or "погод" in first_q:
@@ -122,8 +129,10 @@ async def session():
                 await asyncio.sleep(0.05)
             d = [e for e in events[mark:] if e["type"] == "answer" and e.get("done")]
             return d[-1].get("text", "") if d else ""
+        await call("reminder_add", phrase="через 30 минут полить цветы")
         for q, key in (("Сделай мне презентацию о завтрашней погоде", "pres"), ("Какая погода завтра?", "promise"),
-                       ("Какая погода в моём городе?", "ask"), ("Привет", "plain")):
+                       ("Какая погода в моём городе?", "ask"), ("Привет", "plain"), ("Что у нас по плану?", "plan"),
+                       ("А я что у тебя просил?", "asked")):
             m = len(events)
             await call("say", text=q)
             R[key] = await final(m)
@@ -137,6 +146,14 @@ async def session():
         except subprocess.TimeoutExpired:
             core.kill()
 
+sys.path.insert(0, str(ROOT / "core"))
+from quality import looks_like_promise  # noqa: E402
+PROM = ["Ты спросил, что у нас по плану. Достаю календарь и напоминания — одну секунду.", "Сейчас, вот они — календарь и напоминания.",
+        "Секунду, открываю календарь.", "Сейчас гляну календарь."]
+REAL = ["Вот они: в 10:00 iCad, в 12:28 обед.", "Вот он, твой план: полить цветы и позвонить маме.", "Сейчас 10 утра, в календаре пусто.",
+        "В 10:00 скопировать проект iCad, в 12:28 обед — не забудьте карту.", "Вот так и живём."]
+ok(all(looks_like_promise(t) for t in PROM) and not any(looks_like_promise(t) for t in REAL),
+   f"обещания без результата узнаются, ответы по делу — нет: {[t for t in PROM if not looks_like_promise(t)]} {[t for t in REAL if looks_like_promise(t)]}")
 asyncio.run(session())
 log = (tmp / "core.log").read_text(encoding="utf-8", errors="replace")
 srv.shutdown()
@@ -144,6 +161,9 @@ ok("Взялась за презентацию" in R["pres_all"] and "«През
 ok("+12" in R["promise"], f"«сейчас посмотрю» без действия → доделала: {R['promise'][-60:]}")
 ok(R["ask"].strip() == "Какой город?", f"уточняющий вопрос не трогаем: {R['ask']}")
 ok(R["plain"].startswith("Привет"), "обычный ответ не трогаем")
-ok(log.count("✋ Модель") == 2, f"просили доделать дважды: {log.count('✋ Модель')}")
+ok("полить цветы" in R["plan"] and "секунду" not in R["plan_all"], f"«что у нас по плану» — дела уже перед моделью, ответ сразу: {R['plan_all'][:120]}")
+ok("+12" in R["asked"], f"«достаю календарь — одну секунду» без действия → доделала: {R['asked_all'][-80:]}")
+ok(log.count("✋ Модель") == 3, f"просили доделать трижды (презентация, погода, «одну секунду»): {log.count('✋ Модель')}")
+ok("📅 Вопрос о планах" in log, "в журнале: вопрос о планах — дела и календарь в подсказке")
 print("ИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)

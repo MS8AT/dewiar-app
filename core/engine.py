@@ -33,6 +33,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.player = None
         from conversation import Conversation
         self.conv = Conversation(STATE_DIR / "conversation.json")     # длинный разговор: содержание раньше сказанного
+        from chatlog import ChatLog
+        self.chatlog = ChatLog(STATE_DIR / "chat.jsonl")               # переписка для студии («Чат»): вся лента, как в мессенджере
         self.history = self.conv.restored(float(settings.get("llm", "history_reset_seconds") or 28800))
         from diary import Diary
         from night import NightWatch
@@ -540,6 +542,21 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         if type_ == "answer" and not kw.pop("model", False) and kw.get("text"):
             kw["text"] = self._g(kw["text"])               # быстрые ответы без модели — в роде персонажа
         self.bridge.broadcast(dict(kw, type=type_))
+        if (type_ == "heard" or (type_ == "answer" and kw.get("done"))) and kw.get("text") and getattr(self, "chatlog", None) is not None:
+            self._chat_add(type_, kw)
+
+    def _chat_add(self, type_, kw):
+        """Реплика — в ленту «Чата» студии (chatlog.py) и сразу в открытое окно чата (событие chat)."""
+        try:
+            text, via = str(kw["text"]), None
+            if type_ == "heard" and text.startswith("✉ "):
+                text, via = text[2:], "message"
+            item = self.chatlog.add("user" if type_ == "heard" else "assistant", text,
+                                 who=None if type_ == "heard" else self.s.get("persona"), via=via)
+            if item:
+                self.bridge.broadcast({"type": "chat", "item": item})
+        except Exception as e:  # noqa: BLE001
+            log.debug("чат: %s", e)
 
     def _g(self, text):
         """«Выключил музыку» → «Выключила музыку» у Лиры, Эвы и других героинь (только речь самого ассистента)."""
