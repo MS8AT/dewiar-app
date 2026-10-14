@@ -783,11 +783,12 @@ function applyPersona() {
    (deviceorientation, без разрешений): важна перемена наклона, а не поза — «как держит» подстраивается за пару секунд,
    и портрет возвращается к центру. Диск чуть поворачивается к человеку (CSS, до 7°), лицо сдвигается в глубину, живое
    лицо переводит на него глаза (DewiarEntity.look). Выключено: «Оформление» → «Портрет следит за наклоном», «уменьшить
-   движение» в системе, экран не виден (приложение свёрнуто) и альбомный экран — датчик не слушаем вовсе. */
+   движение» в системе, экран не виден (приложение свёрнуто) и альбомный экран — датчик не слушаем вовсе.
+   По умолчанию выключено (отзыв 14.10: «быстро надоедает — под флагом, по умолчанию выключен»). */
 const TILT = { on: false, b0: null, g0: null, t: 0, x: 0, y: 0, raf: 0 };
 function tiltWanted() {
   const angle = (screen.orientation && screen.orientation.angle) || 0;
-  return S.tilt !== false && "DeviceOrientationEvent" in window && !document.hidden && angle === 0
+  return S.tilt === true && "DeviceOrientationEvent" in window && !document.hidden && angle === 0
     && !matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 function tiltOn(e) {
@@ -1719,7 +1720,7 @@ async function ask(text, opts = {}) {
   turnAtt = att; turnAsk = opts.hidden ? "" : text;    // hidden — просьба приложения (сканер, сводка): без проверки
   const fast = opts.hidden ? null : att.length ? (() => { const say = noteQuick(text, att); return say ? { say } : null; })() : await quick(text);
   if (fast && fast.switchTo) { setState("idle"); showYou(text); switchPersona(fast.switchTo, fast.question); return; }
-  if (fast) { fast.say = gfix(fast.say); history.push({ role: "user", content: text }, { role: "assistant", content: fast.say, who: persona().id }); saveH(); convAfter(); dayTurn(text, fast.say); answerLocal(fast); return; }
+  if (fast) { fast.say = gfix(fast.say); history.push({ role: "user", content: text }, { role: "assistant", content: fast.say, who: persona().id, t: Date.now() }); saveH(); convAfter(); dayTurn(text, fast.say); answerLocal(fast); return; }
   if (!S.llm.base_url && loggedIn()) showBot("Подключаюсь к мозгу — секунду…", "wait");
   await ensureBrain();                             // вошли аккаунтом, а мозг не выбран — модели Dewiar по аккаунту сами
   if (!S.llm.base_url) {
@@ -1874,7 +1875,7 @@ async function ask(text, opts = {}) {
     }
     plog("info", `💬 ответ ${((sink.text() || final).trim() || quiet).length} симв.${quiet ? " (сам: " + clip(quiet) + ")" : ""} за ${((Date.now() - t0) / 1000).toFixed(1)} с`);
     if (!opts.hidden) history.push({ role: "user", content: text + (att.length ? ` [приложено: ${att.map(a => a.kind === "image" ? "фото" : "файл «" + a.name + "»").join(", ")}]` : "") });
-    history.push(Object.assign({ role: "assistant", content: (sink.text() || final).trim() || quiet, who: persona().id },
+    history.push(Object.assign({ role: "assistant", content: (sink.text() || final).trim() || quiet, who: persona().id, t: Date.now() },
       photoTurn ? { note: "[снимок с камеры показан на экране; показать снова — show_photo, новый — take_photo]" } : {},
       turnMedia && turnMedia.length ? { img: turnMedia.map(x => ({ src: x.src, full: x.full, page: x.page, title: x.title, author: x.author, license: x.license })) } : {})); saveH(); convAfter();
     if (!opts.hidden) { dayTurn(text, (sink.text() || final).trim() || quiet); try { dayLogAdd(text, (sink.text() || final).trim() || quiet); } catch (x) { } }
@@ -3929,11 +3930,11 @@ function renderSettings() {
   } else {
     const opt = (list, cur) => list.map(([v, n]) => `<option value="${v}" ${v === cur ? "selected" : ""}>${n}</option>`).join("");
     // фон — плитками с живым образцом (тот же класс темы, что у экрана; кружок — материал её карточек), по группам
-    h.push(`<h3>Оформление</h3><div class="card">${[...new Set(PHONE_SKINS.map(x => x.group))].map(gr => `<div class="skg">${esc(gr)}</div><div class="skins">` +
-        PHONE_SKINS.filter(x => x.group === gr).map(x => `<button class="skm ${x.id === lookSkin() ? "on" : ""}" data-skin="${x.id}"><i class="lk-prev skin-${x.id}"><b></b></i><span>${esc(x.name)}</span></button>`).join("") + `</div>`).join("")}
+    h.push(`<h3>Оформление</h3><div class="card"><div class="skins" role="radiogroup" aria-label="Тема">${
+        PHONE_SKINS.map(x => `<button class="skm ${x.id === lookSkin() ? "on" : ""}" data-skin="${x.id}" role="radio" aria-checked="${x.id === lookSkin()}" title="${esc(x.group)} · ${esc(x.name)}"><i class="lk-prev skin-${x.id}"><b></b></i><span>${esc(x.name)}</span></button>`).join("")}</div>
       <label class="f" style="margin-top:6px"><span>Когда говорит</span><select id="ap-fx">${opt([["bars", "Лучи"], ["pulse", "Пульс"], ["wave", "Волна"]], lookFx())}</select></label>
       <div class="sw" style="margin-top:10px"><div>Портрет следит за наклоном<small class="hint" style="display:block;margin:2px 0 0">Наклоните телефон — персонаж чуть повернётся и посмотрит на вас. Камера не нужна.</small></div>
-        <label class="tg"><input type="checkbox" id="ap-tilt" ${S.tilt !== false ? "checked" : ""}><i></i></label></div></div>`);
+        <label class="tg"><input type="checkbox" id="ap-tilt" ${S.tilt === true ? "checked" : ""}><i></i></label></div></div>`);
     // звук напоминаний: свои мягкие мелодии (Sounds.java, res/raw), системный или свой файл; ▶ — послушать
     const snd = (() => { try { return JSON.parse(D.alarmSound ? D.alarmSound() : "{}"); } catch (e) { return {}; } })();
     h.push(`<h3>Звук напоминаний</h3><div class="card"><p class="hint" style="margin-top:0">Мягко и сначала тихо — громкость прибавляется за 20 секунд.</p>
@@ -3990,7 +3991,7 @@ function wireSettings(info) {
   if (g("dev-ping")) g("dev-ping").onclick = async () => { const r = g("dev-res"); r.className = "res"; r.textContent = "отправляю…";
     const ok = await pulseSend(); r.className = ok ? "res ok" : "res bad";
     r.textContent = ok ? "Готово — обновите список «Где» в кабинете." : (S.pulse === false ? "«Анонимный пульс» выключен — включите его ниже, и телефон появится." : "Не получилось — проверьте интернет."); };
-  $$(".skm").forEach(b => b.onclick = () => { S.skin = b.dataset.skin; saveS(); applyLook(); $$(".skm").forEach(x => x.classList.toggle("on", x === b)); });
+  $$(".skm").forEach(b => b.onclick = () => { S.skin = b.dataset.skin; saveS(); applyLook(); $$(".skm").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", String(x === b)); }); });
   if (g("ap-fx")) g("ap-fx").onchange = () => { S.voice_fx = g("ap-fx").value; saveS(); applyLook(); };
   if (g("ap-tilt")) g("ap-tilt").onchange = () => { S.tilt = g("ap-tilt").checked; saveS(); tiltSync(); };
   // звук напоминаний: нажатие — выбрать и послушать (ещё раз — стоп); «Свой звук» без файла — сразу выбор файла
@@ -5855,7 +5856,9 @@ setInterval(() => { if (!document.hidden) welcomeSeen(); }, 60000);     // по�
     else showBot(gfix(`Привет! Я ${persona().name}. Чтобы мы могли поговорить, меня нужно один раз подключить — это бесплатно и займёт минуту.`));
     showCard(S.join ? `<div class="row2"><button class="btn p" onclick="joinPoll(true).then(d => d && !d.key && toast((d && d.text) || 'Пока ждёт проверки')).catch(e => toast(e.message))" style="flex:1">Проверить</button><button class="btn" onclick="openBrain()" style="flex:1">Другие способы</button></div>`
       : `<div class="start"><button class="btn p w" onclick="openBrain('join')">Подключить бесплатно</button><button class="btn w" onclick="openBrain()">У меня есть код или свой ключ</button></div>`); }
-  else if (last) showBot(last.content.slice(0, 400));
+  // последний ответ — только свежий (до 20 минут): старый («С возвращением. В 15:00 встреча…» с утра) после каждого
+  // запуска и обновления выглядел как новое сообщение (отчёты №52, №53). Он в истории разговора — там его и видно.
+  else if (last && last.t && Date.now() - last.t < 20 * 60e3) showBot(last.content.slice(0, 400));
   const it = D.takeIntent(); if (it) { try { handleIntent(JSON.parse(it)); } catch (e) { } }
   welcomeArm(!!it);                                // открыли кнопкой помощника — сразу слушаем, не здороваемся
   if (S.llm.base_url && !it) needPerm(MIC);

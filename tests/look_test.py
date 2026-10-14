@@ -127,8 +127,8 @@ for (const fx of ["bars", "pulse", "wave"]) for (const tone of ["mono", "color"]
     pg.evaluate("openSettings('more')"); pg.wait_for_timeout(400)
     card = pg.evaluate("() => [document.querySelector('#set-body').textContent.includes('№' + devId().slice(-4)), !!document.querySelector('#dev-ping')]")
     ok(card == [True, True], "«Этот телефон в кабинете»: №… как в списке экзамена и кнопка «Отметиться в кабинете»")
-    ok(pg.evaluate("$$('.skm').length") >= 20 and pg.evaluate("$$('.skg').length") == 6 and pg.evaluate("$$('.skm[data-skin=snow]').length") == 1
-       and pg.evaluate("$('.skm.on').dataset.skin") == "brand", "телефон: все темы плитками по группам, и светлые тоже; выбранная отмечена")
+    ok(pg.evaluate("$$('.skm').length") >= 20 and pg.evaluate("$$('.skm[data-skin=snow]').length") == 1
+       and pg.evaluate("$('.skm.on').dataset.skin") == "brand", "телефон: все темы — круглыми образцами (группы — в подсказке), и светлые тоже; выбранная отмечена")
     pg.click('.skm[data-skin="neon"]'); pg.select_option("#ap-fx", "pulse"); pg.wait_for_timeout(300)
     ph1 = pg.evaluate("() => [document.body.className, orb.tone, orb.fx, S.skin, S.voice_fx]")
     ok("skin-neon" in ph1[0] and ph1[1:] == ["color", "pulse", "neon", "pulse"], f"телефон: тема и анимация меняются и запоминаются: {ph1}")

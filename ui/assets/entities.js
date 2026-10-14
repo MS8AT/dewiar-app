@@ -887,7 +887,9 @@
 
     ctx.save(); ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.clip();
     const G = L.geo, [cx0, cy0, cs] = G.crop;             // портрет целиком: видно причёску (хвостики Лиры), лицо не огромное
-    const gk = e.lookGain, z = 1 + 0.07 * gk * e._la, ox = e._lx * R * 0.05 * gk, oy = e._ly * R * 0.04 * gk;   // к зрителю — лёгкий сдвиг; крупнее — плавно
+    // к зрителю — лёгкий сдвиг без увеличения: портрет целиком, кадр крупнее исходного (отзыв 14.10: «лицо стало крупнее,
+    // еле вмещается в круге»); за краем кадра — тёмная подложка, при сдвиге в 3 % её не видно
+    const gk = e.lookGain, z = 1, ox = e._lx * R * 0.03 * gk, oy = e._ly * R * 0.025 * gk;
     const sc = (2 * R) / cs * z, X = (x) => -R * z + ox + (x - cx0) * sc, Y = (y) => -R * z + oy + (y - cy0) * sc;
     ctx.imageSmoothingQuality = "high";
     const mono = e.tone === "mono" || e.tone === "ink";
@@ -1047,7 +1049,7 @@
       const sleeping = e.state === "offline";             // микрофон выключен — портрет в полную яркость
       ctx.globalAlpha = sleeping ? 0.6 : 1;
       ctx.imageSmoothingQuality = "high";
-      const gk = e.lookGain, z = 1 + 0.07 * gk * e._la, ox = e._lx * R * 0.05 * gk, oy = e._ly * R * 0.04 * gk;   // чуть крупнее (плавно) — край не виден
+      const gk = e.lookGain, z = 1 + 0.035 * gk * e._la, ox = e._lx * R * 0.03 * gk, oy = e._ly * R * 0.025 * gk;   // своё фото: чуть крупнее (плавно) — край не виден
       ctx.drawImage(e._ph.canvas, -R * z + ox + jitter, -R * z + oy, 2 * R * z, 2 * R * z);
       ctx.globalAlpha = 1;
       if (busy) {                                 // говорит/думает — лёгкий оттенок цвета персонажа

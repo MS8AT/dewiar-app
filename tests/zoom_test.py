@@ -102,8 +102,8 @@ try:
         hz = hw.evaluate("() => [document.documentElement.style.zoom, window.__zoom]")
         ok(hz[0] == "0.9" and hz[1] == [0.9], f"виджет: страница 90 % и окно под неё (set_zoom): {hz}")
         # колесо с Ctrl — крупнее, один шаг за жест
-        st.mouse.move(600, 400); st.keyboard.down("Control"); st.mouse.wheel(0, -120); st.mouse.wheel(0, -120); st.keyboard.up("Control"); st.wait_for_timeout(1200)
-        ok(st.evaluate("() => document.documentElement.style.zoom") == "", f"Ctrl + колесо вверх — обратно к 100 % (шаг за жест): {st.evaluate('() => document.documentElement.style.zoom')}")
+        st.mouse.move(600, 400); st.keyboard.down("Control"); st.mouse.wheel(0, -120); st.keyboard.up("Control"); st.wait_for_timeout(1200)   # одно событие: под нагрузкой два подряд приходят дальше 120 мс
+        ok(st.evaluate("() => document.documentElement.style.zoom") == "", f"Ctrl + колесо вверх — обратно к 100 %: {st.evaluate('() => document.documentElement.style.zoom')}")
         # текст: ползунок — сразу, чат и заметки крупнее, кнопки — нет
         btn0 = st.evaluate("() => getComputedStyle(document.querySelector('#zm-reset')).fontSize")
         st.evaluate("() => { const r = document.getElementById('zm-text'); r.value = 1.2; r.dispatchEvent(new Event('input')); }"); st.wait_for_timeout(900)

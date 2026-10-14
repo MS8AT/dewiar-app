@@ -1,8 +1,9 @@
 """Портрет смотрит на человека — «параллакс» без камеры (просьба 14.10):
-— телефон: наклон (deviceorientation) → диск чуть поворачивается к человеку, лицо сдвигается в глубину, глаза живого лица
+— телефон (по умолчанию выключено, «Оформление» → «Портрет следит за наклоном»): наклон (deviceorientation) → диск чуть поворачивается к человеку, лицо сдвигается в глубину, глаза живого лица
   переводятся (DewiarEntity.look); важна перемена наклона, а не поза — через пару секунд всё возвращается к центру;
   выключатель «Портрет следит за наклоном», «уменьшить движение» и альбомный экран — датчик не слушаем;
-— компьютер: курсор над виджетом — то же; ушёл курсор — спокойно к центру; в студии — переключатель (ui.tilt)."""
+— компьютер: только по желанию (студия, ui.cursor_look, по умолчанию выключено — 14.10: «на компьютере не нравится»);
+  телефон — без увеличения лица («еле вмещается в круге»)."""
 import json, os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -31,7 +32,9 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={"width": 400, "height": 820})
     pg.on("pageerror", lambda x: errs.append(str(x)))
     pg.goto((www / "index.html").as_uri()); pg.wait_for_timeout(1200)
-    ok(pg.evaluate("() => TILT.on"), "телефон: датчик наклона слушаем (по умолчанию включено)")
+    ok(pg.evaluate("() => TILT.on") is False, "телефон: по умолчанию наклон выключен (отзыв 14.10: «быстро надоедает»)")
+    pg.evaluate("() => { S.tilt = true; tiltSync(); }")
+    ok(pg.evaluate("() => TILT.on"), "включили в «Оформлении» — датчик наклона слушаем")
     pg.evaluate(ORIENT, [55, 0]); pg.wait_for_timeout(100)
     for _ in range(6):                                     # повернули вправо (правый край от себя) и чуть к себе
         pg.evaluate(ORIENT, [61, 10]); pg.wait_for_timeout(40)
@@ -51,31 +54,26 @@ with sync_playwright() as p:
     pg.evaluate("() => { openSheet('#sh-more'); }") if pg.evaluate("() => !!document.getElementById('sh-more')") else None
     b2 = b.new_page(viewport={"width": 400, "height": 820}, reduced_motion="reduce")
     b2.goto((www / "index.html").as_uri()); b2.wait_for_timeout(1000)
-    ok(b2.evaluate("() => TILT.on") is False, "«уменьшить движение» в системе — без наклона")
+    ok(b2.evaluate("() => { S.tilt = true; tiltSync(); return TILT.on; }") is False, "«уменьшить движение» в системе — без наклона, даже если включён")
     b2.close()
-    # компьютер: виджет и курсор
+    # компьютер: эффект убран (отзыв 14.10: «на компьютере не нравится») — курсор не двигает портрет
     hw = b.new_page(viewport={"width": 300, "height": 420})
     hw.on("pageerror", lambda x: errs.append("виджет: " + str(x)))
     hw.goto((ROOT / "ui/hud.html").as_uri() + "?token=x&port=1&mode=card"); hw.wait_for_timeout(1000)
     box = hw.evaluate("() => { const r = document.getElementById('cv').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }")
-    hw.mouse.move(box[0] + 120, box[1] - 60); hw.wait_for_timeout(2500)
-    H = hw.evaluate("() => ({ lx: entity.lookX, ly: entity.lookY, tr: document.getElementById('cv').style.transform })")
-    ok(H["lx"] > 0.3 and H["ly"] < -0.1 and H["tr"] == "", f"виджет: курсор справа сверху — смотрит туда, а круг не поворачивается (не сплющивается): {H}")
-    ok(hw.evaluate("() => entity.lookGain") == 0.5, "компьютер: эффект вдвое слабее, чем на телефоне (крупный портрет)")
-    hw.evaluate("() => document.documentElement.dispatchEvent(new MouseEvent('mouseleave'))")
-    seq = []
-    for _ in range(45):                                    # уход курсора: увеличение уходит плавно, без рывка к исходному размеру
-        seq.append(hw.evaluate("() => entity._la")); hw.wait_for_timeout(100)
-    jumps = max(abs(a2 - b2) for a2, b2 in zip(seq, seq[1:]))
-    ok(seq[0] > 0.8 and seq[-1] < 0.3 and jumps < 0.2, f"курсор ушёл — размер возвращается плавно (шаг ≤ {jumps:.2f} за 0,1 с): {seq[0]:.2f} → {seq[-1]:.2f}")
-    hw.wait_for_timeout(300)
-    H2 = hw.evaluate("() => ({ looking: entity._looking, tr: document.getElementById('cv').style.transform })")
-    ok(H2 == {"looking": False, "tr": ""}, f"курсор ушёл — спокойно к центру: {H2}")
-    hw.evaluate("() => applyLook({ tilt: false })"); hw.mouse.move(box[0] - 100, box[1]); hw.wait_for_timeout(300)
-    ok(hw.evaluate("() => entity._looking") is False, "в студии выключили (ui.tilt) — не следит")
+    hw.mouse.move(box[0] + 120, box[1] - 60); hw.wait_for_timeout(800)
+    H = hw.evaluate("() => ({ looking: entity._looking, lx: entity.lookX, tr: document.getElementById('cv').style.transform })")
+    ok(H == {"looking": False, "lx": 0, "tr": ""}, f"компьютер по умолчанию: курсор над виджетом — портрет неподвижен: {H}")
+    hw.evaluate("() => applyLook({ cursor_look: true })"); hw.mouse.move(box[0] - 100, box[1] + 40); hw.wait_for_timeout(600)
+    H2 = hw.evaluate("() => ({ looking: entity._looking, lx: entity.lookX, gain: entity.lookGain, tr: document.getElementById('cv').style.transform })")
+    ok(H2["looking"] and H2["lx"] < 0 and H2["gain"] == 0.5 and H2["tr"] == "", f"включили в студии — смотрит на курсор, вдвое мягче, круг не поворачивается: {H2}")
+    hw.evaluate("() => applyLook({})")
+    ok(hw.evaluate("() => entity._looking") is False, "выключили — сразу прямо")
     b.close()
-ok("data-k=\"ui.tilt\"" in (ROOT / "ui/settings.html").read_text(encoding="utf-8"), "студия → «Оформление»: «Портрет смотрит на вас»")
-ok('"tilt": True' in (ROOT / "core/settings.py").read_text(encoding="utf-8"), "по умолчанию включено")
+ok('data-k="ui.cursor_look"' in (ROOT / "ui/settings.html").read_text(encoding="utf-8") and '"cursor_look": False' in (ROOT / "core/settings.py").read_text(encoding="utf-8"),
+   "студия: «Портрет смотрит на курсор» — переключатель, по умолчанию выключен")
+ent = (ROOT / "ui/assets/entities.js").read_text(encoding="utf-8")
+ok("const gk = e.lookGain, z = 1, ox" in ent, "телефон: живое лицо не увеличивается — портрет целиком, как раньше (отзыв 14.10)")
 ok(not errs, "без ошибок JavaScript" + (f": {errs}" if errs else ""))
 shutil.rmtree(tmp, ignore_errors=True)
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
