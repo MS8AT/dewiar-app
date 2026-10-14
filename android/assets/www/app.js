@@ -774,11 +774,51 @@ function applyPersona() {
   $("#who-img").src = p.avatar || miniOrb(p);
   const style = p.avatar && p.style !== "aura" ? "photo" : p.style;
   // портрет сдержанно (белый край вместо цветного кольца), голос — лучами, как на компьютере; тема — «Ещё» → «Оформление»
-  if (!orb) { orb = new DewiarEntity($("#orb"), { style, color: p.color, image: p.avatar || null, plate: true, live: p.live || "" }); orb.set({ audible: false }); applyLook(true); }
+  if (!orb) { orb = new DewiarEntity($("#orb"), { style, color: p.color, image: p.avatar || null, plate: true, live: p.live || "" }); orb.set({ audible: false }); applyLook(true); tiltSync(); }
   else orb.configure({ style, color: p.color, image: p.avatar || null, live: p.live || "" });
   orb.set({ state: state === "idle" ? "idle" : state });
   faceFor(p);
 }
+/* Наклон телефона — портрет «смотрит» на человека (просьба 14.10, параллакс без камеры). Датчик ориентации
+   (deviceorientation, без разрешений): важна перемена наклона, а не поза — «как держит» подстраивается за пару секунд,
+   и портрет возвращается к центру. Диск чуть поворачивается к человеку (CSS, до 7°), лицо сдвигается в глубину, живое
+   лицо переводит на него глаза (DewiarEntity.look). Выключено: «Оформление» → «Портрет следит за наклоном», «уменьшить
+   движение» в системе, экран не виден (приложение свёрнуто) и альбомный экран — датчик не слушаем вовсе. */
+const TILT = { on: false, b0: null, g0: null, t: 0, x: 0, y: 0, raf: 0 };
+function tiltWanted() {
+  const angle = (screen.orientation && screen.orientation.angle) || 0;
+  return S.tilt !== false && "DeviceOrientationEvent" in window && !document.hidden && angle === 0
+    && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+function tiltOn(e) {
+  if (e.beta == null || e.gamma == null) return;
+  const now = performance.now(), dt = TILT.t ? Math.min(0.5, (now - TILT.t) / 1000) : 0; TILT.t = now;
+  const b = e.beta, g = e.gamma;
+  if (TILT.b0 === null || Math.abs(b - TILT.b0) > 60) { TILT.b0 = b; TILT.g0 = g; }   // первый замер или телефон перевернули
+  const k = 1 - Math.exp(-dt / 2.5);
+  TILT.b0 += (b - TILT.b0) * k; TILT.g0 += (g - TILT.g0) * k;
+  const cl = (v) => Math.max(-1, Math.min(1, v));
+  TILT.x += (cl(-(g - TILT.g0) / 12) - TILT.x) * 0.3; TILT.y += (cl((b - TILT.b0) / 12) - TILT.y) * 0.3;   // без дрожи датчика
+  if (!TILT.raf) TILT.raf = requestAnimationFrame(tiltApply);
+}
+function tiltApply() {
+  TILT.raf = 0;
+  if (orb) orb.look(TILT.x, TILT.y);
+  const c = $("#orb"); if (c) c.style.transform = `perspective(700px) rotateY(${(TILT.x * 7).toFixed(2)}deg) rotateX(${(-TILT.y * 6).toFixed(2)}deg)`;
+}
+function tiltSync() {
+  const want = tiltWanted();
+  if (want === TILT.on) return;
+  TILT.on = want;
+  if (want) { TILT.b0 = null; TILT.t = 0; window.addEventListener("deviceorientation", tiltOn); return; }
+  window.removeEventListener("deviceorientation", tiltOn);
+  cancelAnimationFrame(TILT.raf); TILT.raf = 0; TILT.x = TILT.y = 0;
+  if (orb) orb.look(null);
+  const c = $("#orb"); if (c) c.style.transform = "";
+}
+document.addEventListener("visibilitychange", () => tiltSync());
+if (screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener("change", () => tiltSync());
+
 /* Облик для уведомлений и часов (Faces.java): фото персонажа или его облик в круге, 192×192, и имя с цветом.
    Рисуется при смене персонажа; уведомления и будильники берут его и без интерфейса (из файла). */
 function faceFor(p) {
@@ -3891,7 +3931,9 @@ function renderSettings() {
     // фон — плитками с живым образцом (тот же класс темы, что у экрана; кружок — материал её карточек), по группам
     h.push(`<h3>Оформление</h3><div class="card">${[...new Set(PHONE_SKINS.map(x => x.group))].map(gr => `<div class="skg">${esc(gr)}</div><div class="skins">` +
         PHONE_SKINS.filter(x => x.group === gr).map(x => `<button class="skm ${x.id === lookSkin() ? "on" : ""}" data-skin="${x.id}"><i class="lk-prev skin-${x.id}"><b></b></i><span>${esc(x.name)}</span></button>`).join("") + `</div>`).join("")}
-      <label class="f" style="margin-top:6px"><span>Когда говорит</span><select id="ap-fx">${opt([["bars", "Лучи"], ["pulse", "Пульс"], ["wave", "Волна"]], lookFx())}</select></label></div>`);
+      <label class="f" style="margin-top:6px"><span>Когда говорит</span><select id="ap-fx">${opt([["bars", "Лучи"], ["pulse", "Пульс"], ["wave", "Волна"]], lookFx())}</select></label>
+      <div class="sw" style="margin-top:10px"><div>Портрет следит за наклоном<small class="hint" style="display:block;margin:2px 0 0">Наклоните телефон — персонаж чуть повернётся и посмотрит на вас. Камера не нужна.</small></div>
+        <label class="tg"><input type="checkbox" id="ap-tilt" ${S.tilt !== false ? "checked" : ""}><i></i></label></div></div>`);
     // звук напоминаний: свои мягкие мелодии (Sounds.java, res/raw), системный или свой файл; ▶ — послушать
     const snd = (() => { try { return JSON.parse(D.alarmSound ? D.alarmSound() : "{}"); } catch (e) { return {}; } })();
     h.push(`<h3>Звук напоминаний</h3><div class="card"><p class="hint" style="margin-top:0">Мягко и сначала тихо — громкость прибавляется за 20 секунд.</p>
@@ -3950,6 +3992,7 @@ function wireSettings(info) {
     r.textContent = ok ? "Готово — обновите список «Где» в кабинете." : (S.pulse === false ? "«Анонимный пульс» выключен — включите его ниже, и телефон появится." : "Не получилось — проверьте интернет."); };
   $$(".skm").forEach(b => b.onclick = () => { S.skin = b.dataset.skin; saveS(); applyLook(); $$(".skm").forEach(x => x.classList.toggle("on", x === b)); });
   if (g("ap-fx")) g("ap-fx").onchange = () => { S.voice_fx = g("ap-fx").value; saveS(); applyLook(); };
+  if (g("ap-tilt")) g("ap-tilt").onchange = () => { S.tilt = g("ap-tilt").checked; saveS(); tiltSync(); };
   // звук напоминаний: нажатие — выбрать и послушать (ещё раз — стоп); «Свой звук» без файла — сразу выбор файла
   const sndPlaying = (id) => $$(".snd").forEach(x => x.classList.toggle("play", x.dataset.snd === id));
   $$(".snd").forEach(b => b.onclick = () => {

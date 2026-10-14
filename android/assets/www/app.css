@@ -83,7 +83,7 @@ body.radio-on #state.idle { display: none; }      /* в покое вместо 
 #stage { position: fixed; top: 62px; left: 0; right: 0; bottom: calc(124px + var(--safe-b)); z-index: 1;
   display: flex; flex-direction: column; align-items: center; }
 #orbwrap { width: min(70vw, 42vh, 330px); aspect-ratio: 1; margin-top: 2vh; flex: none; position: relative; }
-#orb { width: 100%; height: 100%; display: block; }
+#orb { width: 100%; height: 100%; display: block; transform-origin: 50% 50%; }
 #orbwrap.tap { transform: scale(.97); transition: transform .15s; }
 #state { margin-top: 10px; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); min-height: 18px; text-align: center; }
 #talk { width: 100%; flex: 1; min-height: 0; overflow-y: auto; padding: 10px 24px 8px; text-align: center; scrollbar-width: none;

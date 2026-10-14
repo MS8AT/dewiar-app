@@ -325,6 +325,7 @@
   pre .cp { position: sticky; float: right; left: 100%; top: 0; margin: -4px -6px 0 8px; border: 0; border-radius: 8px; padding: 3px 8px;
             background: rgba(255,255,255,.1); color: var(--ink); font: 11px "Manrope", sans-serif; cursor: pointer; }
   pre .cp:hover { background: rgba(255,255,255,.18); }
+  #cv { transition: transform .35s cubic-bezier(.2,.7,.2,1); transform-origin: 50% 50%; }   /* портрет смотрит на курсор */
 </style>
 </head>
 <body>
@@ -402,7 +403,31 @@ function applyLook(ui) {                      // тема карточки и о
   entity.tone = sk.tone || "mono";
   entity.fx = VOICE_FX.includes(ui.voice_fx) ? ui.voice_fx : "bars";
   applyZoom(ui);
+  lookOn = ui.tilt !== false;
+  if (!lookOn) { clearTimeout(lookT); entity.look(null); const cv = lookCv(); if (cv) cv.style.transform = ""; }   // выключили — сразу прямо
 }
+/* Курсор над виджетом — персонаж смотрит на него (просьба 14.10, «параллакс»; на телефоне — по наклону): диск чуть
+   поворачивается к курсору, лицо сдвигается в глубину, живое лицо переводит глаза (DewiarEntity.look). Ушёл курсор —
+   спокойно возвращается. Выключается в студии: «Оформление» → «Портрет смотрит на вас» (ui.tilt) и «уменьшить движение». */
+let lookOn = true, lookT = 0;
+const lookCv = () => document.getElementById("cv");
+function lookAt(ev) {
+  if (!lookOn || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const cv = lookCv(), r = cv && cv.getBoundingClientRect(); if (!r || !r.width) return;
+  const s = Math.max(innerWidth, innerHeight) * 0.55, cl = (v) => Math.max(-1, Math.min(1, v));
+  const x = cl((ev.clientX - (r.left + r.width / 2)) / s), y = cl((ev.clientY - (r.top + r.height / 2)) / s);
+  entity.look(x, y);
+  cv.style.transform = `perspective(600px) rotateY(${(x * 6).toFixed(2)}deg) rotateX(${(-y * 5).toFixed(2)}deg)`;
+  clearTimeout(lookT);
+}
+function lookAway(now) {
+  clearTimeout(lookT);
+  const back = () => { entity.look(0, 0); const cv = lookCv(); if (cv) cv.style.transform = ""; lookT = setTimeout(() => entity.look(null), 1500); };
+  if (now) back(); else lookT = setTimeout(back, 500);
+}
+document.addEventListener("pointermove", lookAt, { passive: true });
+document.documentElement.addEventListener("mouseleave", () => lookAway(false));
+window.addEventListener("blur", () => lookAway(false));
 /* Масштаб интерфейса (ui.zoom) и текста (ui.text): страница — сразу (CSS zoom), окно виджета — под неё (Api.set_zoom;
    правый нижний угол на месте, новое положение — в настройки). Ctrl + / Ctrl − / Ctrl 0 и Ctrl + колесо — прямо в виджете. */
 let zoomNow = null, zoomSaveT = 0;

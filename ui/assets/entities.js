@@ -853,10 +853,14 @@
       smile: 0, smileTill: 0, mPrev: 0, mTarget: 0, mBlend: 1, nextMouth: 0, wasSpeaking: false, heard: 0 });
     const speaking = e.state === "speaking", thinking = e.state === "thinking";
     // глаза: говорит — прямо; думает — чуть вверх и в сторону; слушает — на вас; в покое — изредка осматривается
-    if (speaking || e.state === "listening") { A.tx = 0; A.ty = 0; }
+    // зритель известен (look) — смотрит на него: говорит и слушает — прямо на него, в покое — на него с редкими взглядами в сторону
+    const vx = e._looking ? e._lx * L.geo.moveX * 0.45 : 0, vy = e._looking ? e._ly * L.geo.moveY * 0.45 : 0;
+    if (speaking || e.state === "listening") { A.tx = vx; A.ty = vy; }
     else if (thinking) { A.tx = 0.9; A.ty = -0.9; }
+    else if (e._looking && now <= A.nextEye) { A.tx = vx + (A.rx || 0) * 0.4; A.ty = vy + (A.ry || 0) * 0.4; }
     else if (now > A.nextEye) {
-      A.tx = (Math.random() * 2 - 0.5) * L.geo.moveX / 2; A.ty = (Math.random() * 2 - 0.5) * L.geo.moveY / 2;
+      A.rx = (Math.random() * 2 - 0.5) * L.geo.moveX / 2; A.ry = (Math.random() * 2 - 0.5) * L.geo.moveY / 2;
+      A.tx = vx + A.rx * (e._looking ? 0.4 : 1); A.ty = vy + A.ry * (e._looking ? 0.4 : 1);
       if (!A.smileTill && Math.random() < 0.3) A.smileTill = now + 2000 + Math.random() * 2000;   // в тишине иногда улыбается
       A.nextEye = now + (Math.random() > 0.8 ? 500 : 3000 + Math.random() * 2000);
     }
@@ -883,7 +887,8 @@
 
     ctx.save(); ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.clip();
     const G = L.geo, [cx0, cy0, cs] = G.crop;             // портрет целиком: видно причёску (хвостики Лиры), лицо не огромное
-    const sc = (2 * R) / cs, X = (x) => -R + (x - cx0) * sc, Y = (y) => -R + (y - cy0) * sc;
+    const z = e._looking ? 1.07 : 1, ox = e._lx * R * 0.05, oy = e._ly * R * 0.04;   // к зрителю — лёгкий сдвиг в глубину
+    const sc = (2 * R) / cs * z, X = (x) => -R * z + ox + (x - cx0) * sc, Y = (y) => -R * z + oy + (y - cy0) * sc;
     ctx.imageSmoothingQuality = "high";
     const mono = e.tone === "mono" || e.tone === "ink";
     if (mono) {                                   // сдержанно: портрет на стекле — сквозь круг виден фон окна
@@ -1041,7 +1046,8 @@
       const sleeping = e.state === "muted" || e.state === "offline";
       ctx.globalAlpha = sleeping ? 0.6 : 1;
       ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(e._ph.canvas, -R + jitter, -R, 2 * R, 2 * R);
+      const z = e._looking ? 1.07 : 1, ox = e._lx * R * 0.05, oy = e._ly * R * 0.04;   // чуть крупнее — край не виден при сдвиге
+      ctx.drawImage(e._ph.canvas, -R * z + ox + jitter, -R * z + oy, 2 * R * z, 2 * R * z);
       ctx.globalAlpha = 1;
       if (busy) {                                 // говорит/думает — лёгкий оттенок цвета персонажа
         ctx.globalCompositeOperation = "soft-light"; ctx.fillStyle = rgba(c, 0.14); ctx.fillRect(-R, -R, 2 * R, 2 * R);
@@ -1160,6 +1166,7 @@
       this.tone = opts.tone || "color";   // "mono" — сдержанно: белый край портрета и белые лучи вместо цвета персонажа
       this.fx = opts.fx || "wave";        // голос: "wave" — волна по кругу, "bars" — лучи вокруг портрета, "pulse" — расходящиеся круги
       this.voiceLevels = !!opts.voiceLevels;   // уровни своего голоса придут (виджет компьютера) — без них рот и волна молчат
+      this.lookX = 0; this.lookY = 0; this._lx = 0; this._ly = 0; this._looking = false;   // где зритель (look)
       this.configure(opts);
       this._last = performance.now(); this._frame = 0;
       const loop = (now) => { if (!this.dead) { this.draw(now); requestAnimationFrame(loop); } };
@@ -1186,6 +1193,15 @@
       if (voice && level !== undefined) { this._voiceAt = performance.now(); if (level > 0.02) this._voiceSeen = true; }
       if (audible !== undefined) { this._audibleKnown = true; this._audible = !!audible; }
     }
+    /* Где зритель относительно портрета: x, y от −1 до 1 (x > 0 — справа, y > 0 — снизу). Телефон — по наклону
+       (app.js tiltLook), виджет компьютера — по курсору. Портрет чуть сдвигается в глубину к зрителю, живое лицо
+       переводит на него глаза; повернуть сам диск — дело страницы (CSS). look(null) — выключить. */
+    look(x, y) {
+      if (x === null || x === undefined) { this._looking = false; this.lookX = this.lookY = 0; return; }
+      const cl = (v) => Math.max(-1, Math.min(1, +v || 0));
+      this._looking = true; this.lookX = cl(x); this.lookY = cl(y);
+      this._stillAt = Math.max(this._stillAt || 0, performance.now() + 600);
+    }
     sounding(now = performance.now()) {
       if (this._voiceSeen) return now - (this._voiceAt || 0) < 400;
       if (this._audibleKnown) return this._audible;
@@ -1209,6 +1225,8 @@
       const dt = Math.min(0.1, (now - this._last) / 1000); this._last = now;
       if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
       this.level += (this.target - this.level) * (this.target > this.level ? 0.5 : 0.12);
+      const le = Math.min(1, dt * 5);                         // взгляд и сдвиг к зрителю — плавно
+      this._lx += (this.lookX - this._lx) * le; this._ly += (this.lookY - this._ly) * le;
       this.t += dt * st.speed * (reduced ? 0.3 : 1);
       const ctx = this.ctx;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
