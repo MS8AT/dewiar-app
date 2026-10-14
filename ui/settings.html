@@ -1094,7 +1094,19 @@
 
   <section id="p-look">
     <h1>Оформление</h1>
-    <p class="lead">Фон виджета и то, как голос отзывается вокруг портрета, — выбираются отдельно, любые сочетания. Меняется сразу: держите виджет рядом и смотрите.</p>
+    <p class="lead">Размер, фон виджета и то, как голос отзывается вокруг портрета, — выбираются отдельно, любые сочетания. Меняется сразу: держите виджет рядом и смотрите.</p>
+    <h2>Размер</h2>
+    <div class="zm" id="zm">
+      <div class="zm-row">
+        <div class="zm-l"><b>Масштаб интерфейса</b><span>Студия и виджет целиком, вместе с окнами. В любом окне — Ctrl + и Ctrl −, Ctrl 0 — обычный размер.</span></div>
+        <div class="zm-ctl"><button class="zm-b" data-k="zoom" data-d="-1" title="Мельче (Ctrl −)" aria-label="Мельче">−</button><input type="range" id="zm-zoom" min="0.7" max="1.5" step="0.05" aria-label="Масштаб интерфейса"><button class="zm-b" data-k="zoom" data-d="1" title="Крупнее (Ctrl +)" aria-label="Крупнее">+</button><output id="zm-zoom-v">100 %</output></div>
+      </div>
+      <div class="zm-row">
+        <div class="zm-l"><b>Размер текста</b><span>Ответы в виджете, «Чат», заметки и память. Кнопки и меню остаются как есть.</span></div>
+        <div class="zm-ctl"><button class="zm-b" data-k="text" data-d="-1" aria-label="Текст мельче">−</button><input type="range" id="zm-text" min="0.85" max="1.4" step="0.05" aria-label="Размер текста"><button class="zm-b" data-k="text" data-d="1" aria-label="Текст крупнее">+</button><output id="zm-text-v">100 %</output></div>
+      </div>
+      <div class="zm-prev"><div class="cl-m"><div class="tx">Завтра в Минске облачно, днём до +11, ночью небольшой дождь — зонт не помешает.</div></div><button class="btn small ghost" id="zm-reset">Как было</button></div>
+    </div>
     <h2>Фон</h2>
     <div id="lk-skins"></div>
     <h2>Когда помощница говорит</h2>
@@ -1349,6 +1361,7 @@
 
 <script src="assets/entities.js"></script>
 <script src="assets/skins.js"></script>
+<script src="assets/zoom.js"></script>
 <script src="studio/theme.js"></script>
 <script src="assets/privacy.js"></script>
 <script src="assets/vendor/zxing.min.js"></script>

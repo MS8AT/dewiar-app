@@ -95,6 +95,7 @@ function bindFields() {
 }
 function refreshStatic() {
   if (window.studioSkin) studioSkin(get("ui.skin"));     // студия — в стиле виджета (studio/theme.js)
+  if (window.DewiarZoom) { DewiarZoom.apply(get("ui")); if (window.zoomSync) zoomSync(); }   // масштаб и текст (look.js)
   const wf = $("#wf-box"); if (wf) wf.style.display = (+get("ui.widget_fail2") || 0) >= 2 ? "" : "none";
   $$("[data-k]").forEach(inp => {
     if (document.activeElement === inp) return;           // не перетираем поле, которое сейчас правят

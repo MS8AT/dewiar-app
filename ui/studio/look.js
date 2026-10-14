@@ -35,3 +35,39 @@ function loadLook() {
   $$("#lk-skins .lk").forEach(b => b.onclick = () => save({ ui: { skin: b.dataset.skin } }).then(() => { if (window.studioSkin) studioSkin(b.dataset.skin); loadLook(); }));
   $$("#lk-fx .lk").forEach(b => b.onclick = () => save({ ui: { voice_fx: b.dataset.fx } }).then(loadLook));
 }
+
+/* «Размер»: масштаб интерфейса (ui.zoom) и текста (ui.text) — assets/zoom.js. Текст меняется сразу, пока тянете
+   ползунок; масштаб — когда отпустили (иначе страница уезжает из-под курсора). Виджет получает settings и подгоняет
+   окно (hud.html → Api.set_zoom). Ctrl + / Ctrl − / Ctrl 0 и Ctrl + колесо — в любом месте студии. */
+let zoomT = 0;
+function zoomSave(patch, label) {
+  clearTimeout(zoomT);
+  zoomT = setTimeout(() => save({ ui: patch }, true).then(() => toast(label)), 350);
+}
+function zoomSet(k, v) {
+  const ui = Object.assign({}, (S && S.ui) || {}, DewiarZoom.get(), { [k]: v });
+  const cur = DewiarZoom.apply(ui);
+  zoomSync(cur);
+  zoomSave({ [k]: cur[k] }, (k === "zoom" ? "Масштаб " : "Текст ") + DewiarZoom.pct(cur[k]));
+}
+function zoomSync(cur) {
+  if (!window.DewiarZoom || !$("#zm-zoom")) return;
+  cur = cur || DewiarZoom.get();
+  for (const k of ["zoom", "text"]) {
+    const r = $("#zm-" + k);
+    if (document.activeElement !== r) r.value = cur[k];
+    $("#zm-" + k + "-v").textContent = DewiarZoom.pct(cur[k]);
+  }
+}
+if (window.DewiarZoom && $("#zm")) {
+  $("#zm-zoom").oninput = (e) => { $("#zm-zoom-v").textContent = DewiarZoom.pct(+e.target.value); };
+  $("#zm-zoom").onchange = (e) => zoomSet("zoom", +e.target.value);
+  $("#zm-text").oninput = (e) => zoomSet("text", +e.target.value);
+  $$("#zm .zm-b").forEach(b => b.onclick = () => {
+    const k = b.dataset.k, d = +b.dataset.d, cur = DewiarZoom.get()[k];
+    zoomSet(k, k === "zoom" ? DewiarZoom.step(cur, d) : Math.round((cur + d * 0.05) * 100) / 100);
+  });
+  $("#zm-reset").onclick = () => { DewiarZoom.apply({ zoom: 1, text: 1 }); zoomSync(); clearTimeout(zoomT); save({ ui: { zoom: 1, text: 1 } }, true).then(() => toast("Обычный размер")); };
+  DewiarZoom.keys(() => DewiarZoom.get().zoom, z => { zoomSync(); zoomSave({ zoom: z }, "Масштаб " + DewiarZoom.pct(z) + " · Ctrl 0 — обычный"); });
+  window.zoomSync = zoomSync;
+}

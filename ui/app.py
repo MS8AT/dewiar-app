@@ -38,9 +38,34 @@ else:
 # Два непрозрачных окна: карточка и значок (переключение — set_mode). Скругление — формой окна (X Shape на Linux,
 # SetWindowRgn на Windows), тень рисует сама система (GNOME даёт тень непрозрачным окнам без рамки). Прозрачное
 # окно не годится: на части систем его полупрозрачные пиксели накапливаются между кадрами.
-SIZES = {"card": (300, 420), "mini": (96, 96)}
+BASE_SIZES = {"card": (300, 420), "mini": (96, 96)}
+SIZES = dict(BASE_SIZES)                # под масштаб интерфейса (ui.zoom) — set_zoom_sizes; меняется на месте
 TITLES = {"card": "Dewiar", "mini": "Dewiar — значок"}
 CARD_RADIUS = 28
+ZOOM = [1.0]                            # масштаб интерфейса: студия «Оформление» → «Масштаб», Ctrl + / Ctrl −
+
+
+def zoom_of(v):
+    """ui.zoom из настроек -> число 0.7…1.5 (как ui/assets/zoom.js)."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return 1.0
+    return round(min(1.5, max(0.7, v)), 2) if v > 0 else 1.0
+
+
+def set_zoom_sizes(z):
+    """Размеры окон виджета под масштаб z (SIZES меняется на месте: на него ссылаются все места). -> менялись ли."""
+    ZOOM[0] = zoom_of(z)
+    new = {m: (int(round(w * ZOOM[0])), int(round(h * ZOOM[0]))) for m, (w, h) in BASE_SIZES.items()}
+    changed = new != SIZES
+    SIZES.update(new)
+    return changed
+
+
+def card_r():
+    """Скругление карточки под масштаб — как в странице (border-radius × zoom)."""
+    return int(round(CARD_RADIUS * ZOOM[0]))
 ALARM_TITLE = "Dewiar — напоминание"
 ALARM_RADIUS = 26
 PROMPTER_TITLE = "Dewiar — суфлёр"
@@ -230,7 +255,7 @@ def _shape_rects(kind, w, h, radius=None):
             x0 = int(round(r - math.sqrt(max(0.0, r * r - dy * dy))))
             out.append((x0, y, w - 2 * x0, 1))
         return out
-    r = radius or CARD_RADIUS
+    r = radius or card_r()
     for y in range(r):
         dy = r - y - 0.5
         inset = int(round(r - math.sqrt(max(0.0, r * r - dy * dy))))
@@ -440,7 +465,7 @@ class Api:
                 h = self._hwnd(mode)
                 if h:
                     try:
-                        winshell.shape(h, mode, CARD_RADIUS)
+                        winshell.shape(h, mode, card_r())
                     except Exception as e:  # noqa: BLE001
                         print(f"Форма окна не задана: {e}", file=sys.stderr)
         threading.Thread(target=run, daemon=True).start()
@@ -466,7 +491,7 @@ class Api:
                 if h:
                     try:
                         winshell.tool_window(h)
-                        winshell.shape(h, m, CARD_RADIUS)
+                        winshell.shape(h, m, card_r())
                     except Exception as e:  # noqa: BLE001
                         print(f"Форма окна не задана: {e}", file=sys.stderr)
                 self._win_shape_events(m)
@@ -517,7 +542,7 @@ class Api:
                 return False
             st["key"] = (w, h, k)
             try:
-                shape_window(gw, mode, (w * k, h * k), CARD_RADIUS * k)
+                shape_window(gw, mode, (w * k, h * k), card_r() * k)
             except Exception as e:  # noqa: BLE001
                 print(f"Форма окна не задана: {e}", file=sys.stderr)
             return False
@@ -541,6 +566,66 @@ class Api:
                 except Exception:  # noqa: BLE001
                     pass
         threading.Thread(target=run, daemon=True).start()
+
+    @staticmethod
+    def _studio_size():
+        """Студия: 1120×760 × масштаб интерфейса, но не больше экрана (ноутбук 1366×768 — с запасом под панель)."""
+        z = zoom_of(ui_settings().get("zoom"))
+        w, h = int(1120 * z), int(760 * z)
+        try:
+            import webview
+            scr = webview.screens[0]
+            w, h = min(w, int(scr.width * 0.92)), min(h, int(scr.height * 0.86))
+        except Exception:  # noqa: BLE001
+            pass
+        return max(640, w), max(460, h)
+
+    def set_zoom(self, z):
+        """Масштаб интерфейса поменяли (студия «Оформление» или Ctrl + / Ctrl − в виджете): окна виджета — под него,
+        правый нижний угол карточки остаётся на месте. Страница уже уменьшилась сама (CSS zoom). Виджет в трее —
+        только размер, без показа. -> новое положение карточки (страница сохраняет его) или None."""
+        old_card = SIZES["card"]
+        try:
+            cx, cy = self.save_pos(self.mode)
+        except Exception:  # noqa: BLE001
+            cx = cy = None
+        if not set_zoom_sizes(z):
+            return None
+        if cx is not None:
+            cx, cy = cx + old_card[0] - SIZES["card"][0], cy + old_card[1] - SIZES["card"][1]
+        if WIN:
+            for m, (w, h) in SIZES.items():
+                try:
+                    form = self.wins[m].native
+                    from System import Action
+                    from System.Drawing import Size
+                    form.Invoke(Action(lambda f=form: setattr(f, "MinimumSize", Size(1, 1))))   # иначе не уменьшится
+                except Exception as e:  # noqa: BLE001
+                    print(f"Масштаб: наименьший размер окна: {e}", file=sys.stderr)
+                try:
+                    self.wins[m].resize(w, h)
+                except Exception as e:  # noqa: BLE001
+                    print(f"Масштаб: размер окна: {e}", file=sys.stderr)
+            if cx is not None and not self.in_tray:
+                return self._place(self.mode, cx, cy)
+            return None
+
+        def run():
+            for m, (w, h) in SIZES.items():
+                gw = self._gw(m)
+                if gw is None:
+                    continue
+                gw.set_size_request(w, h)          # pywebview задаёт min_size так же — иначе окно не уменьшится
+                gw.resize(w, h)
+            gw = self._gw(self.mode)
+            if cx is not None and not self.in_tray and gw is not None and gw.get_visible():
+                return self._place(self.mode, cx, cy)
+            return None
+        try:
+            return self._gtk(run, timeout=5)
+        except Exception as e:  # noqa: BLE001
+            print(f"Масштаб: окна виджета: {e}", file=sys.stderr)
+            return None
 
     def set_mode(self, mode, auto=False):
         """Карточка ↔ значок. Правый нижний угол остаётся на месте — виджет обычно стоит в углу экрана.
@@ -945,8 +1030,9 @@ class Api:
         # светлая и снизу квадратная). Перетаскивание и размер — через сам оконный менеджер (прилипание к краям
         # работает). Вернуть системную рамку: settings.ui.studio_frame = "native".
         own = not WIN and ui_settings().get("studio_frame", "custom") != "native"
+        sw, sh = self._studio_size()
         self._studio = webview.create_window(STUDIO_TITLE, self._url("settings.html", ("&frame=1" if own else "") + query + ("#" + page if page else "")),
-                                            width=1120, height=760, min_size=(820, 560), background_color="#0a0a0f",
+                                            width=sw, height=sh, min_size=(min(820, sw), min(560, sh)), background_color="#0a0a0f",
                                             maximized=bool(ui_settings().get("studio_max", True)),
                                             frameless=own, easy_drag=False,
                                             js_api=self)     # без этого в студии нет «Обновить», выбора папки, сохранения
@@ -1652,6 +1738,7 @@ def main():
     token = ensure_token()
     api = Api(token)
 
+    set_zoom_sizes(uis.get("zoom"))                          # окна виджета — под масштаб интерфейса
     mode = "mini" if uis.get("hud_mode") == "mini" else "card"
     x, y = uis.get("hud_x"), uis.get("hud_y")                 # положение карточки
     if x is None or y is None:
@@ -1780,6 +1867,7 @@ def main_win(args, extra):
         threading.Event().wait()
         return
 
+    set_zoom_sizes(uis.get("zoom"))                          # окна виджета — под масштаб интерфейса
     mode = "mini" if uis.get("hud_mode") == "mini" else "card"
     x, y = uis.get("hud_x"), uis.get("hud_y")
     if x is None or y is None:
