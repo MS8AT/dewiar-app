@@ -25,7 +25,7 @@
     listening: { speed: 0.8,  glow: 1.0, sat: 1 },
     thinking:  { speed: 2.6,  glow: 0.95, sat: 1 },
     speaking:  { speed: 1.0,  glow: 1.0, sat: 1 },
-    muted:     { speed: 0.12, glow: 0.35, sat: 0 },
+    muted:     { speed: 0.35, glow: 0.6, sat: 1 },     // микрофон выключен — как в покое: это видно по значку и подписи (отзыв 14.10)
     offline:   { speed: 0.08, glow: 0.3, sat: 0 },
   };
 
@@ -458,7 +458,7 @@
     const warm = (() => { const [a, b2, d] = c; const mx = Math.max(a, b2, d); return mx === a || (mx === b2 && a > d); })();
     const icon = (e.bold || 1) > 1;                                  // плотный вариант для иконки приложения
     const c1 = c, c2 = hueShift(c, warm ? -48 : 58), R = r * (icon ? 1.1 : 0.74) * (1 + lv * 0.035 * (e.state === "speaking" ? 1 : 0.5));
-    const sat = e.state === "muted" || e.state === "offline" ? 0.25 : 1;
+    const sat = e.state === "offline" ? 0.25 : 1;
     // свечение: два пятна разных оттенков медленно обходят сферу — перелив
     for (const [col, ph, a] of [[c1, 0, 0.34], [c2, Math.PI, 0.3]]) {
       const ang = t * 0.35 + ph, ox = Math.cos(ang) * R * 0.22, oy = Math.sin(ang) * R * 0.22;
@@ -854,7 +854,7 @@
     const speaking = e.state === "speaking", thinking = e.state === "thinking";
     // глаза: говорит — прямо; думает — чуть вверх и в сторону; слушает — на вас; в покое — изредка осматривается
     // зритель известен (look) — смотрит на него: говорит и слушает — прямо на него, в покое — на него с редкими взглядами в сторону
-    const vx = e._looking ? e._lx * L.geo.moveX * 0.45 : 0, vy = e._looking ? e._ly * L.geo.moveY * 0.45 : 0;
+    const vx = e._lx * L.geo.moveX * 0.45 * e.lookGain, vy = e._ly * L.geo.moveY * 0.45 * e.lookGain;   // _lx плавно уходит к 0
     if (speaking || e.state === "listening") { A.tx = vx; A.ty = vy; }
     else if (thinking) { A.tx = 0.9; A.ty = -0.9; }
     else if (e._looking && now <= A.nextEye) { A.tx = vx + (A.rx || 0) * 0.4; A.ty = vy + (A.ry || 0) * 0.4; }
@@ -887,7 +887,7 @@
 
     ctx.save(); ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.clip();
     const G = L.geo, [cx0, cy0, cs] = G.crop;             // портрет целиком: видно причёску (хвостики Лиры), лицо не огромное
-    const z = e._looking ? 1.07 : 1, ox = e._lx * R * 0.05, oy = e._ly * R * 0.04;   // к зрителю — лёгкий сдвиг в глубину
+    const gk = e.lookGain, z = 1 + 0.07 * gk * e._la, ox = e._lx * R * 0.05 * gk, oy = e._ly * R * 0.04 * gk;   // к зрителю — лёгкий сдвиг; крупнее — плавно
     const sc = (2 * R) / cs * z, X = (x) => -R * z + ox + (x - cx0) * sc, Y = (y) => -R * z + oy + (y - cy0) * sc;
     ctx.imageSmoothingQuality = "high";
     const mono = e.tone === "mono" || e.tone === "ink";
@@ -918,9 +918,10 @@
     if (talking) { put(L.mouths[A.mPrev], 1 - A.mBlend); put(L.mouths[A.mTarget], A.mBlend); }
     else { put(L.mouths[0], 1 - A.smile); put(L.smile, A.smile); }
     ctx.globalAlpha = 1;
-    // нет связи или микрофон выключен — притушить ВЕСЬ портрет ровно одним слоем (раньше тускнело лицо, а губы и глаза,
-    // нарисованные поверх, оставались яркими — выглядело жутковато)
-    if (e.state === "muted" || e.state === "offline") { ctx.fillStyle = "rgba(6,6,10,.45)"; ctx.fillRect(-R, -R, 2 * R, 2 * R); }
+    // нет связи — притушить ВЕСЬ портрет ровно одним слоем (раньше тускнело лицо, а губы и глаза, нарисованные поверх,
+    // оставались яркими — выглядело жутковато). Микрофон выключен — не тушим: это и так видно по значку и подписи,
+    // а тусклый виджет некрасив (отзыв 14.10: «микрофон часто выключаю, чтобы не слушала фон»)
+    if (e.state === "offline") { ctx.fillStyle = "rgba(6,6,10,.45)"; ctx.fillRect(-R, -R, 2 * R, 2 * R); }
     const fade = ctx.createLinearGradient(0, R * 0.55, 0, R);   // низ портрета (обрез туловища) растворяется в фоне
     if (mono) {                                   // в прозрачность: внизу проступает фон окна, а не чёрное пятно
       fade.addColorStop(0, "rgba(0,0,0,0)"); fade.addColorStop(0.75, "rgba(0,0,0,.85)"); fade.addColorStop(1, "rgba(0,0,0,1)");
@@ -1043,10 +1044,10 @@
       }
       const jitter = e.state === "thinking" && Math.sin(t * 23) > 0.85 ? 2 : 0;
       // фото всегда в полную яркость (без «пелены»); приглушаем только когда микрофон выключен или нет связи
-      const sleeping = e.state === "muted" || e.state === "offline";
+      const sleeping = e.state === "offline";             // микрофон выключен — портрет в полную яркость
       ctx.globalAlpha = sleeping ? 0.6 : 1;
       ctx.imageSmoothingQuality = "high";
-      const z = e._looking ? 1.07 : 1, ox = e._lx * R * 0.05, oy = e._ly * R * 0.04;   // чуть крупнее — край не виден при сдвиге
+      const gk = e.lookGain, z = 1 + 0.07 * gk * e._la, ox = e._lx * R * 0.05 * gk, oy = e._ly * R * 0.04 * gk;   // чуть крупнее (плавно) — край не виден
       ctx.drawImage(e._ph.canvas, -R * z + ox + jitter, -R * z + oy, 2 * R * z, 2 * R * z);
       ctx.globalAlpha = 1;
       if (busy) {                                 // говорит/думает — лёгкий оттенок цвета персонажа
@@ -1166,7 +1167,8 @@
       this.tone = opts.tone || "color";   // "mono" — сдержанно: белый край портрета и белые лучи вместо цвета персонажа
       this.fx = opts.fx || "wave";        // голос: "wave" — волна по кругу, "bars" — лучи вокруг портрета, "pulse" — расходящиеся круги
       this.voiceLevels = !!opts.voiceLevels;   // уровни своего голоса придут (виджет компьютера) — без них рот и волна молчат
-      this.lookX = 0; this.lookY = 0; this._lx = 0; this._ly = 0; this._looking = false;   // где зритель (look)
+      this.lookX = 0; this.lookY = 0; this._lx = 0; this._ly = 0; this._looking = false; this._la = 0;   // где зритель (look)
+      this.lookGain = opts.lookGain || 1;   // сила эффекта: телефон — 1, виджет компьютера — 0.5 (крупный портрет, отзыв 14.10)
       this.configure(opts);
       this._last = performance.now(); this._frame = 0;
       const loop = (now) => { if (!this.dead) { this.draw(now); requestAnimationFrame(loop); } };
@@ -1216,7 +1218,7 @@
       const st = STATE[this.state] || STATE.idle;
       // экономим CPU: в покое (и под пластинку) ~25 кадров/с, без микрофона или связи ~8, в работе до ~70
       let minDt = this.vinyl && (this.state === "idle" || this.state === "muted") ? 40 :
-        this.state === "muted" || this.state === "offline" ? 120 : this.state === "idle" ? 40 : 14;
+        this.state === "offline" ? 120 : this.state === "idle" || this.state === "muted" ? 40 : 14;
       // слабый компьютер (или WebKit без ускорения): кадр рисуется долго — рисуем реже, чтобы кнопки не «залипали»
       if (this._cost > 6) minDt = Math.max(minDt, Math.min(120, this._cost * 6));
       if (this.calm) minDt = Math.max(minDt, this.state === "idle" ? 160 : 60);   // созвон: облик почти неподвижен, не мешаем
@@ -1227,6 +1229,7 @@
       this.level += (this.target - this.level) * (this.target > this.level ? 0.5 : 0.12);
       const le = Math.min(1, dt * 5);                         // взгляд и сдвиг к зрителю — плавно
       this._lx += (this.lookX - this._lx) * le; this._ly += (this.lookY - this._ly) * le;
+      this._la += ((this._looking ? 1 : 0) - this._la) * Math.min(1, dt * 1.5);   // увеличение для сдвига — появляется и уходит плавно (без рывка)
       this.t += dt * st.speed * (reduced ? 0.3 : 1);
       const ctx = this.ctx;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

@@ -630,12 +630,24 @@ class CommandsMixin:
             return list_cameras()
         if cmd == "ptt":
             if self.muted and self.state not in ("speaking", "thinking"):
-                self.muted = False                          # нажали «говорить» — значит, микрофон снова нужен
-                self.emit("muted", on=False)
+                self._mute_pass = True                      # нажали «говорить» при выключенном микрофоне — одна фраза, и снова тихо
             if self.state in ("speaking", "thinking"):
                 self.interrupt("кнопка", follow=False)       # быстро нажал — замолчал и уснул
                 self.follow_up_until = 0.0
                 self.play_tone("sleep")
+                # ответ начался по голосу и его оборвали в первые секунды — почти наверняка ложное срабатывание (фон, видео):
+                # минуту не просыпаемся от голоса, иначе тут же «опять начинает» (отзыв 14.10). Кнопка — работает.
+                if time.monotonic() - (getattr(self, "wake_time", 0.0) or 0.0) < 25:
+                    self._quiet_until = time.monotonic() + 60
+                    self.wake_time = 0.0
+                    log.info("🤫 Остановили ответ, начатый по голосу, — минуту не откликаюсь на голос")
+                    quiet = "Минуту не откликаюсь на голос — позвать можно нажатием на лицо."
+                    self.note(quiet)
+
+                    def unquiet():
+                        if self.status.get("note") == self._g(quiet):
+                            self.note("")
+                    threading.Timer(60, unquiet).start()
                 return "sleep"
             if self.state == "listening":
                 self.go_sleep("кнопка", media=False)         # второе нажатие — перестать слушать

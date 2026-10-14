@@ -328,9 +328,9 @@ class AudioMixin:
             if not frame:
                 return
             now = time.monotonic()
-            if self.muted:
-                continue
-            self._mic_ring.append(frame)
+            self._mic_ring.append(frame)                # 0,4 с в памяти — удержание не теряет начало фразы (не распознаётся)
+            if self.muted and self.hold is None and not self._mute_pass:
+                continue                                 # микрофон выключен: слушаем только удержание и одну фразу по нажатию
             hold = self.hold
             if hold is not None:
                 # диктовка удержанием: пишем всё подряд, без поиска конца фразы и имени, — пока не отпустят
@@ -394,6 +394,11 @@ class AudioMixin:
 
             barge = self.s.get("audio", "barge_in")
             for kind, phrase in self.spotter.feed(frame):
+                if kind == "wake" and self.state == "idle" and now < self._quiet_until:
+                    # только что остановили кнопкой ответ, начатый по голосу, — это было ложное срабатывание (видео, ТВ):
+                    # минуту не откликаемся на голос, нажатие на лицо работает как обычно (отзыв 14.10)
+                    log.info("🤫 Имя «%s» — пропускаю: недавно остановили ложное срабатывание (ещё %.0f с)", phrase, self._quiet_until - now)
+                    continue
                 if kind == "wake" and self._meeting_ignores(phrase):
                     log.info("🎧 Созвон — имя «%s» пропускаю (%s)", phrase, ", ".join(self.meeting) or "")
                     continue
@@ -651,9 +656,8 @@ class AudioMixin:
         """Нажали и держат (кнопка-облик в виджете, пробел): всё, что звучит, — один вопрос, сколько бы ни длилось и какие бы
         паузы ни были; конец — когда отпустят (hold_end). Ответ, если звучал, замолкает. back_ms — сколько звука до
         вызова взять из кольца: интерфейс зовёт после ~0,3 с удержания, а говорить человек мог начать сразу."""
-        if self.muted:
-            self.muted = False
-            self.emit("muted", on=False)
+        # микрофон выключен — удержание разовое: эту фразу слушаем, а микрофон остаётся выключенным (отзыв 14.10:
+        # «удерживаю аватарку, говорю, отпускаю — а микрофон включился, и приходится снова выключать»)
         if self.state in ("speaking", "thinking"):
             self.interrupt("удержание", follow=False)
         self.follow_up_until = 0.0

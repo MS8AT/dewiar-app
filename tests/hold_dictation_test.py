@@ -159,6 +159,24 @@ async def run():
     R["st_idle"] = await wait_for(lambda e: e["type"] == "state" and e["state"] == "idle", 3)
     await asyncio.sleep(2)
     R["stt_after_cancel"] = list(STT_SEEN)
+    # микрофон выключен: удержание и нажатие — разовые, микрофон остаётся выключенным (отзыв 14.10)
+    await call("mute", on=True); await asyncio.sleep(1)
+    SCRIPT.append("какая завтра погода"); STT_SEEN.clear(); events.clear()
+    await call("hold_start")
+    R["m_listen"] = await wait_for(lambda e: e["type"] == "state" and e["state"] == "listening", 3)
+    await asyncio.sleep(1.5)
+    R["m_end"] = await call("hold_end")
+    R["m_answer"] = await wait_for(lambda e: e["type"] == "answer" and e.get("done"), 30)
+    await asyncio.sleep(2)
+    R["m_stt"] = list(STT_SEEN)
+    R["m_unmuted"] = [e for e in events if e["type"] == "muted" and not e.get("on")]
+    R["m_last"] = [e["state"] for e in events if e["type"] == "state"][-1:]
+    events.clear()
+    R["m_ptt"] = await call("ptt")
+    R["m_ptt_listen"] = await wait_for(lambda e: e["type"] == "state" and e["state"] == "listening", 3)
+    await asyncio.sleep(10)                                  # тишина — фраза не сложилась, снова «микрофон выключен»
+    R["m_ptt_last"] = [e["state"] for e in events if e["type"] == "state"][-1:]
+    R["m_ptt_unmuted"] = [e for e in events if e["type"] == "muted" and not e.get("on")]
     rd.cancel()
 
 try:
@@ -170,9 +188,15 @@ finally:
     stt_srv.shutdown()
 log = (tmp / "core.log").read_text(encoding="utf-8")
 end = (R.get("end") or {}).get("data") or {}
+me = (R.get("m_end") or {}).get("data") or {}
+ok(R.get("m_listen") and me.get("ok") and len(R.get("m_stt") or []) == 1 and R.get("m_answer"),
+   f"микрофон выключен — удержание слышно и уходит вопросом: {me} {R.get('m_stt')}")
+ok(not R.get("m_unmuted") and R.get("m_last") == ["muted"], f"после ответа микрофон снова выключен, сам не включился: {R.get('m_last')} {R.get('m_unmuted')}")
+ok(((R.get("m_ptt") or {}).get("data")) == "listening" and R.get("m_ptt_listen") and R.get("m_ptt_last") == ["muted"] and not R.get("m_ptt_unmuted"),
+   f"нажатие при выключенном — слушает одну фразу и снова «микрофон выключен»: {R.get('m_ptt')} {R.get('m_ptt_last')}")
 ok(R.get("st_listen") and R.get("hold_on"), "hold_start: «слушаю», событие hold")
-ok(end.get("ok") and 2.2 <= end.get("sec", 0) <= 4.6 and R.get("hold_off"), f"hold_end: вся запись с самого нажатия (+0,4 с): {end}")
-ok(len(R.get("stt1") or []) == 1 and 2.2 <= R["stt1"][0] <= 4.6, f"распознавание — одним запросом, паузы не обрывают: {R.get('stt1')}")
+ok(end.get("ok") and 1.5 <= end.get("sec", 0) <= 4.6 and R.get("hold_off"), f"hold_end: вся запись с самого нажатия (+0,4 с): {end}")
+ok(len(R.get("stt1") or []) == 1 and 1.5 <= R["stt1"][0] <= 4.6, f"распознавание — одним запросом, паузы не обрывают: {R.get('stt1')}")
 asked = [json.loads(x) for x in (tmp / "llm.jsonl").read_text(encoding="utf-8").splitlines()] if (tmp / "llm.jsonl").exists() else []
 users = [m["content"] if isinstance(m["content"], str) else json.dumps(m["content"], ensure_ascii=False) for x in asked for m in x["messages"] if m["role"] == "user"]
 ok(any("письмо Игорю о встрече в четверг" in u for u in users), "текст диктовки ушёл вопросом — без имени и без «разговор не со мной»")

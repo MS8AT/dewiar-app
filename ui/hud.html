@@ -394,7 +394,7 @@ const $ = (id) => document.getElementById(id);
 // карточка сама непрозрачная — диск-подложка не нужен; портрет сдержанный (белый край), голос — лучами (ui.voice_fx)
 // voiceLevels: ядро шлёт уровень своего голоса, пока звук играет, — рот и лучи «говорят» только под звук, а не всё время
 // «speaking» (голос с сервера приходит через несколько секунд после начала ответа)
-const entity = new DewiarEntity($("cv"), { style: "nexus", color: "#8A9BFF", plate: false, tone: "mono", fx: "bars", voiceLevels: true });
+const entity = new DewiarEntity($("cv"), { style: "nexus", color: "#8A9BFF", plate: false, tone: "mono", fx: "bars", voiceLevels: true, lookGain: 0.5 });
 const VOICE_FX = ["bars", "pulse", "wave"];
 function applyLook(ui) {                      // тема карточки и облика (assets/skins.*) + чем голос отзывается вокруг портрета
   ui = ui || {};

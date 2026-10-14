@@ -27,6 +27,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.server = server              # режим сервера (main.py --server): без микрофона и звука, ответы — текстом
         self.state = "idle"
         self.muted = False
+        self._mute_pass = False                          # микрофон выключен, но нажали «говорить» — слушаем одну фразу
         self.stopping = threading.Event()
         self.aec = EchoCancel()
         self.capture = None
@@ -50,6 +51,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.follow_up_until = 0.0
         self._said = collections.deque(maxlen=40)       # что ассистент сказал вслух (время, текст) — узнать своё эхо
         self._echo_hits, self._echo_until, self._spoke_until = [], 0.0, 0.0
+        self._quiet_until = 0.0                          # после «ложного срабатывания» (остановили кнопкой) — не откликаться на голос
         self.wake_time, self._wake_phrase = 0.0, ""
         self.stop_utt = False
         self.stop_time = 0.0
@@ -590,7 +592,9 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
             return text
 
     def set_state(self, st):
-        if self.muted and st in ("listening", "idle"):
+        if st != "listening":
+            self._mute_pass = False                        # разовая фраза при выключенном микрофоне — услышана или не сложилась
+        if self.muted and st in ("listening", "idle") and not (st == "listening" and (getattr(self, "hold", None) is not None or self._mute_pass)):
             st = "muted"                                   # микрофон выключили — не «слушаю», пока не включат сами
         if st != self.state:
             if self.state == "speaking":
