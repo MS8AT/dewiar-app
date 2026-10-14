@@ -774,7 +774,7 @@ function applyPersona() {
   $("#who-img").src = p.avatar || miniOrb(p);
   const style = p.avatar && p.style !== "aura" ? "photo" : p.style;
   // портрет сдержанно (белый край вместо цветного кольца), голос — лучами, как на компьютере; тема — «Ещё» → «Оформление»
-  if (!orb) { orb = new DewiarEntity($("#orb"), { style, color: p.color, image: p.avatar || null, plate: true, live: p.live || "" }); applyLook(true); }
+  if (!orb) { orb = new DewiarEntity($("#orb"), { style, color: p.color, image: p.avatar || null, plate: true, live: p.live || "" }); orb.set({ audible: false }); applyLook(true); }
   else orb.configure({ style, color: p.color, image: p.avatar || null, live: p.live || "" });
   orb.set({ state: state === "idle" ? "idle" : state });
   faceFor(p);
@@ -1175,10 +1175,15 @@ function say(text) {
   }
   if (state !== "speaking" && state !== "listening") setState("speaking");
 }
-N.on("tts_start", () => { vCount("tts_ok"); if (state === "thinking") setState("speaking"); });
+// какие фразы звучат прямо сейчас: облик «говорит» губами только под звук. Голос с сервера приходит через секунды после
+// начала ответа — до tts_start и в паузах между фразами рот закрыт (отзыв 14.10: «звука нет, а они болтают губами»)
+const playingIds = new Set();
+const soundOn = () => { if (orb) orb.set({ audible: playingIds.size > 0 }); };
+N.on("tts_start", e => { vCount("tts_ok"); playingIds.add((e && e.id) || "?"); soundOn(); if (state === "thinking") setState("speaking"); });
 N.on("tts_fail", e => { vCount("tts_err"); plog("warn", "голос устройства не сказал фразу (код " + (e.code ?? "?") + ")"); });
 N.on("tts_done", e => {
   if (e && e.id) sayTexts.delete(e.id);
+  playingIds.delete((e && e.id) || "?"); soundOn();
   sayLeft = Math.max(0, sayLeft - 1);
   if (sayLeft === 0 && state === "speaking" && !busy) finishTurn();
 });
@@ -1192,7 +1197,7 @@ N.on("tts_error", e => {
     if (Date.now() - srvVoiceWarnAt > 600e3) { srvVoiceWarnAt = Date.now(); toast("Голос сервера сейчас недоступен — говорю голосом телефона", 5000); }
   } else if (t) toast("Голос сервера: " + e.error);      // своего голоса нет — честно говорим, почему тихо
 });
-function stopVoice() { sayLeft = 0; D.stopSpeak(); }
+function stopVoice() { sayLeft = 0; D.stopSpeak(); playingIds.clear(); soundOn(); }
 function finishTurn() {
   setState("idle");
   const f = afterSpeak; afterSpeak = null;

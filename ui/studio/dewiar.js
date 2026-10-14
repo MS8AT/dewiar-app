@@ -31,6 +31,7 @@ function dwRender() {
   $("#dw-who").textContent = a.logged_in ? (a.user && a.user.login || a.login) : "";
   $("#dw-host").textContent = (a.server || "https://dewiar.pro").replace(/^https?:\/\//, "");
   if (!a.logged_in && a.login && !$("#dw-login").value) $("#dw-login").value = a.login;
+  if (a.server && !/\/\/dewiar\.pro\/?$/.test(a.server)) $("#dw-server").placeholder = a.server;
   if (a.problem && !a.logged_in) { $("#dw-acc-res").className = "res bad"; $("#dw-acc-res").textContent = a.problem; }
   dwSet("acc", a.logged_in ? "ok" : a.problem ? "bad" : "", a.logged_in ? "вход выполнен" : a.problem ? "вход устарел" : "не выполнен");
   // модели
@@ -122,6 +123,13 @@ function dwRender() {
     $("#dw-upd-open").style.display = u.available ? "" : "none";
     dwSet("upd", u.available ? "warn" : u.error ? "bad" : "ok", u.available ? "есть новая" : u.error ? "ошибка" : "последняя");
   }
+  // свёрнутый блок «Компьютер, сеть, антивирус и обновления»: в заголовке — их метки; что-то не так — раскрывается сам
+  // (если человек сам его не сворачивал)
+  const tech = ["pc", "net", "upd"].concat(av && av.supported ? ["av"] : []), more = $("#dw-more");
+  const techBad = tech.filter(k => / (bad|warn)/.test($("#dws-" + k).className));
+  $("#dw-more-sum").innerHTML = (techBad.length ? techBad : tech).map(k => $("#dws-" + k)).filter(e => e.textContent.trim() && e.textContent !== "—")
+    .map(e => `<span class="${escH(e.className)}">${escH(e.textContent)}</span>`).join("");
+  if (techBad.length && !more.dataset.user) more.open = true;
   const cards = ["acc", "cloud", "speech", "kb", "chat", "pc", "net", "upd"].concat(av && av.supported ? ["av"] : []);
   const okN = cards.filter(k => ($("#dws-" + k).className || "").includes(" ok")).length, badN = cards.filter(k => ($("#dws-" + k).className || "").includes(" bad")).length;
   $("#dw-sum").textContent = DW.checked.at ? `Работает ${okN} из ${cards.length}` + (badN ? ` · требует внимания: ${badN}` : "") + ` · проверено в ${new Date(DW.checked.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` : "";
@@ -191,7 +199,7 @@ $("#dw-go").onclick = async () => {
   if (!login || !password) { r.className = "res bad"; r.textContent = "Введите логин и пароль"; return; }
   $("#dw-go").disabled = true; r.className = "res"; r.textContent = "Вхожу…";
   // после входа ядро само подключает модели и Знания аккаунта — карточки перечитываем чуть позже
-  try { const a = await core.call("account_login", { server: (DW.acc && DW.acc.server) || "", login, password }); $("#dw-pass").value = ""; renderAccount(a); DW.acc = a; r.className = "res ok"; r.textContent = "Вход выполнен — модели и Знания подключаются…"; setTimeout(() => dwLoad().then(() => { r.textContent = "Вход выполнен."; }), 2500); }
+  try { const a = await core.call("account_login", { server: $("#dw-server").value.trim() || (DW.acc && DW.acc.server) || "", login, password }); $("#dw-pass").value = ""; renderAccount(a); DW.acc = a; r.className = "res ok"; r.textContent = "Вход выполнен — модели и Знания подключаются…"; setTimeout(() => dwLoad().then(() => { r.textContent = "Вход выполнен."; }), 2500); }
   catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { $("#dw-go").disabled = false; }
 };
 $("#dw-pass").onkeydown = (e) => { if (e.key === "Enter") $("#dw-go").click(); };
@@ -222,6 +230,9 @@ $("#dw-ask").onclick = async () => { const q = $("#dw-q").value.trim(); if (!q) 
   try { const r = await core.call("account_ask", { question: q }); $("#dw-ans").textContent = r.answer + (r.sources.length ? "\n\nИсточники: " + r.sources.join("; ") : ""); }
   catch (e) { $("#dw-ans").textContent = e.message; } finally { $("#dw-ask").disabled = false; } };
 $("#dw-q").onkeydown = (e) => { if (e.key === "Enter") $("#dw-ask").click(); };
+$("#dw-more > summary").addEventListener("click", () => { $("#dw-more").dataset.user = "1"; });
+$("#dw-tts-sec").onclick = (e) => { e.preventDefault(); $('nav button[data-p="voice"]').click(); };
+$("#acc-goto-btn").onclick = () => { $('nav button[data-p="dw"]').click(); setTimeout(() => { const f = $("#dw-login"); if (f && f.offsetParent) f.focus(); }, 200); };
 $("#dw-kb-persona").onclick = () => $('nav button[data-p="personas"]').click();
 const dwGoCard = (id) => { $('nav button[data-p="connect"]').click(); setTimeout(() => $(id).scrollIntoView({ behavior: "smooth", block: "start" }), 150); };
 $("#dw-tg-go").onclick = () => dwGoCard("#tg-box");

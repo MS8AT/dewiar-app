@@ -863,11 +863,12 @@
     const ease = Math.min(1, dt * 10);
     A.ex += (A.tx - A.ex) * ease; A.ey += (A.ty - A.ey) * ease;
     if (now > A.nextBlink) { A.blinkTill = now + 110; A.nextBlink = now + 3200 + Math.random() * 3500; }
-    // рот: говорит — меняем форму каждые ~110 мс по громкости, между формами — плавный переход
-    // уровень своего голоса (set({voice: true}), компьютер): рот движется, только пока звук идёт (свежий уровень за 250 мс),
-    // в паузах между фразами — закрыт. Где уровня голоса нет вовсе (телефон), рот просто «говорит», пока speaking
+    // рот: говорит — меняем форму каждые ~110 мс по громкости, между формами — плавный переход.
+    // Рот движется, только пока звук действительно идёт (e.sounding): голос с сервера приходит через 5–10 с после
+    // «speaking» — всё это время рот закрыт (отзыв 14.10: «звука нет, а они болтают губами»). Уровень своего голоса
+    // (компьютер) — ещё и в паузах между словами закрыт.
     if (e.level > 0.06) A.heard = now;
-    const voiced = speaking && (e._voiceSeen ? (now - (e._voiceAt || 0) < 250 && e.level > 0.04) : (now - A.heard > 1500 || e.level > 0.04));
+    const voiced = speaking && e.sounding(now) && (e._voiceSeen ? e.level > 0.04 : e._audibleKnown || now - A.heard > 1500 || e.level > 0.04);
     let want = A.mTarget;
     if (voiced) { if (now > A.nextMouth) { want = Math.random() < 0.12 ? 0 : 1 + Math.floor(Math.random() * 3); A.nextMouth = now + 90 + Math.random() * 60; } }
     else want = 0;
@@ -1158,6 +1159,7 @@
       this.still = !!opts.still;          // в покое — один кадр, без анимации (много обликов на одной странице студии)
       this.tone = opts.tone || "color";   // "mono" — сдержанно: белый край портрета и белые лучи вместо цвета персонажа
       this.fx = opts.fx || "wave";        // голос: "wave" — волна по кругу, "bars" — лучи вокруг портрета, "pulse" — расходящиеся круги
+      this.voiceLevels = !!opts.voiceLevels;   // уровни своего голоса придут (виджет компьютера) — без них рот и волна молчат
       this.configure(opts);
       this._last = performance.now(); this._frame = 0;
       const loop = (now) => { if (!this.dead) { this.draw(now); requestAnimationFrame(loop); } };
@@ -1173,11 +1175,21 @@
         if (image) { this.img = new Image(); this.img.src = image; }
       }
     }
-    set({ state, level, voice } = {}) {
+    /* Как узнать, что звук голоса идёт прямо сейчас (а не только состояние «speaking» — его ставят, ещё не получив звук):
+       voice — уровень своего голоса (компьютер шлёт его, пока играет плеер): звучит, если уровень свежий (до 400 мс);
+       audible — телефон сообщает начало и конец каждой фразы; opts.voiceLevels — уровни голоса придут точно (виджет
+       компьютера): до первого из них — тишина. Ничего этого нет (облик в студии) — звучит всё время «speaking». */
+    set({ state, level, voice, audible } = {}) {
       if (state && state !== this.state) this._stillAt = performance.now() + 1200;   // плавно вернуться в покой и замереть
       if (state) this.state = state;
       if (level !== undefined) this.target = level;
       if (voice && level !== undefined) { this._voiceAt = performance.now(); if (level > 0.02) this._voiceSeen = true; }
+      if (audible !== undefined) { this._audibleKnown = true; this._audible = !!audible; }
+    }
+    sounding(now = performance.now()) {
+      if (this._voiceSeen) return now - (this._voiceAt || 0) < 400;
+      if (this._audibleKnown) return this._audible;
+      return !this.voiceLevels;
     }
     draw(now) {
       if (this.paused) return;                               // окно спрятано — не рисуем
@@ -1206,7 +1218,10 @@
       const PR = Math.min(w, h) / 2 - 1.5;                    // радиус диска-подложки
       // говорит — живая волна всегда (уровень звука бывает тихим или не приходит вовсе, а облик не должен «застывать»);
       // слушает — лёгкое дыхание. Так в виджете анимация такая же, как в студии при наведении на персонажа.
-      const lvE = this.state === "speaking" ? Math.max(this.level, 0.3 + 0.1 * Math.sin(this.t * 2.3) + 0.05 * Math.sin(this.t * 5.1)) :
+      // ответ готов, а звук ещё не пришёл (голос с сервера) или пауза между фразами — спокойное дыхание, как у «слушает»
+      const sounding = this.state !== "speaking" || this.sounding(now);
+      const lvE = this.state === "speaking" && !sounding ? Math.max(this.level * 0.5, 0.1 + 0.05 * Math.sin(this.t * 1.7)) :
+        this.state === "speaking" ? Math.max(this.level, 0.3 + 0.1 * Math.sin(this.t * 2.3) + 0.05 * Math.sin(this.t * 5.1)) :
         this.state === "listening" ? Math.max(this.level, 0.08 + 0.05 * Math.sin(this.t * 1.7)) : this.level;
       const g = { ctx, r: PR * 0.8, c, t: this.t, lv: lvE, k: st.glow };
       // сдержанный тон: портрет, его край и лучи — холодный белый; абстрактные облики сохраняют цвет персонажа

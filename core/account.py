@@ -233,7 +233,7 @@ class Account:
         """Что можно подключить: свои папки, публичные библиотеки целиком и их разделы →
         {"bases": [{kind, id, label, docs, group…}], "docs": число документов}. Кэш на 5 минут (force — обойти)."""
         if not self.logged_in():
-            raise AccountError("не выполнен вход в аккаунт Dewiar (студия → «Подключение» → «Аккаунт Dewiar»)")
+            raise AccountError("не выполнен вход в аккаунт Dewiar (студия → «Dewiar.pro» → «Аккаунт dewiar.pro»)")
         c = getattr(self, "_scope_cache", None)
         if c and not force and time.time() - c[0] < 300:
             return c[1]

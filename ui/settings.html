@@ -435,8 +435,8 @@
 
   <section id="p-dw" class="wide">
     <h1>Dewiar.pro</h1>
-    <p class="lead">Всё, что даёт сервис Dewiar, — в одном месте: вход, модели, распознавание речи и голос на сервере, Знания, мессенджеры и телефон.
-      Нажмите «Проверить всё» — каждая карточка покажет, работает ли она.</p>
+    <p class="lead">Войдите аккаунтом dewiar.pro — остальное включится само. Метка в углу карточки: зелёная — работает,
+      жёлтая — стоит взглянуть, красная — не работает. «Проверить всё» — проверит каждую.</p>
     <div class="dw-weak" id="dw-weak" style="display:none"></div>
     <div class="dw-top"><button class="btn primary" id="dw-check">Проверить всё</button><span class="dw-sum" id="dw-sum"></span></div>
     <div class="dw-grid">
@@ -450,6 +450,8 @@
             <input type="password" id="dw-pass" placeholder="пароль" autocomplete="current-password" style="flex:1;min-width:130px">
             <button class="btn primary" id="dw-go">Войти</button>
           </div>
+          <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Свой сервер вместо dewiar.pro</summary>
+            <input type="url" id="dw-server" placeholder="https://dewiar.pro" spellcheck="false" style="width:100%;margin-top:8px"></details>
         </div>
         <div id="dw-acc-in" style="display:none">
           <div class="dw-kv"><span>Вы вошли</span><b id="dw-who"></b><span>Сайт</span><div id="dw-host"></div></div>
@@ -471,17 +473,18 @@
             <div class="actions" style="margin:8px 0 0"><input type="text" id="dw-key" placeholder="dw-xxxxxx-xxxxxx-xxxxxx-xxxxxx" style="flex:1;min-width:220px"><button class="btn" id="dw-key-go">Подключить</button></div></details></div>
         <p class="res" id="dw-cloud-res" style="margin-top:6px"></p>
       </div>
-      <div class="dwc" id="dwc-ref">
-        <div class="dh"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M18 8v6M15 11h6"/></svg><h3>Рефералы</h3><span class="dws" id="dws-ref">—</span></div>
-        <p class="hint" id="dw-ref-text">Поделитесь Dewiar — подарки талерами и вам, и другу.</p>
-        <div class="actions" style="margin:0"><button class="btn primary" id="dw-ref-open">Открыть «Рефералы»</button></div>
-      </div>
       <div class="dwc" id="dwc-speech">
-        <div class="dh"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><h3>Речь на сервере</h3><span class="dws" id="dws-speech">—</span></div>
-        <p class="hint">Голос в текст и текст в голос может делать сервер Dewiar — тогда компьютеру почти ничего не нужно. Нет связи — ассистент сам вернётся к своему.</p>
+        <div class="dh"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><h3>Слух и голос</h3><span class="dws" id="dws-speech">—</span></div>
+        <p class="hint">Распознавать речь и озвучивать ответы может сервер Dewiar — компьютеру почти ничего не нужно. Пропала связь — ассистент сам вернётся к своему.</p>
         <div class="switch"><div>Распознавать речь на сервере<span id="dw-stt-why">Быстро и точно даже на слабом компьютере; немного расходует заряд.</span></div><label class="tg"><input type="checkbox" id="dw-stt"><i></i></label></div>
-        <div class="switch" id="dw-tts-row"><div>Голос с сервера<span>Живые нейросетевые голоса; компьютер не нагружается.</span></div><label class="tg"><input type="checkbox" id="dw-tts"><i></i></label></div>
+        <div class="switch" id="dw-tts-row"><div>Голос Dewiar<span>Ассистент говорит живым голосом с сервера. Это тот же пункт «Голос Dewiar», что в разделе <a href="#" id="dw-tts-sec">«Голос»</a>, — включайте здесь или там.</span></div><label class="tg"><input type="checkbox" id="dw-tts"><i></i></label></div>
         <p class="res" id="dw-speech-res"></p>
+      </div>
+      <div class="dwc" id="dwc-sync">
+        <div class="dh"><svg viewBox="0 0 24 24"><path d="M20 7h-9.5a5.5 5.5 0 0 0 0 11H14"/><path d="m17 4 3 3-3 3"/><path d="M4 17h9.5"/><path d="m7 20-3-3 3-3"/></svg><h3>Синхронизация</h3><span class="dws" id="dws-sync">—</span></div>
+        <p class="hint">Телефон и компьютеры — одно и то же: напоминания и будильники, заметки и списки, расходы, память «Обо мне». Через сервер Dewiar, по вашему аккаунту или ключу — на всех устройствах тот же вход.</p>
+        <div class="switch"><div>Синхронизировать<span id="dw-sync-via">—</span></div><label class="tg"><input type="checkbox" id="dw-sync-on"><i></i></label></div>
+        <div class="actions" style="margin:0"><span class="hint" id="dw-sync-st" style="flex:1;margin:0"></span><button class="btn" id="dw-sync-now">Синхронизировать сейчас</button></div>
       </div>
       <div class="dwc" id="dwc-kb">
         <div class="dh"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg><h3>Знания</h3><span class="dws" id="dws-kb">—</span></div>
@@ -496,12 +499,6 @@
         <div class="switch"><div>Telegram<span id="dw-tg">не подключён</span></div><button class="btn" id="dw-tg-go">Подключить</button></div>
         <div class="switch"><div>MAX<span id="dw-mx">не подключён</span></div><button class="btn" id="dw-mx-go">Подключить</button></div>
       </div>
-      <div class="dwc" id="dwc-sync">
-        <div class="dh"><svg viewBox="0 0 24 24"><path d="M20 7h-9.5a5.5 5.5 0 0 0 0 11H14"/><path d="m17 4 3 3-3 3"/><path d="M4 17h9.5"/><path d="m7 20-3-3 3-3"/></svg><h3>Синхронизация</h3><span class="dws" id="dws-sync">—</span></div>
-        <p class="hint">Телефон и компьютеры — одно и то же: напоминания и будильники, заметки и списки, расходы, память «Обо мне». Через сервер Dewiar, по вашему аккаунту или ключу — на всех устройствах тот же вход.</p>
-        <div class="switch"><div>Синхронизировать<span id="dw-sync-via">—</span></div><label class="tg"><input type="checkbox" id="dw-sync-on"><i></i></label></div>
-        <div class="actions" style="margin:0"><span class="hint" id="dw-sync-st" style="flex:1;margin:0"></span><button class="btn" id="dw-sync-now">Синхронизировать сейчас</button></div>
-      </div>
       <div class="dwc" id="dwc-phone">
         <div class="dh"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg><h3>Телефон</h3><span class="dws run">Android</span></div>
         <div style="display:flex;gap:16px;align-items:center">
@@ -509,40 +506,56 @@
           <ol class="dw-steps" style="margin:0 0 0 18px"><li>Наведите камеру телефона на код — скачается Dewiar.</li><li>В приложении: Настройки → «Мозг» → «Аккаунт dewiar.pro» — тот же логин.</li><li>Всё: модели, Знания и заряд — общие.</li></ol>
         </div>
       </div>
-      <div class="dwc" id="dwc-pc">
-        <div class="dh"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><h3>Этот компьютер</h3><span class="dws" id="dws-pc">—</span></div>
-        <div class="dw-kv" id="dw-pc-kv"></div>
-        <div class="switch"><div>Лёгкий режим<span>Для слабых компьютеров: распознавание — сервер Dewiar или лёгкая модель, голос — лёгкий Piper.</span></div><label class="tg"><input type="checkbox" id="dw-light"><i></i></label></div>
-        <div class="switch"><div>Предупреждать, когда не хватает памяти<span>Открыто много других программ и компьютер ушёл в подкачку — подскажу, кто занимает память и что закрыть.</span></div><label class="tg"><input type="checkbox" data-k="device.mem_warn"><i></i></label></div>
-        <p class="hint" id="dw-pc-adv" style="margin-top:8px"></p>
-      </div>
-      <div class="dwc" id="dwc-av" style="display:none">
-        <div class="dh"><svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg><h3>Антивирус</h3><span class="dws" id="dws-av">—</span></div>
-        <p class="hint" id="dw-av-text"></p>
-        <div class="dw-path" id="dw-av-path"></div>
-        <ol class="dw-steps" id="dw-av-steps"></ol>
-        <div class="actions" style="margin:0;flex-wrap:wrap"><button class="btn primary" id="dw-av-ex" style="display:none">Добавить в исключения</button><button class="btn" id="dw-av-copy">Скопировать путь</button></div>
-        <p class="res" id="dw-av-res"></p>
-      </div>
-      <div class="dwc" id="dwc-net">
-        <div class="dh"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5s1.2-6.2 3.6-8.5z"/></svg><h3>Сеть</h3><span class="dws" id="dws-net">—</span></div>
-        <p class="hint">Провайдер блокирует dewiar.pro? Укажите прокси — через него пойдут только запросы к Dewiar (вход, модели, Знания, речь, обновления), остальное — напрямую.</p>
-        <div class="actions" style="margin:0;flex-wrap:wrap"><input type="text" id="dw-px" placeholder="socks5://адрес:порт или http://адрес:порт" spellcheck="false" style="flex:1;min-width:200px"><button class="btn primary" id="dw-px-save">Сохранить</button></div>
-        <div class="switch" style="border:0;padding:10px 0 0"><div>Использовать прокси Dewiar<span>Свой прокси не нужен: его выдаёт dewiar.pro тем, кто вошёл аккаунтом или подключил ключ. Только для серверов Dewiar — Telegram и остальной интернет идут напрямую. Свой прокси, если указан, главнее.</span></div>
-          <label class="tg"><input type="checkbox" id="dw-px-dw"><i></i></label></div>
-        <p class="res" id="dw-net-res"></p>
-      </div>
-      <div class="dwc" id="dwc-upd">
-        <div class="dh"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/></svg><h3>Обновления</h3><span class="dws" id="dws-upd">—</span></div>
-        <p class="hint" id="dw-upd-text"></p>
-        <div class="actions" style="margin:0"><button class="btn" id="dw-upd-go">Проверить</button><button class="btn primary" id="dw-upd-open" style="display:none">Обновить…</button></div>
+      <div class="dwc" id="dwc-ref">
+        <div class="dh"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M18 8v6M15 11h6"/></svg><h3>Рефералы</h3><span class="dws" id="dws-ref">—</span></div>
+        <p class="hint" id="dw-ref-text">Поделитесь Dewiar — подарки талерами и вам, и другу.</p>
+        <div class="actions" style="margin:0"><button class="btn primary" id="dw-ref-open">Открыть «Рефералы»</button></div>
       </div>
     </div>
+    <details class="dw-more" id="dw-more">
+      <summary><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg><span><b>Компьютер, сеть, антивирус и обновления</b>
+        <em>Если ассистент тормозит, сайт не открывается или пропали файлы — загляните сюда.</em></span><i class="dw-more-sum" id="dw-more-sum"></i></summary>
+      <div class="dw-grid">
+        <div class="dwc" id="dwc-pc">
+          <div class="dh"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><h3>Этот компьютер</h3><span class="dws" id="dws-pc">—</span></div>
+          <div class="dw-kv" id="dw-pc-kv"></div>
+          <div class="switch"><div>Лёгкий режим<span>Для слабых компьютеров: распознавание — сервер Dewiar или лёгкая модель, голос — лёгкий Piper.</span></div><label class="tg"><input type="checkbox" id="dw-light"><i></i></label></div>
+          <div class="switch"><div>Предупреждать, когда не хватает памяти<span>Открыто много других программ и компьютер ушёл в подкачку — подскажу, кто занимает память и что закрыть.</span></div><label class="tg"><input type="checkbox" data-k="device.mem_warn"><i></i></label></div>
+          <p class="hint" id="dw-pc-adv" style="margin-top:8px"></p>
+        </div>
+        <div class="dwc" id="dwc-av" style="display:none">
+          <div class="dh"><svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg><h3>Антивирус</h3><span class="dws" id="dws-av">—</span></div>
+          <p class="hint" id="dw-av-text"></p>
+          <div class="dw-path" id="dw-av-path"></div>
+          <ol class="dw-steps" id="dw-av-steps"></ol>
+          <div class="actions" style="margin:0;flex-wrap:wrap"><button class="btn primary" id="dw-av-ex" style="display:none">Добавить в исключения</button><button class="btn" id="dw-av-copy">Скопировать путь</button></div>
+          <p class="res" id="dw-av-res"></p>
+        </div>
+        <div class="dwc" id="dwc-net">
+          <div class="dh"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5s1.2-6.2 3.6-8.5z"/></svg><h3>Сеть</h3><span class="dws" id="dws-net">—</span></div>
+          <p class="hint">Провайдер блокирует dewiar.pro? Укажите прокси — через него пойдут только запросы к Dewiar (вход, модели, Знания, речь, обновления), остальное — напрямую.</p>
+          <div class="actions" style="margin:0;flex-wrap:wrap"><input type="text" id="dw-px" placeholder="socks5://адрес:порт или http://адрес:порт" spellcheck="false" style="flex:1;min-width:200px"><button class="btn primary" id="dw-px-save">Сохранить</button></div>
+          <div class="switch" style="border:0;padding:10px 0 0"><div>Использовать прокси Dewiar<span>Свой прокси не нужен: его выдаёт dewiar.pro тем, кто вошёл аккаунтом или подключил ключ. Только для серверов Dewiar — Telegram и остальной интернет идут напрямую. Свой прокси, если указан, главнее.</span></div>
+            <label class="tg"><input type="checkbox" id="dw-px-dw"><i></i></label></div>
+          <p class="res" id="dw-net-res"></p>
+        </div>
+        <div class="dwc" id="dwc-upd">
+          <div class="dh"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/></svg><h3>Обновления</h3><span class="dws" id="dws-upd">—</span></div>
+          <p class="hint" id="dw-upd-text"></p>
+          <div class="actions" style="margin:0"><button class="btn" id="dw-upd-go">Проверить</button><button class="btn primary" id="dw-upd-open" style="display:none">Обновить…</button></div>
+        </div>
+      </div>
+    </details>
   </section>
 
   <section id="p-connect">
     <h1>Подключение</h1>
-    <div class="prof on" id="acc-box" style="padding:16px 18px;margin-bottom:22px">
+    <div class="prof on acc-go-dw" id="acc-goto" style="padding:14px 18px;margin-bottom:22px">
+      <p class="hint" style="margin:0;flex:1">Вход аккаунтом dewiar.pro, модели, Знания и синхронизация — в разделе «Dewiar.pro».</p>
+      <button class="btn" id="acc-goto-btn">Открыть «Dewiar.pro»</button>
+    </div>
+    <!-- прежний вход аккаунтом: один вход — в «Dewiar.pro»; блок остаётся скрытым, links.js по-прежнему его заполняет -->
+    <div class="prof on" id="acc-box" style="display:none">
       <h3 style="font-size:15px;margin-bottom:6px">Аккаунт Dewiar</h3>
       <div id="acc-out">
         <p class="hint" style="margin-bottom:12px">Войдите логином и паролем от dewiar.pro — и всё настроится само: ассистент ответит по вашим Знаниям (документы, папки, публичная библиотека), а если своей модели нет — подключит модели Dewiar с зарядом в талерах. Пароль не сохраняется.</p>

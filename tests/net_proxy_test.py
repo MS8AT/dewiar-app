@@ -155,7 +155,7 @@ finally:
 log = (tmp / "core.log").read_text(encoding="utf-8", errors="replace")
 ok(R["net0"]["on"] is False and "dewiar.pro" in R["net0"]["hosts"], f"по умолчанию — напрямую: {R['net0']}")
 ok(not R["check0"]["check"]["direct"][0] and "укажите прокси" in R["check0"]["check"]["advice"], "«Проверить всё»: сайт не открывается → совет про прокси")
-ok(not R["login0"]["ok"] and "«Dewiar.pro» → «Сеть»" in R["login0"]["error"], f"вход без прокси — понятно, где прокси: {R['login0'].get('error', '')[-90:]}")
+ok(not R["login0"]["ok"] and "«Сеть»" in R["login0"]["error"] and "«Dewiar.pro»" in R["login0"]["error"], f"вход без прокси — понятно, где прокси: {R['login0'].get('error', '')[-90:]}")
 ok(not R["bad"]["ok"] and "не сохраняю" in R["bad"]["error"], f"нерабочий прокси не сохраняется: {R['bad'].get('error')}")
 ok(not R["mt"]["ok"] and "MTProto" in R["mt"]["error"], "MTProto-прокси — понятный отказ")
 st = R["set"]

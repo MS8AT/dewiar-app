@@ -155,6 +155,7 @@ run "радио: «играет», а звука нет" $PY "$T/radio_silent_te
 run "служба голосов Qwen3-TTS: фразы, персонажи, свои голоса, поток" $PY "$T/voices_service_test.py"
 run "телефон: голос сервера не ответил — говорит голосом телефона" $PY "$T/android_voice_fallback_test.py"
 run "телефон: календарь — что у меня завтра, запись после «да»" $PY "$T/android_calendar_test.py"
+run "лицо говорит губами только под звук: голос с сервера ещё не пришёл — рот закрыт" $PY "$T/lipsync_test.py"
 run "экзамен 13.10: заметки, близкие, правдивые советы" $PY "$T/exam1013_test.py"
 run "телефон: заметки, фото и файлы" $PY "$T/android_notes_test.py"
 run "студия: заметки и поиск" $PY "$T/studio_notes_test.py"

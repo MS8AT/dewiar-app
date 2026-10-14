@@ -155,7 +155,7 @@ function renderKb(open) {
       list.appendChild(l);
     });
   }).catch(e => { list.innerHTML = ""; const p = document.createElement("p"); p.className = "hint"; p.style.padding = "8px";
-    p.textContent = /вход|аккаунт/i.test(e.message) ? "Нужен вход в аккаунт Dewiar: «Подключение» → «Аккаунт Dewiar». После входа здесь появятся ваши папки и публичная библиотека." : e.message; list.appendChild(p); });
+    p.textContent = /вход|аккаунт/i.test(e.message) ? "Нужен вход в аккаунт Dewiar: «Dewiar.pro» → «Аккаунт dewiar.pro». После входа здесь появятся ваши папки и публичная библиотека." : e.message; list.appendChild(p); });
 }
 $("#e-cancel").onclick = closeEditor;
 $("#e-save").onclick = async () => {
