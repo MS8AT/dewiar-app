@@ -2,8 +2,8 @@
 1. «Нажал „Обновить“ — программа не перезапустилась сама, пришлось запускать». Установщик запускает новую версию
    сам (NSIS LaunchApp), а на случай, если не вышло, — сторож PowerShell: ждёт конца установщика, 10 с, и если Dewiar
    из папки установки не запущен — запускает (пробелы, кириллица и апостроф в пути не мешают).
-2. «Цветной кружок у выбора персонажа читается как „в сети / не в сети“». Вместо кружка — лицо персонажа (фото) или
-   первая буква имени; в списке персонажей — так же."""
+2. «Цветной кружок у выбора персонажа читается как „в сети / не в сети“». Вместо кружка — контурный силуэт героини
+   (длинные волосы) или героя (короткая стрижка) в стиле остальных значков; лицо в 20 px было «пятном» (14.10)."""
 import base64, json, os, socket, subprocess, sys, tempfile, time
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -58,16 +58,15 @@ try:
         b = p.chromium.launch(); hw = b.new_page(viewport={"width": 300, "height": 420}, device_scale_factor=2)
         hw.on("pageerror", lambda x: errs.append(str(x)))
         hw.goto((ROOT / "ui/hud.html").as_uri() + f"?token={(tmp / 'cfg/token').read_text().strip()}&port={PORT}&mode=card"); hw.wait_for_timeout(2500)
-        T = hw.evaluate("""() => { const d = document.getElementById('team-dot'), cs = getComputedStyle(d);
-            return { img: d.style.backgroundImage, ph: d.classList.contains('ph'), txt: d.textContent, glow: cs.boxShadow, w: d.getBoundingClientRect().width,
-                     who: current && current.name, hasAv: !!(current && current.avatar_url) }; }""")
-        ok(T["hasAv"] and T["img"].startswith("url(") and T["ph"] and T["txt"] == "" and T["w"] >= 18, f"у кнопки персонажа — его лицо, а не цветной кружок: {T}")
+        T = hw.evaluate("""() => { const d = document.getElementById('team-dot');
+            return { g: d.dataset.g, svg: !!d.querySelector('svg circle'), bg: d.style.backgroundImage, who: current && current.name, glow: getComputedStyle(d).boxShadow }; }""")
+        ok(T["who"] == "Лира" and T["g"] == "female" and T["svg"] and not T["bg"] and T["glow"] in ("none", ""),
+           f"у кнопки персонажа — контурный силуэт героини (не цветной кружок, не крошечное фото): {T}")
         hw.click("#b-team"); hw.wait_for_timeout(400)
-        M = hw.evaluate("""() => [...document.querySelectorAll('#team button')].map(b => { const i = b.querySelector('i');
-            return [b.querySelector('b').textContent, !!i.style.backgroundImage, i.textContent]; })""")
-        ok(len(M) >= 2 and all((x[1] and x[2] == "") or (not x[1] and len(x[2]) == 1) for x in M), f"в списке — лица (без фото — первая буква): {M}")
-        hw.evaluate("() => { const p = { name: 'Нова', avatar_url: '' }; paintAv(document.getElementById('team-dot'), p); }")
-        ok(hw.evaluate("() => document.getElementById('team-dot').textContent") == "Н", "без фото — первая буква имени")
+        M = hw.evaluate("""() => [...document.querySelectorAll('#team button')].map(b => [b.querySelector('b').textContent, b.querySelector('i').dataset.g])""")
+        ok(["Лира", "female"] in M and ["Патрик", "male"] in M, f"в списке — силуэты по полу: {M}")
+        hw.evaluate("() => paintAv(document.getElementById('team-dot'), { name: 'Нова' })")
+        ok(hw.evaluate("() => document.getElementById('team-dot').dataset.g") == "none", "пол не указан — просто силуэт")
         hw.evaluate("() => paintAv(document.getElementById('team-dot'), current)")
         hw.screenshot(path=os.environ.get("TEAM_SHOT") or str(tmp / "team.png"))
         b.close()

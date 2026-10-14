@@ -60,7 +60,7 @@ with sync_playwright() as p:
     box = hw.evaluate("() => { const r = document.getElementById('cv').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }")
     hw.mouse.move(box[0] + 120, box[1] - 60); hw.wait_for_timeout(500)
     H = hw.evaluate("() => ({ lx: entity.lookX, ly: entity.lookY, tr: document.getElementById('cv').style.transform })")
-    ok(H["lx"] > 0.3 and H["ly"] < -0.1 and "rotateY(" in H["tr"] and "rotateY(-" not in H["tr"], f"виджет: курсор справа сверху — смотрит туда: {H}")
+    ok(H["lx"] > 0.3 and H["ly"] < -0.1 and H["tr"] == "", f"виджет: курсор справа сверху — смотрит туда, а круг не поворачивается (не сплющивается): {H}")
     hw.evaluate("() => document.documentElement.dispatchEvent(new MouseEvent('mouseleave'))"); hw.wait_for_timeout(2400)
     H2 = hw.evaluate("() => ({ looking: entity._looking, tr: document.getElementById('cv').style.transform })")
     ok(H2 == {"looking": False, "tr": ""}, f"курсор ушёл — спокойно к центру: {H2}")
