@@ -2,7 +2,8 @@
 из Telegram. Отдельно от памяти модели (conversation.json сворачивается и сбрасывается через 8 часов тишины) — здесь
 просто лента, как в мессенджере, только на этом компьютере (state/chat.jsonl, до 5000 последних реплик).
 
-Записи: {"id", "ts", "role": "user"|"assistant", "text", "who"?: pid персонажа, "via"?: "telegram"|"max"…}.
+Записи: {"id", "ts", "role": "user"|"assistant", "text", "who"?: pid персонажа, "via"?: "message", "att"?: вложения
+[{kind: image|file, name, path (во «Входящих» папки ассистента), thumb (миниатюра картинки, data:URL)}]}.
 Ответ модели в одном ходе приходит одной репликой; если подряд пришло продолжение того же ответа (текст начинается с
 прежнего) — запись обновляется, а не дублируется. Продиктованные для сейфа секреты маскируются, как в журнале."""
 import json
@@ -27,7 +28,7 @@ class ChatLog:
                     x = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(x, dict) and x.get("text") and x.get("role") in ("user", "assistant"):
+                if isinstance(x, dict) and (x.get("text") or x.get("att")) and x.get("role") in ("user", "assistant"):
                     self.items.append(x)
         except OSError:
             pass
@@ -38,10 +39,10 @@ class ChatLog:
         tmp.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in self.items), encoding="utf-8")
         tmp.replace(self.path)
 
-    def add(self, role, text, who=None, via=None):
-        """-> запись (новая или обновлённая) или None, если писать нечего."""
+    def add(self, role, text, who=None, via=None, att=None):
+        """-> запись (новая или обновлённая) или None, если писать нечего. att — вложения: [{kind, name, path, thumb?}]."""
         text = (text or "").strip()
-        if not text or role not in ("user", "assistant"):
+        if (not text and not att) or role not in ("user", "assistant"):
             return None
         try:
             from vault import mask
@@ -52,7 +53,7 @@ class ChatLog:
         with self._lock:
             last = self.items[-1] if self.items else None
             # тот же ответ дописался (или повторился) — обновляем запись, а не плодим одинаковые
-            if last and last["role"] == role and now - last["ts"] < 180 and last.get("who") == who and \
+            if not att and last and last["role"] == role and now - last["ts"] < 180 and last.get("who") == who and \
                     (text == last["text"] or (role == "assistant" and text.startswith(last["text"]))):
                 last["text"], last["ts"] = text, now
                 self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,6 +64,8 @@ class ChatLog:
                 item["who"] = who
             if via:
                 item["via"] = via
+            if att:
+                item["att"] = att[:10]
             self.items.append(item)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             if len(self.items) > KEEP + 500:

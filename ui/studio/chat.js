@@ -11,14 +11,19 @@ function chatDay(ts) {
   if (d.toDateString() === y.toDateString()) return "Вчера";
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
 }
+const chatSize = (n) => n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + " КБ" : (n / 1048576).toFixed(1).replace(".", ",") + " МБ";
 function chatBubble(x, lastWho) {
   const out = x.role === "user", p = out ? null : chatWho(x.who);
   const hm = new Date(x.ts * 1000).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
   // имя персонажа — над его первым ответом за день и когда отвечает другой персонаж (не над каждым ответом)
   const head = !out && lastWho !== (x.who || "")
     ? `<div class="ch-who"><i style="background:${escH((p && p.color) || "#8A9BFF")}"></i>${escH((p && p.name) || "Ассистент")}</div>` : "";
-  const body = out ? `<div class="tx">${escH(x.text)}</div>` : `<div class="tx md">${md(x.text)}</div>`;
-  return `${head}<div class="cl-m${out ? " out" : ""}" data-id="${escH(x.id)}">${x.via ? `<small class="ch-via">из мессенджера</small>` : ""}${body}<time>${hm}</time></div>`;
+  const body = !x.text ? "" : out ? `<div class="tx">${escH(x.text)}</div>` : `<div class="tx md">${md(x.text)}</div>`;
+  // вложения: картинки — миниатюрами, файлы — плашками; нажать — открыть из «Входящих» папки ассистента
+  const att = (x.att || []).map(a => a.kind === "image" && a.thumb
+    ? `<button class="ch-img" data-path="${escH(a.path || "")}" title="${escH(a.name)} — открыть"><img src="${escH(a.thumb)}" alt="${escH(a.name)}"></button>`
+    : `<button class="cl-f" data-path="${escH(a.path || "")}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg><span>${escH(a.name)}</span><small>${a.size ? chatSize(a.size) : ""}</small></button>`).join("");
+  return `${head}<div class="cl-m${out ? " out" : ""}" data-id="${escH(x.id)}">${x.via ? `<small class="ch-via">из мессенджера</small>` : ""}${att ? `<div class="ch-att">${att}</div>` : ""}${body}<time>${hm}</time></div>`;
 }
 function chatRender(keep) {
   const box = $("#ch-msgs"); if (!box) return;
@@ -41,6 +46,7 @@ function chatRender(keep) {
   if (keep === "older") box.scrollTop = box.scrollHeight - oldH + oldTop;   // подгрузили раньше — лента не прыгает
   else if (keep !== "stay" || atBottom) box.scrollTop = box.scrollHeight;
   const o = $("#ch-older"); if (o) o.onclick = chatOlder;
+  $$("#ch-msgs [data-path]").forEach(b => b.onclick = () => { if (b.dataset.path) core.call("ws_open", { path: b.dataset.path }).catch(e => { $("#ch-res").textContent = e.message; }); });
   const p = chatWho(active);
   $("#ch-text").placeholder = `Сообщение — ответит ${p ? p.name : "ассистент"}. Enter — отправить, Shift+Enter — новая строка`;
 }
@@ -76,11 +82,52 @@ core.on("state", e => {
   if (e.state === "thinking" && !CH.live) { CH.live = { text: "" }; if ($("#p-chat").classList.contains("cur")) chatRender("stay"); }
   if ((e.state === "idle" || e.state === "listening") && CH.live && !CH.live.text) { CH.live = null; if ($("#p-chat").classList.contains("cur")) chatRender("stay"); }
 });
-function chatSend() {
-  const t = $("#ch-text"), q = t.value.trim(); if (!q) return;
-  t.value = ""; t.style.height = "";
-  core.call("say", { text: q }).catch(e => { $("#ch-res").textContent = e.message; });
+/* вложения к сообщению: скрепка, перетащить в ленту, Ctrl+V; картинки уменьшаются до 1600 px (как в виджете),
+   файлы — до 11 МБ; ядро кладёт всё во «Входящие» папки ассистента и показывает модели (текст документов, картинки) */
+let chAtts = [];                                       // {kind: "image"|"file", name, b64, size, url?}
+const CH_MAX = 11e6;
+function chatShrink(file) {
+  return new Promise((ok, bad) => {
+    const img = new Image(); img.onerror = () => bad(new Error("это не картинка"));
+    img.onload = () => { const k = Math.min(1, 1600 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src); ok(c.toDataURL("image/jpeg", 0.88)); };
+    img.src = URL.createObjectURL(file);
+  });
 }
+const chatB64 = (file) => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = bad; r.readAsDataURL(file); });
+async function chatAddFiles(list) {
+  for (const f of list) {
+    try {
+      if (/^image\//.test(f.type) && !/svg/.test(f.type)) {
+        const url = await chatShrink(f);
+        chAtts.push({ kind: "image", name: (f.name || "картинка").replace(/\.\w+$/, "") + ".jpg", b64: url, url, size: Math.round(url.length * 0.75) });
+      } else if (f.size > CH_MAX) $("#ch-res").textContent = `«${f.name}» больше 11 МБ — положите его в папку ассистента`;
+      else chAtts.push({ kind: "file", name: f.name, b64: await chatB64(f), size: f.size });
+    } catch (e) { $("#ch-res").textContent = `«${f.name}»: ${e.message}`; }
+  }
+  chAtts = chAtts.slice(0, 10);
+  chatAttsRender();
+}
+function chatAttsRender() {
+  $("#ch-atts").innerHTML = chAtts.map((a, i) => `<span class="ch-chip">${a.kind === "image" ? `<img src="${escH(a.url)}" alt="">` : `<i>${escH((a.name.split(".").pop() || "").slice(0, 4).toUpperCase())}</i>`}<b>${escH(a.name)}</b><button data-i="${i}" title="Убрать" aria-label="Убрать">✕</button></span>`).join("");
+  $$("#ch-atts button").forEach(b => b.onclick = () => { chAtts.splice(+b.dataset.i, 1); chatAttsRender(); });
+}
+function chatSend() {
+  const t = $("#ch-text"), q = t.value.trim(); if (!q && !chAtts.length) return;
+  const files = chAtts.map(a => ({ name: a.name, b64: a.b64 }));
+  t.value = ""; t.style.height = ""; chAtts = []; chatAttsRender(); $("#ch-res").textContent = "";
+  core.call("say", { text: q, files }).catch(e => { $("#ch-res").textContent = e.message; });
+}
+$("#ch-file").onchange = (e) => { chatAddFiles([...e.target.files]); e.target.value = ""; };
+$("#ch-text").addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData && e.clipboardData.items || [])].filter(x => x.kind === "file").map(x => x.getAsFile()).filter(Boolean);
+  if (files.length) { e.preventDefault(); chatAddFiles(files); }
+});
+{ const box = $("#ch-box");
+  box.addEventListener("dragover", (e) => { if ([...(e.dataTransfer.types || [])].includes("Files")) { e.preventDefault(); box.classList.add("over"); } });
+  box.addEventListener("dragleave", (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove("over"); });
+  box.addEventListener("drop", (e) => { e.preventDefault(); box.classList.remove("over"); chatAddFiles([...(e.dataTransfer.files || [])]); }); }
 $("#ch-go").onclick = chatSend;
 $("#ch-text").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); chatSend(); } });
 $("#ch-text").addEventListener("input", (e) => { const t = e.target; t.style.height = ""; t.style.height = Math.min(160, t.scrollHeight) + "px"; });

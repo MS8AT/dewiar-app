@@ -41,6 +41,24 @@ def team_window(hist, me, name_of):
         i = j
     return out
 
+ATT_DEFAULT_Q = "Посмотри вложения и коротко скажи, что в них."
+
+
+def _thumb(data, side=320):
+    """Миниатюра картинки для ленты «Чата» (data:URL, JPEG ~10–25 КБ) или "" — если не картинка."""
+    try:
+        import base64
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(data))
+        im.thumbnail((side, side))
+        out = io.BytesIO()
+        im.convert("RGB").save(out, "JPEG", quality=72)
+        return "data:image/jpeg;base64," + base64.b64encode(out.getvalue()).decode()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 class AnswerMixin:
     # ---------- ответ ----------
 
@@ -763,6 +781,7 @@ class AnswerMixin:
         inbox = self.workspace.ensure() / "Входящие"
         inbox.mkdir(exist_ok=True)
         parts, budget = [], 24000
+        saved = []                                         # для «Чата» студии: что приложено (имя, путь, миниатюра картинки)
         for f in files[:10]:
             name = Path(str(f.get("name") or "файл")).name or "файл"
             raw = f.get("b64", "")
@@ -776,9 +795,11 @@ class AnswerMixin:
                 try:
                     images.append(prepare(data)[0])
                     parts.append(f"[Картинка «{name}» — приложена ниже, сохранена: {rel}]")
+                    saved.append({"kind": "image", "name": dst.name, "path": rel, "thumb": _thumb(data)})
                     continue
                 except Exception:  # noqa: BLE001
                     pass
+            saved.append({"kind": "file", "name": dst.name, "path": rel, "size": len(data)})
             try:
                 body = extract(dst) if dst.suffix.lower() in (".md", ".txt", ".csv", ".html", ".htm", ".pdf", ".docx", ".odt") \
                     else (data.decode("utf-8") if len(data) < 400_000 else "")
@@ -794,7 +815,8 @@ class AnswerMixin:
             else:
                 parts.append(f"[Файл «{name}» ({len(data) // 1024} КБ) сохранён в папке ассистента: {rel}; текста в нём нет]")
             log.info("📎 %s → %s", name, rel)
-        q = text.strip() or "Посмотри вложения и коротко скажи, что в них."
+        self._chat_att = (time.monotonic(), saved)
+        q = text.strip() or ATT_DEFAULT_Q
         return q + "\n\nВложения:\n" + "\n\n".join(parts)
 
     def _thanks(self, text):

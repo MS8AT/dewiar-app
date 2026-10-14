@@ -81,6 +81,7 @@ public final class Tts {
     /** Очередь фраз: add=true — дописать к уже звучащему (ответ модели идёт предложениями). */
     public void speak(String id, String text, float rate, float pitch, String voice, boolean add) {
         if (!ready) { ev("tts_done", id); return; }
+        if (BtMic.isOn()) BtMic.offNow(ctx);          // слушали микрофоном наушников — ответ звучит в обычном качестве
         try {
             tts.setSpeechRate(rate <= 0 ? 1f : rate);
             tts.setPitch(pitch <= 0 ? 1f : pitch);
@@ -158,6 +159,7 @@ public final class Tts {
             @Override public boolean onError(MediaPlayer m, int a, int b) { synchronized (lock) { done[0] = true; lock.notifyAll(); } return true; }
         });
         mp.prepare();
+        if (BtMic.isOn()) BtMic.offNow(ctx);          // голосовой канал гарнитуры — выключить: ответ в обычном качестве
         synchronized (this) { player = mp; }
         ev("tts_start", id);
         mp.start();

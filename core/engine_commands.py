@@ -586,14 +586,14 @@ class CommandsMixin:
                 threading.Timer(0.2, self.on_quit).start()
             return True
         if cmd == "say":
-            from eyes import prepare
-            import base64
+            # картинки (вставленные, снимок экрана) — как файлы: сохраняются во «Входящие» и видны в ленте «Чата»
             images = []
-            for im in ([a["image"]] if a.get("image") else []) + list(a.get("images") or []):
-                raw = im.split(",", 1)[1] if im.startswith("data:") else im
-                images.append(prepare(base64.b64decode(raw))[0])
+            files = list(a.get("files") or [])
+            for k, im in enumerate(([a["image"]] if a.get("image") else []) + list(a.get("images") or [])):
+                mime = im[5:im.index(";")] if im.startswith("data:") and ";" in im[:40] else "image/jpeg"
+                ext = {"image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}.get(mime, ".jpg")
+                files.append({"name": time.strftime("Картинка %d.%m %H-%M-%S") + (f" ({k + 1})" if k else "") + ext, "b64": im})
             text = a.get("text", "")
-            files = a.get("files") or []
             if files:
                 text = self._attach_files(text, files, images)
             self.ask(text, images)

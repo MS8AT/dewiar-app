@@ -3683,6 +3683,8 @@ function renderSettings() {
       <label class="f"><span>Кто распознаёт речь</span><select id="stt-eng"><option value="system">Это устройство${info.recognizer ? "" : " (не найдено)"}</option>${cloudEars() ? `<option value="dewiar">Сервер Dewiar (GigaAM)</option>` : ""}<option value="server">Мой сервер распознавания</option></select></label>
       <div id="stt-srv"><label class="f"><span>Адрес (OpenAI-совместимый, …/v1)</span><input id="stt-url" placeholder="http://192.168.1.10:8090/v1" value="${esc(S.stt.url)}"></label>
       <div class="row2"><label class="f" style="flex:1"><span>Ключ</span><input id="stt-key" type="password" value="${esc(S.stt.key)}"></label><label class="f" style="flex:1"><span>Модель</span><input id="stt-model" placeholder="whisper-1" value="${esc(S.stt.model)}"></label></div></div>
+      <div class="sw"><div>Микрофон Bluetooth-наушников<small>Наушники с микрофоном подключены — слушаю ими, а не телефоном: можно отойти от телефона.${D.btMicAvailable && D.btMicAvailable() ? " Сейчас подключены." : ""}</small></div>
+      <label class="tg"><input type="checkbox" id="bt-mic" ${S.btMic !== false ? "checked" : ""}><i></i></label></div>
       <p class="hint">${S.stt.auto ? "Распознавание этого устройства не отвечало — слушает сервер Dewiar. " : ""}${info.recognizer ? "Распознавание устройства работает и без интернета, если скачан русский язык (Google → Распознавание речи офлайн)." : cloudEars() ? "В устройстве нет распознавания речи — слушает сервер Dewiar." : "В устройстве нет распознавания речи — войдите аккаунтом dewiar.pro (слушать будет сервер Dewiar) или укажите свой сервер."}</p></div>
       <h3>Голос</h3><div class="card">
       <label class="f"><span>Кто говорит</span><select id="tts-eng"><option value="system">Голос устройства</option>${cloudVoice() ? `<option value="cloud">Голос Dewiar — у каждого персонажа свой</option>` : ""}<option value="eleven">ElevenLabs — своим ключом</option><option value="server">Голос моего сервера</option></select></label>
@@ -3863,6 +3865,7 @@ function wireSettings(info) {
         el_voice_f: g("el-vf").value.trim(), el_voice_m: g("el-vm").value.trim(), el_model: g("el-model").value, rate: +g("tts-rate").value });
       S.user_name = g("u-name").value.trim(); S.follow = g("follow").value; saveS(); vis(); g("rate-v").textContent = (+S.tts.rate).toFixed(2); };
     $$("#set-body input, #set-body select").forEach(x => x.onchange = saveV);
+    g("bt-mic").onchange = () => { S.btMic = g("bt-mic").checked; saveS(); btMicSync(); };
     const rateFill = () => { const r = g("tts-rate"); r.style.setProperty("--p", ((r.value - r.min) / (r.max - r.min) * 100) + "%"); };
     rateFill();
     g("tts-rate").oninput = () => { g("rate-v").textContent = (+g("tts-rate").value).toFixed(2); rateFill(); };
@@ -4876,6 +4879,15 @@ function pauseOk() {
   lastStt.ok = true; S.stt.pauseExtra = Math.max(0, +S.stt.pauseExtra - 10); saveS(); pauseSync();
 }
 setTimeout(pauseSync, 0);
+/* Микрофон Bluetooth-наушников (BtMic.java, отчёт №51): подключены наушники с микрофоном — слушаем ими, а не телефоном */
+function btMicSync() { try { if (D.btMic) D.btMic(S.btMic !== false); } catch (e) { } }
+setTimeout(btMicSync, 0);
+let btMicWarned = false;
+N.on("stt_bt", e => {
+  if (e.on) plog("info", "🎧 слушаю микрофоном Bluetooth-наушников");
+  else { plog("warn", "🎧 микрофон наушников не включился — слушаю микрофоном телефона");
+    if (!btMicWarned) { btMicWarned = true; toast("Микрофон наушников не включился — слушаю телефоном. Говорите ближе к телефону или переподключите наушники.", 6000); } }
+});
 let holdT = null, holdXY = null, holdSwallow = false;
 const HOLD_MS = 320;
 $("#mic").addEventListener("pointerdown", (e) => {

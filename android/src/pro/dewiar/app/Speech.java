@@ -100,11 +100,22 @@ public final class Speech {
         p.edit().putString("beep_muted", "").apply();
     }
 
-    public void release() { main.removeCallbacks(unmuteR); unmuteNow(); }
+    public void release() { main.removeCallbacks(unmuteR); unmuteNow(); BtMic.offNow(ctx); }
+
+    /** Слушать микрофоном Bluetooth-наушников, если они подключены (BtMic; настройка «Микрофон наушников», по умолчанию да). */
+    volatile boolean btMic = true;
+
+    /** Включить микрофон наушников перед слушанием (не из главного потока); сообщить интерфейсу, вышло ли. */
+    private boolean btUp(int g) {
+        if (!btMic || !BtMic.available(ctx)) return false;
+        boolean was = BtMic.isOn(), ok = BtMic.start(ctx, 2500);
+        if (!was) { try { ev(g, "stt_bt", o().put("on", ok)); } catch (Exception ignored) { } }
+        return ok;
+    }
 
     public void listenSystem(final int g) {
         gen = g;
-        main.post(new Runnable() {
+        final Runnable go = new Runnable() {
             @Override public void run() {
                 try {
                     if (rec != null) { rec.destroy(); rec = null; }
@@ -120,9 +131,11 @@ public final class Speech {
                         @Override public void onBufferReceived(byte[] b) { }
                         @Override public void onEndOfSpeech() { ev(g, "stt_end", o()); }
                         @Override public void onError(int code) {
+                            BtMic.stopSoon();
                             try { ev(g, "stt_error", o().put("code", code).put("msg", errText(code))); } catch (Exception ignored) { }
                         }
                         @Override public void onResults(Bundle b) {
+                            BtMic.stopSoon();
                             ArrayList<String> r = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                             try { ev(g, "stt_result", o().put("text", r != null && !r.isEmpty() ? r.get(0) : "")); } catch (Exception ignored) { }
                         }
@@ -145,10 +158,18 @@ public final class Speech {
                     i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.getPackageName());
                     rec.startListening(i);
                 } catch (Throwable e) {
+                    BtMic.stopSoon();
                     try { ev(g, "stt_error", o().put("code", -1).put("msg", "распознавание телефона не запустилось: " + e.getMessage())); } catch (Exception ignored) { }
                 }
             }
-        });
+        };
+        // наушники с микрофоном — сначала их голосовой канал (до 2,5 с, в своём потоке), потом распознаватель
+        if (btMic && !BtMic.isOn() && BtMic.available(ctx)) {
+            new Thread(new Runnable() { @Override public void run() { btUp(g); main.post(go); } }, "btmic").start();
+        } else {
+            if (BtMic.isOn()) btUp(g);                    // уже включён — только отменить выключение
+            main.post(go);
+        }
     }
 
     /** Закончить слушать: системное распознавание отдаст то, что успело услышать, запись для сервера — заканчивается
@@ -166,6 +187,7 @@ public final class Speech {
 
     public void cancel() {
         recording = false;
+        BtMic.stopSoon();
         main.post(new Runnable() {
             @Override public void run() {
                 if (rec != null) {
@@ -209,7 +231,8 @@ public final class Speech {
                 try {
                     final int rate = 16000;
                     int min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                    int source = MediaRecorder.AudioSource.VOICE_RECOGNITION;
+                    // микрофон наушников — через голосовой канал гарнитуры (источник «связь»), иначе — телефона
+                    int source = btUp(g) ? MediaRecorder.AudioSource.VOICE_COMMUNICATION : MediaRecorder.AudioSource.VOICE_RECOGNITION;
                     ar = new AudioRecord(source, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, rate));
                     ar.startRecording();
                     ev(g, "stt_start", o());
@@ -271,6 +294,7 @@ public final class Speech {
                     try { ev(g, "stt_error", o().put("code", -2).put("msg", String.valueOf(e.getMessage()))); } catch (Exception ignored) { }
                 } finally {
                     recording = false;
+                    BtMic.stopSoon();
                     if (ar != null) { try { ar.release(); } catch (Throwable ignored) { } }
                 }
             }

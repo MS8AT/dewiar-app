@@ -316,6 +316,9 @@ public final class Bridge {
     @JavascriptInterface public void stopListen() { a.speech.stop(); }
 
     /** Добавка к паузе конца фразы (0…900 мс) — app.js учит её под манеру речи человека. */
+    /** Слушать микрофоном Bluetooth-наушников, когда они подключены (настройка «Микрофон наушников»). */
+    @JavascriptInterface public void btMic(boolean on) { a.speech.btMic = on; if (!on) BtMic.offNow(a); }
+    @JavascriptInterface public boolean btMicAvailable() { return BtMic.available(a); }
     @JavascriptInterface public void pauseExtra(int ms) { a.speech.extraMs = Math.max(0, Math.min(900, ms)); }
 
     @JavascriptInterface public void cancelListen() { a.speech.cancel(); }

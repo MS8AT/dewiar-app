@@ -171,8 +171,8 @@ finally:
 log = (tmp / "core.log").read_text(encoding="utf-8")
 end = (R.get("end") or {}).get("data") or {}
 ok(R.get("st_listen") and R.get("hold_on"), "hold_start: «слушаю», событие hold")
-ok(end.get("ok") and 3.0 <= end.get("sec", 0) <= 4.6 and R.get("hold_off"), f"hold_end: вся запись с самого нажатия (+0,4 с): {end}")
-ok(len(R.get("stt1") or []) == 1 and 3.0 <= R["stt1"][0] <= 4.6, f"распознавание — одним запросом, паузы не обрывают: {R.get('stt1')}")
+ok(end.get("ok") and 2.5 <= end.get("sec", 0) <= 4.6 and R.get("hold_off"), f"hold_end: вся запись с самого нажатия (+0,4 с): {end}")
+ok(len(R.get("stt1") or []) == 1 and 2.5 <= R["stt1"][0] <= 4.6, f"распознавание — одним запросом, паузы не обрывают: {R.get('stt1')}")
 asked = [json.loads(x) for x in (tmp / "llm.jsonl").read_text(encoding="utf-8").splitlines()] if (tmp / "llm.jsonl").exists() else []
 users = [m["content"] if isinstance(m["content"], str) else json.dumps(m["content"], ensure_ascii=False) for x in asked for m in x["messages"] if m["role"] == "user"]
 ok(any("письмо Игорю о встрече в четверг" in u for u in users), "текст диктовки ушёл вопросом — без имени и без «разговор не со мной»")

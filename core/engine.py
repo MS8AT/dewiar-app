@@ -548,11 +548,19 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
     def _chat_add(self, type_, kw):
         """Реплика — в ленту «Чата» студии (chatlog.py) и сразу в открытое окно чата (событие chat)."""
         try:
-            text, via = str(kw["text"]), None
+            text, via, att = str(kw["text"]), None, None
             if type_ == "heard" and text.startswith("✉ "):
                 text, via = text[2:], "message"
+            if type_ == "heard" and "\n\nВложения:" in text:      # вложения — карточками в ленте, а не текстом файлов
+                text = text.split("\n\nВложения:")[0]
+                at, saved = getattr(self, "_chat_att", None) or (0, [])
+                if saved and time.monotonic() - at < 120:
+                    att, self._chat_att = saved, None
+                from engine_answer import ATT_DEFAULT_Q
+                if text.strip() == ATT_DEFAULT_Q:
+                    text = ""
             item = self.chatlog.add("user" if type_ == "heard" else "assistant", text,
-                                 who=None if type_ == "heard" else self.s.get("persona"), via=via)
+                                    who=None if type_ == "heard" else self.s.get("persona"), via=via, att=att)
             if item:
                 self.bridge.broadcast({"type": "chat", "item": item})
         except Exception as e:  # noqa: BLE001
