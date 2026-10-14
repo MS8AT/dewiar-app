@@ -873,6 +873,8 @@ class CommandsMixin:
         if cmd in ("net", "net_proxy", "net_check", "net_dewiar"):   # dewiar.pro заблокирован провайдером — прокси
             return self.net_cmd(cmd, a)
         if cmd == "device":
+            if a.get("fresh"):                         # раздел «Голос» открыт — что умеет облако сейчас (озвучку могли включить)
+                self._cloud_caps()
             return self.device_status()
         if cmd in ("av_status", "av_exclude", "av_copy"):     # Windows: антивирус и исключения для Dewiar
             import winav

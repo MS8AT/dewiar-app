@@ -125,6 +125,20 @@ class BrainMixin:
             r["check"] = net.check(url, eff)
         return r
 
+    def _cloud_caps(self):
+        """Умеет ли облако распознавание и озвучку — спросить сервер сейчас (/models). Без ключа или связи — как было."""
+        if not self.s.get("cloud", "key"):
+            return
+        from cloud import fetch
+        try:
+            md = fetch(self.cloud.url, self.cloud.key, "/models")
+        except Exception as e:  # noqa: BLE001 — нет связи: остаётся прежнее
+            log.info("☁ Что умеет облако — не узнал: %s", e)
+            return
+        if bool(md.get("stt")) != bool(self.s.get("cloud", "stt_ok")) or bool(md.get("tts")) != bool(self.s.get("cloud", "tts_ok")):
+            self.s.update({"cloud": {"stt_ok": bool(md.get("stt")), "tts_ok": bool(md.get("tts"))}})
+            self.emit("settings", settings=self.s.snapshot())
+
     def device_status(self):
         """Мощность компьютера, лёгкий режим, кто распознаёт речь и совет для окна."""
         from device import measure
@@ -405,13 +419,7 @@ class BrainMixin:
                 except CloudError as e:
                     log.info("☁ Вернуть модели Dewiar в «Мозг» не вышло: %s", e)
             # распознавание: умеет ли облако речь — спрашиваем у сервера каждый раз; свой GigaAM не загрузился — речь серверу
-            if self.s.get("cloud", "key"):
-                try:
-                    md = fetch(self.cloud.url, self.cloud.key, "/models")
-                    if bool(md.get("stt")) != bool(self.s.get("cloud", "stt_ok")) or bool(md.get("tts")) != bool(self.s.get("cloud", "tts_ok")):
-                        self.s.update({"cloud": {"stt_ok": bool(md.get("stt")), "tts_ok": bool(md.get("tts"))}})
-                except CloudError:
-                    pass
+            self._cloud_caps()
             st = self.s.get("stt") or {}
             if st.get("engine") in ("gigaam", "vosk") and self.status.get("stt_ready") is False and self._cloud_stt_ok():
                 self._apply_light_stt("cloud")

@@ -85,7 +85,11 @@ function bindFields() {
     };
   });
   $$("[data-eng]").forEach(o => $("input", o).onchange = () => save({ stt: { engine: o.dataset.eng } }));
-  $$("[data-tts]").forEach(o => $("input", o).onchange = () => save({ tts: { engine: o.dataset.tts } }));
+  $$("[data-tts]").forEach(o => $("input", o).onchange = () => {
+    if (o.dataset.tts === "dewiar") return dwVoice(true);           // «Голос Dewiar» — облако или аккаунт (links.js)
+    if (dwVoiceOn()) return dwVoice(false, o.dataset.tts);           // уходим с голоса Dewiar — сразу на выбранный
+    save({ tts: { engine: o.dataset.tts } });
+  });
   // extra — тоже заменяется целиком (settings._merge), так что лишние ключи из поля убираются
   $("#ttsextra").onchange = () => { try { save({ tts: { remote: { extra: JSON.parse($("#ttsextra").value || "{}") } } }); } catch (e) { toast("Это не JSON"); } };
 }
@@ -102,8 +106,9 @@ function refreshStatic() {
     + (px > 0 && get("audio.end_silence_auto") !== false ? ` Сейчас жду ${(+get("audio.end_silence_ms") || 650) + px} мс (+${px} под вашу речь).` : "");
   $$("[data-eng]").forEach(o => { const on = S.stt.engine === o.dataset.eng; o.classList.toggle("on", on); $("input", o).checked = on; });
   $$('#p-ears .sub').forEach(s => s.style.display = S.stt.engine === s.dataset.for ? "" : "none");
-  $$("[data-tts]").forEach(o => { const on = S.tts.engine === o.dataset.tts; o.classList.toggle("on", on); $("input", o).checked = on; });
-  $$('#p-voice .sub').forEach(s => s.style.display = S.tts.engine === s.dataset.for ? "" : "none");
+  const dw = typeof dwVoiceOn === "function" && dwVoiceOn();
+  $$("[data-tts]").forEach(o => { const on = dw ? o.dataset.tts === "dewiar" : S.tts.engine === o.dataset.tts; o.classList.toggle("on", on); $("input", o).checked = on; });
+  $$('#p-voice .sub').forEach(s => s.style.display = !dw && S.tts.engine === s.dataset.for ? "" : "none");
   if (document.activeElement !== $("#ttsextra")) $("#ttsextra").value = JSON.stringify(S.tts.remote.extra || {});
   renderFx();
 }
