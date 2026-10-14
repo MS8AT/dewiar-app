@@ -1596,17 +1596,25 @@ function toOllama(m) {
 }
 const safeJSON = (s) => { try { return typeof s === "string" ? JSON.parse(s || "{}") : (s || {}); } catch (e) { return {}; } };
 
-/* Разговорная очередь: показываем текст и озвучиваем по предложениям. */
+/* Разговорная очередь: показываем текст и озвучиваем по предложениям. Первую фразу без конца предложения — как можно
+   раньше (по запятой или тире после 60 знаков, как на компьютере — SentenceSplitter): голос с сервера синтезирует фразу
+   целиком, и длинное первое предложение заметно задерживало первый звук; дальше по запятой режем только очень длинные. */
 function sentenceSink() {
-  let pending = "", shown = "";
+  let pending = "", shown = "", first = true;
   return {
     push(piece) {
       shown += piece; showBot(gfix(shown)); pending += piece;    // героиня, а модель сбилась на «рад», «понял» — правим сами
       for (;;) {
         const m = pending.match(/^([\s\S]*?[.!?…](?:["»)]?)(?:\s+|$)|[\s\S]*?\n)/);
-        if (!m || m[0].length < 2) break;
-        if (!/\s$/.test(m[0]) && m[0].length === pending.length) break;   // конец предложения ещё может продолжиться
-        say(gfix(m[0])); pending = pending.slice(m[0].length);
+        if (m && m[0].length >= 2 && !(!/\s$/.test(m[0]) && m[0].length === pending.length)) {   // иначе конец ещё может продолжиться
+          say(gfix(m[0])); pending = pending.slice(m[0].length); first = false; continue;
+        }
+        const limit = first ? 60 : 220;
+        if (pending.length > limit) {
+          const cut = Math.max(pending.lastIndexOf(", ", limit + 40), pending.lastIndexOf(" — ", limit + 40));
+          if (cut > 25) { say(gfix(pending.slice(0, cut + 1))); pending = pending.slice(cut + 2); first = false; continue; }
+        }
+        break;
       }
     },
     flush() { if (pending.trim()) say(gfix(pending)); pending = ""; },

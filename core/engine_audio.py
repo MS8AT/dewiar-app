@@ -318,7 +318,7 @@ class AudioMixin:
         self._pause_apply()                             # пауза конца фразы — своя у человека (_pause_*), меняется на ходу
         preroll = collections.deque(maxlen=12)          # ~0,4 с до срабатывания VAD — чтобы не терять начало слова
         in_speech, utt, silence, starts, speech_frames, t0 = False, [], 0, 0, 0, 0.0
-        was_speaking = False
+        was_speaking, in_hold = False, False
         bs, quiet, ducked = 0, 0, False                 # перебивание речью: кадры речи, тишины, приглушили ли
         echo = collections.deque(maxlen=90)             # громкость остаточного эха своего голоса (~3 с)
         half_echo = collections.deque(maxlen=100)       # полудуплекс: громкость своего голоса в микрофоне (~3 с)
@@ -330,6 +330,23 @@ class AudioMixin:
             now = time.monotonic()
             if self.muted:
                 continue
+            self._mic_ring.append(frame)
+            hold = self.hold
+            if hold is not None:
+                # диктовка удержанием: пишем всё подряд, без поиска конца фразы и имени, — пока не отпустят
+                hold["pcm"].append(frame)
+                a = np.frombuffer(frame, dtype=np.int16).astype(np.float32)
+                self._level(min(1.0, float(np.sqrt(np.mean(a * a))) / 3000.0), "mic")
+                if len(hold["pcm"]) * FRAME_S >= hold["max"]:
+                    log.info("🎙 Удержание длиннее %d с — отправляю, что есть", hold["max"])
+                    threading.Thread(target=self.hold_end, kwargs={"why": "limit"}, daemon=True).start()
+                in_hold = True
+                continue
+            if in_hold:                                     # отпустили — слух начинает с чистого листа
+                in_hold = False
+                self.vad.reset()
+                self.spotter.rec.Reset()
+                in_speech, utt, silence, starts, preroll = False, [], 0, 0, collections.deque(maxlen=12)
             if not self.wav_input:
                 # ровные нули (Windows запретил доступ) или «почти ничего» — пик ≤ 3 из 32767 (виртуальный микрофон вместо
                 # настоящего, громкость записи на нуле): живой микрофон даже в тихой комнате шумит сильнее
@@ -628,6 +645,72 @@ class AudioMixin:
             self._pause_debt = 0
             self._pause_apply()
 
+    # ---------- диктовка удержанием ----------
+
+    def hold_start(self, back_ms=400, max_s=600):
+        """Нажали и держат (кнопка-облик в виджете, пробел): всё, что звучит, — один вопрос, сколько бы ни длилось и какие бы
+        паузы ни были; конец — когда отпустят (hold_end). Ответ, если звучал, замолкает. back_ms — сколько звука до
+        вызова взять из кольца: интерфейс зовёт после ~0,3 с удержания, а говорить человек мог начать сразу."""
+        if self.muted:
+            self.muted = False
+            self.emit("muted", on=False)
+        if self.state in ("speaking", "thinking"):
+            self.interrupt("удержание", follow=False)
+        self.follow_up_until = 0.0
+        n = max(0, min(len(self._mic_ring), int(back_ms / 1000 / FRAME_S)))
+        self.hold = {"pcm": list(self._mic_ring)[len(self._mic_ring) - n:] if n else [], "t0": time.monotonic(), "max": max(5, int(max_s))}
+        log.info("🎙 Диктовка удержанием — говорите, отпустите — отправлю")
+        self.set_state("listening")
+        self.emit("hold", on=True)
+        return True
+
+    def hold_end(self, cancel=False, why=""):
+        """Отпустили: звук целиком — в распознавание длинной записи и как вопрос (без имени). cancel — увели палец или
+        Esc: ничего не отправляем."""
+        h, self.hold = self.hold, None
+        if h is None:
+            return {"ok": False, "sec": 0}
+        pcm = b"".join(h["pcm"])
+        sec = round(len(pcm) / 2 / RATE, 1)
+        self.emit("hold", on=False, sec=sec, cancel=bool(cancel))
+        if cancel or sec < 0.4:
+            log.info("🎙 Удержание %s (%.1f с)", "отменено" if cancel else "слишком короткое", sec)
+            self.set_state("idle")
+            self.play_tone("sleep")
+            return {"ok": False, "sec": sec, "cancel": bool(cancel)}
+        log.info("🎙 Удержание %.1f с → распознаю целиком%s", sec, " (предел длины)" if why == "limit" else "")
+        self.set_state("thinking")
+        self.stt_q.put((pcm, True, False, None, "hold"))
+        return {"ok": True, "sec": sec}
+
+    def _transcribe_long(self, stt, pcm):
+        """Длинная запись (диктовка удержанием): распознаватели рассчитаны на фразы до ~20 с — режем по самым тихим
+        местам на куски до 20 с и склеиваем текст. Кусок не распознался основным — им займётся Vosk."""
+        a = np.frombuffer(pcm, dtype=np.int16)
+        step = int(0.03 * RATE)                                  # окна по 30 мс
+        n = len(a) // step
+        if n * 0.03 <= 22:
+            parts = [pcm]
+        else:
+            rms = np.sqrt(np.mean(a[:n * step].astype(np.float32).reshape(n, step) ** 2, axis=1))
+            parts, start = [], 0
+            while (n - start) * 0.03 > 20:
+                lo, hi = start + int(12 / 0.03), start + int(20 / 0.03)   # режем между 12-й и 20-й секундой куска
+                cut = lo + int(np.argmin(rms[lo:hi]))
+                parts.append(a[start * step:cut * step].tobytes())
+                start = cut
+            parts.append(a[start * step:].tobytes())
+        out = []
+        for part in parts:
+            try:
+                t = stt.transcribe(part).strip()
+            except Exception as e:  # noqa: BLE001
+                log.warning("%s не распознал кусок диктовки: %s — пробую Vosk", stt.name, e)
+                t = self.vosk_stt.transcribe(part).strip()
+            if t:
+                out.append(t)
+        return " ".join(out)
+
     # ---------- распознавание ----------
 
     def _stt_worker(self):
@@ -637,17 +720,50 @@ class AudioMixin:
             item = self.stt_q.get()
             pcm, by_wake, follow = item[:3]
             forced = item[3] if len(item) > 3 else None
+            held = len(item) > 4 and item[4] == "hold"
             stt = self.current_stt()
             t0 = time.monotonic()
-            try:
-                text = stt.transcribe(pcm).strip()
-            except Exception as e:  # noqa: BLE001
-                log.warning("%s не распознал: %s — пробую Vosk", stt.name, e)
-                text = self.vosk_stt.transcribe(pcm).strip()
+            if held:
+                text = self._transcribe_long(stt, pcm)
+            else:
+                try:
+                    text = stt.transcribe(pcm).strip()
+                except Exception as e:  # noqa: BLE001
+                    log.warning("%s не распознал: %s — пробую Vosk", stt.name, e)
+                    text = self.vosk_stt.transcribe(pcm).strip()
             from vault import mask as _mask                # продиктованный для сейфа секрет — не в журнал
             log.info("📝 %s (%s, %d мс)", _mask(text) or "—", stt.name, (time.monotonic() - t0) * 1000)
             self.emit("hearing", text=text, by=stt.name, name="", ms=int((time.monotonic() - t0) * 1000), full=True)
-            self.handle_text(text, by_wake, follow, forced, dur=len(pcm) / 2 / RATE)
+            if held:
+                self.handle_held(text)
+            else:
+                self.handle_text(text, by_wake, follow, forced, dur=len(pcm) / 2 / RATE)
+
+    def handle_held(self, text):
+        """Текст диктовки удержанием: это точно вопрос ко мне — без проверки имени и «разговора не со мной». Ответ на
+        «выполнить?» и на вопрос задачи — как обычно; имя в начале («Патрик, …») — переключает персонажа."""
+        if not text:
+            log.info("🎙 В удержании речи не расслышал")
+            self.note("Речи не слышно — держите и говорите чуть громче или ближе к микрофону")
+            self.set_state("idle")
+            self.play_tone("sleep")
+            return
+        if self.pending_confirm and self._answer_confirm(text):
+            return
+        wt = self.tasks.waiting()
+        if wt and time.monotonic() < self.task_answer_until:
+            self.task_answer_until = 0.0
+            self.tasks.answer(wt.id, text)
+            self.emit("heard", text=text)
+            self.announce("Передал в задачу.")
+            return
+        pid, end = find_name(text, self.aliases, strict=True)
+        if pid:                                                # имя — первым словом: «Патрик, …»
+            if pid != self.s.get("persona"):
+                self.switch_persona(pid)
+            rest = text[end:].lstrip(" ,.!?:;—-").strip()
+            text = rest or text
+        self.ask(text)
 
     def _check_worker(self):
         """Поток name-check: ищет имя во фразах из check_q — ("utt", pcm, uid) без явного имени и ("barge", …)

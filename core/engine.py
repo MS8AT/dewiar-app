@@ -64,6 +64,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.barge_hit = -1                   # в какой фразе ранняя проверка нашла имя
         self.barge_speech = -1                # какую фразу перебили просто речью
         self.barge_done = {}                  # фраза закончилась раньше проверки: id -> звук
+        self.hold = None                      # диктовка удержанием (hold_start … hold_end): {"pcm": [кадры], "t0", "max"}
+        self._mic_ring = collections.deque(maxlen=40)   # последние ~1,2 с микрофона: удержание начинается с самого нажатия
         self.asr_names = []
         self.status = {"aec": False, "stt": "", "stt_ready": False, "tts": "", "llm": "", "note": "",
                        "input": "", "downloads": {}, "loading": {}}

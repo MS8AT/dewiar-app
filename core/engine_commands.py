@@ -642,6 +642,10 @@ class CommandsMixin:
                 return "sleep"
             self.listen_for_command(8)
             return "listening"
+        if cmd == "hold_start":                           # диктовка удержанием: держат кнопку или пробел — говорят сколько нужно
+            return self.hold_start(int(a.get("back_ms") or 400), int(a.get("max_s") or 600))
+        if cmd == "hold_end":
+            return self.hold_end(bool(a.get("cancel")))
         if cmd == "stop":
             self.interrupt("кнопка", follow=False)
             return True

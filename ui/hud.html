@@ -80,6 +80,14 @@
   #bubble.turn::after { animation: turn-left var(--turn, 8s) linear forwards; }
   @keyframes turn-left { from { transform: scaleX(1); } to { transform: scaleX(0); } }
   @media (prefers-reduced-motion: reduce) { #bubble.turn::after { animation: none; transform: scaleX(.6); } #bubble.live::before { animation: none; } }
+  /* диктовка удержанием: красная точка записи и время; увели палец в сторону — «отпустите — отменить» */
+  #bubble.hold { background: rgb(255 92 122 / 16%); }
+  #bubble.hold::before { background: #ff5c7a; box-shadow: 0 0 10px rgba(255,92,122,.8); animation: breathe 1s ease-in-out infinite; }
+  #bubble.hold.holdx { background: rgb(255 255 255 / 7%); }
+  #bubble.hold.holdx::before { background: rgba(255,255,255,.5); box-shadow: none; animation: none; }
+  #bubble.hold span { font-variant-numeric: tabular-nums; }
+  #orb.holding { transform: scale(1.04); transition: transform .2s ease, width .35s ease, height .35s ease; }
+  @media (prefers-reduced-motion: reduce) { #bubble.hold::before { animation: none; } #orb.holding { transform: none; } }
   #bubble b { font-family: "Unbounded", "Ubuntu", sans-serif; font-weight: 600; font-size: 14px; letter-spacing: .03em; }
 
   /* по центру, но не выше имени: при нехватке места «распорки» сжимаются до нуля, а лишнее уходит вниз (не наезжает на имя) */
@@ -322,7 +330,7 @@
 <body>
 <div id="reader"><div class="rh"><b id="rd-title">Ответ целиком</b><button class="btn" id="rd-x" title="Закрыть (Esc)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div><div id="rd-body"></div></div>
 <div id="card">
-  <div id="orb"><canvas id="cv"></canvas></div>
+  <div id="orb" title="Нажмите — говорить. Удерживайте (или пробел) — диктовка любой длины, отпустите — отправлю"><canvas id="cv"></canvas></div>
   <div id="bubble"><span id="say">Подключаюсь…</span></div>
   <div id="mid">
     <div id="cap"><div class="you" id="you"></div><div id="act" title="Ход работы"></div><div class="bot" id="bot"></div><div id="media"></div><button id="more">Открыть целиком</button></div>
@@ -419,6 +427,7 @@ function renderDots() {                       // список команды —
 }
 let radioNow = "";                           // играет радио — в покое вместо персонажа крутится пластинка
 let stateSince = Date.now();
+let hold = null;              // диктовка удержанием (ниже, у перетаскивания): {on, t0, far, timer, by: "mouse"|"key"}
 let turnUntil = 0;                           // до какого времени ждём ответа без имени (событие turn от ядра)
 // обновление: ядро перезапускается — это не «нет связи», а спокойное «обновляюсь» с обычным лицом (без притушенного
 // портрета и пунктирного круга); дольше 3 минут — значит, правда что-то не так, и снова честное «Нет связи с ядром»
@@ -433,6 +442,7 @@ function setState(s) {
   if (s !== state) stateSince = Date.now();
   if (s !== "listening") turnUntil = 0;
   state = s; entity.set({ state: s });
+  if (hold && hold.on) return holdShow();
   const say = $("say"), bub = $("bubble");
   bub.classList.toggle("live", s === "listening" || s === "speaking" || s === "thinking");
   const left = turnUntil - Date.now();
@@ -774,17 +784,66 @@ new MutationObserver(() => {
    логические px экрана); после перетаскивания положение сохраняется в настройки (hud_x, hud_y) */
 let drag = null;
 const card = $("card");
+/* Диктовка удержанием (как голосовое в Telegram): нажали на облик и держите (или пробел) — говорите сколько нужно,
+   паузы не обрывают; отпустили — уходит одним вопросом. Увели палец в сторону или Esc — отмена. Короткое нажатие —
+   как раньше («слушай» / «замолчи»). Ядро берёт звук с самого нажатия (hold_start back_ms), так что начало не теряется. */
+function holdShow() {
+  const say = $("say"), bub = $("bubble");
+  if (!hold || !hold.on) { bub.classList.remove("hold", "holdx"); $("orb").classList.remove("holding"); return setState(state); }
+  const sec = Math.floor((Date.now() - hold.t0) / 1000);
+  bub.classList.add("live", "hold"); bub.classList.remove("turn"); bub.classList.toggle("holdx", !!hold.far); $("orb").classList.add("holding");
+  say.textContent = hold.far ? "Отпустите — отменить" : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")} · отпустите — отправлю`;
+  say.title = "Держите и говорите сколько нужно — паузы не обрывают. Увести в сторону или Esc — отмена";
+}
+function holdBegin(by) {
+  if (hold || state === "offline") return;
+  hold = { on: false, t0: Date.now(), far: false, by, timer: null };
+  hold.wait = setTimeout(() => {                       // держат дольше 0,3 с — это удержание, а не нажатие
+    if (!hold) return;
+    hold.on = true; hold.t0 = Date.now() - 300;
+    core.call("hold_start", { back_ms: 450 }).catch(e => { hold = null; holdShow(); showErr(e); });
+    hold.timer = setInterval(holdShow, 250); holdShow();
+  }, 300);
+}
+function holdFinish(cancel) {
+  const h = hold; if (!h) return false;
+  hold = null; clearTimeout(h.wait); clearInterval(h.timer);
+  if (!h.on) return false;                             // это было короткое нажатие
+  holdShow();
+  core.call("hold_end", { cancel: !!(cancel || h.far) }).catch(showErr);
+  return true;
+}
+core.on("hold", e => { if (!e.on && hold && hold.on) { clearInterval(hold.timer); hold = null; holdShow(); } });   // ядро само закончило (предел 10 минут)
 card.addEventListener("pointerdown", async (ev) => {
   // строки задачи и обновления — кнопки: не перехватываем указатель, иначе щелчок до них не дойдёт
   if (ev.button !== 0 || ev.target.closest("button, input, #cap, #note, #upd, #task, #yn")) return;
   card.setPointerCapture(ev.pointerId);
   drag = { sx: ev.screenX, sy: ev.screenY, moved: false, pos: null, orb: !!ev.target.closest("#orb") };
+  if (drag.orb) holdBegin("mouse");
   const a = api(); if (a) drag.pos = await a.get_pos(mode);
 });
+document.addEventListener("keydown", (e) => {          // пробел в виджете — то же удержание (не в поле ввода)
+  if (e.code === "Escape" && hold) { e.preventDefault(); if (!holdFinish(true)) hold = null; return; }
+  if (e.code !== "Space" || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+  if (/^(INPUT|TEXTAREA|BUTTON|SELECT)$/.test((document.activeElement || {}).tagName || "") || $("reader").classList.contains("on")) return;
+  e.preventDefault(); holdBegin("key");
+});
+document.addEventListener("keyup", (e) => {
+  if (e.code !== "Space" || !hold || hold.by !== "key") return;
+  e.preventDefault();
+  if (!holdFinish(false)) tapOrb();                    // короткий пробел — как нажатие на облик
+});
+window.addEventListener("blur", () => { if (hold && hold.by === "key") holdFinish(false); });   // ушли из окна с зажатым пробелом
 let raf = 0;
 card.addEventListener("pointermove", (ev) => {
   if (!drag) return;
   const dx = ev.screenX - drag.sx, dy = ev.screenY - drag.sy;
+  if (hold && hold.on) {                               // удержание: окно не двигаем; далеко увели — «отпустите — отменить»
+    const far = Math.hypot(dx, dy) > 90;
+    if (far !== hold.far) { hold.far = far; holdShow(); }
+    return;
+  }
+  if (hold && !hold.on && Math.hypot(dx, dy) > 5) { clearTimeout(hold.wait); hold = null; }   // потащили — это перетаскивание
   if (!drag.moved && Math.hypot(dx, dy) > 5) { drag.moved = true; card.classList.add("dragging"); }
   if (drag.moved && drag.pos && !raf) {
     raf = requestAnimationFrame(() => { raf = 0; const a = api(); if (a && drag) a.move_to(mode, drag.pos[0] + dx, drag.pos[1] + dy); });
@@ -793,10 +852,12 @@ card.addEventListener("pointermove", (ev) => {
 card.addEventListener("pointerup", () => {
   if (!drag) return;
   const d = drag; drag = null; card.classList.remove("dragging");
+  if (hold && hold.by === "mouse" && holdFinish(false)) return;   // отпустили после удержания — отправили (или отмена)
   if (d.moved) { const a = api(); if (a) a.save_pos(mode).then(p => core.call("settings_save", { patch: { ui: { hud_x: p[0], hud_y: p[1] } } })).catch(() => {}); return; }
   if (!d.orb || state === "offline") return;
   tapOrb();
 });
+card.addEventListener("pointercancel", () => { if (hold && hold.by === "mouse") holdFinish(true); drag = null; card.classList.remove("dragging"); });
 
 $("y").onclick = () => core.call("confirm_answer", { ok: true }).catch(showErr);
 $("n").onclick = () => core.call("confirm_answer", { ok: false }).catch(showErr);
