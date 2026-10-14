@@ -684,7 +684,24 @@ def preload():
             continue
         try:
             spec = {"kind": "design" if role == "design" else "speaker", "speaker": "serena", "instruct": "спокойный голос"}
-            if role in ("base", "espeech"):
+            if role == "espeech":
+                # ESpeech: загрузить, заранее подготовить образцы своих голосов (звук + текст с ударениями) и один раз
+                # прогнать фразу — первый проход на CUDA медленный, и первая фраза первого ответа ждала бы его (1–3 с)
+                e = on_gpu(lambda: ENGINE.get("espeech"))
+                c = cfg_load()
+                own = [(k, v) for k, v in c["voices"].items() if k not in BUILTIN and v.get("kind", "clone") == "clone" and v.get("audio")]
+                for k, v in own[:12]:
+                    try:
+                        on_gpu(lambda v=v: ENGINE.ref(e, vdir(v["audio"]), v.get("text", "")))
+                    except Exception as x:  # noqa: BLE001
+                        log.warning("образец голоса %s не подготовлен: %s", k, x)
+                if own:
+                    t0 = time.time()
+                    for _ in synth_iter("Проверка голоса.", dict(own[0][1], id=own[0][0], kind="clone")):
+                        pass
+                    log.info("ESpeech прогрет за %.1f с, образцов голосов готово: %d", time.time() - t0, len(own[:12]))
+                continue
+            if role == "base":
                 on_gpu(lambda r=role: ENGINE.get(r))
                 continue
             for _ in synth_iter("Проверка голоса.", spec):                # прогрев: первый проход на CUDA медленный

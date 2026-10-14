@@ -1151,6 +1151,7 @@ function say(text) {
     if (v === 0) { volWarned = true; vCount("tts_vol0"); plog("warn", "голос: громкость звука на нуле"); toast("Звук на телефоне на нуле — прибавьте громкость, чтобы слышать ответы", 6000); }
   }
   const id = "s" + (++sayN); sayLeft++;
+  turnTime("said");
   const cv = (S.tts.engine === "cloud" || (S.tts.engine === "system" && !D.ttsReady())) ? cloudVoice() : null;
   const srvDown = Date.now() - srvVoiceDownAt < 120e3 && D.ttsReady();   // голос сервера только что не ответил — пока свой
   const fem = persona().gender === "female";
@@ -1179,7 +1180,7 @@ function say(text) {
 // начала ответа — до tts_start и в паузах между фразами рот закрыт (отзыв 14.10: «звука нет, а они болтают губами»)
 const playingIds = new Set();
 const soundOn = () => { if (orb) orb.set({ audible: playingIds.size > 0 }); };
-N.on("tts_start", e => { vCount("tts_ok"); playingIds.add((e && e.id) || "?"); soundOn(); if (state === "thinking") setState("speaking"); });
+N.on("tts_start", e => { vCount("tts_ok"); playingIds.add((e && e.id) || "?"); soundOn(); turnTime("sound"); if (state === "thinking") setState("speaking"); });
 N.on("tts_fail", e => { vCount("tts_err"); plog("warn", "голос устройства не сказал фразу (код " + (e.code ?? "?") + ")"); });
 N.on("tts_done", e => {
   if (e && e.id) sayTexts.delete(e.id);
@@ -1599,10 +1600,25 @@ const safeJSON = (s) => { try { return typeof s === "string" ? JSON.parse(s || "
 /* Разговорная очередь: показываем текст и озвучиваем по предложениям. Первую фразу без конца предложения — как можно
    раньше (по запятой или тире после 60 знаков, как на компьютере — SentenceSplitter): голос с сервера синтезирует фразу
    целиком, и длинное первое предложение заметно задерживало первый звук; дальше по запятой режем только очень длинные. */
+/* ⏱ куда уходит время до первого звука (исследование 14.10: TTS — меньше секунды из 7–10): первое слово модели, первая
+   фраза отдана в голос, звук пошёл — одной строкой в журнале (видно в отчётах) */
+let turnT = null;
+function turnTime(stage) {
+  const t = turnT; if (!t || t.logged) return;
+  if (stage === "word" && !t.word) t.word = Date.now();
+  if (stage === "said" && !t.said) t.said = Date.now();
+  if (stage === "sound" && t.said) {
+    t.logged = true;
+    const f = (a, b) => ((b - a) / 1000).toFixed(1).replace(".", ",");
+    const via = S.tts.engine === "cloud" ? "голос Dewiar" : S.tts.engine === "server" ? "свой сервер голоса" : S.tts.engine === "eleven" ? "ElevenLabs" : "голос телефона";
+    plog("info", `⏱ до звука ${f(t.t0, Date.now())} с: модель начала отвечать за ${f(t.t0, t.word || t.said)} с, первая фраза в голос +${f(t.word || t.said, t.said)} с, синтез и доставка (${via}) +${f(t.said, Date.now())} с`);
+  }
+}
 function sentenceSink() {
   let pending = "", shown = "", first = true;
   return {
     push(piece) {
+      if (piece) turnTime("word");
       shown += piece; showBot(gfix(shown)); pending += piece;    // героиня, а модель сбилась на «рад», «понял» — правим сами
       for (;;) {
         const m = pending.match(/^([\s\S]*?[.!?…](?:["»)]?)(?:\s+|$)|[\s\S]*?\n)/);
@@ -1649,6 +1665,7 @@ async function ask(text, opts = {}) {
   }
   busy = true;
   const t0 = Date.now();
+  turnT = { t0, word: 0, said: 0, logged: false };
   plog("info", `❓ ${clip(text)} → ${S.llm.cloud ? "Dewiar Облако" : (S.llm.name || S.llm.model || "модель")}`);
   const ctl = turnAbort = new AbortController();
   const sink = sentenceSink();

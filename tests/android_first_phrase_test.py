@@ -39,7 +39,12 @@ with sync_playwright() as p:
           sk.flush(); out[k] = said;
         }
         say = real; return out; }""", CASES)
+    # ⏱ время до звука — одной строкой в журнале
+    T = pg.evaluate("""async () => { D.ttsReady = () => true; turnT = { t0: Date.now() - 2000, word: 0, said: 0, logged: false };
+        const sk = sentenceSink(); sk.push("Привет. "); await new Promise(r => setTimeout(r, 200));
+        return PLOG.filter(x => x.includes("⏱")); }""")
     b.close()
+ok(len(T) == 1 and "до звука" in T[0] and "модель начала отвечать за" in T[0] and "синтез и доставка" in T[0], f"журнал: куда ушло время до первого звука: {T}")
 lg = R["long"]
 ok(len(lg) >= 3 and lg[0][0].strip().endswith(",") and 25 < len(lg[0][0]) <= 100 and lg[0][1] < LONG.index("."),
    f"длинная первая фраза — в голос по запятой, до конца предложения: {[x[0] for x in lg]}")

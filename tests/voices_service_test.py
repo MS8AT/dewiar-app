@@ -139,6 +139,15 @@ ok(len(c0) == 2 and sr == 24000 and c0[0]["ref_len"] <= 24000 * 12 and c0[0]["re
 ok(c0[0]["gen"] == ["Привет, я г+олос Дэви+ара."] and _f5["acc"][1][1] == r"\S*\+\S*", f"ударения: своё (а́ → +) сохранено, остальное — RUAccent: {c0[0]['gen']}")
 ok(c0[1]["gen"] == ["Скажи «прив+ет»."], f"«+» пользователя не перебивается: {c0[1]['gen']}")
 ok(sorted(E2.models) == ["espeech"] and _f5["acc_load"]["omograph_model_size"] == "turbo3.1", "загружен ESpeech с RUAccent turbo3.1")
+# прогрев при запуске: ESpeech загружен, образцы своих голосов подготовлены, одна фраза уже прогнана
+_save_cfg, _save_eng, _save_pre = A.cfg_load(), A.ENGINE, A.PRELOAD
+c = A.cfg_load(); c["voices"]["anna"] = {"kind": "clone", "audio": "long.wav", "text": "Это мой голос.", "gender": "female"}; A.cfg_save(c)
+A.ENGINE, A.PRELOAD, _f5["calls"] = A.Engine(), ["auto"], []
+A.ENGINE.device = lambda: "cpu"
+A.preload()
+ok("espeech" in A.ENGINE.models and len(A.ENGINE.refs) == 1 and any("Проверка голоса" in x["gen"][0].replace("+", "") for x in _f5["calls"]),
+   f"прогрев: ESpeech загружен, образец своего голоса готов, одна фраза прогнана: {sorted(A.ENGINE.models)} refs={len(A.ENGINE.refs)} {[x['gen'] for x in _f5['calls']]}")
+A.cfg_save(_save_cfg); A.ENGINE, A.PRELOAD = _save_eng, _save_pre
 ok(A.role_for({"kind": "clone"}) == "espeech" and A.role_for({"kind": "clone", "engine": "qwen"}) == "base"
    and A.role_for({"kind": "speaker"}) == "custom" and A.role_for({"kind": "design"}) == "design", "кто что озвучивает: свои — ESpeech, встроенные — Qwen")
 
