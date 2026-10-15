@@ -323,7 +323,7 @@ function netErr(e, url) {
   e = String(e || "");
   const home = HOME_URL.test(url || "");
   if (/Unable to resolve|UnknownHost|No address/i.test(e)) return home ? "домашний сервер не найден (возможно, вы не дома)" : "нет интернета или слабая связь";
-  if (/timeout|timed out|after \d+\s*ms/i.test(e)) return home ? "домашний сервер долго не отвечает (возможно, вы не дома)" : "сервер долго не отвечает — похоже, слабая связь";
+  if (/timeout|timed out|after \d+\s*ms/i.test(e)) return home ? "домашний сервер долго не отвечает (возможно, вы не дома)" : (/dewiar\.pro/i.test(url || "") ? "сервер Dewiar долго не отвечает — слабая связь или сейчас много людей сразу" : "сервер долго не отвечает — похоже, слабая связь");
   if (/ECONNREFUSED|Connection refused|failed to connect|reset|closed|EOF/i.test(e)) return home ? "домашний сервер не отвечает (возможно, вы не в домашней сети)" : "связь с сервером оборвалась";
   return e;
 }

@@ -83,6 +83,9 @@ MAX_MODELS = max(1, int(os.getenv("TTS_MAX_MODELS", "2")))         # больш�
 GPU_MEM_GB = float(os.getenv("TTS_GPU_MEM_GB", "0") or 0)
 BATCH = max(1, int(os.getenv("TTS_BATCH", "4")))                   # фраз за один проход после первой
 MAX_CHARS = int(os.getenv("TTS_MAX_CHARS", "8000"))
+# столько озвучек уже ждут видеокарту — новой сразу «занято» (503): приложение скажет своим голосом, а не будет ждать
+# минуту в очереди (видеокарта одна на всех и ещё на vLLM). 0 — без предела
+MAX_WAITING = int(os.getenv("TTS_MAX_WAITING", "6"))
 OUT_SR = 24000                                                     # pcm без заголовка — 24 кГц, как у OpenAI
 KEY = os.getenv("TTS_KEY", "")                                     # ключ для озвучки (пусто — внутренняя сеть)
 ADMIN_KEY = os.getenv("TTS_ADMIN_KEY", "")                         # ключ для управления голосами
@@ -102,7 +105,7 @@ NAME_RX = re.compile(r"^[a-z0-9_][a-z0-9_-]{0,39}$")
 
 STATE = {"loaded": [], "loading": "", "error": "", "device": "", "started": time.time(), "fake": FAKE,
          "requests": 0, "errors": 0, "chars": 0, "audio_sec": 0.0, "busy_sec": 0.0, "waiting": 0, "busy": False,
-         "last_request": 0, "ttfa_ms_last": 0, "ttfa_ms_sum": 0, "ttfa_n": 0}
+         "last_request": 0, "ttfa_ms_last": 0, "ttfa_ms_sum": 0, "ttfa_n": 0, "busy_rejects": 0}
 STATS = threading.Lock()
 
 
@@ -1028,6 +1031,9 @@ class H(BaseHTTPRequestHandler):
             return self._err(400, "нужен JSON с полем input — текст для озвучки")
         if len(text) > MAX_CHARS:
             return self._err(413, f"текст длиннее {MAX_CHARS} знаков")
+        if MAX_WAITING and STATE["waiting"] >= MAX_WAITING:
+            stat_add(busy_rejects=1)
+            return self._err(503, f"голоса заняты: в очереди уже {STATE['waiting']} — много людей сразу", "busy")
         spec = resolve(str(body.get("voice") or ""), str(body.get("persona") or ""), str(body.get("gender") or ""))
         if body.get("instruct") and spec.get("kind") == "speaker":          # манера на один ответ: «радостно», «шёпотом»
             spec = dict(spec, instruct=(spec.get("instruct", "") + " " + str(body["instruct"])).strip())

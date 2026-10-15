@@ -422,7 +422,7 @@ class AnswerMixin:
         """Ошибка, которую облако Dewiar объяснило само («заряд закончился», «лимит на сегодня») -> True.
         Такую ошибку говорим как есть и не повторяем запрос без инструментов. Тексты — от сервера облака (cloud.php)."""
         from cloud import is_cloud
-        return is_cloud(prof) and bool(re.match(r"(Заряд|Ключ) Dewiar|На сегодня лимит|Слишком много", str(e)))
+        return is_cloud(prof) and bool(re.match(r"(Заряд|Ключ) Dewiar|На сегодня лимит|Слишком много|Сейчас у Dewiar много людей", str(e)))
 
     def _cloud_fallback(self, prof, e):
         """Запасной мозг для облака: «Мозг» → карточка облака → «Если облако не отвечает» -> профиль или None

@@ -322,6 +322,14 @@ try:
     st, _, h = req("GET", "/health")
     ok(h["requests"] >= 8 and h["chars"] > 50 and h["audio_sec"] > 1 and h["ttfa_ms_avg"] >= 0 and h["waiting"] == 0, f"счётчики: {h['requests']} {h['chars']} {h['audio_sec']:.1f}")
 
+    # наплыв людей: очередь к видеокарте длинная — сразу «занято» (503), приложение скажет своим голосом, а не ждёт минуту
+    A.STATE["waiting"] = A.MAX_WAITING
+    st, _, e = req("POST", "/v1/audio/speech", {"input": "Привет", "voice": "serena"})
+    A.STATE["waiting"] = 0
+    st2, _, _ = req("GET", "/health")
+    ok(st == 503 and "заняты" in json.dumps(e, ensure_ascii=False) and A.STATE["busy_rejects"] >= 1, f"очередь длинная — 503 «голоса заняты»: {st} {e}")
+    st, _, _ = req("POST", "/v1/audio/speech", {"input": "Привет", "voice": "serena", "response_format": "wav"})
+    ok(st == 200, "очередь разошлась — снова говорит")
     js = (ROOT / "android/assets/www/app.js").read_text(encoding="utf-8")
     ok('persona: persona().id || ""' in js, "телефон тоже передаёт персонажа в «Голос Dewiar»")
     # файлы для сервера на месте
