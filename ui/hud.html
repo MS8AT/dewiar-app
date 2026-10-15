@@ -983,7 +983,7 @@ function renderTask_() {
     : `<div class="tl"><span class="spin"></span><b>${esc(t.title)}</b><em>${t.progress && t.progress[1] ? `${t.progress[0]}/${t.progress[1]}` : `шаг ${t.steps}`}</em></div>` +
       (t.activity ? `<div class="tsub">${esc(t.activity)}</div>` : "") + `<i class="tp"><b style="width:${Math.max(4, pr * 100)}%"></b></i>`;
 }
-core.on("hello", d => { (d.tasks || []).forEach(t => tasks[t.id] = t); renderTask(); if (d.update && d.update.available) showUpd(d.update); })
+core.on("hello", d => { (d.tasks || []).forEach(t => tasks[t.id] = t); renderTask(); if (d.update && (d.update.available || d.update.failed)) showUpd(d.update); })
     .on("task", e => {
       const prev = tasks[e.task.id];
       if (e.task.status === "done" && (!prev || prev.status !== "done")) doneAt[e.task.id] = Date.now();
@@ -992,6 +992,18 @@ core.on("hello", d => { (d.tasks || []).forEach(t => tasks[t.id] = t); renderTas
     .on("update", e => showUpd(e.update));
 $("task").onclick = () => { const a = api(); if (a) a.open_settings("tasks"); };
 function showUpd(u) {
+  const f = u && u.failed && u.failed.path ? u.failed : null;
+  if (f) {           // нажимали «обновить», а запустилась прежняя версия — открыть установщик обычным окном: в нём видно, что мешает
+    $("upd").classList.add("on");
+    $("upd").textContent = `Обновление до ${f.version} не установилось — нажмите, чтобы открыть установщик`;
+    $("upd").onclick = async () => {
+      const x = api(); if (!x) return;
+      if (typeof x.run_installer !== "function") { $("upd").textContent = `Скачайте Dewiar ${f.version} с dewiar.pro и запустите установщик`; return; }
+      const r = await x.run_installer(f.path).catch(e => ({ ok: false, error: e.message }));
+      $("upd").textContent = r.ok ? "Установщик открыт — следуйте его шагам" : `Не получилось: ${r.error}. Скачайте Dewiar ${f.version} с dewiar.pro`;
+    };
+    return;
+  }
   const a = u && u.available; $("upd").classList.toggle("on", !!a);
   if (a) $("upd").textContent = `Доступна версия ${a.version} — нажмите, чтобы обновить`;
   $("upd").onclick = async () => {

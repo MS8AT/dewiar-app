@@ -1639,6 +1639,28 @@ def _memory_hits(ctx, q):
     return "В памяти «Обо мне» по этим словам ничего, вот последние записи (может, это оно):\n" + "\n".join("- " + f for f in facts[-10:])
 
 
+def _chat_hits(ctx, q, days=14):
+    """Что человек сам говорил в прошлых разговорах (лента «Чата», chatlog.py) по словам запроса — и соседние его реплики
+    того же разговора (±20 мин): «на работе три дела…» и «ещё начальник просил презентацию» — одно, хотя слова «работа»
+    во второй нет. Экзамен 0.38.47: модель сказала «записала», не вызвав remember, а через новый разговор на «вспомни, что я
+    говорил про работу» нашла только память о ремонте. -> текст или ""."""
+    log_ = ctx.get("chatlog")
+    if log_ is None:
+        return ""
+    stems = {w[:5] if len(w) > 5 else w for w in re.findall(r"[а-яa-z0-9]{4,}", q.lower().replace("ё", "е")) if not NOTES_GENERIC.match(w)}
+    if not stems:
+        return ""
+    import time as _t
+    since = _t.time() - days * 86400
+    mine = [x for x in list(getattr(log_, "items", []))[-2000:] if x.get("role") == "user" and x.get("ts", 0) >= since and x.get("text")]
+    hit = [i for i, x in enumerate(mine) if any(st in x["text"].lower().replace("ё", "е") for st in stems)]
+    if not hit:
+        return ""
+    keep = sorted({j for i in hit for j in range(len(mine)) if abs(mine[j]["ts"] - mine[i]["ts"]) <= 1200})[-12:]
+    return "Ты сам(а) говорил(а) в прошлых разговорах:\n" + "\n".join(
+        f"- {_t.strftime('%d.%m %H:%M', _t.localtime(mine[j]['ts']))} — {mine[j]['text'][:300]}" for j in keep)
+
+
 def t_find_notes(a, ctx):
     """Сначала поиск recall.py (ранжированный, с Obsidian), ничего — простой поиск по папке ассистента. К найденному —
     строки памяти «Обо мне» (_memory_hits): «вспомни, что я говорил…» часто про запомненное, а не про заметки."""
@@ -1646,7 +1668,8 @@ def t_find_notes(a, ctx):
     if not [w for w in re.split(r"[\s,.]+", q.lower().replace("ё", "е")) if len(w) > 2 and not NOTES_GENERIC.match(w)]:
         return _latest_notes(ctx)
     mem = _memory_hits(ctx, q)
-    tail = ("\n\n" + mem) if mem else ""
+    said = _chat_hits(ctx, q)
+    tail = ("\n\n" + mem if mem else "") + ("\n\n" + said if said else "")
     rc = ctx.get("recall")
     if rc is not None:
         res = rc.search(a.get("query", ""), limit=8)

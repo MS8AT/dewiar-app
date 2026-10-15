@@ -137,6 +137,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.obsidian.index_info = self._obsidian_index_info      # оглавление «DEWIAR.md»: имя, дни дневника
         self.recall = Recall(lambda: self.workspace.root, self.obsidian.search_root)
         self.toolbox.hooks["recall"] = self.recall
+        self.toolbox.hooks["chatlog"] = self.chatlog              # «вспомни, что я говорил…» — и по прошлым разговорам
         from telegram import Telegram
         from maxbot import Max, Messengers
         self.telegram = Telegram(on_message=lambda k, d: self._on_messenger(self.telegram, k, d))

@@ -930,6 +930,10 @@ class Api:
         except Exception:  # noqa: BLE001
             pass
         _notify("Dewiar обновляется — через минуту-две откроется сам.")
+        try:                                     # метка: после перезапуска ядро сверит версию (updater._check_pending)
+            (allowed / "pending.json").write_text(json.dumps({"file": p.name, "ts": time.time()}), encoding="utf-8")
+        except OSError:
+            pass
         try:
             inst = subprocess.Popen([str(p), "/S", "/UPDATE"], creationflags=winshell.DETACHED, close_fds=True)
         except OSError as e:
@@ -941,6 +945,20 @@ class Api:
             _ui_log(f"сторож обновления не запущен: {e}")
         import threading
         threading.Timer(1.0, lambda: os._exit(0)).start()
+        return {"ok": True}
+
+    def run_installer(self, path):
+        """Тихое обновление не встало — открыть скачанный установщик обычным окном (Windows): он сам остановит Dewiar,
+        покажет ход и ошибку, если что-то мешает, и запустит новую версию. Только файл из STATE_DIR/updates."""
+        p = Path(path or "").resolve()
+        from settings import STATE_DIR
+        allowed = STATE_DIR.resolve() / "updates"
+        if not WIN or allowed not in p.parents or p.suffix.lower() != ".exe" or not p.is_file():
+            return {"ok": False, "error": "это не скачанное обновление Dewiar"}
+        try:
+            os.startfile(str(p))  # noqa: S606 — проверенный (sha256) установщик из своей папки обновлений
+        except OSError as e:
+            return {"ok": False, "error": f"установщик не открылся: {e}"}
         return {"ok": True}
 
     def restart_core(self):

@@ -25,6 +25,7 @@ def free():
 
 
 SEEN = []
+HINT = []                                         # подсказка «просят схему» в системной — для запроса со схемой
 
 
 class H(BaseHTTPRequestHandler):
@@ -47,7 +48,13 @@ class H(BaseHTTPRequestHandler):
 
         def send(delta, fin=None):
             self.wfile.write(f"data: {json.dumps({'choices': [{'delta': delta, 'finish_reason': fin}]}, ensure_ascii=False)}\n\n".encode())
-        if "Поставь таймер" in first_q or user.startswith("ПРОВЕРКА"):          # экзамен 14.10: «на 79», а поставлено 59
+        if any("Нарисуй схему" in str(m.get("content")) for m in msgs if m["role"] == "user"):
+            HINT.append("СЕЙЧАС ПРОСЯТ СХЕМУ" in str(msgs[0].get("content")))                   # экзамен 15.10: «Схема готова и уже на экране» — без схемы
+            if user.startswith("ПРОВЕРКА: тебя попросили нарисовать схему"):
+                send({"content": "Вот она.\n```mermaid\nflowchart LR\n  A[\"Клиент\"] --> B[\"Менеджер\"] --> C[\"Склад\"] --> A\n```"}); send({}, "stop")
+            else:
+                send({"content": "Схема готова и уже на экране. Клиент — менеджер — склад — клиент."}); send({}, "stop")
+        elif "Поставь таймер" in first_q or user.startswith("ПРОВЕРКА"):          # экзамен 14.10: «на 79», а поставлено 59
             if user.startswith("ПРОВЕРКА"):
                 send({"content": "Поправка: верно 59 минут."}); send({}, "stop")
             elif msgs[-1]["role"] == "tool":
@@ -140,7 +147,8 @@ async def session():
         await call("reminder_add", phrase="через 30 минут полить цветы")
         for q, key in (("Сделай мне презентацию о завтрашней погоде", "pres"), ("Какая погода завтра?", "promise"),
                        ("Какая погода в моём городе?", "ask"), ("Привет", "plain"), ("Что у нас по плану?", "plan"),
-                       ("А я что у тебя просил?", "asked"), ("Поставь таймер на столько минут, сколько дней до Нового года", "timer")):
+                       ("А я что у тебя просил?", "asked"), ("Поставь таймер на столько минут, сколько дней до Нового года", "timer"),
+                       ("Нарисуй схему: как заявка проходит от клиента через менеджера на склад и обратно клиенту.", "diagram")):
             m = len(events)
             await call("say", text=q)
             R[key] = await final(m)
@@ -174,6 +182,8 @@ ok("+12" in R["asked"], f"«достаю календарь — одну сек�
 ok(log.count("✋ Модель") == 3, f"просили доделать трижды (презентация, погода, «одну секунду»): {log.count('✋ Модель')}")
 ok("Поправка: верно 59" in R["timer_all"] and "✋ Число в ответе не совпадает" in log,
    f"«таймер на 79 минут», а поставлено 59 — модель поправилась: {R['timer_all'][-120:]}")
+ok("```mermaid" in R["diagram"] and "✋ Просили схему" in log, f"«нарисуй схему» — ответ словами → дорисовала: {R['diagram'][-140:]!r}")
+ok(HINT and all(HINT), f"просят схему — модель заранее знает: только блок mermaid рисует, «на экране» без него не говорить: {HINT}")
 ok("📅 Вопрос о планах" in log, "в журнале: вопрос о планах — дела и календарь в подсказке")
 print("ИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)

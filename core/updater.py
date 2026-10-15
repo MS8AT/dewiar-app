@@ -143,11 +143,33 @@ class Updater:
         self.models = {}                # ключ → {"url" (полный), "sha256", …} — см. model()
         self._fetched = False
         self._lock = threading.Lock()
+        self.failed = None              # {"version", "path"} — нажали «обновить», а после перезапуска версия прежняя
+        self._check_pending()
         try:                            # последний известный список моделей — на случай, если сайт сейчас недоступен
             m = json.loads((self.dir / "manifest.json").read_text(encoding="utf-8"))
             self._parse(m, m.get("_base", ""))
         except (OSError, ValueError):
             pass
+
+    def _check_pending(self):
+        """Окно перед тихой установкой (ui/app.py, Windows) пишет updates/pending.json. Новая версия запустилась —
+        хорошо; запустилась прежняя — установка не встала (скриншот 15.10: «не обновляется у него», нажимает —
+        и ничего): виджет предложит открыть установщик обычным окном — там видно, что мешает."""
+        f = self.dir / "pending.json"
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        f.unlink(missing_ok=True)
+        m = re.search(r"(\d+\.\d+\.\d+)", str(d.get("file") or ""))
+        if not m or time.time() - float(d.get("ts") or 0) > 7 * 86400:
+            return
+        if vtuple(m.group(1)) <= vtuple(self.version):
+            log.info("Обновление до %s встало", m.group(1))
+            return
+        exe = self.dir / Path(str(d["file"])).name
+        log.warning("Обновление до %s не установилось — запущена %s", m.group(1), self.version)
+        self.failed = {"version": m.group(1), "path": str(exe) if exe.is_file() else ""}
 
     @property
     def url(self):
@@ -269,7 +291,7 @@ class Updater:
 
     def public(self):
         """Для студии: текущая версия, доступное обновление, время и ошибка последней проверки."""
-        return {"current": self.version, "url": self.url, "available": self.available,
+        return {"current": self.version, "url": self.url, "available": self.available, "failed": self.failed,
                 "checked": self.last["checked"], "error": self.last["error"], "remote": self.last.get("remote", "")}
 
     def loop(self, stopping):
