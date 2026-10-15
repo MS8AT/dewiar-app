@@ -66,7 +66,7 @@ except ImportError:
     try:
         from speechnorm import speech_norm
     except ImportError:
-        speech_norm = None
+        speech_norm = None                 # без модуля цифры уйдут в модель как есть — видно в /health и в панели
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s voices %(levelname)s %(message)s")
 log = logging.getLogger("voices")
@@ -941,6 +941,7 @@ class H(BaseHTTPRequestHandler):
                     "max_models": MAX_MODELS, "voices": len(cfg_load()["voices"]),
                     "instruct_ok": "0.6B" not in MODELS["custom"],          # манеру встроенным дикторам понимает только 1.7B
                     "clone_engine": CLONE_ENGINE, "builtin_on": BUILTIN_ON, "espeech_nfe": ESPEECH_NFE,
+                    "numbers": speech_norm is not None,                      # цифры словами (speechnorm.py в образе)
                     "ttfa_ms_avg": int(STATE["ttfa_ms_sum"] / STATE["ttfa_n"]) if STATE["ttfa_n"] else 0}
             info.pop("ttfa_ms_sum", None)
             try:

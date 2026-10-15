@@ -490,6 +490,9 @@ class RemoteTTS:
         c = self.cfg
         rate = int(c.get("sample_rate") or 24000)
         own = c.get("voice_f") if voice_cfg.get("_gender") == "female" else c.get("voice_m")   # голос героинь / героев с сервера
+        if re.search(r"[А-Яа-яЁё]", text or ""):              # русский: числа словами и здесь — служба голосов старой
+            from speechnorm import speech_norm                   # версии читала цифры странными звуками (отзыв 15.10)
+            text = speech_norm(text, latin=False) or text
         body = {"model": c.get("model") or "tts-1", "input": text, "voice": own or voice_cfg.get("remote") or "alloy",
                 "response_format": "pcm", "stream": True, "speed": speed}
         if voice_cfg.get("_pid"):                         # служба голосов Dewiar даёт персонажу его собственный голос

@@ -332,8 +332,22 @@ try:
     req("POST", "/v1/audio/speech", {"input": "Call me at 5 pm", "voice": "serena", "response_format": "wav"})
     ok(any("5" in t for c in A.ENGINE.calls for t in c["texts"]), "английский текст не трогаем — модель читает его сама")
     V0 = ROOT / "server/voices"
-    ok("COPY app.py speechnorm.py" in (V0 / "Dockerfile").read_text(encoding="utf-8")
+    ok("COPY *.py" in (V0 / "Dockerfile").read_text(encoding="utf-8")
        and '"src/vllm/tts/speechnorm.py"' in (ROOT / "tools/voices_bundle.py").read_text(encoding="utf-8"), "пакет «Голоса» везёт speechnorm.py, образ его копирует")
+    st, _, h = req("GET", "/health")
+    ok(h.get("numbers") is True, "/health: цифры словами — включены (панель покажет, если служба собрана без них)")
+    # «Обновить службу» собирает образ из tar, который делает панель: раньше там были только Dockerfile и app.py — образ
+    # с новым модулем не собирался, и цифры оставались (отзыв 15.10 после 0.38.52)
+    import subprocess as _sp
+    if shutil.which("php"):
+        tc = tmp / "tc"; (tc / "lib").mkdir(parents=True); (tc / "tts").mkdir()
+        shutil.copy(V0 / "vllm/lib/ttsctl.php", tc / "lib/ttsctl.php")
+        for f in ("Dockerfile", "app.py"):
+            shutil.copy(V0 / f, tc / "tts" / f)
+        shutil.copy(ROOT / "core/speechnorm.py", tc / "tts/speechnorm.py")
+        out = _sp.run(["php", "-r", f'require "{tc}/lib/ttsctl.php"; $t = TtsCtl::tarContext(); preg_match_all("/(Dockerfile|[a-z_]+\\.py)\\x00/", $t, $m); echo implode(",", array_unique($m[1]));'],
+                      capture_output=True, text=True).stdout
+        ok(set(out.split(",")) == {"Dockerfile", "app.py", "speechnorm.py"}, f"сборка образа берёт и speechnorm.py: {out}")
     # наплыв людей: очередь к видеокарте длинная — сразу «занято» (503), приложение скажет своим голосом, а не ждёт минуту
     A.STATE["waiting"] = A.MAX_WAITING
     st, _, e = req("POST", "/v1/audio/speech", {"input": "Привет", "voice": "serena"})
