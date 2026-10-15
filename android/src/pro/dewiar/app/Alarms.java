@@ -29,6 +29,9 @@ public final class Alarms {
     public static synchronized void put(Context c, JSONObject item) throws Exception {
         JSONArray a = list(c), out = new JSONArray();
         for (int i = 0; i < a.length(); i++) if (!a.getJSONObject(i).getString("id").equals(item.getString("id"))) out.put(a.getJSONObject(i));
+        // повторяющееся на уже прошедшее время («по будням в 17:30», поставлено в 17:43) — не звонить сразу, а в следующий раз (№56)
+        long now = System.currentTimeMillis();
+        while (item.getLong("at") < now - 60000 && !item.optString("repeat").isEmpty()) item.put("at", next(item));
         out.put(item);
         save(c, out);
         schedule(c, item);

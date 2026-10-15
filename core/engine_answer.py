@@ -362,22 +362,30 @@ class AnswerMixin:
     def code_auto_run(self):
         return bool(self.s.get("tasks", "auto_run"))
 
-    def confirm(self, question, timeout=120):
+    def confirm(self, question, timeout=120, cancel=None):
         """Спросить «да/нет» вне разговора (для фоновой задачи): голосом и кнопками в виджете.
-        Блокирует вызывающий поток до ответа или timeout секунд -> True только при «да»."""
+        Блокирует вызывающий поток до ответа, timeout секунд или cancel (Event задачи: «останови задачу» не ждёт
+        двух минут, №54) -> True при «да», False при «нет», None — никто не ответил или задачу остановили."""
         for _ in range(240):                                   # один вопрос за раз: ждём до 2 мин, пока ответят на прежний
-            if self.pending_confirm is None:
+            if self.pending_confirm is None or (cancel is not None and cancel.is_set()):
                 break
             time.sleep(0.5)
+        if cancel is not None and cancel.is_set():
+            return None
         box = {"event": threading.Event(), "answer": False}
         self.pending_confirm = box
         self.emit("confirm", text=question)
         self.announce(_spoken_question(question) + " Скажите «да» или «нет».")
-        box["event"].wait(timeout)
-        self.pending_confirm = None
+        end = time.monotonic() + timeout
+        while not box["event"].wait(min(0.5, max(0.0, end - time.monotonic()))):
+            if time.monotonic() >= end or (cancel is not None and cancel.is_set()):
+                break
+        answered = box["event"].is_set()
+        if self.pending_confirm is box:
+            self.pending_confirm = None
         self.emit("confirm_done", ok=box["answer"])
-        log.info("Подтверждение (задача): %s", "да" if box["answer"] else "нет")
-        return box["answer"]
+        log.info("Подтверждение (задача): %s", ("да" if box["answer"] else "нет") if answered else "без ответа")
+        return box["answer"] if answered else None
 
     def ask_user(self, task, question):
         """Задача спрашивает: говорим вопрос; следующая фраза пользователя без имени в течение 2 минут — ответ
@@ -1050,7 +1058,7 @@ class AnswerMixin:
                 sentences.put(s_)
             blind_key = f"{prof.get('base_url')}|{prof.get('model')}"
             t_start = time.monotonic()
-            from quality import DELIVERABLE, REFUSAL_NUDGE, looks_like_promise, looks_like_refusal, number_mismatch, promise_nudge
+            from quality import DELIVERABLE, REFUSAL_NUDGE, diagram_missing, looks_like_promise, looks_like_refusal, number_mismatch, promise_nudge
             called, nudged = set(), 0                    # какие действия уже были; сколько раз просили «сделай, а не обещай»
             deliver = bool(DELIVERABLE.search(text)) and any(x.get("name") == "start_task" for x in specs or [])
             # отговорку «нет доступа к интернету» на шаге 0 (когда есть поиск) просим переделать (ниже) — значит, первую
@@ -1066,6 +1074,7 @@ class AnswerMixin:
                 speak(s_)
             seen_calls = {}                              # одинаковый вызов в одном ходе — не повторяем (результат уже есть)
             done_calls, checked = [], False                  # что вызвано с результатами — сверить числа ответа (number_mismatch)
+            drew = False                                     # просили схему, а её нет — попросили нарисовать (раз за ход)
             for step in range(6):                       # модель → действия → результаты → модель…
                 calls, step_text = [], ""
                 if step == 5 and specs:                  # последний шаг — только слова: ответить тем, что уже узнал
@@ -1154,6 +1163,16 @@ class AnswerMixin:
                     if fix:                                 # «таймер на 79 минут», а поставлено 59 (экзамен 14.10)
                         checked = True
                         log.info("✋ Число в ответе не совпадает с поставленным — прошу исправить")
+                        msgs = msgs + [{"role": "assistant", "content": step_text or "…"}, {"role": "user", "content": fix}]
+                        if turn.full.strip() and not turn.full.endswith(" "):
+                            turn.full += " "
+                        self.set_state("thinking")
+                        continue
+                if not calls and not turn.cancel.is_set() and step < 5 and not drew:
+                    fix = diagram_missing(text, turn.full + step_text, called)
+                    if fix:
+                        drew = True
+                        log.info("✋ Просили схему, а её нет — прошу нарисовать (mermaid)")
                         msgs = msgs + [{"role": "assistant", "content": step_text or "…"}, {"role": "user", "content": fix}]
                         if turn.full.strip() and not turn.full.endswith(" "):
                             turn.full += " "

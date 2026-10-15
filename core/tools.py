@@ -1258,7 +1258,13 @@ def _when(a):
     if a.get("in_minutes") is not None:
         when = datetime.now() + timedelta(minutes=float(a["in_minutes"]))
         return when, rep, text, "reminder"
-    at = str(a.get("at") or "").strip()
+    at = re.sub(r"\s+", " ", str(a.get("at") or "").replace("\u202f", " ").replace("\xa0", " ")).strip()
+    try:                                                 # «2026-10-15 08:00:00», «…T08:00+03:00», «…Z» — тоже дата
+        iso = datetime.fromisoformat(at.replace("Z", "+00:00")) if re.match(r"\d{4}-\d\d-\d\d[T ]\d", at) else None
+        if iso is not None:
+            at = (iso.astimezone().replace(tzinfo=None) if iso.tzinfo else iso).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        pass
     for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S", "%H:%M", "%d.%m.%Y %H:%M"):
         try:
             t = datetime.strptime(at, fmt)
@@ -1308,7 +1314,11 @@ def t_reminder(a, ctx):
         from when import next_time
         when = next_time(rep, datetime.now())              # первый раз — в ближайший подходящий день
     moved = ""
-    if not rep and when < datetime.now() - timedelta(minutes=1):     # это время уже прошло («на 17:00», а сейчас 17:26) —
+    if rep and when < datetime.now() - timedelta(minutes=1):          # «по будням в 17:30», а уже 17:43 — первый раз
+        from when import next_time                                    # в следующий подходящий, а не звонок сразу (№56)
+        when = next_time(rep, datetime.now())
+        moved = f" Сегодня это время уже прошло — первый раз {human(when)}; так и скажи."
+    elif not rep and when < datetime.now() - timedelta(minutes=1):     # это время уже прошло («на 17:00», а сейчас 17:26) —
         while when < datetime.now():                                  # ставим на ближайшее такое же время, а не в прошлое
             when += timedelta(days=1)
         moved = " Это время сегодня уже прошло — поэтому на завтра; так и скажи."

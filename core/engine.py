@@ -79,6 +79,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.espeak = SapiTTS() if os.name == "nt" else EspeakTTS()      # аварийный голос без скачивания
         self.gigaam = None
         self.vosk_model = None
+        self.vosk_dir = None                  # папка модели Vosk — когда слух поднялся (до того «сохранить персонажа» не падает, №58)
         self.vosk_stt = None
         self.stt = None                  # распознаватель — появится, когда загрузится модель (до этого настройки сохраняются без него)
         self.decoys = []

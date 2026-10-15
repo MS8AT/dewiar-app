@@ -6,6 +6,8 @@
 дальше — ask() в engine_answer.py."""
 from engine_base import *  # noqa: F401,F403 — общие импорты и помощники движка
 
+VOSK_RETRY_MIN = float(os.environ.get("DEWIAR_VOSK_RETRY_MIN") or 30)   # голоса Vosk не скачались — повтор через столько минут
+
 
 class AudioMixin:
     # ---------- настройка движков ----------
@@ -125,6 +127,8 @@ class AudioMixin:
         """Голоса Vosk TTS: скачать (один раз) и загрузить в потоке vosk-tts; до готовности говорим Piper."""
         if self.vosk_tts.ready or self._vosk_loading:
             return
+        if time.monotonic() < getattr(self, "_vosk_retry_at", 0.0):   # не скачалось — следующая попытка позже, а не
+            return                                                    # каждые 2 минуты весь день (№58: сеть до сайта плохая)
         self._vosk_loading = True
         # откуда качать: адрес из настроек → зеркало модели с сайта (с sha256) → зеркало из манифеста обновлений
         m = None if self.s.get("tts", "vosk_url") or self.vosk_tts.installed() else self._mirror("vosk_tts")
@@ -138,14 +142,19 @@ class AudioMixin:
                 self.vosk_tts.ensure(on_progress=lambda f: self._dl("voices", f), on_status=self.note)
                 self.note("")
                 log.info("Vosk TTS готов: %s", self.vosk_tts.speakers)
+                self._vosk_fails = 0
                 self.emit("voices", speakers=self.vosk_tts.speakers)
             except Exception as e:  # noqa: BLE001
                 err = str(e)
                 if isinstance(e, ImportError):
                     err = "не установлена библиотека vosk-tts — выполните в терминале: sudo /opt/dewiar/dewiar-env"
                 self.vosk_tts.error = err
-                log.warning("Vosk TTS не загрузился: %s", e)
-                self.note(f"Новые голоса не загрузились ({err[:120]}) — говорю голосами Piper")
+                n = self._vosk_fails = getattr(self, "_vosk_fails", 0) + 1
+                wait = VOSK_RETRY_MIN * 60 * min(2 ** (n - 1), 12)      # 30 мин, час, 2, 4, 6 часов
+                self._vosk_retry_at = time.monotonic() + wait
+                log.warning("Vosk TTS не загрузился (%d-й раз, снова через %d мин): %s", n, wait // 60, e)
+                if n == 1:                                              # сказать один раз, не каждые полчаса
+                    self.note(f"Новые голоса не загрузились ({err[:120]}) — говорю голосами Piper, попробую позже")
             finally:
                 self._vosk_loading = False
                 self._loaded("voices")

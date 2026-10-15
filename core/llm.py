@@ -549,9 +549,13 @@ def parse_tool_call(raw):
     raw = (raw or "").strip()
     if not raw:
         return None
+    # экзамен 0.38.46 (Qwen): «<\n\nfunction=code_list>» — переводы строк внутри тега
+    raw = re.sub(r"<\s*(function|parameter)\s*=\s*", r"<\1=", raw)
     m = re.search(r"<function=([\w.\-]+)>(.*?)(?:</function>|$)", raw, re.S)
     if m:
         args = {k: _arg_value(v) for k, v in re.findall(r"<parameter=([\w.\-]+)>(.*?)(?:</parameter>|(?=<parameter=)|$)", m.group(2), re.S)}
+        if not args:                                   # <function=code_read><path>a.py</path></function> — ключи тегами
+            args = {k: _arg_value(v) for k, v in re.findall(r"<([A-Za-z_][\w\-]*)>(.*?)</\1>", m.group(2), re.S)}
         return {"name": m.group(1), "args": args}
     m = re.match(r"([A-Za-z_][\w.\-]*)\s*(.*)$", raw, re.S)
     if m and "<arg_key>" in m.group(2):
@@ -565,6 +569,15 @@ def parse_tool_call(raw):
             rest = json.loads("{" + bare.group(2) + "}")
             if isinstance(rest, dict):
                 return {"name": bare.group(1), "args": rest}
+        except ValueError:
+            pass
+    # экзамен 0.38.46: имя отдельным объектом, аргументы — следующим: {"function": "show_images"}\n{"query": …}
+    two = re.match(r'\{\s*"(?:function|name|tool|tool_name)"\s*:\s*"([A-Za-z_][\w.\-]*)"\s*\}\s*(\{.*\})', raw, re.S)
+    if two:
+        try:
+            rest = json.loads(two.group(2))
+            if isinstance(rest, dict):
+                return {"name": two.group(1), "args": rest}
         except ValueError:
             pass
     j = re.search(r"\{.*\}", raw, re.S)

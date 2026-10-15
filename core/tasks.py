@@ -36,6 +36,10 @@ CYCLES = int(os.environ.get("DEWIAR_TASK_CYCLES") or 0)   # кругов по ma
                                                    # по умолчанию 15: 80 × 15 = 1200 шагов), потом пауза до команды человека.
 BREATHER_SEC = float(os.environ.get("DEWIAR_TASK_BREATHER_SEC") or 60)   # передышка между кругами
 STALE_CYCLES = 2                                   # кругов подряд без продвижения (план, блокнот, файлы) — пауза раньше
+STUCK_STEPS = int(os.environ.get("DEWIAR_TASK_STUCK_STEPS") or 40)   # шагов подряд без продвижения — пауза («буксует», №58)
+ASK_DECLINES = 3                                   # отказов человека за запуск — пауза, а не новые вопросы (№54, №58)
+ASK_SILENT = 2                                     # вопросов подряд без ответа (человека нет рядом) — пауза
+PROGRESS_TOOLS = {"code_edit", "code_write", "code_delete", "code_undo"}   # правки рабочей копии — тоже продвижение
 HANG_SEC = float(os.environ.get("DEWIAR_TASK_HANG_SEC") or 600)     # шаг молчит столько (модель) — «задача не отвечает»
 HANG_TOOL_SEC = float(os.environ.get("DEWIAR_TASK_HANG_TOOL_SEC") or 1800)   # …а инструмент (скачивание, код) — столько
 PROGRESS_FIRST = float(os.environ.get("DEWIAR_TASK_PROGRESS_FIRST") or 600)  # долгая задача: первая весточка «как идёт»
@@ -944,8 +948,10 @@ class TaskManager:
                         t.journal(f"🛡 Защита не дала: {cmd} — {v['reason']}")
                         return f"Защита Dewiar запретила эту команду: {v['reason']}. Найди другой путь."
                     warn = guard.describe_warn(v) + " " if v["level"] == "warn" else ""
-                    if (warn or not self.host.code_auto_run()) and not self.host.confirm(f"Задача «{t.title}»: {warn}выполнить в проекте «{cmd}»?"):
-                        return "Пользователь не разрешил эту команду. Обойдись без неё или спроси (ask_user)."
+                    if warn or not self.host.code_auto_run():
+                        okd, why = self._permit(t, "code_run", f"Задача «{t.title}»: {warn}выполнить в проекте «{cmd}»?")
+                        if not okd:
+                            return why
                     if args.get("background"):
                         return c.start_bg(cmd)
                     return c.run(cmd, args.get("timeout") or 180)
@@ -959,8 +965,10 @@ class TaskManager:
         if blocked:
             t.journal(f"🛡 Защита не дала: {name} — {blocked}")
             return f"Защита Dewiar запретила это: {blocked}. Так делать нельзя — найди другой путь или спроси пользователя."
-        if (need or force) and not self.host.confirm(f"Задача «{t.title}»: {warn_q or self.host.toolbox.describe(name, args)}"):
-            return "Пользователь отказался."
+        if need or force:
+            okd, why = self._permit(t, name, f"Задача «{t.title}»: {warn_q or self.host.toolbox.describe(name, args)}")
+            if not okd:
+                return why
         try:
             return self.host.toolbox.run(name, args)
         except Exception as e:  # noqa: BLE001
@@ -1020,8 +1028,9 @@ class TaskManager:
             return "\n".join(out[:300]) or "Папка пуста."
         if name == "run_python":
             if not self.host.code_auto_run() and not t.data.get("py_ok"):    # разрешение спрашиваем раз на задачу
-                if not self.host.confirm(f"Задача «{t.title}» хочет запускать свои скрипты Python в папке задачи. Разрешить для этой задачи?"):
-                    return "Пользователь не разрешил запуск кода. Сделай без него (write_file) или спроси (ask_user)."
+                okd, why = self._permit(t, "run_python", f"Задача «{t.title}» хочет запускать свои скрипты Python в папке задачи. Разрешить для этой задачи?")
+                if not okd:
+                    return why + " Без запуска кода: write_file."
                 t.data["py_ok"] = True
                 t.save()
             return self._run_python(t, args.get("code") or "", int(args.get("timeout") or 180))
@@ -1244,6 +1253,49 @@ class TaskManager:
         except (AttributeError, TypeError, ValueError):
             return 15
 
+    def _permit(self, t, key, question):
+        """Спросить человека разрешение на действие задачи -> (да?, текст для модели при «нет»).
+        Отказ запоминается до конца запуска: то же действие (тот же инструмент) больше не спрашиваем, а модели
+        говорим обойтись без него. ASK_DECLINES отказов или ASK_SILENT вопросов подряд без ответа — задача встаёт
+        на паузу (pause_now), а не спрашивает без конца и не жжёт токены (№54: «Лаборатория: запись?» раз за разом;
+        №58: ночью команды по одной каждые 2 минуты, никто не отвечал)."""
+        st = self.__dict__.setdefault("_asks", {}).setdefault(t.id, {"no": set(), "declined": 0, "silent": 0})
+        if key in st["no"]:                                   # уже отказали, а модель снова за своё — это тоже в счёт
+            st["declined"] += 1
+            if st["declined"] >= ASK_DECLINES:
+                t.data["pause_now"] = ("Вы уже отказали, а задача снова пробует то же самое — остановил её, чтобы не "
+                                       "крутилась впустую. Напишите задаче, как быть, или скажите «продолжи задачу».")
+            return False, ("Пользователь уже отказал в этом действии — больше не спрашиваю. Не пробуй то же другим способом: "
+                           "обойдись без него или спроси (ask_user), что делать.")
+        import inspect
+        try:
+            takes_cancel = "cancel" in inspect.signature(self.host.confirm).parameters
+        except (TypeError, ValueError):
+            takes_cancel = False
+        ans = self.host.confirm(question, cancel=t.cancel) if takes_cancel else self.host.confirm(question)
+        if ans:
+            st["silent"] = 0
+            return True, ""
+        if t.cancel.is_set():
+            return False, "Задачу остановили."
+        if ans is None:                                       # никто не ответил за 2 минуты
+            st["silent"] += 1
+            t.journal(f"❔ Нет ответа на вопрос: {question}")
+            if st["silent"] >= ASK_SILENT:
+                t.data["pause_now"] = ("Задаю вопросы, а ответа нет — остановился, чтобы не спрашивать впустую. "
+                                       "Скажите «продолжи задачу», когда будете рядом.")
+            return False, ("Пользователь не ответил (его, видимо, нет рядом). Не спрашивай снова то же самое: сделай то, что "
+                           "можно без этого, а вопрос запиши в блокнот («Чего ждём»).")
+        st["no"].add(key)
+        st["declined"] += 1
+        st["silent"] = 0
+        t.journal(f"✋ Пользователь отказал: {question}")
+        if st["declined"] >= ASK_DECLINES:
+            t.data["pause_now"] = (f"Вы отказали {st['declined']} раза — остановился, чтобы не спрашивать без конца. "
+                                   "Напишите задаче, как быть, или скажите «продолжи задачу».")
+        return False, ("Пользователь отказался. Больше это действие не предлагай и не пробуй его другими командами: обойдись "
+                       "без него или спроси (ask_user), как быть.")
+
     @staticmethod
     def _progress_sig(t):
         """Отпечаток продвижения: план (сколько отмечено), блокнот, файлы-результаты и файлы в папке задачи."""
@@ -1380,6 +1432,9 @@ class TaskManager:
         max_steps = self.host.max_steps()
         idle, acted, run_steps = 0, False, 0
         guard = Q.LoopGuard()                                     # живёт один запуск потока
+        self.__dict__.setdefault("_asks", {}).pop(t.id, None)    # отказы и вопросы без ответа — счёт заново на каждый запуск
+        t.data.pop("pause_now", None)
+        prog_sig, prog_step = self._progress_sig(t), int(t.data.get("steps") or 0)   # «буксует»: шагов без продвижения
         q = self._q(t)
         try:
             prof = self.host.llm_profile()
@@ -1494,7 +1549,9 @@ class TaskManager:
                     results.append(r)
                     if t.data.get("looped"):
                         break
-                    if t.data.get("finished") or t.cancel.is_set() or t.data.get("sleep_now"):
+                    if c["name"] in PROGRESS_TOOLS and isinstance(r, str) and not r.startswith(("Ошибка", "Защита Dewiar")):
+                        prog_step = int(t.data["steps"])
+                    if t.data.get("finished") or t.cancel.is_set() or t.data.get("sleep_now") or t.data.get("pause_now"):
                         break
                 # на каждый вызов нужен ответ, иначе модель отвергнет историю — невыполненные закрываем заглушкой
                 results += ["(не выполнено: задача ушла ждать — повтори после пробуждения, если нужно)"] * (len(calls) - len(results))
@@ -1504,6 +1561,26 @@ class TaskManager:
                 t.save()
                 self._emit(t)
                 if t.data.get("finished") or t.data.get("sleep_now"):
+                    break
+                if not t.data.get("pause_now") and run_steps % 5 == 0:     # продвинулась ли работа (раз в 5 шагов)
+                    sig = self._progress_sig(t)
+                    if sig != prog_sig:
+                        prog_sig, prog_step = sig, int(t.data["steps"])
+                    elif int(t.data["steps"]) - prog_step >= STUCK_STEPS:
+                        t.data["pause_now"] = (f"{int(t.data['steps']) - prog_step} шагов подряд без продвижения: план, блокнот "
+                                               "и файлы не менялись. Остановился, чтобы не тратить время и токены впустую. "
+                                               "Напишите задаче, что делать, или скажите «продолжи задачу».")
+                        t.data["stuck"] = True
+                if t.data.get("pause_now"):
+                    why = t.data.pop("pause_now")
+                    t.data.update(status="paused", cycles=0, stale_cycles=0, activity="")
+                    t.save()
+                    t.journal(f"⏸ {why}")
+                    if not t.data.get("parent"):
+                        self.host.announce(f"Задача «{t.title}» " + ("буксует — остановил её. Загляните в журнал задачи."
+                                                                      if t.data.pop("stuck", False) else "на паузе: " + why[:1].lower() + why[1:]))
+                    t.data.pop("stuck", None)
+                    self._emit(t)
                     break
                 if t.data.pop("looped", False):
                     raise LLMError("застрял: много раз повторил одно и то же действие с тем же результатом. Что уже удалось — "

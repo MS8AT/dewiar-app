@@ -211,7 +211,8 @@ function examFakeTool(name, a) {
     case "radio_control": return "Готово.";
     case "take_photo": return "Камера сейчас недоступна.";
     case "show_photo": return "Снимков пока нет.";
-    case "make_app": return `Сделано: «${a.title || "мини-программа"}» — на экране телефона.`;
+    case "make_app": return /<(?:html|body|div|script|button|canvas|main|section)\b/i.test(String(a.html || ""))   // как настоящий: без html — ошибка
+      ? `Сделано: «${a.title || "мини-программа"}» — на экране телефона.` : "Ошибка: html не пришёл — пришли весь HTML-файл в поле html (компактный код).";
     case "open_made": return "Открыто.";
     case "start_task": return "Задача передана компьютеру.";
     case "smart_home": return "Готово.";

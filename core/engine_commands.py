@@ -680,7 +680,7 @@ class CommandsMixin:
         if cmd == "persona_save":
             pid = self.personas.save(a["persona"])
             p = self.personas.get(pid)
-            miss = missing_words(self.vosk_dir, p.get("wake", []))
+            miss = missing_words(self.vosk_dir, p.get("wake", [])) if self.vosk_dir else []   # слух ещё не готов — проверим потом
             self.build_spotter()
             self.emit("personas", personas=self.personas.public())
             return {"id": pid, "missing": miss}

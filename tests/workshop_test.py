@@ -45,7 +45,7 @@ ok("сумма 4 True" in r and (t.dir / "outputs/data.json").exists() and len(h
 r = w("run_python", code="print('снова')")
 ok("снова" in r and len(h.asked) == 1, "второй запуск — без вопроса (разрешено для этой задачи)")
 t2 = tm.create("Другая", "x", start=False); h.answer = False
-ok("не разрешил" in tm._work(t2, "run_python", {"code": "print(1)"}), "отказ — код не запускается")
+ok("отказался" in tm._work(t2, "run_python", {"code": "print(1)"}), "отказ — код не запускается")
 r = w("show", path="outputs/app.html", title="Калькулятор")
 ok(t.data["outputs"][0] == {**t.data["outputs"][0], "path": "outputs/app.html", "title": "Калькулятор"} and any(k == "task" for k, _ in h.events),
    "show → в «Результатах» и студия узнала")

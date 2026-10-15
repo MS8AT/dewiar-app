@@ -1397,10 +1397,14 @@ function jsonEnd(s) {
 }
 /* вызов функции из текста: JSON (Qwen/Hermes), GLM (<arg_key>/<arg_value>), Qwen3-Coder (<function=…><parameter=…>), «имя {json}» */
 function parseToolCall(raw) {
-  raw = String(raw || "").trim(); if (!raw) return null;
+  raw = String(raw || "").trim().replace(/<\s*(function|parameter)\s*=\s*/g, "<$1="); if (!raw) return null;   // «<\n\nfunction=f>»
   const val = (v) => { v = v.trim(); try { return JSON.parse(v); } catch (e) { return v; } };
+  const two = raw.match(/^\{\s*"(?:function|name|tool|tool_name)"\s*:\s*"([A-Za-z_][\w.-]*)"\s*\}\s*(\{[\s\S]*\})/);   // {"function": "f"}\n{…аргументы}
+  if (two) { try { const o = JSON.parse(two[2]); if (o && typeof o === "object") return { name: two[1], args: o }; } catch (e) { } }
   let m = raw.match(/<function=([\w.-]+)>([\s\S]*?)(?:<\/function>|$)/);
-  if (m) { const args = {}; for (const p of m[2].matchAll(/<parameter=([\w.-]+)>([\s\S]*?)(?:<\/parameter>|(?=<parameter=)|$)/g)) args[p[1]] = val(p[2]); return { name: m[1], args }; }
+  if (m) { const args = {}; for (const p of m[2].matchAll(/<parameter=([\w.-]+)>([\s\S]*?)(?:<\/parameter>|(?=<parameter=)|$)/g)) args[p[1]] = val(p[2]);
+    if (!Object.keys(args).length) for (const p of m[2].matchAll(/<([A-Za-z_][\w-]*)>([\s\S]*?)<\/\1>/g)) args[p[1]] = val(p[2]);   // <path>a.py</path>
+    return { name: m[1], args }; }
   m = raw.match(/^([A-Za-z_][\w.-]*)\s*([\s\S]*)$/);
   if (m && m[2].includes("<arg_key>")) { const args = {}; for (const p of m[2].matchAll(/<arg_key>\s*([\s\S]*?)\s*<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/g)) args[p[1]] = val(p[2]); return { name: m[1], args }; }
   const j = raw.match(/\{[\s\S]*\}/);
@@ -1649,7 +1653,32 @@ function toOllama(m) {
     images: m.content.filter(x => x.type === "image_url").map(x => String(x.image_url.url).replace(/^data:[^,]+,/, "")) };
   return { role: m.role, content: m.content };
 }
-const safeJSON = (s) => { try { return typeof s === "string" ? JSON.parse(s || "{}") : (s || {}); } catch (e) { return {}; } };
+/* Аргументы вызова -> объект. Модели (и серверы) присылают их по-разному: строкой с JSON внутри строки, одним объектом
+   дважды подряд («{…}{…}» — кусок повторился в потоке), оборванными по лимиту. Раньше всё это молча становилось {}:
+   remember({}) отвечал «Запомнил», а не запоминал ничего (экзамен 0.6.40, «Помнит факт после нового разговора»). */
+function safeJSON(s) {
+  if (s && typeof s === "object") return s;
+  const t = String(s || "").trim(); if (!t) return {};
+  const obj = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : null;
+  try { let v = JSON.parse(t); if (typeof v === "string") v = JSON.parse(v); return obj(v) || {}; } catch (e) { }
+  for (let i = t.lastIndexOf("{"); i > 0; i = t.lastIndexOf("{", i - 1)) {        // «{…}{…}» — берём последний целый
+    if (t[i - 1] !== "}" && !/}\s*$/.test(t.slice(0, i))) continue;
+    try { const v = obj(JSON.parse(t.slice(i))); if (v) return v; } catch (e) { }
+  }
+  return repairJSON(t) || {};
+}
+/* оборванный JSON: закрыть строку и скобки (как repair_json в llm.py) */
+function repairJSON(t) {
+  if (!t.startsWith("{")) return null;
+  const st = []; let q = false, esc = false;
+  for (const ch of t) {
+    if (q) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === '"') q = false; continue; }
+    if (ch === '"') q = true; else if (ch === "{" || ch === "[") st.push(ch === "{" ? "}" : "]"); else if (ch === "}" || ch === "]") st.pop();
+  }
+  let fixed = t + (q ? '"' : "");
+  fixed = fixed.replace(/,\s*$/, "").replace(/:\s*$/, ': ""') + st.reverse().join("");
+  try { const v = JSON.parse(fixed); return v && typeof v === "object" ? v : null; } catch (e) { return null; }
+}
 
 /* Разговорная очередь: показываем текст и озвучиваем по предложениям. Первую фразу без конца предложения — как можно
    раньше (по запятой или тире после 60 знаков, как на компьютере — SentenceSplitter): голос с сервера синтезирует фразу
@@ -1779,7 +1808,7 @@ async function ask(text, opts = {}) {
         }
       }
     };
-    const doneCalls = []; let numChecked = false;      // вызовы с результатами — сверить числа ответа (numberMismatch)
+    const doneCalls = []; let numChecked = false, drew = false;   // вызовы с результатами — сверить числа ответа (numberMismatch); схема
     for (let round = 0; round < maxRounds; round++) {
       let r;
       try {
@@ -1816,6 +1845,8 @@ async function ask(text, opts = {}) {
       }
       const fix = !r.calls.length && !numChecked ? numberMismatch(r.text || "", doneCalls) : "";
       if (fix) { numChecked = true; msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: fix }); sink.push(" "); continue; }   // «на 79 минут», а поставлено 59
+      const dfix = !r.calls.length && !drew && round < maxRounds - 1 ? diagramMissing(text, sink.text() + (r.text || ""), called) : "";
+      if (dfix) { drew = true; msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: dfix }); sink.push(" "); continue; }   // «нарисуй схему» — словами
       if (!r.calls.length && round === 0 && REFUSAL_RX.test(r.text || "") && String(r.text).length < 1200) {
         // «у меня нет доступа к интернету», а поиск есть — один раз просим поискать (как в задачах на компьютере)
         msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: REFUSAL_NUDGE });
@@ -1826,10 +1857,15 @@ async function ask(text, opts = {}) {
       msgs.push({ role: "assistant", content: r.text || "", tool_calls: r.calls.map(c => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.args || "{}" } })) });
       const shots = [];
       if (r.calls.some(c => HANDS_SET.has(c.name))) maxRounds = 30;
-      for (const c of r.calls) {
+      const once = new Set();                       // один и тот же вызов несколько раз в одном ответе — делаем один раз
+      for (const c of r.calls) {                    // (экзамен 0.6.40: remember «бюджет 70/65/50» девять раз подряд)
         called.add(c.name);
         let res;
+        const key = c.name + " " + JSON.stringify(safeJSON(c.args));
+        if (once.has(key)) { msgs.push({ role: "tool", tool_call_id: c.id, name: c.name, content: "(то же самое уже сделано этим ответом — не повторяй)" }); continue; }
+        once.add(key);
         try { res = await runTool(c.name, safeJSON(c.args)); } catch (e) { res = "Ошибка: " + e.message; }
+        plog("info", `🔧 ${c.name} → ${clip(String((res && res.text) || res || "").split("\n")[0], 90)}`);   // что сделано — видно в отчёте (№56)
         if (c.name === "calendar_add" && /^Записано/.test(String(res))) called.add("calendar_write");   // правда записано, а не только спросили
         if (c.name === "call_persona" && res && res.switchTo) { switchTo = res.switchTo; res = res.text; }
         if (res && res.image) { shots.push(res.image); res = res.text; }
@@ -1985,8 +2021,15 @@ const whenText = (d) => { const now = new Date(), tm = `${pad(d.getHours())}:${p
   const dd = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
   return dd === 0 ? "сегодня в " + tm : dd === 1 ? "завтра в " + tm : dd === 2 ? "послезавтра в " + tm : `${d.getDate()} ${MON[d.getMonth()]} в ${tm}`; };
 const REP_RU = { daily: "каждый день", weekdays: "по будням", weekly: "каждую неделю" };
+// повторяющееся напоминание: первый раз — ближайший подходящий момент не раньше «сейчас» (будни — без субботы и воскресенья)
+function rollRepeat(at, rep) {
+  const d = new Date(at), step = rep === "weekly" ? 7 : 1, off = x => rep === "weekdays" && (x.getDay() === 0 || x.getDay() === 6);
+  for (let i = 0; i < 800 && (d.getTime() < Date.now() || off(d)); i++) d.setDate(d.getDate() + step);
+  return d;
+}
 
 function addAlarm(title, at, kind, repeat) {
+  if (repeat) at = rollRepeat(at, repeat);              // «будильник по будням в 7», сказанное в 7:20, — с завтрашнего, не сразу
   // who — кто ставил: его лицо и имя будут в уведомлении (Faces.java)
   const x = JSON.parse(D.alarmSet(JSON.stringify({ title, at: at.getTime(), kind: kind || "reminder", repeat: repeat || "", who: S.persona || "" })) || "{}");
   if (!D.exactAlarms()) toast("Чтобы будильники звонили минута в минуту, разрешите «Будильники и напоминания» в настройках.", 5000);
@@ -2325,6 +2368,13 @@ const CLAIMS = [
    asked — просьба человека: у части обещаний («смотрю», «вот») смысл есть только при просьбе про камеру (c.user) */
 /* Экзамен 14.10: посчитала 79 дней, поставила таймер на 59 минут и сказала «на 79» — число минут в ответе не совпадает
    с поставленным: просим исправить (как quality.number_mismatch на компьютере). -> подсказка модели или "". */
+/* «Нарисуй схему…» — а в ответе нет ```mermaid (экзамен 0.6.40: make_app пустой и «схема на экране») — как diagram_missing в quality.py */
+const DIAGRAM_ASK = /(?:нарисуй|начерти|изобрази|набросай|построй|покажи|сделай|составь)[а-яё]*\s+(?:мне\s+|нам\s+)?(?:[а-яё-]+\s+){0,2}?(?:схем|диаграмм|блок-?схем|майнд-?карт|интеллект-карт|mind\s?map|дерев[оа]\s+(?:решений|целей|задач)|оргструктур|карт[уы]\s+(?:процесс|связ))/i;
+const DRAWN_TOOLS = ["show_images", "make_app", "start_task", "save_note", "open_made"];
+function diagramMissing(ask, answer, called) {
+  if (!DIAGRAM_ASK.test(String(ask || "")) || /```mermaid/i.test(String(answer || "")) || DRAWN_TOOLS.some(n => called && called.has && called.has(n))) return "";
+  return "ПРОВЕРКА: тебя попросили нарисовать схему, а в ответе её нет. Нарисуй её прямо сейчас в ответе кодом Mermaid — блоком ```mermaid … ``` (flowchart LR или TD, подписи узлов по-русски в кавычках), — она появится на экране картинкой. Перед блоком одна короткая фраза, без повторения сказанного; словами процесс больше не пересказывай.";
+}
 function numberMismatch(text, calls) {
   const actual = [];
   for (const c of calls || []) {
@@ -2565,6 +2615,10 @@ async function runTool(name, a) {
       if (!at || isNaN(at)) return "Ошибка: не понял время — спроси у пользователя, когда напомнить.";
       let moved = "";                                    // «на 17:00», а уже 17:26 — на завтра в 17:00, а не в прошлое
       if (at < new Date(Date.now() - 60000) && !a.repeat) { while (at < new Date()) at = new Date(at.getTime() + 864e5); moved = " Это время сегодня уже прошло — поэтому на завтра; так и скажи."; }
+      else if (a.repeat) {                               // «по будням в 17:30», а уже 17:43 — первое в следующий будний, а не звонок сразу (№56)
+        const r = rollRepeat(at, a.repeat);
+        if (r.getTime() !== at.getTime()) { if (at < new Date(Date.now() - 60000)) moved = ` Сегодня это время уже прошло — первое напоминание ${whenText(r)}; так и скажи.`; at = r; }
+      }
       const x = addAlarm(a.text || "Напоминание", at, a.kind || "reminder", a.repeat || "");
       showCard(alarmCard(x));
       return `Поставлено: ${whenText(at)}${a.repeat ? ", " + REP_RU[a.repeat] : ""} — ${x.title} (id ${x.id}).${moved}`;
@@ -2680,7 +2734,9 @@ async function runTool(name, a) {
       if (!all.length) return "Заметок пока нет.";
       return (w.length ? "По этим словам в заметках ничего нет. " : "") + `Всего заметок: ${all.length}. Последние:\n\n` + show(all.slice(0, 10));
     }
-    case "remember": { const f = String(a.fact || "").trim(); if (f && !S.memory.includes(f)) { S.memory.push(f); S.memory = S.memory.slice(-80); saveS(); syncSoon(); } return "Запомнил."; }
+    case "remember": { const f = String(a.fact || a.text || a.content || "").trim();
+      if (!f) return "Ошибка: не пришло, что запомнить — вызови remember ещё раз с fact (сам факт одной фразой).";
+      if (!S.memory.includes(f)) { S.memory.push(f); S.memory = S.memory.slice(-80); saveS(); syncSoon(); } return "Запомнил."; }
     case "money_add": {
       if (isPlanMoney(`${a.category || ""} ${a.note || ""}`)) return "Не записано: это план (бюджет, лимит), а не трата или доход. Запомни его как факт (remember), например «Бюджет на мебель — 65 тысяч рублей».";
       const m = money(); const x = { id: "m" + Date.now(), date: isoLocal(new Date()).slice(0, 10), kind: a.kind === "income" ? "income" : "expense", amount: +a.amount || 0,
@@ -3266,8 +3322,11 @@ function doneHead(s) {
     + `<div class="achs">${chips.join("")}</div></div></div>`
     + `<form class="doneadd" id="done-add"><input placeholder="Что уже сделали?" maxlength="120" enterkeyhint="done" aria-label="Что сделали"><button class="ib" aria-label="Отметить сделанным">✓</button></form>`;
 }
+// «Мой день» — какой сегодня день: «Среда, 15 октября» (просьба 15.10: «почему он не пишет число и день недели?»)
+function dayDate(d = new Date()) { const w = WD[d.getDay()]; return `${w[0].toUpperCase()}${w.slice(1)}, ${d.getDate()} ${MON[d.getMonth()]}`; }
 function renderDay() {
-  const box = $("#day-body");
+  const box = $("#day-body"), dd = $("#day-date");
+  if (dd) dd.textContent = dayDate();
   if (dayTab === "rem") {
     const l = JSON.parse(D.alarms() || "[]").sort((a, b) => a.at - b.at), ds = doneStats();
     const jobs = (mind().jobs || []).filter(j => !j.paused);       // дела по расписанию — их делает компьютер (утренняя сводка, итоги)
