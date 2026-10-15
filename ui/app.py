@@ -1072,6 +1072,23 @@ class Api:
             return
         subprocess.Popen(["xdg-open", str(d)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    def open_note(self, path=""):
+        """Открыть заметку в студии («Заметки»): из окна напоминания с картинками — «Открыть все в заметке»."""
+        import json as _json
+        from urllib.parse import quote
+        path = str(path or "")
+        if not path.startswith("Заметки/"):
+            return self.open_settings("notes")
+        if self._studio is not None:
+            self.open_settings("notes")
+            try:
+                if self._studio is not None:
+                    self._studio.evaluate_js(f"window.ntGoto && ntGoto({_json.dumps(path)})")
+                    return
+            except Exception:  # noqa: BLE001
+                self._studio = None
+        self.open_settings("notes", "&note=" + quote(path))
+
     def open_settings(self, page="", query=""):
         """Открыть студию на разделе page. Окно одно: уже открыто — показываем его; с query (импорт файла,
         ссылка подключения) окно создаётся заново, чтобы страница получила новые параметры адреса."""
@@ -1351,7 +1368,7 @@ class Api:
                 old.destroy()
             except Exception:  # noqa: BLE001
                 pass
-        w, h = 520, 440
+        w, h = 520, (556 if int(p.get("att") or 0) else 440)       # с картинками напоминания — выше, под их ряд
         try:
             if WIN:
                 l, t_, r, b = winshell.work_area()
@@ -1363,7 +1380,7 @@ class Api:
         except Exception:  # noqa: BLE001
             x = y = None
         q = "&" + urlencode({"id": rid, "text": p.get("text", ""), "title": p.get("title", ""), "rep": p.get("repeat_text", ""),
-                             "late": "1" if p.get("late") else "", "at": p.get("at", "")})
+                             "late": "1" if p.get("late") else "", "at": p.get("at", ""), "att": int(p.get("att") or 0)})
         self._alarm_id = rid
         win = webview.create_window(ALARM_TITLE, self._url("alarm.html", q), width=w, height=h, x=x, y=y,
                                     resizable=False, frameless=True, easy_drag=True, on_top=True, focus=True, hidden=True,

@@ -606,6 +606,8 @@ body.neu .clsend textarea, body.neu #cl-name { background: var(--glass); box-sha
 .ntf small { color: var(--muted); margin-left: 6px; }
 .ntadd { display: flex; gap: 8px; margin-bottom: 10px; } .ntadd .btn { flex: 1; text-align: center; }
 .nthumb { width: 46px; height: 46px; border-radius: 12px; object-fit: cover; flex: none; }
+.nthumb.rt { width: 40px; height: 40px; border-radius: 10px; margin-left: 2px; cursor: pointer; }   /* фото напоминания в «Мой день» */
+.it .bd[data-note] { cursor: pointer; }
 .it.note { cursor: pointer; } .it .bd .ntc { color: var(--accent); font-size: 12px; margin-left: 4px; }
 .ntnew { width: 100%; margin-bottom: 10px; }
 #imgview { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.94); display: none; place-items: center; padding: 16px; }

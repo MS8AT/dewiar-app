@@ -339,7 +339,7 @@ class CommandsMixin:
         if cmd in ("done", "done_add", "done_undo", "done_reminder"):    # «Дела»: сделанное и достижения (студия, done.py)
             return self._done_cmd(cmd, a)
         if cmd in ("reminders", "reminder_add", "reminder_update", "reminder_cancel", "alarm_ack", "alarm_snooze",
-                   "alarm_get", "alarm_test", "reminder_parse", "job_add", "job_run"):
+                   "alarm_get", "alarm_test", "reminder_parse", "job_add", "job_run", "reminder_files"):
             return self._reminder_cmd(cmd, a)
         if cmd.startswith("money_") or cmd == "calendar_month":      # деньги и календарь (студия → «Календарь»)
             m = self.money
@@ -594,6 +594,8 @@ class CommandsMixin:
                 ext = {"image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}.get(mime, ".jpg")
                 files.append({"name": time.strftime("Картинка %d.%m %H-%M-%S") + (f" ({k + 1})" if k else "") + ext, "b64": im})
             text = a.get("text", "")
+            if files and text.strip() and self._reminder_with_files(text, files):
+                return True                      # «напомни завтра в 10» + снимки — напоминание с картинками, без модели
             if files:
                 text = self._attach_files(text, files, images)
             self.ask(text, images)
@@ -935,7 +937,9 @@ class CommandsMixin:
             try:
                 if cmd == "note_file":
                     return self.workspace.note_file(a.get("path", ""))
-                return self.workspace.note_attach(a.get("path", ""), a.get("name", ""), base64.b64decode(a.get("b64", "") or ""))
+                r = self.workspace.note_attach(a.get("path", ""), a.get("name", ""), base64.b64decode(a.get("b64", "") or ""))
+                self.note_files_out(a.get("path", ""), [r["path"]])           # фото заметки — и на свой телефон
+                return r
             except (WorkspaceError, OSError, ValueError) as e:
                 raise ValueError(str(e)) from e
         if cmd == "ws_read":

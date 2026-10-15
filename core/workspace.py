@@ -251,14 +251,14 @@ class Workspace:
             hay = norm(f.stem + "\n" + body + "\n" + folder)
             if words and not all(w in hay for w in words):
                 continue
-            at = hay.find(words[0]) - len(f.stem) - 1 if words else -1
-            snip = body[max(0, at - 50): max(0, at - 50) + 180] if at > 50 else body[:180]
+            clean = NOTE_LINK_RX.sub("", body).strip()     # строки-ссылки на вложения — не в отрывок (обрезанная выглядела «![Картинка 16.10…»)
+            at = norm(clean).find(words[0]) if words else -1
+            snip = clean[max(0, at - 50): max(0, at - 50) + 180] if at > 50 else clean[:180]
             atts = NOTE_LINK_RX.findall(body)              # вложения: первая картинка — миниатюрой в списке
             img = next((u for bang, u in atts if bang), "")
             if img:
                 import urllib.parse
                 img = (f.parent / urllib.parse.unquote(img)).relative_to(self.root).as_posix()
-            snip = NOTE_LINK_RX.sub("", snip)
             out.append({"path": f.relative_to(self.root).as_posix(), "title": f.stem, "mtime": st.st_mtime, "size": st.st_size,
                         "folder": folder, "snippet": re.sub(r"\s+", " ", snip).strip(), "att": len(atts), "img": img})
         out.sort(key=lambda x: -x["mtime"])
@@ -288,6 +288,42 @@ class Workspace:
         label = out.name.replace("]", ")").replace("[", "(")
         return {"line": (f"![{label}]({link})" if kind == "image" else f"📎 [{label}]({link})"),
                 "path": out.relative_to(self.ensure().resolve()).as_posix(), "kind": kind, "name": out.name}
+
+    def note_with_files(self, title, text, files, folder="Напоминания"):
+        """Заметка с вложениями одним вызовом (напоминание с картинками: «напомни завтра в 10» + два снимка) —
+        «Заметки/<folder>/<title>.md», файлы рядом (note_attach), строки-ссылки в конце текста.
+        files — [(имя, байты)]. -> {path, att: [{kind, name, path}]}."""
+        rel = self.save_note(title, text, folder)
+        lines, att = [], []
+        for name, data in list(files)[:12]:
+            try:
+                r = self.note_attach(rel, name, data)
+            except WorkspaceError as e:
+                log.info("Вложение «%s» к заметке не легло: %s", name, e)
+                continue
+            lines.append(r["line"])
+            att.append({"kind": r["kind"], "name": r["name"], "path": r["path"]})
+        if lines:
+            p = self.safe(rel)
+            body = p.read_text(encoding="utf-8").rstrip("\n")
+            self.write(rel, body + "\n\n" + "\n".join(lines) + "\n")
+        return {"path": rel, "att": att}
+
+    def note_atts(self, rel):
+        """Вложения заметки по строкам-ссылкам её текста -> [{kind, name, path}] (пути — от корня папки ассистента)."""
+        import urllib.parse
+        try:
+            p = self.safe(rel)
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except (OSError, WorkspaceError):
+            return []
+        out = []
+        for bang, link in NOTE_LINK_RX.findall(text):
+            f = p.parent / urllib.parse.unquote(link)
+            if f.is_file():
+                out.append({"kind": "image" if bang and f.suffix.lower() in NOTE_IMG else "file", "name": f.name,
+                            "path": f.relative_to(self.ensure().resolve()).as_posix()})
+        return out
 
     def note_file(self, rel):
         """Картинка заметки для показа в студии: -> {url: data:…} (до NOTE_ATT_MAX)."""

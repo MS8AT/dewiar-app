@@ -304,7 +304,10 @@ class Close:
     # (sync.py, «note:<id>») — может позже конверта, поэтому вложения ждут её в st["natt"] до NATT_WAIT; файл кладём
     # рядом с заметкой (workspace.note_attach), строку-ссылку — в конец её текста. Уже положенные — по aid в natt_done.
     def _natt_add(self, natt):
-        files = [f for f in natt.get("files") or [] if isinstance(f, dict) and f.get("id") and f.get("key")][:12]
+        # «pc…» — вложения, которые отправил компьютер (natt_share): они уже лежат у заметки на нём; другому компьютеру
+        # их не класть — его копия заметки пришла синхронизацией вместе со строками-ссылками, вышли бы двойники
+        files = [f for f in natt.get("files") or [] if isinstance(f, dict) and f.get("id") and f.get("key")
+                 and not str(f.get("aid") or "").startswith("pc")][:12]
         if not files or not str(natt.get("note") or ""):
             return
         with self._lock:
@@ -365,6 +368,31 @@ class Close:
                 sy.soon.set()
             self.host.emit("notes_changed")
         return True
+
+    def natt_share(self, note, title, files):
+        """Фото и файлы заметки этого компьютера — своим телефонам (обратно к _natt_add; на телефоне — ownApply → nattTake):
+        каждый файл шифруется своим ключом и кладётся в /close/file себе, ключи — в конверте own {natt}. files — [(путь от
+        корня папки ассистента, Path)]; aid «pc» + отпечаток пути: телефон кладёт каждый файл один раз и не шлёт обратно.
+        -> сколько отправлено (0 — других своих устройств нет)."""
+        self._keys()
+        if not self.st.get("me") or time.time() - float(self.st.get("hello_at") or 0) > 600:
+            self.hello()
+        me = self.st.get("me") or {}
+        if not me.get("pid") or not any(d.get("dev") and d.get("dev") != self.st["dev"] for d in me.get("devs") or []):
+            return 0
+        out = []
+        for rel, path in list(files)[:12]:
+            data = path.read_bytes()
+            if not data or len(data) > FILE_MAX:
+                continue
+            fk = os.urandom(32)
+            d = self._req("POST", "/close/file", raw=CC.seal(fk, data), params={"to": me["pid"]}, timeout=120).json()
+            out.append({"id": d["id"], "key": CC.b64e(fk), "name": path.name, "size": len(data),
+                        "type": mimetypes.guess_type(path.name)[0] or "", "aid": "pc" + hashlib.sha1(str(rel).encode("utf-8")).hexdigest()[:14]})
+        if out:
+            self.own_send({"natt": {"note": str(note), "title": str(title or "")[:120], "files": out}})
+            log.info("📎 вложения заметки «%s» — своим телефонам: %d", title, len(out))
+        return len(out)
 
     # ---------- «Рефералы»: свой первый уровень — в «Близкие» с согласия ----------
     def ref_map(self, rids):

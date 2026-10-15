@@ -218,6 +218,10 @@ function renderReminders(items) {
       const meta = $(".rmeta", el); const w = document.createElement("span"); w.textContent = x.paused ? "на паузе" : x.when; meta.appendChild(w);
       if (x.repeat_text) { const b = document.createElement("span"); b.className = "rbadge"; b.textContent = "↻ " + x.repeat_text; meta.appendChild(b); }
       if (kind) { const b = document.createElement("span"); b.className = "rbadge k"; b.textContent = kind; meta.appendChild(b); }
+      if (x.att && x.note) {                          // картинки и файлы напоминания — в его заметке; нажатие открывает её
+        const b = document.createElement("button"); b.className = "rbadge ratt"; b.title = "Открыть вложения";
+        b.innerHTML = `<svg viewBox="0 0 24 24"><path d="m20.5 11.5-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l8-8"/></svg>${x.att}`;
+        b.onclick = () => ntGoto(x.note); meta.appendChild(b); }
       const act = $(".ract", el);
       const btn = (icon, title, fn) => { const b = document.createElement("button"); b.title = title; b.innerHTML = `<svg viewBox="0 0 24 24">${RI[icon]}</svg>`; b.onclick = fn; act.appendChild(b); };
       if (x.repeat) btn(x.paused ? "play" : "pause", x.paused ? "Возобновить" : "Пауза", () => core.call("reminder_update", { id: x.id, patch: { paused: !x.paused } }).then(loadReminders).catch(e => toast(e.message)));

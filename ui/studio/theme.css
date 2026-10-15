@@ -228,3 +228,4 @@ html.st-neu .cl-p.cur { background: var(--sk-glass); box-shadow: var(--press); c
 html.st-neu .cl-m { background: var(--sk-glass); box-shadow: var(--raise-s); }
 html.st-neu .cl-m.out { background: var(--brand); color: #fff; }
 html.st-neu .cl-head { box-shadow: 0 8px 14px -12px var(--nd); }
+html.st-light .ritem .rbadge.ratt { color: #3b46a6; background: rgba(90,105,230,.14); }

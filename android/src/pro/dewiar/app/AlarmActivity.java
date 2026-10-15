@@ -3,6 +3,7 @@ package pro.dewiar.app;
 import android.app.Activity;
 import android.app.NotificationManager;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -86,6 +87,9 @@ public class AlarmActivity extends Activity {
         Button made = task ? button("Сделано ✓", 0xFF2FB67E, 0xFF1F8F86) : null;
         Button ok = task ? button("Понял", 0x22FFFFFF, 0x22FFFFFF) : button("Понял", 0xFF667EEA, 0xFF764BA2);
         Button snooze = button("Отложить на 10 минут", 0x22FFFFFF, 0x22FFFFFF);
+        final String note = AlarmReceiver.noteFor(this, id);
+        Button look = note.isEmpty() ? null : button("Посмотреть вложения", 0xFF5B6CFF, 0xFF8A5BFF);
+        if (look != null) look.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { openNote(note); } });
         if (made != null) made.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { AlarmReceiver.made(AlarmActivity.this, id, title); done(); } });
         ok.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { done(); } });
         snooze.setOnClickListener(new View.OnClickListener() { @Override public void onClick(View v) { snooze(); } });
@@ -94,6 +98,7 @@ public class AlarmActivity extends Activity {
         root.addView(text);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58));
         lp.bottomMargin = dp(12);
+        if (look != null) root.addView(look, lp);
         if (made != null) root.addView(made, lp);
         root.addView(ok, lp);
         root.addView(snooze, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58)));
@@ -171,6 +176,28 @@ public class AlarmActivity extends Activity {
         finish();
     }
 
+    /** «Посмотреть вложения»: звонок смолкает, приложение открывает заметку с фото и файлами (MainActivity → pro.dewiar.NOTE →
+     *  app.js handleIntent → openNote). На заблокированном экране сначала просим снять блокировку. */
+    private void openNote(final String note) {
+        stopSound();
+        ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).cancel(id.hashCode());
+        final Intent i = new Intent(this, MainActivity.class).setAction("pro.dewiar.NOTE").putExtra("note", note)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        android.app.KeyguardManager km = (android.app.KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+        if (Build.VERSION.SDK_INT >= 26 && km != null && km.isKeyguardLocked()) {
+            try {                                       // API 26+, а собираем против 23 — отражением; без ответа: окно закроется в onStop
+                Class<?> cb = Class.forName("android.app.KeyguardManager$KeyguardDismissCallback");
+                android.app.KeyguardManager.class.getMethod("requestDismissKeyguard", Activity.class, cb).invoke(km, this, null);
+            } catch (Throwable ignored) { }
+        }
+        leaving = true;
+        startActivity(i);
+    }
+
+    private boolean leaving;                            // ушли смотреть вложения: приложение открылось поверх — окно больше не нужно
+
+    @Override protected void onStop() { super.onStop(); if (leaving) finish(); }
+
     private void snooze() {
         snoozeLater(this, id, title, kind, getIntent().getStringExtra("who"));
         done();
@@ -182,6 +209,8 @@ public class AlarmActivity extends Activity {
             JSONObject x = new JSONObject().put("id", id + "-s" + (System.currentTimeMillis() / 1000)).put("title", title == null ? "Напоминание" : title)
                     .put("kind", kind == null ? "reminder" : kind).put("repeat", "").put("at", System.currentTimeMillis() + 10 * 60000L)
                     .put("who", who == null ? "" : who);
+            String note = AlarmReceiver.noteFor(c, id);
+            if (!note.isEmpty()) x.put("note", note);                        // отложенное — с теми же фото и файлами
             Alarms.put(c, x);
         } catch (Exception ignored) { }
     }

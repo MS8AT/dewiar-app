@@ -1758,7 +1758,7 @@ async function ask(text, opts = {}) {
   const att = opts.attach || [], pics = att.filter(a => a.kind === "image"), docs = att.filter(a => a.kind === "text");
   if (pics.length) { showCard(`<div class="attshow">${pics.map(a => `<img src="${a.url}" alt="">`).join("")}</div>`); cardSticky = Date.now() + 60000; }
   turnAtt = att; turnAsk = opts.hidden ? "" : text;    // hidden — просьба приложения (сканер, сводка): без проверки
-  const fast = opts.hidden ? null : att.length ? (() => { const say = noteQuick(text, att); return say ? { say } : null; })() : await quick(text);
+  const fast = opts.hidden ? null : att.length ? (remindAttQuick(text, att) || (() => { const say = noteQuick(text, att); return say ? { say } : null; })()) : await quick(text);
   if (fast && fast.switchTo) { setState("idle"); showYou(text); switchPersona(fast.switchTo, fast.question); return; }
   if (fast) { fast.say = gfix(fast.say); history.push({ role: "user", content: text }, { role: "assistant", content: fast.say, who: persona().id, t: Date.now() }); saveH(); convAfter(); dayTurn(text, fast.say); answerLocal(fast); return; }
   if (!S.llm.base_url && loggedIn()) showBot("Подключаюсь к мозгу — секунду…", "wait");
@@ -2045,16 +2045,23 @@ function rollRepeat(at, rep) {
   return d;
 }
 
-function addAlarm(title, at, kind, repeat) {
+// что напомнить — из остатка после разбора времени: без «о том, что», «завтра», «в среду», «часов утра»
+function remindWhat(rest) {
+  return String(rest || "").replace(/^\s*(о том,? что|о том|что|про|о|об)\s+/, "").replace(/(^|\s)(сегодня|послезавтра|завтра|утром|вечером|днем|каждый день|по будням|ежедневно)(?=\s|$)/g, " ")
+    .replace(/\s+(в|во|по|каждый|каждую)\s+(понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)[а-яё]*/g, " ").replace(/\s+/g, " ").trim()
+    .replace(/^(чтобы|что)\s+/, "").replace(/(^|\s)(?:часов|часа|час|утра|вечера|дня|ночи|ровно)(?=\s|$)/g, " ").replace(/\s+/g, " ").trim();
+}
+function addAlarm(title, at, kind, repeat, note) {
   if (repeat) at = rollRepeat(at, repeat);              // «будильник по будням в 7», сказанное в 7:20, — с завтрашнего, не сразу
-  // who — кто ставил: его лицо и имя будут в уведомлении (Faces.java)
-  const x = JSON.parse(D.alarmSet(JSON.stringify({ title, at: at.getTime(), kind: kind || "reminder", repeat: repeat || "", who: S.persona || "" })) || "{}");
+  // who — кто ставил: его лицо и имя будут в уведомлении (Faces.java); note — заметка с фото и файлами напоминания
+  const x = JSON.parse(D.alarmSet(JSON.stringify(Object.assign({ title, at: at.getTime(), kind: kind || "reminder", repeat: repeat || "", who: S.persona || "" },
+    note ? { note } : {}))) || "{}");
   if (!D.exactAlarms()) toast("Чтобы будильники звонили минута в минуту, разрешите «Будильники и напоминания» в настройках.", 5000);
   needPerm(NOTIF); syncSoon();
   return x;
 }
 function alarmCard(x) {
-  return `<div class="pill"><span>${x.kind === "alarm" ? "⏰" : x.kind === "timer" ? "⏱" : "🔔"}</span><span><b>${esc(whenText(new Date(x.at)))}</b>${x.repeat ? " · " + REP_RU[x.repeat] : ""}<br>${esc(x.title)}</span><button onclick="cancelAlarm('${esc(x.id)}', this)">Отменить</button></div>`;
+  return `<div class="pill"><span>${x.kind === "alarm" ? "⏰" : x.kind === "timer" ? "⏱" : "🔔"}</span><span><b>${esc(whenText(new Date(x.at)))}</b>${x.repeat ? " · " + REP_RU[x.repeat] : ""}${x.note ? " · 📎" : ""}<br>${esc(x.title)}</span><button onclick="cancelAlarm('${esc(x.id)}', this)">Отменить</button></div>`;
 }
 window.cancelAlarm = (id, btn) => { D.alarmCancel(id); syncSoon(); if (btn) btn.closest(".pill").innerHTML = "<span>Отменено</span>"; };
 
@@ -2178,9 +2185,7 @@ async function quick(text) {
   if ((m = t.match(/^напомни(?:те)?(?: мне)?\s+(.+)$/)) || (m = t.match(/^напоминай(?: мне)?\s+(.+)$/))) {
     const w = parseWhen(m[1]);
     if (w) {
-      let what = w.rest.replace(/^\s*(о том,? что|о том|что|про|о|об)\s+/, "").replace(/(^|\s)(сегодня|послезавтра|завтра|утром|вечером|днем|каждый день|по будням|ежедневно)(?=\s|$)/g, " ")
-        .replace(/\s+(в|во|по|каждый|каждую)\s+(понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)[а-яё]*/g, " ").replace(/\s+/g, " ").trim();
-      what = what.replace(/^(чтобы|что)\s+/, "").replace(/(^|\s)(?:часов|часа|час|утра|вечера|дня|ночи|ровно)(?=\s|$)/g, " ").replace(/\s+/g, " ").trim();
+      let what = remindWhat(w.rest);
       // «напомни об этом / о ней / о последней заметке завтра в 10» — про что-то сказанное раньше (отчёт №66: вышло
       // напоминание «Этом часов утра»). Только что записанная заметка — она; иначе пусть решает модель (она видит разговор)
       if (/^(?:об?\s+)?(?:этом|это|этой|этого|ней|нем|нём|нему|ней|том|последн[а-яё]*\s+заметк[а-яё]*|заметк[а-яё]*|сказанном|нашем разговоре)(?:\s|$)/.test(what) || !what) {
@@ -2681,9 +2686,12 @@ async function runTool(name, a) {
         const r = rollRepeat(at, a.repeat);
         if (r.getTime() !== at.getTime()) { if (at < new Date(Date.now() - 60000)) moved = ` Сегодня это время уже прошло — первое напоминание ${whenText(r)}; так и скажи.`; at = r; }
       }
-      const x = addAlarm(a.text || "Напоминание", at, a.kind || "reminder", a.repeat || "");
+      // в сообщении были фото или файлы («вот скрины, напомни завтра обсудить их с Сашей») — они к напоминанию, в его заметку
+      const n = turnAtt.length ? remindNote(a.text || "", at, turnAsk, turnAtt) : null; if (n) turnAtt = [];
+      const x = addAlarm(n ? n.title : a.text || "Напоминание", at, a.kind || "reminder", a.repeat || "", n ? n.id : "");
       showCard(alarmCard(x));
-      return `Поставлено: ${whenText(at)}${a.repeat ? ", " + REP_RU[a.repeat] : ""} — ${x.title} (id ${x.id}).${moved}`;
+      return `Поставлено: ${whenText(at)}${a.repeat ? ", " + REP_RU[a.repeat] : ""} — ${x.title} (id ${x.id}).${moved}` +
+        (n ? ` Вложения из сообщения (${n.att.length}) приложены к напоминанию — в срок они откроются прямо из него; можно так и сказать.` : "");
     }
     case "calc": {
       try { const r = calcEval(String(a.expression || "")); return `${a.expression} = ${typeof r === "number" ? String(+r.toFixed(10)).replace(".", ",") : r}`; }
@@ -3119,6 +3127,36 @@ function noteQuick(text, att) {
   const pics = files.filter(f => f.type === "image").length;
   return `${persona().gender === "female" ? "Записала" : "Записал"} в заметки` + (!files.length ? "." : files.length === 1 ? (pics ? " вместе с фото." : " вместе с файлом.") : ` — вложений: ${files.length}.`);
 }
+/* Напоминание с вложениями (идея 16.10: «на завтра напоминание, и чтобы там пара скриншотов, и удобно сразу посмотреть»):
+   «напомни завтра в 10» + фото (скрепка или «Поделиться» из галереи) — заметка «Напоминания» с этими фото и напоминание
+   с note = её id. В срок окно напоминания показывает «Посмотреть вложения» (AlarmActivity → openNote). Заметка уходит
+   на компьютер синхронизацией, фото — зашифрованным каналом (noteAttShare), и там окно-будильник покажет их миниатюрами. */
+const REMIND_GENERIC = /^(?:напоминание|(?:(?:об?|про)\s+)?(?:это|этом|этой|этого|них|ней|нем|нём|него|неё|нее)|(?:(?:об?|про)\s+)?(?:эт[а-яё]+\s+)?(?:скрин[а-яё]*|фот[а-яё]*|картинк[а-яё]*|снимк[а-яё]*|файл[а-яё]*))?$/i;
+function remindNote(title, at, said, att) {
+  const files = noteAttSave(att || []); if (!files.length) return null;
+  const pics = files.filter(f => f.type === "image").length;
+  let t = String(title || "").trim();
+  if (REMIND_GENERIC.test(t)) t = pics === files.length ? "Посмотреть фото" : !pics ? "Посмотреть файлы" : "Посмотреть вложения";
+  t = t[0].toUpperCase() + t.slice(1);
+  const d = new Date(at), body = `Напоминание — ${d.getDate()} ${MON[d.getMonth()]} в ${pad(d.getHours())}:${pad(d.getMinutes())}.` + (said ? `\n\n«${String(said).trim()}»` : "");
+  const n = { id: "n" + Date.now(), title: t, text: body, time: Date.now(), folder: "Напоминания", att: files };
+  const all = notes(); all.push(n); saveNotes(all);
+  plog("info", `📎 напоминание с вложениями (${files.length}) → заметка «${clip(t, 50)}»`);
+  if (SANDBOX) SANDBOX.dev.push({ name: "save_note", args: t, t: Date.now() });
+  return n;
+}
+function remindAttQuick(text, att) {
+  const t = String(text || "").trim().replace(/^[А-ЯЁA-Z][а-яёa-z-]+\s*,\s*(?=\S)/, (m) => findPersona(m.replace(/[\s,]/g, ""), true) ? "" : m).toLowerCase().replace(/ё/g, "е");
+  const m = t.match(/^напомни(?:те)?(?: мне)?\s+(.+)$/) || t.match(/^напоминай(?: мне)?\s+(.+)$/); if (!m) return null;
+  const w = parseWhen(m[1]); if (!w) return null;
+  let what = remindWhat(w.rest);
+  const n = remindNote(what, w.at, text, att); if (!n) return null;
+  turnAtt = [];
+  const x = addAlarm(n.title, w.at, "reminder", w.repeat, n.id);
+  const pics = n.att.filter(f => f.type === "image").length, many = n.att.length > 1;
+  const tail = pics === n.att.length ? (many ? "Фото будут прямо в напоминании." : "Фото будет прямо в напоминании.") : (many ? "Файлы будут прямо в напоминании." : "Файл будет прямо в напоминании.");
+  return { say: `Напомню ${REP_RU[w.repeat] ? REP_RU[w.repeat] + ", " : ""}${whenText(w.at)}: ${n.title[0].toLowerCase() + n.title.slice(1)}. ${tail}`, card: alarmCard(x) };
+}
 /* ---------- заметка целиком: открыть, поправить, фото и файлы (лист #sh-note) ----------
    Вложения — файлы natt-<id> во внутренней памяти (data: URL; фото сжаты shrinkImage), в заметке — только их список att.
    Синхронизация уносит на компьютер текст заметки; вложения — зашифрованным каналом своих устройств (noteAttShare). */
@@ -3130,6 +3168,7 @@ const NOTE_LINK_LINE = /^[ \t]*(?:📎\s*)?!?\[[^\]\n]*\]\(Вложения\/[^)
 const noteShown = (t) => noteBody(t).replace(NOTE_LINK_LINE, "").replace(/\n{3,}/g, "\n\n").trim();
 const noteLinks = (t) => (String(t || "").match(NOTE_LINK_LINE) || []).map(x => x.trim());
 const noteAttGet = (id) => fileGet("natt-" + id) || "";
+const noteAttCount = (n) => (n.att || []).length || noteLinks(n.text).length;     // свои вложения или ссылки на вложения компьютера
 function noteAttSave(list) {
   return (list || []).filter(a => a && (a.url || a.text != null)).slice(0, 12).map((a, i) => {
     const id = "na" + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 5);
@@ -3157,6 +3196,12 @@ function undoBar(text, onUndo, ms = 8000) {
   el.innerHTML = `<span>${esc(text)}</span><button>Вернуть</button>`; el.classList.add("on");
   clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("on"), ms);
   el.querySelector("button").onclick = () => { clearTimeout(el._t); el.classList.remove("on"); onUndo(); };
+}
+// заметка напоминания: может ещё не прийти с компьютера — синхронизируем и пробуем снова
+async function openNoteSoon(id) {
+  closeSheets();
+  if (!notes().some(x => x.id === id)) { toast("Получаю заметку с вложениями…", 2500); try { await syncRun(true); } catch (e) { } }
+  if (notes().some(x => x.id === id)) openNote(id); else toast("Заметка с вложениями ещё не пришла — проверьте, что компьютер включён", 4000);
 }
 function openNote(id) { noteCur = id || ""; notePend = []; renderNote(); openSheet("#sh-note"); if (!id) setTimeout(() => $("#nt-text") && $("#nt-text").focus(), 300); }
 function renderNote() {
@@ -3424,7 +3469,9 @@ function renderDay() {
       + (ds.items.length ? `<div class="bugh">Сделано сегодня</div>` + ds.items.slice().reverse().map(x => { const d = new Date(x.at);
           return `<div class="it dn"><div class="ok">✓</div><div class="bd"><b>${esc(x.title)}</b><small>${pad(d.getHours())}:${pad(d.getMinutes())}${x.src === "pc" ? " · на компьютере" : x.src === "alarm" ? " · из напоминания" : ""}</small></div><button class="x" data-undo="${esc(x.id)}" title="Снять отметку" aria-label="Снять отметку">${X_SVG}</button></div>`; }).join("") : "")
       + (l.length ? `<div class="bugh">Напоминания</div>` + l.map(x => { const d = new Date(x.at), task = x.kind !== "alarm" && x.kind !== "timer";
-          return `<div class="it"><div class="tm">${pad(d.getHours())}:${pad(d.getMinutes())}</div><div class="bd"><b>${esc(x.title)}</b><small>${x.kind === "alarm" ? "⏰ будильник" : x.kind === "timer" ? "⏱ таймер" : "🔔 напоминание"} · ${esc(whenText(d))}${x.repeat ? " · " + REP_RU[x.repeat] : ""}</small></div>`
+          const nt = x.note ? notes().find(n => n.id === x.note) : null, img = nt && (nt.att || []).find(a => a.type === "image");
+          return `<div class="it"><div class="tm">${pad(d.getHours())}:${pad(d.getMinutes())}</div><div class="bd"${x.note ? ` data-note="${esc(x.note)}"` : ""}><b>${esc(x.title)}</b><small>${x.kind === "alarm" ? "⏰ будильник" : x.kind === "timer" ? "⏱ таймер" : "🔔 напоминание"} · ${esc(whenText(d))}${x.repeat ? " · " + REP_RU[x.repeat] : ""}${x.note ? ` · <span class="ntc">📎${nt ? noteAttCount(nt) || "" : ""}</span>` : ""}</small></div>`
+            + (img ? `<img class="nthumb rt" data-note="${esc(x.note)}" src="${noteAttGet(img.id)}" alt="">` : "")
             + (task ? `<button class="x ok" data-done="${esc(x.id)}" title="Сделано" aria-label="Сделано">✓</button>` : "") + `<button class="x" data-id="${esc(x.id)}" title="Удалить" aria-label="Удалить">${X_SVG}</button></div>`; }).join("")
       : jobs.length || ds.items.length ? "" : `<div class="empty">Напоминаний нет.<br>Скажите: «напомни завтра в 9 позвонить маме» или «будильник на 7».<br>Сделали дело — скажите «я позвонила маме, отметь» или впишите его выше.</div>`)
       + (jobs.length ? `<div class="bugh">По расписанию — делает компьютер</div>` + jobs.map(j => { const d = new Date(j.at);
@@ -3432,6 +3479,7 @@ function renderDay() {
         + `<p class="hint" style="margin:6px 4px 0">Изменить или выключить — на компьютере: студия → «Напоминания».</p>` : "")
       + (D.exactAlarms() ? "" : `<div class="card"><b>Будильники могут опаздывать</b><p class="hint">Разрешите точное время: «Будильники и напоминания».</p><button class="btn p" onclick="Dewiar.openSettings('alarms')">Разрешить</button></div>`);
     $$("[data-id]", box).forEach(b => b.onclick = () => { D.alarmCancel(b.dataset.id); syncSoon(); renderDay(); });
+    $$("[data-note]", box).forEach(b => b.onclick = () => openNoteSoon(b.dataset.note));
     $$("[data-done]", box).forEach(b => b.onclick = () => { const x = l.find(i => i.id === b.dataset.done); if (!x) return;
       if (!x.repeat) { D.alarmCancel(x.id); syncSoon(); } celebrate(Object.assign(doneAdd([{ title: x.title, rid: x.id }], "tap"), { closed: [] })); renderDay(); });
     $$("[data-undo]", box).forEach(b => b.onclick = () => { const x = doneUndo(b.dataset.undo); renderDay(); if (x) toast("Отметка снята: " + x.title, 2000); });
@@ -4456,7 +4504,8 @@ function mindPrompt() {
    Отпечаток syncHash каждой записи сравнивается с отправленным: изменилась — уходит, пропала — уходит удалением. */
 function syncSnapshot() {
   const out = {};
-  JSON.parse(D.alarms() || "[]").forEach(x => { out["reminder:" + x.id] = { text: x.title || "", at: +x.at, kind: x.kind || "reminder", repeat: repToDict(x.repeat, x.at), paused: false }; });
+  JSON.parse(D.alarms() || "[]").forEach(x => { out["reminder:" + x.id] = Object.assign({ text: x.title || "", at: +x.at, kind: x.kind || "reminder", repeat: repToDict(x.repeat, x.at), paused: false },
+    x.note ? { note: x.note } : {}); });                // note — id заметки с фото и файлами (то же, что note:<id>)
   notes().forEach(x => { out["note:" + x.id] = { title: x.title || "", text: x.text || "", folder: x.folder || "" };
     if (+x.time) Object.defineProperty(out["note:" + x.id], "t", { value: +x.time, enumerable: false }); });   // когда написана: старая копия не перебьёт новую
   money().forEach(x => { out["money:" + x.id] = { date: x.date, kind: x.kind, amount: +x.amount, currency: x.currency, category: x.category || "", note: x.note || "" }; });
@@ -4482,7 +4531,9 @@ function syncApply(it) {
     const exists = JSON.parse(D.alarms() || "[]").some(x => x.id === it.id);
     if (!d.repeat && +d.at < Date.now() - 300000 && !exists) return false;
     if (d.paused) { if (exists) D.alarmCancel(it.id); return true; }
-    D.alarmSet(JSON.stringify({ id: it.id, title: d.text || "Напоминание", at: +d.at, kind: ["alarm", "timer"].includes(d.kind) ? d.kind : "reminder", repeat: repFromDict(d.repeat) }));
+    const was = exists ? JSON.parse(D.alarms() || "[]").find(x => x.id === it.id) : null, note = "note" in d ? d.note : was && was.note;
+    D.alarmSet(JSON.stringify(Object.assign({ id: it.id, title: d.text || "Напоминание", at: +d.at, kind: ["alarm", "timer"].includes(d.kind) ? d.kind : "reminder", repeat: repFromDict(d.repeat) },
+      note ? { note } : {})));
   } else if (it.kind === "note") {
     const old = notes().find(x => x.id === it.id);
     let n = notes().filter(x => x.id !== it.id);
@@ -4583,6 +4634,7 @@ async function syncRun(manual) {
     if (got) { const s2 = syncSnapshot(); for (const k in st.idx) { const e = st.idx[k]; if (e.h === null && !e.del && !e.skip && k in s2) e.h = syncHash(s2[k]); } }
     prefSet("sync", JSON.stringify(st));
     syncStatus = { ok: true, at: Date.now(), error: "", devices: d.devices || [], counts: { sent: changes.length, got }, via: c.via };
+    if (got && qGet("natt_in").length) setTimeout(() => nattIn().catch(() => { }), 0);    // пришла заметка, которую ждали фото с компьютера
     if (got && $("#sh-day") && $("#sh-day").classList.contains("on") && document.activeElement !== $("#tk-goal")) renderDay();
     if (got && $("#sh-soul") && $("#sh-soul").classList.contains("on") && soulTab === "diary") renderSoul();
   } catch (e) {
@@ -5399,6 +5451,11 @@ function handleIntent(e) {
   else if (e.action === "say") {        // текст, которым поделилось другое приложение, — в поле ввода: отправляет сам человек
     closeSheets(); $("#typebox").classList.add("on"); $("#typed").value = String(e.text || "").slice(0, 4000); setTimeout(() => $("#typed").focus(), 300); }
   else if (e.action === "type") { closeSheets(); $("#typebox").classList.add("on"); setTimeout(() => $("#typed").focus(), 300); }
+  else if (e.action === "images") {     // фото из «Поделиться» — во вложения; подпись пишет сам человек («напомни завтра в 10»)
+    closeSheets(); attached = attached.concat((e.images || []).map((url, i) => ({ kind: "image", name: "фото " + (i + 1), url }))).slice(0, ATT_MAX);
+    renderAtts(); $("#typebox").classList.add("on"); if (e.text && !$("#typed").value) $("#typed").value = String(e.text).slice(0, 2000);
+    $("#typed").placeholder = "Например: напомни завтра в 10"; setTimeout(() => $("#typed").focus(), 300); }
+  else if (e.action === "note") openNoteSoon(e.id);           // «Посмотреть вложения» в окне напоминания
   else if (e.action === "import") { try { const m = JSON.parse(e.text); if (!cfgAsk(m)) return; applyConfig(m, ""); showBot("Настройки с компьютера применены. Мозг: " + brainName() + "."); } catch (x) { showBot("Файл настроек не подошёл: " + x.message, "err"); } }
   else if (e.action === "link" && /^dewiar:\/\/import/.test(e.url || "")) {        // QR из студии на компьютере
     try {
@@ -5477,7 +5534,41 @@ async function ownShare(want) {
   const env = DC().encryptFor(Object.assign(at ? { home: { token: S.home.token || "", at } } : { want: ["home"] }, { ts: Date.now() }), DC().b64d(k.priv), k.dev, t);
   await clReq("POST", "/close/self", { env }); return true;
 }
+/* Фото и файлы заметок с компьютера (core/close.py natt_share): конверт own {natt: {note, title, files: [{id, key, name,
+   type, size, aid}]}}. Заметка (текст) приходит синхронизацией и может опоздать — задания ждут её в «natt_in» до недели.
+   Файл: скачать из /close/file, открыть своим ключом, положить natt-<id> и в att заметки с pc (обратно не отправлять). */
+function nattTake(natt) {
+  if (!natt || !natt.note || !Array.isArray(natt.files)) return;
+  const q = qGet("natt_in").filter(x => x.note !== natt.note);
+  q.push({ id: "ni" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), note: String(natt.note), title: String(natt.title || ""), files: natt.files.slice(0, 12), ts: Date.now() });
+  qSet("natt_in", q.slice(-40)); nattIn().catch(e => plog("info", "вложения заметки с компьютера: " + e.message));
+}
+var nattInBusy = false;
+async function nattIn() {
+  if (nattInBusy || !syncCred() || !DC()) return;
+  nattInBusy = true;
+  try {
+    for (const job of qGet("natt_in")) {
+      const all = notes(), n = all.find(x => x.id === job.note);
+      if (!n) { if (Date.now() - job.ts > 7 * 864e5) qSet("natt_in", qGet("natt_in").filter(x => x.id !== job.id)); continue; }
+      const have = new Set((n.att || []).map(a => a.aid).filter(Boolean)), got = [];
+      for (const f of job.files) {
+        if (!f.id || !f.key || have.has(f.aid)) continue;
+        const d = await clReq("GET", "/close/file", null, "&b64=1&id=" + encodeURIComponent(f.id));
+        const bytes = DC().unseal(DC().b64d(f.key), Uint8Array.from(atob(d.b64), c => c.charCodeAt(0)));
+        const img = /^image\//.test(f.type || ""), id = "na" + Date.now().toString(36) + got.length + Math.random().toString(36).slice(2, 5);
+        fileSave("natt-" + id, "data:" + (f.type || "application/octet-stream") + ";base64," + clStdB64(bytes));
+        got.push({ id, name: String(f.name || "файл").slice(0, 120), type: img ? "image" : (f.type || "file"), size: bytes.length, pc: Date.now(), aid: f.aid || "" });
+      }
+      const all2 = notes(), x = all2.find(y => y.id === job.note);
+      if (x && got.length) { x.att = (x.att || []).concat(got); fileSave("notes.json", JSON.stringify(all2)); }
+      qSet("natt_in", qGet("natt_in").filter(y => y.id !== job.id));
+      if (got.length) { plog("info", `📎 с компьютера к заметке «${clip(job.title, 40)}»: ${got.length}`); if ($("#sh-day.on")) renderDay(); }
+    }
+  } finally { nattInBusy = false; }
+}
 function ownApply(body) {
+  if (body && body.natt) nattTake(body.natt);
   if (body && body.want && (S.home.at || S.home.token)) setTimeout(() => ownShare().catch(() => { }), 0);   // другое моё устройство просит
   const h = body && body.home; if (!h || typeof h !== "object") return;
   const tok = String(h.token || ""), at = +h.at || 0;

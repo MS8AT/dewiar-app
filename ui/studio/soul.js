@@ -144,4 +144,5 @@ $("#f-move").onclick = async () => {
   try { const r = await core.call("ws_set_path", { path: p }); toast("Папка: " + r); fCur = ""; loadFolder(); } catch (e) { toast(e.message); }
 };
 // студия открыта на нужном разделе: ui/app.py добавляет #раздел к адресу (open_settings("calendar") и т. п.)
-if (location.hash) { const b = $(`nav button[data-p="${location.hash.slice(1)}"]`); if (b) b.click(); }
+// после всех скриптов студии: раньше раздел «Заметки» открывался пустым — notes.js ещё не загрузился (loadNotesPage is not defined)
+document.addEventListener("DOMContentLoaded", () => { if (location.hash) { const b = $(`nav button[data-p="${location.hash.slice(1)}"]`); if (b) b.click(); } });

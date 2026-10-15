@@ -142,7 +142,8 @@ public class MainActivity extends Activity implements Net.Sink {
         if (pageReady && pending != null) { JSONObject p = pending; pending = null; event("intent", p); }   // страница уже открыта — сразу событием
     }
 
-    /** Намерение → pending {action: type | listen | link | import | say}: TYPE — ярлык «написать»; ASSIST/VOICE_COMMAND/LISTEN —
+    /** Намерение → pending {action: type | listen | link | import | say | images | note}: images — фото из «Поделиться»,
+     *  note — «Посмотреть вложения» в окне напоминания; TYPE — ярлык «написать»; ASSIST/VOICE_COMMAND/LISTEN —
      *  кнопка помощника и ярлык «слушать»; dewiar:// — ссылка (QR из студии на компьютере); открытый файл или текст,
      *  похожий на JSON, — импорт настроек с компьютера;
      *  прочий текст из «Поделиться» — сказать ассистенту. */
@@ -152,6 +153,8 @@ public class MainActivity extends Activity implements Net.Sink {
             String a = i.getAction();
             if ("pro.dewiar.TYPE".equals(a)) {
                 pending = new JSONObject().put("action", "type");
+            } else if ("pro.dewiar.NOTE".equals(a)) {               // «Посмотреть вложения» в окне напоминания (AlarmActivity)
+                pending = new JSONObject().put("action", "note").put("id", i.getStringExtra("note"));
             } else if ("pro.dewiar.CLOSE".equals(a)) {              // уведомление «Близких» (CloseWatch) — открыть переписку
                 pending = new JSONObject().put("action", "close");
             } else if ("pro.dewiar.CLOSE_CALL".equals(a)) {         // звонок близкого из уведомления (CloseLive): открыть, ответить
@@ -163,6 +166,17 @@ public class MainActivity extends Activity implements Net.Sink {
                 Uri u = i.getData();
                 if ("dewiar".equals(u.getScheme())) pending = new JSONObject().put("action", "link").put("url", u.toString());
                 else if ("content".equals(u.getScheme())) pending = new JSONObject().put("action", "import").put("text", read(u));   // файл настроек, выбранный человеком
+            } else if ((Intent.ACTION_SEND.equals(a) || Intent.ACTION_SEND_MULTIPLE.equals(a)) && String.valueOf(i.getType()).startsWith("image/")) {
+                // снимки и фото из «Поделиться»: уменьшенные (до 1600 px, JPEG) — во вложения поля ввода
+                java.util.ArrayList<Uri> us = new java.util.ArrayList<>();
+                if (Intent.ACTION_SEND_MULTIPLE.equals(a)) {
+                    java.util.ArrayList<Uri> l = i.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+                    if (l != null) us.addAll(l);
+                } else { Uri st = i.getParcelableExtra(Intent.EXTRA_STREAM); if (st != null) us.add(st); }
+                org.json.JSONArray imgs = new org.json.JSONArray();
+                for (Uri u : us) { if (imgs.length() >= 4) break; String d = image(u); if (!d.isEmpty()) imgs.put(d); }
+                String t = i.getStringExtra(Intent.EXTRA_TEXT);
+                if (imgs.length() > 0) pending = new JSONObject().put("action", "images").put("images", imgs).put("text", t == null ? "" : t);
             } else if (Intent.ACTION_SEND.equals(a)) {
                 Uri st = i.getParcelableExtra(Intent.EXTRA_STREAM);
                 String t = i.getStringExtra(Intent.EXTRA_TEXT);
@@ -171,6 +185,30 @@ public class MainActivity extends Activity implements Net.Sink {
                 else if (t != null) pending = new JSONObject().put("action", "say").put("text", t);
             }
         } catch (Throwable ignored) { }
+    }
+
+    /** Картинка по адресу «Поделиться» -> data:image/jpeg;base64 (длинная сторона до 1600 px) или "" — не открылась. */
+    private String image(Uri u) {
+        try {
+            android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            try (InputStream in = getContentResolver().openInputStream(u)) { android.graphics.BitmapFactory.decodeStream(in, null, o); }
+            int side = Math.max(o.outWidth, o.outHeight), k = 1;
+            while (side / (k * 2) >= 1600) k *= 2;
+            o = new android.graphics.BitmapFactory.Options();
+            o.inSampleSize = k;
+            android.graphics.Bitmap bm;
+            try (InputStream in = getContentResolver().openInputStream(u)) { bm = android.graphics.BitmapFactory.decodeStream(in, null, o); }
+            if (bm == null) return "";
+            int m = Math.max(bm.getWidth(), bm.getHeight());
+            if (m > 1600) {
+                float f = 1600f / m;
+                bm = android.graphics.Bitmap.createScaledBitmap(bm, Math.round(bm.getWidth() * f), Math.round(bm.getHeight() * f), true);
+            }
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            bm.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out);
+            return "data:image/jpeg;base64," + android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP);
+        } catch (Throwable e) { return ""; }
     }
 
     private String read(Uri u) {

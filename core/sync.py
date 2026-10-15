@@ -109,11 +109,20 @@ class Sync:
     def _notes_root(self):
         return self.host.workspace.ensure() / NOTES
 
+    def note_sid(self, rel):
+        """Путь заметки в папке ассистента («Заметки/…») -> её id синхронизации (тот же, что в snapshot: из map или
+        отпечаток пути) — им её знает телефон."""
+        sub = str(rel)[len(NOTES) + 1:] if str(rel).startswith(NOTES + "/") else str(rel)
+        by_path = {v: k for k, v in self.state["map"].items()}
+        return by_path.get(sub) or "f" + hashlib.sha1(sub.encode("utf-8")).hexdigest()[:12]
+
     def snapshot(self):
         """-> {«вид:id»: данные}. Для заметок и хранилища ещё «ключ#t» — время правки файла (мс) и, если файл не менялся
         с прошлого раза, данные None и «ключ#h» — отпечаток из кэша (сам текст читаем, только когда его надо отправить).
         Попутно обновляет map и кэш mt. Чего нет в снимке — уйдёт удалением, см. шапку."""
         out = {}
+        root = self._notes_root()
+        by_path = {v: k for k, v in self.state["map"].items()}
         for r in list(self.host.reminders.items):
             if r.get("kind") == "job":
                 continue
@@ -123,12 +132,16 @@ class Sync:
                 continue
             d = {"text": r.get("text", ""), "at": at, "kind": r.get("kind") or "reminder",
                  "repeat": r.get("repeat") or None, "paused": bool(r.get("paused"))}
+            nid = r.get("note_id") or ""
+            if r.get("note") and str(r["note"]).startswith(NOTES + "/"):     # заметка с картинками — её id, как у самой заметки
+                rel = str(r["note"])[len(NOTES) + 1:]
+                nid = by_path.get(rel) or "f" + hashlib.sha1(rel.encode("utf-8")).hexdigest()[:12]
+            if nid:
+                d["note"] = nid
             out["reminder:" + r["id"]] = d
         for m in list(self.host.money.items):
             d = {k: m.get(k) for k in ("date", "kind", "amount", "currency", "category", "note")}
             out["money:" + m["id"]] = d
-        root = self._notes_root()
-        by_path = {v: k for k, v in self.state["map"].items()}
         cache = self.state.setdefault("mt", {})
         seen_paths = set()
         if root.is_dir():
@@ -276,7 +289,7 @@ class Sync:
                 return False                               # разовое и уже прошло — звенеть задним числом незачем
             self.host.reminders.upsert({"id": iid, "at": at.isoformat(timespec="seconds"), "text": d.get("text") or "Напоминание",
                                         "repeat": d.get("repeat") or None, "kind": d.get("kind") or "reminder",
-                                        "paused": bool(d.get("paused"))})
+                                        "paused": bool(d.get("paused")), **({"note_id": d.get("note") or ""} if "note" in d else {})})
         elif kind == "money":
             if deleted:
                 self.host.money.delete(iid)

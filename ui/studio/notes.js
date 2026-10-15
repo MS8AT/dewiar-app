@@ -139,6 +139,13 @@ async function ntNew() {
     setTimeout(() => { const t = $("#nt-title"); if (t) { t.focus(); t.select(); } }, 80); } catch (e) { toast(e.message); }
 }
 function loadNotesPage() { ntLoad(); setTimeout(() => $("#nt-q").focus(), 60); }
+/* открыть конкретную заметку (окно напоминания с картинками → ui/app.py open_note, или адрес ?note=…) */
+async function ntGoto(path) {
+  await ntFlush(); NT.cur = path; NT.doc = null; NT.edit = false;        // до перехода: список не откроет первую заметку вместо этой
+  const b = $('nav button[data-p="notes"]'); if (b && !b.classList.contains("cur")) b.click();
+  $("#nt-q").value = ""; await ntOpen(path); ntLoad();
+}
+window.ntGoto = ntGoto;
 $("#nt-q").oninput = () => { clearTimeout(NT.t); NT.t = setTimeout(ntLoad, 180); };
 $("#nt-add").onclick = ntNew;
 document.addEventListener("paste", (e) => {                 // снимок из буфера — к открытой на правку заметке

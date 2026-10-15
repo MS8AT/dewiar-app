@@ -63,6 +63,13 @@ def _thumb(data, side=320):
 REF_RX = re.compile(r"^\s*(?:об?\s+)?(?:этом|это|этой|этого|ней|нем|нём|том|последн\w*\s+заметк\w*|заметк\w*|сказанном)\s*[.!]?\s*$", re.I)
 
 
+# «напомни завтра про это / про них / про эти скрины» с картинками — название напоминания придумаем сами
+ATT_REF_RX = re.compile(r"^\s*(?:про|насч[её]т|о|об)\s+(?:это|этом|них|неё|нее|него|эт\w+(?:\s+(?:скрин\w*|картинк\w*|снимк\w*|фот\w*))?|"
+                        r"скрин\w*|картинк\w*|снимк\w*)\s*[.!]?\s*$", re.I)
+# вложения вопроса в тексте для модели (_attach_files): «… сохранена: Входящие/…]» / «… сохранён в папке ассистента: …]»
+ATT_PATH_RX = re.compile(r"сохран[её]на?(?: в папке ассистента)?:\s*(Входящие/[^\]\n;]+?)\s*(?=\]|;)")
+
+
 class AnswerMixin:
     # ---------- ответ ----------
 
@@ -806,6 +813,60 @@ class AnswerMixin:
             finally:
                 self._probing.discard(key)
         threading.Thread(target=run, name="probe-tools", daemon=True).start()
+
+    def _reminder_with_files(self, text, files, via=None):
+        """«Напомни завтра в 10» + снимки или файлы (вставлены из буфера, перетащены) — заметка с ними в «Заметки/
+        Напоминания» и напоминание со ссылкой на неё (note): в срок окно-будильник покажет картинки, а телефон откроет
+        заметку. Без модели — сразу. -> True, если это было такое напоминание."""
+        import base64
+        from when import parse as parse_when
+        r = parse_when(text)
+        if not r:
+            return False
+        data = []
+        for f in files[:12]:
+            raw = str(f.get("b64") or "")
+            try:
+                b = base64.b64decode(raw.split(",", 1)[1] if raw.startswith("data:") else raw)
+            except ValueError:
+                continue
+            if b:
+                data.append((Path(str(f.get("name") or "файл")).name or "файл", b))
+        if not data:
+            return False
+        self._reminder_note_from(r, text, data)
+        r["said"] = text + "\n\nВложения:\n" + "\n".join(f"[{n}]" for n, _ in data)
+        self._set_reminder_fast(r, via)
+        return True
+
+    def _reminder_note_from(self, r, said, data, chat=True):
+        """Напоминание r (when.parse) и вложения [(имя, байты)] -> заметка; r дополняется note (путь), text (если
+        «напомни завтра в 10» без слов — «Посмотреть картинки») и att; лента «Чата» получает миниатюры."""
+        from workspace import NOTE_IMG
+        pics = sum(1 for n, _ in data if Path(n).suffix.lower() in NOTE_IMG)
+        title = (r.get("text") or "").strip()
+        if not title or title in ("Напоминание", "Будильник", "Таймер") or REF_RX.match(title) or ATT_REF_RX.match(title):
+            title = "Посмотреть картинки" if pics == len(data) else "Посмотреть файлы" if not pics else "Посмотреть вложения"
+        at = r["at"]
+        months = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря")
+        said0 = said.split("\n\nВложения:")[0].strip()
+        body = f"Напоминание — {at.day} {months[at.month - 1]} в {at:%H:%M}." + (f"\n\n«{said0}»" if said0 else "")
+        note = self.workspace.note_with_files(title, body, data)
+        saved = []
+        for f in note["att"]:
+            x = dict(f)
+            if f["kind"] == "image":
+                try:
+                    x["thumb"] = _thumb(self.workspace.safe(f["path"]).read_bytes())
+                except OSError:
+                    pass
+            saved.append(x)
+        if chat:
+            self._chat_att = (time.monotonic(), saved)
+        r.update(text=title, note=note["path"], att=note["att"])
+        self.note_files_out(note["path"], [f["path"] for f in note["att"]])       # и на свой телефон — там та же заметка
+        log.info("📎 Напоминание с вложениями (%d) → %s", len(note["att"]), note["path"])
+        return note
 
     def _attach_files(self, text, files, images):
         """Файлы к вопросу: сохраняем во «Входящие» папки ассистента, текст документов — в вопрос модели,

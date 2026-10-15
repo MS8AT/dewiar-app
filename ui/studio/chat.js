@@ -132,8 +132,18 @@ function chatSend() {
 $("#ch-file").onchange = (e) => { chatAddFiles([...e.target.files]); e.target.value = ""; };
 $("#ch-text").addEventListener("paste", (e) => {
   const files = [...(e.clipboardData && e.clipboardData.items || [])].filter(x => x.kind === "file").map(x => x.getAsFile()).filter(Boolean);
-  if (files.length) { e.preventDefault(); chatAddFiles(files); }
+  if (files.length) { e.preventDefault(); chatAddFiles(files); return; }
+  // WebKitGTK часто не отдаёт странице картинку из буфера — спрашиваем окно (Api.clipboard_image, как в виджете)
+  if (e.clipboardData && !e.clipboardData.getData("text")) { e.preventDefault(); chatClipImage(); }
 });
+async function chatClipImage() {
+  const a = window.api && window.api(); let url = "";
+  try { url = a && a.clipboard_image ? await a.clipboard_image() : ""; } catch (e) {}
+  if (!url) { $("#ch-res").textContent = "В буфере обмена нет картинки — скопируйте снимок и вставьте ещё раз."; return; }
+  chAtts.push({ kind: "image", name: "Снимок " + new Date().toLocaleTimeString("ru-RU").replace(/:/g, "-") + (/^data:image\/png/.test(url) ? ".png" : ".jpg"), b64: url, url,
+                size: Math.round(url.length * 0.75) });
+  chAtts = chAtts.slice(0, 10); chatAttsRender();
+}
 { const box = $("#ch-box");
   box.addEventListener("dragover", (e) => { if ([...(e.dataTransfer.types || [])].includes("Files")) { e.preventDefault(); box.classList.add("over"); } });
   box.addEventListener("dragleave", (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove("over"); });

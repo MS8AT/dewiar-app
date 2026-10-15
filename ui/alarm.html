@@ -7,7 +7,7 @@
 <style>
   /* Окно-будильник: по центру экрана, поверх всех окон. Звонит ядро (слышно и без окна), окно — чтобы заметить
      и ответить одним нажатием: «Готово» или «Отложить». Enter, пробел, Esc — готово; 1–4 — отложить.
-     Открывает его ui/app.py (show_alarm): напоминание приходит в адресе (id, text, title, rep, late, at), окно без
+     Открывает его ui/app.py (show_alarm): напоминание приходит в адресе (id, text, title, rep, late, at, att), окно без
      рамки, а скругление 26px совпадает с формой окна ALARM_RADIUS там. Закрывает — api().close_alarm. */
   :root { --a1: #FFB547; --a2: #FF6A88; --ink: #F6F4FF; --muted: #B9B5CF; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -55,6 +55,27 @@
        background: rgba(255,255,255,.06); color: var(--muted); font-size: 16px; line-height: 30px; }
   #x:hover { background: rgba(255,255,255,.14); color: #fff; }
   button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  /* вложения напоминания (картинки, файлы из заметки — core reminder_files): нажатие — открыть большой и выключить звонок */
+  #att { width: 100%; margin-top: 14px; display: none; }
+  .has-att #att { display: block; }
+  .has-att .bell { width: 84px; height: 84px; margin-bottom: 8px; }
+  .has-att .bell .core { inset: 14px; } .has-att .bell svg { width: 32px; height: 32px; }
+  .has-att #time { font-size: 36px; margin: 4px 0 2px; }
+  .has-att #text { font-size: 20px; -webkit-line-clamp: 2; }
+  #pics { display: flex; gap: 8px; justify-content: center; }
+  #pics button { position: relative; flex: 0 1 128px; height: 86px; padding: 0; border-radius: 12px; cursor: zoom-in; overflow: hidden;
+                 border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06) center/cover no-repeat;
+                 transition: transform .12s, border-color .12s; }
+  #pics button:hover { transform: translateY(-1px); border-color: rgba(255,190,120,.6); }
+  #pics button.file { cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+                      color: var(--muted); font: 600 11.5px/1.2 "Manrope", sans-serif; padding: 6px; }
+  #pics button.file svg { width: 22px; height: 22px; stroke: var(--a1); fill: none; stroke-width: 1.7; }
+  #pics button.file span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #pics .more { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(12,10,18,.62);
+                color: #fff; font: 700 18px/1 "Unbounded", sans-serif; }
+  #all { display: block; margin: 8px auto 0; border: 0; background: none; cursor: pointer; color: var(--a1);
+         font: 600 13px/1.3 "Manrope", sans-serif; padding: 2px 6px; border-radius: 6px; }
+  #all:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -67,6 +88,7 @@
   <div id="time">--:--</div>
   <div id="text"></div>
   <div id="sub"></div>
+  <div id="att"><div id="pics"></div><button id="all"></button></div>
   <div class="grow"></div>
   <button id="ok">Готово</button>
   <div id="snooze">
@@ -80,7 +102,8 @@ const $ = (id) => document.getElementById(id);
 const q = new URLSearchParams(location.search);
 // A — текущее напоминание: сначала из адреса, затем уточняется у ядра (alarm_get) и событиями alarm
 let A = { id: q.get("id") || "", text: q.get("text") || "", title: q.get("title") || "Напоминание", repeat_text: q.get("rep") || "",
-          late: q.get("late") === "1", at: q.get("at") || "" };
+          late: q.get("late") === "1", at: q.get("at") || "", att: +(q.get("att") || 0) };
+let ATT = { id: "", note: "", files: [] };
 let finished = false;
 const pad = (n) => String(n).padStart(2, "0");
 function tick() { const d = new Date(); $("time").textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
@@ -93,7 +116,46 @@ function render() {
   if (A.repeat_text) parts.push("повтор: " + A.repeat_text);
   $("sub").textContent = parts.join(" · ");
   document.title = `⏰ ${$("text").textContent}`;
+  loadAtt();
 }
+const esc = (t) => String(t || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const plural = (n, a, b, c) => n % 10 === 1 && n % 100 !== 11 ? a : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? b : c;
+// картинки и файлы напоминания: до четырёх плиток, на последней «+N»; нажатие — звонок выключается, файл открывается
+async function loadAtt() {
+  const id = A.id;
+  if (!id || ATT.id === id || ATT.busy === id) return;
+  ATT.busy = id;
+  let r = null;
+  try { r = await core.call("reminder_files", { id }); } catch (e) { ATT.busy = ""; return; }   // ядро ещё не на связи — повторим по hello
+  ATT.busy = "";
+  if (A.id !== id) return;
+  ATT = { id, note: r && r.note || "", files: r && r.files || [] };
+  if (!ATT.files.length) { $("wrap").classList.remove("has-att"); return; }
+  r = ATT;
+  const show = r.files.slice(0, 4), rest = r.files.length - show.length;
+  $("pics").innerHTML = show.map((f, i) => f.thumb
+    ? `<button data-i="${i}" title="${esc(f.name)}" style="background-image:url('${f.thumb}')">${i === 3 && rest > 0 ? `<span class="more">+${rest + 1}</span>` : ""}</button>`
+    : `<button class="file" data-i="${i}" title="${esc(f.name)}"><svg viewBox="0 0 24 24"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg><span>${esc(f.name)}</span></button>`).join("");
+  document.querySelectorAll("#pics button").forEach(b => b.onclick = () => {
+    const i = +b.dataset.i; openAtt(i === 3 && rest > 0 ? null : ATT.files[i]); });
+  const n = r.files.length, pics = r.files.filter(f => f.thumb).length;
+  $("all").textContent = pics === n ? `Открыть ${n > 1 ? `все ${n} ${plural(n, "картинку", "картинки", "картинок")}` : "картинку"} в заметке`
+    : `Открыть заметку — ${n} ${plural(n, "вложение", "вложения", "вложений")}`;
+  $("hint").textContent = pics ? "Нажмите на картинку — откроется во весь экран" : "Нажмите на файл — откроется в своей программе";
+  $("wrap").classList.add("has-att");
+}
+// посмотреть вложение: звонок выключаем (человек уже здесь), окно закрываем — иначе оно поверх просмотра
+async function openAtt(f) {
+  if (!finished && !$("wrap").classList.contains("missed")) { try { await core.call("alarm_ack", { id: A.id }); } catch (e) {} }
+  finished = true;
+  const a = api();
+  try {
+    if (f) await core.call("ws_open", { path: f.path });
+    else if (a && a.open_note) a.open_note(ATT.note);
+  } catch (e) {}
+  close(150);
+}
+$("all").onclick = () => openAtt(null);
 // окно без рамки закрывает программа; в браузере (нет pywebview) — window.close
 function close(after = 0) { setTimeout(() => { const a = api(); if (a && a.close_alarm) a.close_alarm(A.id); else window.close(); }, after); }
 function showDone(msg) {
@@ -112,7 +174,7 @@ async function snooze(m) {
   try {
     const r = await core.call("alarm_snooze", { id: A.id, minutes: m });
     if (r) when = r.when;
-    else { const x = await core.call("reminder_add", { text: A.text, in_minutes: m }); when = x.when; }   // звонок уже не звенит (пропущен) — откладывать нечего, ставим новое напоминание
+    else { const x = await core.call("reminder_add", { text: A.text, in_minutes: m, from: A.id }); when = x.when; }   // звонок уже не звенит (пропущен) — откладывать нечего, ставим новое напоминание
   } catch (e) {}
   showDone(when ? `Напомню ${when}` : "");
 }
@@ -125,7 +187,7 @@ document.addEventListener("keydown", (e) => {
 core.on("hello", async () => {
   try { const a = await core.call("alarm_get"); if (a && (!A.id || a.id === A.id)) { A = Object.assign(A, a); render(); } } catch (e) {}
 });
-core.on("alarm", (e) => { A = { id: e.id, text: e.text, title: e.title, repeat_text: e.repeat_text, late: e.late, at: e.at };
+core.on("alarm", (e) => { A = { id: e.id, text: e.text, title: e.title, repeat_text: e.repeat_text, late: e.late, at: e.at, att: e.att || 0 };
   finished = false; $("wrap").className = ""; $("snooze").style.visibility = ""; $("ok").style.visibility = ""; render(); });
 // звонок завершился не отсюда (голосом, в другом окне или сам) — показать итог
 core.on("alarm_done", (e) => {

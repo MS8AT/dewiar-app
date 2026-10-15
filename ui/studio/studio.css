@@ -614,6 +614,10 @@ input[type=radio]:checked::after { content: ""; width: 8px; height: 8px; border-
 .ritem .rmeta { font-size: 12.5px; color: var(--muted); margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; }
 .ritem .rbadge { padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.1); color: #fff; }
 .ritem .rbadge.k { background: rgba(255,181,71,.16); color: #FFC978; }
+.ritem .rbadge.ratt { display: inline-flex; align-items: center; gap: 4px; border: 0; cursor: pointer; font: inherit;
+                      background: rgba(123,140,255,.18); color: #C9D0FF; }
+.ritem .rbadge.ratt:hover { background: rgba(123,140,255,.32); }
+.ritem .rbadge.ratt svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .ritem .ract { display: flex; gap: 6px; opacity: .65; transition: opacity .15s; }
 .ritem:hover .ract { opacity: 1; }
 .ritem .ract button { width: 34px; height: 34px; border-radius: 10px; border: 0; cursor: pointer; background: rgba(255,255,255,.07); color: var(--ink); display: grid; place-items: center; }

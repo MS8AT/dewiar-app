@@ -477,6 +477,7 @@ core.on("hello", d => {
   else if (/^dewiar:\/\/ref/.test(q.get("address") || "")) {         // приглашение друга (dewiar://ref?c=КОД)
     $('nav button[data-p="dw"]').click(); setTimeout(() => { $("#dw-ref-use").open = true; $("#dw-ref-code").value = (/[?&]c=([A-Za-z0-9]+)/.exec(q.get("address")) || [])[1] || ""; }, 1200); }
   else if (q.get("address")) { $("#c-addr").value = q.get("address"); preview({ address: q.get("address") }); }
+  else if (q.get("note") && !DW.noteShown) { DW.noteShown = true; ntGoto(q.get("note")); }    // заметка из окна напоминания
   else if (!S.llm.active && !location.hash) $('nav button[data-p="brain"]').click();
   wlcBoot(d);
 })

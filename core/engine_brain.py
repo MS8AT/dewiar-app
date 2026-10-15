@@ -709,7 +709,7 @@ class BrainMixin:
     def _set_reminder_fast(self, r, via=None):
         """«Напомни…» разобрали сами — ставим без модели и подтверждаем одной фразой."""
         from when import describe_repeat, human
-        item = self.reminders.add(r["at"], r["text"], r["repeat"], r["kind"])
+        item = self.reminders.add(r["at"], r["text"], r["repeat"], r["kind"], extra={"note": r.get("note")})
         rep = describe_repeat(r["repeat"])
         if r["kind"] == "timer":
             msg = f"Таймер — {human(r['at'])}."
@@ -718,6 +718,11 @@ class BrainMixin:
         else:
             msg = (f"Хорошо, буду напоминать {rep}: {r['text'].rstrip('.')}. Первый раз — {human(r['at'])}." if rep else
                    f"Хорошо, напомню {human(r['at'])}: {r['text'].rstrip('.')}.")
+        if r.get("att"):                                  # напоминание с картинками (engine_answer._reminder_with_files)
+            pics = all(f["kind"] == "image" for f in r["att"])
+            many = len(r["att"]) > 1
+            msg += (" Картинки будут прямо в напоминании." if pics and many else " Картинка будет прямо в напоминании." if pics
+                    else " Файлы будут прямо в напоминании." if many else " Файл будет прямо в напоминании.")
         log.info("⏰ Поставлено (без модели): %s — %s %s", r["text"], r["at"], rep)
         self.emit("reminder_set", item=self._reminder_public(item), text=msg)
         self._say_quick(msg, r.get("said", r["text"]), via)

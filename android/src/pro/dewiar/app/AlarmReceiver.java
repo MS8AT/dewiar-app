@@ -26,6 +26,7 @@ public class AlarmReceiver extends BroadcastReceiver {
             return;
         }
         JSONObject x = Alarms.fired(c, id);           // null — в списке уже нет: показываем по данным самого сигнала
+        if (x != null && !x.optString("note", "").isEmpty()) noteSet(c, id, x.optString("note", ""));
         String title = x != null ? x.optString("title", "Напоминание") : in.getStringExtra("title");
         String kind = x != null ? x.optString("kind", "reminder") : "reminder";
         show(c, id, title == null ? "Напоминание" : title, kind, x != null ? x.optString("who", "") : "");
@@ -49,7 +50,7 @@ public class AlarmReceiver extends BroadcastReceiver {
         if (loud && android.os.Build.VERSION.SDK_INT < 26) b.setSound(Sounds.uri(c, Sounds.current(c)), Sounds.attrs());   // до Android 8 звук — у самого уведомления
         String name = Faces.dress(c, b, who);
         // с обликом: заголовок — имя персонажа, вид сигнала — значком в тексте и подписью в шапке (так читается и на часах)
-        String text = name.isEmpty() ? title : head.substring(0, head.indexOf(' ')) + " " + title;
+        String text = (name.isEmpty() ? title : head.substring(0, head.indexOf(' ')) + " " + title) + (noteFor(c, id).isEmpty() ? "" : " 📎");
         b.setContentTitle(name.isEmpty() ? head : name)
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text))
@@ -71,6 +72,26 @@ public class AlarmReceiver extends BroadcastReceiver {
         if (!loud) return;
         // приложение на экране — окно сразу; из фона Android 10+ окно не откроет — тогда остаётся уведомление
         try { c.startActivity(full); } catch (Throwable ignored) { }
+    }
+
+    /** Напоминание с вложениями (app.js addAlarm(…, note)): id заметки с фото и файлами. Разовое при срабатывании уходит из
+     *  списка Alarms, поэтому связь «напоминание → заметка» живёт отдельно (до 40 последних) — для окна (кнопка «Посмотреть
+     *  вложения») и для «Отложить» (отложенное — с теми же вложениями). */
+    static synchronized void noteSet(Context c, String id, String note) {
+        try {
+            android.content.SharedPreferences p = c.getSharedPreferences("alarms", Context.MODE_PRIVATE);
+            JSONObject m;
+            try { m = new JSONObject(p.getString("notes", "{}")); } catch (Exception e) { m = new JSONObject(); }
+            m.put(id, note);
+            while (m.length() > 40) m.remove(m.keys().next());
+            p.edit().putString("notes", m.toString()).apply();
+        } catch (Exception ignored) { }
+    }
+
+    static String noteFor(Context c, String id) {
+        try {
+            return new JSONObject(c.getSharedPreferences("alarms", Context.MODE_PRIVATE).getString("notes", "{}")).optString(id, "");
+        } catch (Exception e) { return ""; }
     }
 
     /** «Сделано ✓» — дело в очередь done_inbox (SharedPreferences "dewiar"): приложение заберёт её в журнал дел

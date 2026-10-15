@@ -64,6 +64,13 @@
                 <data android:mimeType="application/json"/>
                 <data android:mimeType="application/octet-stream"/>
             </intent-filter>
+            <!-- снимки и фото из «Поделиться» — во вложения поля ввода (напомнить о них, записать, спросить) -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
+            </intent-filter>
         </activity>
         <activity android:name=".HtmlView" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden|uiMode|screenLayout|smallestScreenSize"/>
         <activity android:name=".AlarmActivity" android:exported="false" android:showWhenLocked="true" android:turnScreenOn="true"

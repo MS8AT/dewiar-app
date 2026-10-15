@@ -13,6 +13,20 @@ NOTE_ASK_RX = re.compile(r"заметк|запиш|запис|сохран|за�
 QUERY_TOOLS = ("find_notes", "web_search", "show_images")     # без query — бессмысленны: тему берём из просьбы
 
 
+def _att_word(att):
+    """[{kind…}] -> «2 картинки», «картинка и файл» — для уведомлений."""
+    def plural(n, one, few, many):
+        return one if n % 10 == 1 and n % 100 != 11 else few if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else many
+    pics = sum(1 for f in att if f["kind"] == "image")
+    files = len(att) - pics
+    parts = []
+    if pics:
+        parts.append(f"{pics} " + plural(pics, "картинка", "картинки", "картинок"))
+    if files:
+        parts.append(f"{files} " + plural(files, "файл", "файла", "файлов"))
+    return " и ".join(parts)
+
+
 class ToolsMixin:
     # ---------- инструменты ----------
 
@@ -58,6 +72,8 @@ class ToolsMixin:
         try:
             res = self.toolbox.run(name, args)
             turn.tools_ok = getattr(turn, "tools_ok", []) + [name]
+            if name == "set_reminder" and asked and "\n\nВложения:" in asked and isinstance(res, str):
+                res = self._reminder_link_files(turn, res)
             out = res["text"] if isinstance(res, dict) else str(res)
             self.emit("tool", name=name, title=title, status="done", detail=detail, result=out[:1500])
             log.info("   ↳ %s", (res["text"] if isinstance(res, dict) else res)[:160].replace("\n", " "))
@@ -69,6 +85,40 @@ class ToolsMixin:
             log.exception("инструмент %s", name)
             self.emit("tool", name=name, title=title, status="error", error=str(e))
             return f"Ошибка: {e}"
+
+    def _reminder_link_files(self, turn, res):
+        """Модель поставила напоминание в ответ на сообщение с картинками или файлами («вот скрины, напомни завтра
+        обсудить их с Сашей») — те же вложения кладём в заметку и привязываем к напоминанию: в срок они в окне.
+        -> результат инструмента с пометкой для модели."""
+        from engine_answer import ATT_PATH_RX, REF_RX
+        m = re.search(r"\(id ([0-9a-f]+)\)", res)
+        item = self.reminders.get(m.group(1)) if m else None
+        if not item:
+            return res
+        note = getattr(turn, "att_note", None)
+        if note is None:
+            data = []
+            for rel in dict.fromkeys(ATT_PATH_RX.findall(turn.asked.split("\n\nВложения:", 1)[1])):
+                try:
+                    data.append((Path(rel).name, self.workspace.safe(rel).read_bytes()))
+                except Exception:  # noqa: BLE001
+                    continue
+            if not data:
+                return res
+            r = {"text": item["text"], "at": datetime.fromisoformat(item["at"])}
+            try:
+                note = self._reminder_note_from(r, turn.asked, data, chat=False)
+            except Exception as e:  # noqa: BLE001
+                log.info("Вложения к напоминанию не легли: %s", e)
+                return res
+            turn.att_note = note
+        patch = {"note": note["path"]}
+        if item["text"] in ("Напоминание", "") or REF_RX.match(item["text"]):
+            patch["text"] = note["path"].rsplit("/", 1)[-1][:-3]          # «напомни об этом» — название по вложениям
+        self.reminders.update(item["id"], patch)
+        n = len(note["att"])
+        log.info("📎 К напоминанию «%s» — вложения сообщения (%d)", item["text"], n)
+        return res + f" Вложения из сообщения ({n}) приложены к напоминанию — в срок они будут прямо в окне напоминания; можно так и сказать."
 
     def _confirm(self, turn, question, sentences, timeout=15):
         """Спросить голосом и кнопками, дождаться «да»/«нет». -> True, если согласились.
@@ -125,7 +175,74 @@ class ToolsMixin:
             when = human(at)
         except (KeyError, ValueError):
             at, when = None, x.get("at", "")
-        return dict(x, when=when, repeat_text=describe_repeat(x.get("repeat")), at_hm=f"{at:%H:%M}" if at else "")
+        out = dict(x, when=when, repeat_text=describe_repeat(x.get("repeat")), at_hm=f"{at:%H:%M}" if at else "")
+        if x.get("note") or x.get("note_id"):
+            rel = self._reminder_note(x)
+            out.update(note=rel, att=len(self.workspace.note_atts(rel)) if rel else 0)
+        return out
+
+    def _reminder_note(self, x):
+        """Заметка с картинками и файлами напоминания -> путь в папке ассистента или "". note — путь (поставлено здесь),
+        note_id — id синхронизации (поставлено на телефоне: его заметка приходит в «Заметки» под своим путём)."""
+        rel = x.get("note")
+        try:
+            if rel and self.workspace.safe(rel).is_file():
+                return rel
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            return (self.note_rel_of(x["note_id"]) or "") if x.get("note_id") and getattr(self, "sync", None) is not None else ""
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def note_files_out(self, rel, paths):
+        """Фото и файлы заметки отсюда — своим телефонам (E2E, Close.natt_share), чтобы напоминание с картинками открывалось
+        и там. Через 5 с одним конвертом: студия кладёт файлы по одному, а конвертов в час у облака немного."""
+        if getattr(self, "close", None) is None or not paths:
+            return
+        with self._natt_lock():
+            q = self.__dict__.setdefault("_natt_out", {})
+            q.setdefault(rel, []).extend(p for p in paths if p not in q.get(rel, []))
+            t = self.__dict__.get("_natt_t")
+            if t is not None:
+                t.cancel()
+            self._natt_t = threading.Timer(5, self._natt_out_run)
+            self._natt_t.daemon = True
+            self._natt_t.start()
+
+    def _natt_lock(self):
+        return self.__dict__.setdefault("_natt_lk", threading.Lock())
+
+    def _natt_out_run(self):
+        with self._natt_lock():
+            q, self._natt_out = dict(self.__dict__.get("_natt_out") or {}), {}
+        for rel, paths in q.items():
+            try:
+                files = [(p, self.workspace.safe(p)) for p in paths]
+                files = [(r, f) for r, f in files if f.is_file()]
+                sy = getattr(self, "sync", None)
+                sid = sy.note_sid(rel) if sy is not None else ""
+                if files and sid:
+                    self.close.natt_share(sid, rel.rsplit("/", 1)[-1][:-3], files)
+            except Exception as e:  # noqa: BLE001 — нет связи или входа: на телефоне останется заметка без картинок
+                log.info("вложения заметки — телефону: не отправились: %s", e)
+
+    def _reminder_files(self, rid):
+        """Вложения напоминания для окна-будильника: [{kind, name, path, thumb}] — миниатюры картинок data:URL."""
+        from engine_answer import _thumb
+        x = (getattr(self, "_fired", None) or {}).get(rid) or self.reminders.get(rid) if rid else None
+        if not x:
+            return {"note": "", "files": []}
+        rel = self._reminder_note(x)
+        out = []
+        for f in (self.workspace.note_atts(rel) if rel else [])[:12]:
+            if f["kind"] == "image":
+                try:
+                    f = dict(f, thumb=_thumb(self.workspace.safe(f["path"]).read_bytes(), 360))
+                except OSError:
+                    continue
+            out.append(f)
+        return {"note": rel, "files": out}
 
     def reminders_list(self):
         return [self._reminder_public(x) for x in self.reminders.items]
@@ -216,6 +333,9 @@ class ToolsMixin:
         text = item["text"]
         log.info("⏰ %s", text)
         self._log_reminder(item)
+        fired = getattr(self, "_fired", None) or {}           # сработавшие (разовые уже убраны из списка) — окну за вложениями
+        fired[item["id"]] = item
+        self._fired = dict(list(fired.items())[-20:])
         if item.get("kind") == "job":                     # дело по расписанию: не звоним, а выполняем
             threading.Thread(target=self._run_job, args=(item,), name="job", daemon=True).start()
             return
@@ -228,13 +348,17 @@ class ToolsMixin:
         from when import describe_repeat
         kind = item.get("kind") or "reminder"
         title = {"alarm": "Будильник", "timer": "Таймер"}.get(kind, "Напоминание")
-        desktop_notify(f"⏰ {title}: {text}", critical=True)
+        rel = self._reminder_note(item) if item.get("note") or item.get("note_id") else ""
+        att = self.workspace.note_atts(rel) if rel else []
+        pics = sum(1 for f in att if f["kind"] == "image")
+        clip = f" (📎 {_att_word(att)})" if att else ""
+        desktop_notify(f"⏰ {title}: {text}{clip}", critical=True)
         self.emit("alarm", id=item["id"], text=text, kind=kind, title=title, late=bool(item.get("late")),
                   at=item.get("at", ""), repeat_text=describe_repeat(item.get("repeat")),
-                  window=self.s.get("reminders", "window") is not False)
+                  window=self.s.get("reminders", "window") is not False, note=rel, att=len(att), pics=pics)
         self.emit("reminder", text=text)
         if self.chat.notify_on():
-            threading.Thread(target=self.chat.notify, args=(f"⏰ {title}: {text}",),
+            threading.Thread(target=self.chat.notify, args=(f"⏰ {title}: {text}" + (f"\n📎 {_att_word(att)} — на компьютере" if att else ""),),
                              kwargs={"buttons": [("Готово", f"alarm:ack:{item['id']}"), ("Через 10 мин", f"alarm:snooze:{item['id']}:10"),
                                                  ("Через час", f"alarm:snooze:{item['id']}:60")]}, daemon=True).start()
         threading.Thread(target=self._alarm_loop, args=(a,), name="alarm", daemon=True).start()
@@ -252,6 +376,11 @@ class ToolsMixin:
                   (item["text"] if item["text"] not in ("Будильник", "Таймер", "Напоминание") else "")).strip()
         if item.get("late"):
             phrase = "Пропущенное напоминание: " + item["text"]
+        if item.get("note") or item.get("note_id"):
+            att = self.workspace.note_atts(self._reminder_note(item))
+            if att:
+                phrase = phrase.rstrip(".") + ". " + ("Картинки — на экране, в окне напоминания." if any(f["kind"] == "image" for f in att)
+                                                      else "Файлы — на экране, в окне напоминания.")
         n = 0
         while not a["done"].is_set() and not self.stopping.is_set() and time.monotonic() - a["since"] < limit:
             for _ in range(60):                                # не перебиваем разговор: ждём конца ответа, но не дольше 15 с
@@ -331,7 +460,8 @@ class ToolsMixin:
             from when import human
             minutes = max(1, int(minutes or 10))
             when = datetime.now() + timedelta(minutes=minutes)
-            new = self.reminders.add(when, item["text"], None, item.get("kind") or "reminder")
+            new = self.reminders.add(when, item["text"], None, item.get("kind") or "reminder",
+                                     extra={k: item.get(k) for k in ("note", "note_id")})     # картинки — и при отложенном
             out.update(snooze_id=new["id"], when=human(when))
             log.info("⏰ Отложено на %d мин: %s", minutes, item["text"])
         else:
@@ -404,7 +534,7 @@ class ToolsMixin:
         kind = it.get("kind") or "reminder"
         return {"id": it["id"], "text": it["text"], "kind": kind, "late": bool(it.get("late")), "at": it.get("at", ""),
                 "title": {"alarm": "Будильник", "timer": "Таймер"}.get(kind, "Напоминание"),
-                "repeat_text": describe_repeat(it.get("repeat"))}
+                "repeat_text": describe_repeat(it.get("repeat")), "note": self._reminder_note(it) if it.get("note") or it.get("note_id") else ""}
 
     def _done_cmd(self, cmd, a):
         """Студия → «Дела»: список и достижения, отметить сделанное (в том числе напоминание), снять отметку."""
@@ -476,8 +606,12 @@ class ToolsMixin:
                     when, rep, text, kind = _when(a)
                 except ToolError as e:
                     raise ValueError(str(e)) from e
-                item = self.reminders.add(when, text or "Напоминание", rep, a.get("kind") or kind)
+                src = (getattr(self, "_fired", None) or {}).get(a.get("from") or "") or {}    # пропущенное из окна — с теми же картинками
+                item = self.reminders.add(when, text or "Напоминание", rep, a.get("kind") or kind,
+                                          extra={k: src.get(k) for k in ("note", "note_id")})
             return self._reminder_public(item)
+        if cmd == "reminder_files":                   # окно-будильник: картинки и файлы напоминания
+            return self._reminder_files(a.get("id") or "")
         if cmd == "job_add":                          # «Готовые дела» в студии: фраза с расписанием + точный текст дела
             from jobs import parse as parse_job
             c = parse_job(a.get("phrase") or "")

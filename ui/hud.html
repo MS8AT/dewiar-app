@@ -754,7 +754,7 @@ core.on("hello", d => {
   $("rem-undo").textContent = "Отменить"; el.dataset.id = ""; el.classList.remove("note", "money"); el.classList.add("power", "show");
 })
 .on("reminder_set", e => {
-  const it = e.item || {}; $("rem-when").textContent = it.when + (it.repeat_text ? " · " + it.repeat_text : "");
+  const it = e.item || {}; $("rem-when").textContent = it.when + (it.repeat_text ? " · " + it.repeat_text : "") + (it.att ? ` · 📎 ${it.att}` : "");
   $("rem-ico").textContent = it.kind === "timer" ? "⏱" : it.kind === "job" ? "🗓" : "⏰"; $("rem-undo").textContent = "Отменить"; $("rem").classList.remove("note", "money", "power"); clearInterval($("rem")._cd);
   $("rem-text").textContent = it.text || ""; $("rem").dataset.id = it.id || ""; $("rem").classList.add("show");
   clearTimeout($("rem")._t); $("rem")._t = setTimeout(() => $("rem").classList.remove("show"), 14000);

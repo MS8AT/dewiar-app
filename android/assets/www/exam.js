@@ -230,9 +230,9 @@ function examFakeTool(name, a) {
 }
 
 const _examAddAlarm = addAlarm, _examDoCall = doCall, _examDial = typeof dial === "function" ? dial : null;
-addAlarm = function (title, at, kind, repeat) {                 // eslint-disable-line no-global-assign
-  if (!EXAM) return _examAddAlarm(title, at, kind, repeat);
-  const x = { id: "e" + (EXAM.alarms.length + 1), title, at: at.getTime(), kind: kind || "reminder", repeat: repeat || "", made: Date.now() };
+addAlarm = function (title, at, kind, repeat, note) {           // eslint-disable-line no-global-assign
+  if (!EXAM) return _examAddAlarm(title, at, kind, repeat, note);
+  const x = Object.assign({ id: "e" + (EXAM.alarms.length + 1), title, at: at.getTime(), kind: kind || "reminder", repeat: repeat || "", made: Date.now() }, note ? { note } : {});
   EXAM.alarms.push(x);
   return x;
 };

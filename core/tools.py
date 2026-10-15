@@ -1088,12 +1088,14 @@ class Reminders:
                 log.warning("Напоминания: %s", e)
 
     def add(self, when: datetime, text, repeat=None, kind="reminder", extra=None):
-        """-> копия записи. kind: reminder | alarm | timer | job; extra — поля дела по расписанию (deliver, brief, preset)."""
+        """-> копия записи. kind: reminder | alarm | timer | job; extra — поля дела по расписанию (deliver, brief, preset)
+        и вложения: note — путь заметки с картинками и файлами в папке ассистента, note_id — её id синхронизации
+        (заметка пришла с телефона), см. Engine._reminder_note."""
         with self._lock:
             item = {"id": uuid.uuid4().hex[:6], "at": when.replace(microsecond=0).isoformat(timespec="seconds"),
                     "text": (text or "Напоминание").strip(), "repeat": repeat or None, "kind": kind,
                     "created": datetime.now().isoformat(timespec="seconds")}
-            item.update({k: v for k, v in (extra or {}).items() if k in ("deliver", "brief", "preset") and v not in (None, "")})
+            item.update({k: v for k, v in (extra or {}).items() if k in ("deliver", "brief", "preset", "note", "note_id") and v not in (None, "")})
             self.items.append(item)
             self._save()
             return dict(item)
@@ -1103,7 +1105,7 @@ class Reminders:
 
     def upsert(self, item):
         """Синхронизация (sync.py): напоминание с другого устройства — с тем же id (создать или заменить поля).
-        Переносятся только at, text, repeat, kind, paused."""
+        Переносятся только at, text, repeat, kind, paused и note_id (заметка с вложениями; нет ключа — не трогаем)."""
         with self._lock:
             cur = next((x for x in self.items if x["id"] == item["id"]), None)
             if cur is not None and cur.get("kind") == "job":
@@ -1111,9 +1113,11 @@ class Reminders:
             if cur is None:
                 cur = {"id": item["id"], "created": datetime.now().isoformat(timespec="seconds")}
                 self.items.append(cur)
-            for k in ("at", "text", "repeat", "kind", "paused"):
+            for k in ("at", "text", "repeat", "kind", "paused", "note_id"):
                 if k in item:
                     cur[k] = item[k]
+            if not cur.get("note_id"):
+                cur.pop("note_id", None)
             if not cur.get("paused"):
                 cur.pop("paused", None)
             self._save()
@@ -1133,7 +1137,7 @@ class Reminders:
         with self._lock:
             for x in self.items:
                 if x["id"] == rid:
-                    for k in ("text", "at", "repeat", "paused", "kind", "deliver", "last_run", "last_ok", "last_error"):
+                    for k in ("text", "at", "repeat", "paused", "kind", "deliver", "last_run", "last_ok", "last_error", "note", "note_id"):
                         if k in patch:
                             x[k] = patch[k]
                     self._save()
