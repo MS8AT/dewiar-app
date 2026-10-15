@@ -45,7 +45,7 @@ class FakePlayer:
 
 
 vosk, piper = FakeTTS("vosk", fail_on=("Nvidia",)), FakeTTS("piper")
-me = types.SimpleNamespace(s=types.SimpleNamespace(get=lambda *k: {"speed": 1.0}.get(k[-1])), _voice_cfg=lambda: {},
+me = types.SimpleNamespace(s=types.SimpleNamespace(get=lambda *k: {"speed": 1.0}.get(k[-1])), _voice_cfg=lambda: {}, _output_muted=lambda: False,
                            _fx_name=lambda v: "off", player=FakePlayer(), set_state=lambda s: None,
                            _engines_for_speech=lambda v: [vosk, piper], _wait_vosk_tts=lambda v: None, last_speak_end=0,
                            vosk_tts=vosk, _said=[])

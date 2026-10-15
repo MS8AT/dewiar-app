@@ -1199,9 +1199,14 @@ let volWarned = false;
 function say(text) {
   const t = speechText(text); if (!t) return;
   if (S.textMode) { vCount("tts_text"); return; }            // текстовый режим — ответ только на экране
-  if (!volWarned && !D.mock) {                                // звук на нуле — голос есть, но его не слышно: так и говорим
-    let v = -1; try { v = D.volume("get", 0); } catch (e) { }
-    if (v === 0) { volWarned = true; vCount("tts_vol0"); plog("warn", "голос: громкость звука на нуле"); toast("Звук на телефоне на нуле — прибавьте громкость, чтобы слышать ответы", 6000); }
+  if (!D.mock) {                                              // звук на нуле — голос всё равно не услышат: не синтезируем
+    let v = -1; try { v = D.volume("get", 0); } catch (e) { }   // (сервер голосов не тратится впустую — идея 15.10), ответ на экране
+    if (v === 0) {
+      vCount("tts_vol0");
+      if (!volWarned) { volWarned = true; plog("warn", "голос: громкость звука на нуле — отвечаю текстом"); toast("Звук на телефоне на нуле — отвечаю текстом. Прибавьте громкость, чтобы слышать ответы", 6000); }
+      return;
+    }
+    volWarned = false;                                        // прибавили — в следующий раз снова подскажем
   }
   const id = "s" + (++sayN); sayLeft++;
   turnTime("said");

@@ -306,6 +306,32 @@ class RemoteMixin:
             return voice.get("fx") or "clear"
         return mode
 
+    def _output_muted(self):
+        """Звук компьютера выключен или на нуле -> True: синтез (и сервер голосов) не тратим впустую (идея 15.10).
+        Linux — PulseAudio/PipeWire (pactl), раз в 5 с; Windows и без pactl — False (говорим как обычно).
+        DEWIAR_FAKE_OUTPUT_MUTED=1 — для проверок."""
+        if os.environ.get("DEWIAR_FAKE_OUTPUT_MUTED"):
+            return os.environ["DEWIAR_FAKE_OUTPUT_MUTED"] == "1"
+        now = time.monotonic()
+        at, val = getattr(self, "_mute_cache", (-1e9, False))
+        if now - at < 5:
+            return val
+        import shutil
+        import sys
+        muted = False
+        if sys.platform.startswith("linux") and not getattr(self, "server", False) and shutil.which("pactl"):
+            try:
+                r = subprocess.run(["pactl", "get-sink-mute", "@DEFAULT_SINK@"], capture_output=True, text=True, timeout=1.5)
+                muted = bool(re.search(r":\s*(yes|да)\b", r.stdout, re.I))
+                if not muted:
+                    r = subprocess.run(["pactl", "get-sink-volume", "@DEFAULT_SINK@"], capture_output=True, text=True, timeout=1.5)
+                    vols = [int(x) for x in re.findall(r"(\d+)%", r.stdout)]
+                    muted = bool(vols) and max(vols) == 0
+            except (OSError, subprocess.SubprocessError, ValueError):
+                muted = False
+        self._mute_cache = (now, muted)
+        return muted
+
     def _speak_worker(self, turn, sentences, fx_override=None, voice_override=None):
         """Озвучить фразы из очереди sentences до None или отмены хода (блокирует, зовётся из потока ответа).
         Синтез и звук — в два потока: пока звучит фраза, следующая уже синтезируется (поток speak-synth, опережение —
@@ -314,6 +340,9 @@ class RemoteMixin:
         сказанное копится в turn.spoken — по нему _cancel_locked запоминает, на чём перебили. Ставит состояние «speaking».
         «Отвечать текстом» (tts.text_only, кнопка-динамик в виджете) — молчим: очередь только вычитывается."""
         if self.s.get("tts", "text_only"):
+            return self._drain_worker(turn, sentences)
+        if self._output_muted():                        # звук компьютера выключен — голос не услышат: не синтезируем
+            log.info("🔇 Звук компьютера выключен (или на нуле) — отвечаю текстом, голос не синтезирую")
             return self._drain_worker(turn, sentences)
         speed = float(self.s.get("tts", "speed") or 1.0)
         voice = self._voice_cfg()
