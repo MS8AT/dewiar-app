@@ -9,7 +9,7 @@
 — голос по описанию: проба с номером, большая модель сразу выгружается, проба сохраняется голосом;
 — удалённый голос снимается с персонажей; ключ управления закрывает управление, но не озвучку;
 — больше TTS_MAX_MODELS моделей одновременно не держится; два разговора сразу — оба договаривают."""
-import http.client, io, json, os, shutil, sys, tempfile, threading, time, wave
+import http.client, io, json, os, re, shutil, sys, tempfile, threading, time, wave
 from pathlib import Path
 import numpy as np
 ROOT = Path(os.environ.get("DEWIAR_ROOT") or Path(__file__).resolve().parent.parent)
@@ -322,6 +322,18 @@ try:
     st, _, h = req("GET", "/health")
     ok(h["requests"] >= 8 and h["chars"] > 50 and h["audio_sec"] > 1 and h["ttfa_ms_avg"] >= 0 and h["waiting"] == 0, f"счётчики: {h['requests']} {h['chars']} {h['audio_sec']:.1f}")
 
+    # цифры — словами (отзыв 15.10: «вместо цифр — очень странные звуки»), в роде следующего слова и с датами
+    A.ENGINE.calls.clear()
+    st, _, _ = req("POST", "/v1/audio/speech", {"input": "Через 1 минуту, 15 октября в 10:30, 54 рубля и +12°.", "voice": "serena", "response_format": "wav"})
+    said = " ".join(t for c in A.ENGINE.calls for t in c["texts"])
+    ok(st == 200 and "одну минуту" in said and "пятнадцатое октября" in said and "десять тридцать" in said and "пятьдесят четыре рубля" in said
+       and "плюс двенадцать градусов" in said and not re.search(r"\d", said), f"цифры — словами: {said}")
+    A.ENGINE.calls.clear()
+    req("POST", "/v1/audio/speech", {"input": "Call me at 5 pm", "voice": "serena", "response_format": "wav"})
+    ok(any("5" in t for c in A.ENGINE.calls for t in c["texts"]), "английский текст не трогаем — модель читает его сама")
+    V0 = ROOT / "server/voices"
+    ok("COPY app.py speechnorm.py" in (V0 / "Dockerfile").read_text(encoding="utf-8")
+       and '"src/vllm/tts/speechnorm.py"' in (ROOT / "tools/voices_bundle.py").read_text(encoding="utf-8"), "пакет «Голоса» везёт speechnorm.py, образ его копирует")
     # наплыв людей: очередь к видеокарте длинная — сразу «занято» (503), приложение скажет своим голосом, а не ждёт минуту
     A.STATE["waiting"] = A.MAX_WAITING
     st, _, e = req("POST", "/v1/audio/speech", {"input": "Привет", "voice": "serena"})

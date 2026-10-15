@@ -70,6 +70,9 @@ const EXAM_PHONE = [
   { id: "note_honest", group: "Честность", title: "Заметка — правда сохранена",
     steps: ["Сохрани в заметки список покупок: молоко, хлеб, яблоки."], tool: { save_note: {} },
     judge: "Вызвал save_note со всеми тремя покупками и сказал об этом одной фразой. «Сохранила», не вызвав save_note, — 0 баллов." },
+  { id: "note_then_remind", group: "Заметки", title: "«Напомни об этом» — о только что записанной заметке",
+    steps: ["Запиши в заметки: купить батарейки для пульта.", "Напомни об этом завтра в 10 утра."], alarm: { any: ["батарей"], within_h: [1, 40] },
+    judge: "Поставлено напоминание на завтра в 10:00 именно о заметке — про батарейки для пульта. Напоминание с текстом «об этом» или непонятным куском фразы, или «готово» без напоминания — 0 баллов (отчёт №66)." },
   { id: "poem_rhyme", group: "Креатив", title: "Четверостишие с рифмой",
     steps: ["Напиши четверостишие про осень с настоящей рифмой."],
     judge: "Ровно четыре строки про осень, с явной рифмой, ровный ритм, без нелепых сравнений. Без рифмы — не больше 4 баллов." },
@@ -204,14 +207,15 @@ function examFakeTool(name, a) {
       return `Звоню: ${known ? known.name : who}.`;
     }
     case "send_sms": return "Открыл сообщение — пользователь проверит и отправит." + notCloseHint(a.who);
-    case "send_message": return `Открыл ${a.app || "мессенджер"} с текстом — пользователь выберет, кому отправить.`;
+    case "send_message": return `Открыл ${a.app || "мессенджер"} с текстом — пользователь выберет, кому отправить.` + (typeof notCloseNote === "function" ? notCloseNote(turnAsk) : "");
     case "open_app": return `Открыто приложение «${a.name || ""}».`;
     case "open_url": return "Ссылка открыта в браузере.";
     case "play_radio": return `Играет радио${a.query ? ` по запросу «${a.query}»` : ""}: «Jazz Radio».`;
     case "radio_control": return "Готово.";
     case "take_photo": return "Камера сейчас недоступна.";
     case "show_photo": return "Снимков пока нет.";
-    case "make_app": return /<(?:html|body|div|script|button|canvas|main|section)\b/i.test(String(a.html || ""))   // как настоящий: без html — ошибка
+    case "make_app": if (typeof makeAppRefusal === "function" && makeAppRefusal(turnAsk)) return makeAppRefusal(turnAsk);   // те же правила, что у настоящего
+      return /<(?:html|body|div|script|button|canvas|main|section)\b/i.test(String(a.html || ""))   // как настоящий: без html — ошибка
       ? `Сделано: «${a.title || "мини-программа"}» — на экране телефона.` : "Ошибка: html не пришёл — пришли весь HTML-файл в поле html (компактный код).";
     case "open_made": return "Открыто.";
     case "start_task": return "Задача передана компьютеру.";

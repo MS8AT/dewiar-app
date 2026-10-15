@@ -48,10 +48,18 @@ class H(BaseHTTPRequestHandler):
 
         def send(delta, fin=None):
             self.wfile.write(f"data: {json.dumps({'choices': [{'delta': delta, 'finish_reason': fin}]}, ensure_ascii=False)}\n\n".encode())
-        if any("остановимся на 65" in str(m.get("content")) for m in msgs if m["role"] == "user"):   # экзамен 0.38.48
+        if any("до Нового года, и поставь" in str(m.get("content")) for m in msgs if m["role"] == "user"):   # экзамен 0.38.51
+            if msgs[-1]["role"] == "tool":
+                send({"content": "Поставила таймер на 78 минут."}); send({}, "stop")
+            elif user.startswith("ПРОВЕРКА: пользователь прямо попросил поставить"):
+                send({"tool_calls": [{"index": 0, "id": "n1", "type": "function", "function": {"name": "set_reminder",
+                      "arguments": json.dumps({"text": "Таймер", "in_minutes": 78})}}]}); send({}, "tool_calls")
+            else:
+                send({"content": "До Нового года 78 дней. Скажи — поставлю таймер на 78 минут."}); send({}, "stop")
+        elif any("остановимся на 65" in str(m.get("content")) for m in msgs if m["role"] == "user"):   # экзамен 0.38.48
             if msgs[-1]["role"] == "tool":
                 send({"content": "Записала: 65 000."}); send({}, "stop")
-            elif user.startswith("ПРОВЕРКА: ты написал(а), что записал"):
+            elif user.startswith("ПРОВЕРКА: ты написал(а), что сделал"):
                 send({"tool_calls": [{"index": 0, "id": "r1", "type": "function", "function": {"name": "remember",
                       "arguments": json.dumps({"fact": "Бюджет на мебель для гостиной — 65 000"}, ensure_ascii=False)}}]}); send({}, "tool_calls")
             else:
@@ -157,7 +165,8 @@ async def session():
                        ("Какая погода в моём городе?", "ask"), ("Привет", "plain"), ("Что у нас по плану?", "plan"),
                        ("А я что у тебя просил?", "asked"), ("Поставь таймер на столько минут, сколько дней до Нового года", "timer"),
                        ("Нарисуй схему: как заявка проходит от клиента через менеджера на склад и обратно клиенту.", "diagram"),
-                       ("Ладно, остановимся на 65 тысячах.", "saved")):
+                       ("Ладно, остановимся на 65 тысячах.", "saved"),
+                       ("Посчитай, сколько дней осталось до Нового года, и поставь таймер на столько же минут.", "ny")):
             m = len(events)
             await call("say", text=q)
             R[key] = await final(m)
@@ -194,8 +203,9 @@ ok("Поправка: верно 59" in R["timer_all"] and "✋ Число в о
 ok("```mermaid" in R["diagram"] and "✋ Просили схему" in log, f"«нарисуй схему» — ответ словами → дорисовала: {R['diagram'][-140:]!r}")
 ok(HINT and all(HINT), f"просят схему — модель заранее знает: только блок mermaid рисует, «на экране» без него не говорить: {HINT}")
 mem = "".join(x.read_text(encoding="utf-8") for x in (tmp / "ws").rglob("Обо мне.md"))
-ok("✋ Сказала «записала»" in log and "65 000" in mem and "Записала: 65 000" in R["saved_all"],
+ok("✋ Сказала «готово/записала»" in log and "65 000" in mem and "Записала: 65 000" in R["saved_all"],
    f"«записала 65 000», ничего не вызвав, → записала по-настоящему: {R['saved_all'][-100:]!r}, в памяти: {'65 000' in mem}")
+ok("Поставила таймер на 78 минут" in R["ny_all"] and "set_reminder" in log, f"«поставь таймер» — а модель переспросила: попросили поставить, поставила: {R['ny_all'][-120:]!r}")
 ok("📅 Вопрос о планах" in log, "в журнале: вопрос о планах — дела и календарь в подсказке")
 print("ИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)

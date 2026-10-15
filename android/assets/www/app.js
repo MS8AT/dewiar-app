@@ -1855,6 +1855,8 @@ async function ask(text, opts = {}) {
       }
       const fix = !r.calls.length && !numChecked ? numberMismatch(r.text || "", doneCalls) : "";
       if (fix) { numChecked = true; msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: fix }); sink.push(" "); continue; }   // «на 79 минут», а поставлено 59
+      const sfix = !r.calls.length && !nudged && round < maxRounds - 1 ? (remindMissing(text, called) || (!called.size ? savedClaim(text, r.text || "") : "")) : "";
+      if (sfix) { nudged = true; msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: sfix }); sink.push(" "); continue; }   // «Готово», а ничего не сделано (№66)
       const dfix = !r.calls.length && !drew && round < maxRounds - 1 ? diagramMissing(text, sink.text() + (r.text || ""), called) : "";
       if (dfix) { drew = true; msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: dfix }); sink.push(" "); continue; }   // «нарисуй схему» — словами
       if (!r.calls.length && round === 0 && REFUSAL_RX.test(r.text || "") && String(r.text).length < 1200) {
@@ -2173,7 +2175,16 @@ async function quick(text) {
     if (w) {
       let what = w.rest.replace(/^\s*(о том,? что|о том|что|про|о|об)\s+/, "").replace(/(^|\s)(сегодня|послезавтра|завтра|утром|вечером|днем|каждый день|по будням|ежедневно)(?=\s|$)/g, " ")
         .replace(/\s+(в|во|по|каждый|каждую)\s+(понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)[а-яё]*/g, " ").replace(/\s+/g, " ").trim();
-      what = what.replace(/^(чтобы|что)\s+/, "");
+      what = what.replace(/^(чтобы|что)\s+/, "").replace(/(^|\s)(?:часов|часа|час|утра|вечера|дня|ночи|ровно)(?=\s|$)/g, " ").replace(/\s+/g, " ").trim();
+      // «напомни об этом / о ней / о последней заметке завтра в 10» — про что-то сказанное раньше (отчёт №66: вышло
+      // напоминание «Этом часов утра»). Только что записанная заметка — она; иначе пусть решает модель (она видит разговор)
+      if (/^(?:об?\s+)?(?:этом|это|этой|этого|ней|нем|нём|нему|ней|том|последн[а-яё]*\s+заметк[а-яё]*|заметк[а-яё]*|сказанном|нашем разговоре)(?:\s|$)/.test(what) || !what) {
+        const last = notes().slice().sort((a, b) => (+b.time || 0) - (+a.time || 0))[0];
+        const fresh = last && Date.now() - (+last.time || 0) < 30 * 60e3;
+        if (!fresh && what) return null;
+        const body = fresh ? noteShown(last.text || last.title || "").split(/\n/)[0].trim() : "";
+        what = body ? "Заметка: " + (body.length > 90 ? body.slice(0, 90).replace(/\s+\S*$/, "") + "…" : body) : "";
+      }
       if (what) { const x = addAlarm(what[0].toUpperCase() + what.slice(1), w.at, "reminder", w.repeat);
         return { say: `Напомню ${REP_RU[w.repeat] ? REP_RU[w.repeat] + ", " : ""}${whenText(w.at)}: ${what}.`, card: alarmCard(x) }; }
     }
@@ -2389,6 +2400,37 @@ const DRAWN_TOOLS = ["show_images", "make_app", "start_task", "save_note", "open
 function diagramMissing(ask, answer, called) {
   if (!DIAGRAM_ASK.test(String(ask || "")) || /```mermaid/i.test(String(answer || "")) || DRAWN_TOOLS.some(n => called && called.has && called.has(n))) return "";
   return "ПРОВЕРКА: тебя попросили нарисовать схему, а в ответе её нет. Нарисуй её прямо сейчас в ответе кодом Mermaid — блоком ```mermaid … ``` (flowchart LR или TD, подписи узлов по-русски в кавычках), — она появится на экране картинкой. Перед блоком одна короткая фраза, без повторения сказанного; словами процесс больше не пересказывай.";
+}
+/* «Готово», «поправила», «записала», «поправлю» — а за ход ни одного действия (отчёт №66: «напомни по последней заметке» →
+   «Поняла, поправлю», «Так поправь» → «Готово», а напоминание прежнее). Как quality.saved_claim на компьютере. */
+const SAVED_RX = /(?<![а-яё])(?<!не )(?:записал[аи]?|запомнил[аи]?|сохранил[аи]?|зафиксировал[аи]?|обновил[аи]?|добавил[аи]?\s+в\s+(?:список|память|дела|заметк)|запиш[уе]т?|поправил[аи]?|исправил[аи]?|изменил[аи]?|переписал[аи]?|перен[её]сл[аи]?|перен[её]с|поменял[аи]?|переделал[аи]?|поправлю|исправлю|переделаю|перепишу|изменю)(?![а-яё])|^\W*(?:готово|сделано)(?![а-яё])/i;
+function savedClaim(ask, answer) {
+  if (!SAVED_RX.test(String(answer || "")) || /\?\s*$/.test(String(ask || ""))) return "";
+  return "ПРОВЕРКА: ты написал(а), что сделал(а) (записала, поправила, готово), но ни одного действия не было — ничего не изменилось. Сделай это сейчас инструментами: новое или изменённое — remember с фактом целиком; напоминание неверное — найди его (list_reminders), отмени (cancel_reminder) и поставь правильное (set_reminder); заметку — инструментом заметок. Потом коротко скажи, что именно изменилось. Неясно, что нужно, — спроси одной фразой; делать было нечего — не говори «готово». Уже сказанное не повторяй.";
+}
+// «Напиши Андрею…», а Андрея нет в «Близких» -> пояснение для модели к результату send_message, иначе ""
+function notCloseNote(ask) {
+  const m = /(?:[Нн]апиши|[Оо]тправь|[Сс]кажи|[Пп]ередай|[Сс]ообщи|[Чч]еркни)\s+(?:сообщение\s+)?([А-ЯЁ][а-яё]{2,})/.exec(String(ask || ""));   // имя — с большой буквы
+  if (!m) return "";
+  let people = []; try { people = clLoad().people || []; } catch (e) { }
+  if (people.length && clMatch(m[1], people)) return "";
+  return ` Человека «${m[1]}» нет в «Близких» Dewiar — скажи об этом одной фразой: сообщение открыто в приложении, получателя он выберет сам; пригласить в «Близкие» можно в «Ещё» → «Близкие».`;
+}
+/* Мини-программа — только когда просили программу, страницу, игру… Экзамены: «нарисуй схему» — HTML-программа вместо схемы;
+   «составь список из пяти идей подарка» — программа «на экране» вместо списка в ответе. -> отказ для модели или "" */
+const APP_ASK = /программ|приложени|игр[уаыое]|калькулятор|страниц|сайт|презентаци|викторин|таймер|конвертер|открытк|визитк|трекер|таблиц|чек-?лист|тренаж[её]р|интерактив|html|на\s+экран/i;
+function makeAppRefusal(ask) {
+  const t = String(ask || "");
+  if (!t || APP_ASK.test(t)) return "";
+  if (DIAGRAM_ASK.test(t)) return "Не сделано: схему рисуй блоком ```mermaid прямо в ответе (flowchart LR или TD, подписи по-русски в кавычках) — она появится на экране картинкой. Программа для этого не нужна.";
+  if (/список|иде[июйя]|посоветуй|подбери|расскажи|объясни|напиши|придумай|составь|перечисли|вариант/i.test(t)) return "Не сделано: программу не просили. Ответь прямо в чате — список пунктами в самом ответе, коротко.";
+  return "";
+}
+// «поставь таймер / напомни…» — прямо просили, а set_reminder за ход не вызван (экзамен 0.38.51: «скажи — поставлю»)
+const SET_ASK = /(?:^|[\s,.])(?:поставь|заведи|установи|запусти|включи)\s+(?:мне\s+|нам\s+)?(?:[а-яё]+\s+)?(?:таймер|будильник|напоминани)|^\W*(?:[а-яё]+,\s*)?напомни(?:те)?\s/i;
+function remindMissing(ask, called) {
+  if (!SET_ASK.test(String(ask || "")) || (called && called.has && called.has("set_reminder")) || /\?\s*$/.test(String(ask || ""))) return "";
+  return "ПРОВЕРКА: пользователь прямо попросил поставить напоминание (таймер, будильник), а ты его не поставил(а). Поставь сейчас — set_reminder (через N минут — in_minutes; время — at), не переспрашивай; если правда не сказано, когда, — спроси одной фразой. Уже сказанное не повторяй.";
 }
 function numberMismatch(text, calls) {
   const actual = [];
@@ -2771,9 +2813,7 @@ async function runTool(name, a) {
       return { text: `${p.name} сейчас ответит сам.`, switchTo: p.id };
     }
     case "make_app": {
-      // «нарисуй схему» — схема блоком ```mermaid в ответе (картинкой в чате), а не мини-программой (экзамен 0.6.42)
-      if (turnAsk && DIAGRAM_ASK.test(turnAsk) && !/программ|приложени|игр[уаыое]|сайт|страниц|калькулятор/i.test(turnAsk))
-        return "Не сделано: схему рисуй блоком ```mermaid прямо в ответе (flowchart LR или TD, подписи по-русски в кавычках) — она появится на экране картинкой. Программа для этого не нужна.";
+      { const no = makeAppRefusal(turnAsk); if (no) return no; }
       const html = String(a.html || "").trim();
       if (!/<(?:html|body|div|script|button|canvas|main|section)\b/i.test(html)) return "Ошибка: html не пришёл — пришли весь HTML-файл в поле html (компактный код).";
       if (!/<\/(?:html|body|script|div|main|section)>\s*$/i.test(html)) return "Ошибка: HTML оборвался на середине — сделай короче и пришли целиком.";
@@ -2789,7 +2829,12 @@ async function runTool(name, a) {
         + " Результата ЕЩЁ НЕТ — он появится через несколько минут или дольше. Скажи одной фразой, что взялась (взялся) и сообщишь, когда будет готово; не говори «готово», «сделала», «вот презентация» — это неправда, пока задача не закончилась.";
     }
     case "smart_home": return await homeTool(a);
-    case "send_message": return sendTo(a.app || "max", a.text || "");
+    case "send_message": {
+      // «Напиши Андрею…», а Андрея нет в «Близких» — сообщение откроется в мессенджере (получателя выберет человек), и
+      // модели — сказать об этом честно (экзамен: «Готово, открыла MAX» — как будто Андрей уже получил)
+      const r = sendTo(a.app || "max", a.text || "");
+      return typeof r === "string" ? r + notCloseNote(turnAsk) : r;
+    }
     case "ask_knowledge": return await askKnowledge(a.question || "", a.base || "");
   }
   return "Неизвестный инструмент.";

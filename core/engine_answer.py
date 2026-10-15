@@ -59,6 +59,10 @@ def _thumb(data, side=320):
         return ""
 
 
+# «об этом», «о ней», «о последней заметке», «это» — напоминание о сказанном раньше, а не текст напоминания
+REF_RX = re.compile(r"^\s*(?:об?\s+)?(?:этом|это|этой|этого|ней|нем|нём|том|последн\w*\s+заметк\w*|заметк\w*|сказанном)\s*[.!]?\s*$", re.I)
+
+
 class AnswerMixin:
     # ---------- ответ ----------
 
@@ -111,6 +115,11 @@ class AnswerMixin:
         if not raw and not quiet and not images:
             from when import parse as parse_when
             r = parse_when(text)
+            if r and REF_RX.match(r.get("text") or ""):
+                # «напомни об этом / о ней / о последней заметке завтра в 10» (отчёт №66: вышло напоминание «Об этом»):
+                # только что записанная заметка — она; иначе — модели, она видит разговор
+                note = self._fresh_note()
+                r = dict(r, text=note) if note else None
             if r:
                 r["said"] = text
                 self._set_reminder_fast(r, via)
@@ -416,6 +425,19 @@ class AnswerMixin:
                         or (len(q) >= 3 and len(n) >= 3 and q[:-1] == n[:-1])):
                     best = best or p["id"]
         return best
+
+    def _fresh_note(self, minutes=30):
+        """Заметка, записанная последние minutes минут -> «Заметка: начало текста» для названия напоминания или ""."""
+        try:
+            n = (self.workspace.notes(limit=1) or [None])[0]
+        except Exception:  # noqa: BLE001
+            return ""
+        if not n or time.time() - float(n.get("mtime") or 0) > minutes * 60:
+            return ""
+        body = re.sub(r"\s+", " ", str(n.get("snippet") or n.get("title") or "")).strip()
+        if len(body) > 90:
+            body = body[:90].rsplit(" ", 1)[0] + "…"
+        return "Заметка: " + body if body else ""
 
     @staticmethod
     def _cloud_said(prof, e):
@@ -1064,7 +1086,7 @@ class AnswerMixin:
                 sentences.put(s_)
             blind_key = f"{prof.get('base_url')}|{prof.get('model')}"
             t_start = time.monotonic()
-            from quality import DELIVERABLE, REFUSAL_NUDGE, diagram_missing, saved_claim, looks_like_promise, looks_like_refusal, number_mismatch, promise_nudge
+            from quality import DELIVERABLE, REFUSAL_NUDGE, diagram_missing, reminder_missing, saved_claim, looks_like_promise, looks_like_refusal, number_mismatch, promise_nudge
             called, nudged = set(), 0                    # какие действия уже были; сколько раз просили «сделай, а не обещай»
             deliver = bool(DELIVERABLE.search(text)) and any(x.get("name") == "start_task" for x in specs or [])
             # отговорку «нет доступа к интернету» на шаге 0 (когда есть поиск) просим переделать (ниже) — значит, первую
@@ -1176,10 +1198,10 @@ class AnswerMixin:
                         self.set_state("thinking")
                         continue
                 if not calls and not turn.cancel.is_set() and step < 5 and specs and not saved_checked:
-                    fix = saved_claim(text, step_text, called)
+                    fix = reminder_missing(text, turn.full, called) or saved_claim(text, step_text, called)
                     if fix:
                         saved_checked = True
-                        log.info("✋ Сказала «записала», ничего не вызвав, — прошу записать")
+                        log.info("✋ Сказала «готово/записала» или не поставила просимое напоминание — прошу сделать")
                         msgs = msgs + [{"role": "assistant", "content": step_text or "…"}, {"role": "user", "content": fix}]
                         if turn.full.strip() and not turn.full.endswith(" "):
                             turn.full += " "

@@ -58,6 +58,16 @@ from urllib.parse import urlparse
 
 import numpy as np
 
+try:                                   # числа словами: «54» — «пятьдесят четыре», «15 октября» — «пятнадцатое октября»
+    from speechnorm import speech_norm  # рядом с app.py (пакет «Голоса» кладёт его из core/speechnorm.py)
+except ImportError:
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "core"))   # из исходников
+    try:
+        from speechnorm import speech_norm
+    except ImportError:
+        speech_norm = None
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s voices %(levelname)s %(message)s")
 log = logging.getLogger("voices")
 
@@ -1042,6 +1052,10 @@ class H(BaseHTTPRequestHandler):
         sse = str(body.get("stream_format") or "") == "sse"
         stream = sse or fmt == "pcm" or (bool(body.get("stream")) and fmt == "wav")
         lang = lang_of(text, str(body.get("language") or ""))
+        if lang == "Russian" and speech_norm is not None:
+            # модели голосов читают цифры странными звуками (отзыв 15.10): числа, даты, годы, проценты, градусы, время —
+            # словами и в роде слова после них («одна минута», «пятнадцатое октября»); латиницу модель читает сама
+            text = speech_norm(text, latin=False) or text
         t0 = time.time()
         stat_add(requests=1, chars=len(text))
         STATE["last_request"] = int(t0)

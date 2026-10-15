@@ -36,7 +36,7 @@ RUN pip freeze | grep -iE '^(torch|torchaudio)==' > /tmp/keep.txt \
 RUN python -c "from ruaccent import RUAccent; a = RUAccent(); a.load(omograph_model_size='turbo3.1', use_dictionary=True, workdir='/opt/ruaccent'); print(a.process_all('Привет, я голос Девиара.'))"
 
 WORKDIR /opt/voices
-COPY app.py .
+COPY app.py speechnorm.py ./
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
