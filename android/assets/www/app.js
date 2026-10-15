@@ -1399,6 +1399,12 @@ function jsonEnd(s) {
 function parseToolCall(raw) {
   raw = String(raw || "").trim().replace(/<\s*(function|parameter)\s*=\s*/g, "<$1=").replace(/^<\s*(function|name|tool)"\s*:/, '{"$1":'); if (!raw) return null;   // «<\n\nfunction=f>»
   const val = (v) => { v = v.trim(); try { return JSON.parse(v); } catch (e) { return v; } };
+  if (raw.includes("<tool_call>")) {                 // первый вызов оборван, следом второй в своём <tool_call> — берём последний целый
+    for (const part of raw.split("<tool_call>").filter(x => x.trim()).reverse()) { const c = parseToolCall(part); if (c) return c; }
+    return null;
+  }
+  raw = raw.replace(/"\s+(name|arguments|parameters|function)"(\s*:)/g, '"$1"$2');   // {"\n\nname": …} — перевод строки в ключе
+  { const nm = raw.match(/^\{?\s*"?(?:function\s+name|function_name|name)\s*=\s*"?([A-Za-z_][\w.-]*)"?\s*\}?\s*$/); if (nm) return { name: nm[1], args: {} }; }   // {"function name="f"}
   const two = raw.match(/^\{\s*"(?:function|name|tool|tool_name)"\s*:\s*"([A-Za-z_][\w.-]*)"\s*\}\s*(\{[\s\S]*\})/);   // {"function": "f"}\n{…аргументы}
   if (two) { try { const o = JSON.parse(two[2]); if (o && typeof o === "object") return { name: two[1], args: o }; } catch (e) { } }
   let m = raw.match(/<function=([\w.-]+)>([\s\S]*?)(?:<\/function>|$)/);
@@ -2353,7 +2359,8 @@ const CLAIMS = [
     tool: "make_app", what: "сделал программу, страницу или презентацию",
     // только когда такую вещь и просили: «вот вариант поздравления — можно написать на открытке» — не обещание программы
     // (экзамен 0.6.42: Лира дописала к готовому поздравлению «Секунду — собираю. Ничего не вышло…»)
-    user: /калькулятор|игр[уаыое]|программ|приложени|таймер|конвертер|викторин|презентаци|слайд|страниц|сайт|открытк|шпаргалк|на\s+экран/i },
+    // и не на «дочка нарисовала мне открытку» — нужна именно просьба сделать (экзамен 0.6.43)
+    user: /(?:сделай|создай|напиши|собери|подготовь|нарисуй|сверстай|покажи|открой|запусти|хочу)[а-яё]*\s+(?:мне\s+|нам\s+|ей\s+|ему\s+)?(?:[а-яё-]+\s+){0,2}?(?:калькулятор|игр[уаыое]|программ|приложени|таймер|конвертер|викторин|презентаци|слайд|страниц|сайт|открытк|шпаргалк)|на\s+экран/i },
   // «Открыла сканер», «Наведите камеру на код» — без scan_code сканер не открылся (отзыв 11.10)
   { rx: /(?:открыл[аи]?|открываю|запускаю|запустил[аи]?|включил[аи]?|включаю)\s+(?:тебе\s+|вам\s+)?сканер|наведите\s+(?:камеру|телефон)\s+на\s+(?:код|qr|штрих)/i,
     tool: "scan_code", what: "открыл(а) сканер" },
@@ -3588,7 +3595,7 @@ async function calEvents(from, to) {
 function dayPlans(from, to) {
   const facts = (S.memory || []).filter(f => { const m = /\(на (\d\d)\.(\d\d)\.(\d{4})/.exec(f); if (!m) return false;
     const t = new Date(+m[3], +m[2] - 1, +m[1]).getTime(); return t >= from && t < to; });
-  let rem = []; try { rem = JSON.parse(D.alarms() || "[]").filter(x => x.at >= from && x.at < to).sort((x, y) => x.at - y.at); } catch (e) { }
+  let rem = []; try { rem = alarmsNow().filter(x => x.at >= from && x.at < to).sort((x, y) => x.at - y.at); } catch (e) { }
   if (!facts.length && !rem.length) return "";
   return (facts.length ? "\nЕщё на эти дни — из памяти (пользователь сам просил запомнить): " + facts.map(f => f.replace(/^Со слов пользователя:\s*/, "")).join("; ") : "")
     + (rem.length ? "\nНапоминания: " + rem.slice(0, 10).map(x => `${pad(new Date(x.at).getHours())}:${pad(new Date(x.at).getMinutes())} — ${x.title}`).join("; ") : "")
@@ -3597,8 +3604,10 @@ function dayPlans(from, to) {
 // «что у меня в среду?», «какие планы на завтра?», «есть ли дела в пятницу?» -> dayPlans на этот день или ""
 function agendaPlans(text) {
   const t = String(text || "");
-  if (!/(?:что|какие|есть ли|чем)[^.!?]{0,40}(?:у меня|у нас|план|дел[ао]?(?![а-яё])|встреч|занят)|(?:мои|мой)\s+(?:планы|день|дела)/i.test(t) || !DAY_WORD.test(t)) return "";
-  const d = dayOf(t); if (!d) return "";
+  if (!/(?:что|какие|есть ли|чем)[^.!?]{0,40}(?:у меня|у нас|план|дел[ао]?(?![а-яё])|встреч|занят)|(?:мои|мой)\s+(?:планы|день|дела)/i.test(t)) return "";
+  let d = dayOf(t);
+  if (!d && /(?:по\s+плану|какие\s+(?:у\s+(?:меня|нас)\s+)?(?:планы|дела)|что\s+у\s+(?:меня|нас)\s+(?:сегодня|на\s+сегодня)?\s*$)/i.test(t.replace(/[?!.]+$/, ""))) { d = new Date(); d.setHours(0, 0, 0, 0); }   // «что у нас по плану?» — сегодня
+  if (!d) return "";
   return dayPlans(d.getTime(), d.getTime() + 864e5);
 }
 // «сегодня», «завтра», «послезавтра», «в/на среду» (ближайшая, сегодня — сегодня), «21 октября», «21.10» -> полночь дня или null

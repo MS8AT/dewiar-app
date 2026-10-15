@@ -10,6 +10,9 @@ from engine_base import *  # noqa: F401,F403 — общие импорты и п
 # просьба записать: «запиши», «сохрани», «в заметки», «запомни списком», «зафиксируй», «в файл»
 NOTE_ASK_RX = re.compile(r"заметк|запиш|запис|сохран|запомн|занеси|зафиксир|в\s+файл|в\s+папк|конспект", re.I)
 
+QUERY_TOOLS = ("find_notes", "web_search", "show_images")     # без query — бессмысленны: тему берём из просьбы
+
+
 class ToolsMixin:
     # ---------- инструменты ----------
 
@@ -23,6 +26,12 @@ class ToolsMixin:
         if not on:
             return f"Инструмент {name} выключен пользователем."
         asked = getattr(turn, "asked", None)
+        if name in QUERY_TOOLS and isinstance(args, dict) and not str(args.get("query") or "").strip() and asked:
+            # экзамен 0.38.49: find_notes({}) — модель потеряла аргументы, и «вспомни, что я говорил про работу» искало
+            # «ничего»; тема — из самой просьбы («…про работу» → «работу»), иначе просьба целиком
+            m = re.search(r"(?<![а-яё])(?:про|насч[её]т|об?|по поводу)\s+([^\s,.?!]+(?:\s+[^\s,.?!]+)?)", asked, re.I)
+            args["query"] = (m.group(1) if m else asked).strip()[:200]
+            log.info("🛠  %s без запроса — беру из просьбы: %s", name, redact(args["query"]))
         if name == "save_note" and asked is not None and not NOTE_ASK_RX.search(asked):
             # стихи, список идей, ответ на вопрос — в чат, а не в заметки без спроса (экзамен 11.10: «записала это в
             # заметку», хотя просили просто четверостишие)

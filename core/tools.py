@@ -179,10 +179,21 @@ def t_show_images(a, ctx):
     if not q:
         raise ToolError("пустой запрос — что показать?")
     n = max(1, min(6, int(a.get("count") or 4)))
-    try:
-        items = IM.search(q, n, searx_url=ctx["settings"].get("tools", "search_url") or "", via=ctx.get("dewiar_web"))
-    except httpx.HTTPError as e:
-        raise ToolError(f"картинки сейчас не загрузились ({e}) — скажи об этом коротко") from e
+    # не нашлось — пробуем проще сами (экзамен 0.38.49: модель трижды подряд звала «rune knotwork» и сдалась): самые
+    # длинные слова запроса по отдельности, не больше двух попыток
+    words = sorted({w for w in re.findall(r"[\w-]{4,}", q)}, key=len, reverse=True)
+    tries = [q] + ([w for w in words if w.lower() != q.lower()][:2] if len(q.split()) > 1 else [])
+    items, err = [], None
+    for qq in tries:
+        try:
+            items = IM.search(qq, n, searx_url=ctx["settings"].get("tools", "search_url") or "", via=ctx.get("dewiar_web"))
+        except httpx.HTTPError as e:
+            err = e
+            continue
+        if items:
+            break
+    if not items and err is not None:
+        raise ToolError(f"картинки сейчас не загрузились ({err}) — скажи об этом коротко") from err
     if not items:
         return ("Картинок по этому запросу не нашлось. Не говори, что показала их; можно попробовать запрос проще (одно-два "
                 "слова) или по-английски.")

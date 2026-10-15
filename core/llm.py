@@ -549,6 +549,12 @@ def parse_tool_call(raw):
     raw = (raw or "").strip()
     if not raw:
         return None
+    if "<tool_call>" in raw:                           # 0.38.49: первый вызов оборван, следом второй в своём <tool_call>
+        for part in reversed([x for x in raw.split("<tool_call>") if x.strip()]):
+            c = parse_tool_call(part)
+            if c:
+                return c
+        return None
     # экзамен 0.38.46 (Qwen): «<\n\nfunction=code_list>» — переводы строк внутри тега
     raw = re.sub(r"<\s*(function|parameter)\s*=\s*", r"<\1=", raw)
     raw = re.sub(r'^<\s*(function|name|tool)"\s*:', r'{"\1":', raw)       # 0.38.48: «<function": "web_search", "arguments": {…}}»
@@ -559,6 +565,9 @@ def parse_tool_call(raw):
             args = {k: _arg_value(v) for k, v in re.findall(r"<([A-Za-z_][\w\-]*)>(.*?)</\1>", m.group(2), re.S)}
         return {"name": m.group(1), "args": args}
     m = re.match(r"([A-Za-z_][\w.\-]*)\s*(.*)$", raw, re.S)
+    nm = re.match(r'^\{?\s*"?(?:function\s+name|function_name|name)\s*=\s*"?([A-Za-z_][\w.\-]*)"?\s*\}?\s*$', raw)
+    if nm:                                             # 0.38.49: {"function name="set_reminder"} — одно имя, без аргументов
+        return {"name": nm.group(1), "args": {}}
     if m and "<arg_key>" in m.group(2):
         pairs = re.findall(r"<arg_key>\s*(.*?)\s*</arg_key>\s*<arg_value>(.*?)</arg_value>", m.group(2), re.S)
         return {"name": m.group(1), "args": {k: _arg_value(v) for k, v in pairs}}
