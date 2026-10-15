@@ -7,6 +7,49 @@
 from engine_base import *  # noqa: F401,F403 — общие импорты и помощники движка
 
 
+# Windows: выключен ли системный звук (Core Audio: IMMDeviceEnumerator → вывод по умолчанию → IAudioEndpointVolume) ->
+# печатает 1 или 0. Запускается отдельным процессом (_win_muted): ошибка в описании COM не уронит ядро. comtypes — уже
+# в сборке Windows (им говорит голос Windows, SAPI).
+WIN_MUTE_PY = r"""
+import ctypes, comtypes
+from comtypes import GUID, COMMETHOD, HRESULT, IUnknown, CLSCTX_ALL
+from ctypes import POINTER, c_float, c_uint, c_int, c_void_p
+from ctypes.wintypes import BOOL, DWORD
+class IAudioEndpointVolume(IUnknown):
+    _iid_ = GUID('{5CDF2C82-841E-4546-9722-0CF74078229A}')
+    _methods_ = [
+        COMMETHOD([], HRESULT, 'RegisterControlChangeNotify', (['in'], c_void_p, 'p')),
+        COMMETHOD([], HRESULT, 'UnregisterControlChangeNotify', (['in'], c_void_p, 'p')),
+        COMMETHOD([], HRESULT, 'GetChannelCount', (['out'], POINTER(c_uint), 'n')),
+        COMMETHOD([], HRESULT, 'SetMasterVolumeLevel', (['in'], c_float, 'l'), (['in'], POINTER(GUID), 'g')),
+        COMMETHOD([], HRESULT, 'SetMasterVolumeLevelScalar', (['in'], c_float, 'l'), (['in'], POINTER(GUID), 'g')),
+        COMMETHOD([], HRESULT, 'GetMasterVolumeLevel', (['out'], POINTER(c_float), 'l')),
+        COMMETHOD([], HRESULT, 'GetMasterVolumeLevelScalar', (['out'], POINTER(c_float), 'l')),
+        COMMETHOD([], HRESULT, 'SetChannelVolumeLevel', (['in'], c_uint, 'c'), (['in'], c_float, 'l'), (['in'], POINTER(GUID), 'g')),
+        COMMETHOD([], HRESULT, 'SetChannelVolumeLevelScalar', (['in'], c_uint, 'c'), (['in'], c_float, 'l'), (['in'], POINTER(GUID), 'g')),
+        COMMETHOD([], HRESULT, 'GetChannelVolumeLevel', (['in'], c_uint, 'c'), (['out'], POINTER(c_float), 'l')),
+        COMMETHOD([], HRESULT, 'GetChannelVolumeLevelScalar', (['in'], c_uint, 'c'), (['out'], POINTER(c_float), 'l')),
+        COMMETHOD([], HRESULT, 'SetMute', (['in'], BOOL, 'm'), (['in'], POINTER(GUID), 'g')),
+        COMMETHOD([], HRESULT, 'GetMute', (['out'], POINTER(BOOL), 'm')),
+    ]
+class IMMDevice(IUnknown):
+    _iid_ = GUID('{D666063F-1587-4E43-81F1-B948E807363F}')
+    _methods_ = [COMMETHOD([], HRESULT, 'Activate', (['in'], POINTER(GUID), 'iid'), (['in'], DWORD, 'ctx'),
+                           (['in'], c_void_p, 'params'), (['out'], POINTER(POINTER(IUnknown)), 'iface'))]
+class IMMDeviceEnumerator(IUnknown):
+    _iid_ = GUID('{A95664D2-9614-4F35-A746-DE8DB63617E6}')
+    _methods_ = [
+        COMMETHOD([], HRESULT, 'EnumAudioEndpoints', (['in'], c_int, 'flow'), (['in'], DWORD, 'mask'), (['out'], POINTER(c_void_p), 'devs')),
+        COMMETHOD([], HRESULT, 'GetDefaultAudioEndpoint', (['in'], c_int, 'flow'), (['in'], c_int, 'role'), (['out'], POINTER(POINTER(IMMDevice)), 'dev')),
+    ]
+comtypes.CoInitialize()
+en = comtypes.CoCreateInstance(GUID('{BCDE0395-E52F-467C-8E3D-C4579291692E}'), IMMDeviceEnumerator, CLSCTX_ALL)
+dev = en.GetDefaultAudioEndpoint(0, 1)
+vol = dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None).QueryInterface(IAudioEndpointVolume)
+print(1 if vol.GetMute() or vol.GetMasterVolumeLevelScalar() < 0.005 else 0)
+"""
+
+
 class RemoteMixin:
     # ---------- Telegram без компьютера: сервер отвечает сам, напоминания приходят с сервера ----------
 
@@ -308,10 +351,13 @@ class RemoteMixin:
 
     def _output_muted(self):
         """Звук компьютера выключен или на нуле -> True: синтез (и сервер голосов) не тратим впустую (идея 15.10).
-        Linux — PulseAudio/PipeWire (pactl), раз в 5 с; Windows и без pactl — False (говорим как обычно).
-        DEWIAR_FAKE_OUTPUT_MUTED=1 — для проверок."""
+        Linux — PulseAudio/PipeWire (pactl), раз в 5 с. Windows — громкость и «выключено» системного вывода (Core Audio)
+        в отдельном процессе раз в 15 с, в фоне: ответ не ждёт проверки, а ошибка или падение COM не трогают ядро.
+        Не узнали — False (говорим как обычно). DEWIAR_FAKE_OUTPUT_MUTED=1 — для проверок."""
         if os.environ.get("DEWIAR_FAKE_OUTPUT_MUTED"):
             return os.environ["DEWIAR_FAKE_OUTPUT_MUTED"] == "1"
+        if os.name == "nt":
+            return self._win_muted()
         now = time.monotonic()
         at, val = getattr(self, "_mute_cache", (-1e9, False))
         if now - at < 5:
@@ -331,6 +377,29 @@ class RemoteMixin:
                 muted = False
         self._mute_cache = (now, muted)
         return muted
+
+    def _win_muted(self):
+        """Windows: последнее известное состояние звука; устарело (15 с) — обновить в фоне (WIN_MUTE_PY в своём процессе)."""
+        at, val = getattr(self, "_mute_cache", (-1e9, False))
+        if time.monotonic() - at > 15 and not getattr(self, "_mute_busy", False) and not getattr(self, "server", False):
+            self._mute_busy = True
+
+            def check():
+                import subprocess
+                import sys
+                muted = val
+                try:
+                    exe = sys.executable.replace("pythonw.exe", "python.exe")
+                    r = subprocess.run([exe, "-c", WIN_MUTE_PY], capture_output=True, text=True, timeout=8,
+                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+                    out = (r.stdout or "").strip()
+                    muted = out == "1" if out in ("0", "1") else False
+                except (OSError, subprocess.SubprocessError):
+                    muted = False
+                self._mute_cache = (time.monotonic(), muted)
+                self._mute_busy = False
+            threading.Thread(target=check, name="mute-check", daemon=True).start()
+        return val
 
     def _speak_worker(self, turn, sentences, fx_override=None, voice_override=None):
         """Озвучить фразы из очереди sentences до None или отмены хода (блокирует, зовётся из потока ответа).

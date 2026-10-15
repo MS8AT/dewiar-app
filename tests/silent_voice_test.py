@@ -2,7 +2,8 @@
 работает — сэкономить»): кнопка «без голоса» так и работала; теперь и звук на нуле.
 — телефон: громкость музыки 0 — ответ только на экране, синтез (и «Голос Dewiar») не вызывается, подсказка один раз;
   прибавили — снова голос;
-— компьютер (Linux): звук выключен или на нуле (pactl) — фразы не синтезируются, проверка раз в 5 с."""
+— компьютер: звук выключен или на нуле — фразы не синтезируются (Linux — pactl раз в 5 с; Windows — Core Audio в
+  отдельном процессе раз в 15 с, в фоне)."""
 import os, shutil, subprocess, sys, tempfile, types
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -44,6 +45,29 @@ try:
     ok(ER.RemoteMixin._output_muted(f4) is False, "сервер без звука (Telegram) — не проверяем")
 finally:
     subprocess.run, shutil.which = orig_run, orig_which
+# Windows: проверка в своём процессе и в фоне — ответ не ждёт её, падение COM не трогает ядро
+import time  # noqa: E402
+runs = []
+subprocess.run = lambda cmd, **k: (runs.append(cmd) or types.SimpleNamespace(stdout="1\n", returncode=0))
+try:
+    w = types.SimpleNamespace(server=False)
+    first = ER.RemoteMixin._win_muted(w)
+    for _ in range(50):
+        if not getattr(w, "_mute_busy", False):
+            break
+        time.sleep(0.02)
+    second = ER.RemoteMixin._win_muted(w)
+    ok(first is False and second is True and len(runs) == 1 and runs[0][1] == "-c" and "IAudioEndpointVolume" in runs[0][2],
+       f"Windows: первый раз — говорим (проверка в фоне), дальше — «выключен»; проверка одна на 15 с: {first} {second} {len(runs)}")
+    subprocess.run = lambda cmd, **k: (_ for _ in ()).throw(OSError("нет python"))
+    w2 = types.SimpleNamespace(server=False)
+    ER.RemoteMixin._win_muted(w2); time.sleep(0.2)
+    ok(ER.RemoteMixin._win_muted(w2) is False, "Windows: проверка не удалась — говорим как обычно")
+finally:
+    subprocess.run = orig_run
+import ast  # noqa: E402
+ast.parse(ER.WIN_MUTE_PY)
+ok("GetMasterVolumeLevelScalar" in ER.WIN_MUTE_PY and "BCDE0395-E52F-467C-8E3D-C4579291692E" in ER.WIN_MUTE_PY, "сценарий Core Audio на месте и разбирается")
 src = (ROOT / "core/engine_remote.py").read_text(encoding="utf-8")
 ok("if self._output_muted():" in src and "return self._drain_worker(turn, sentences)" in src, "озвучка на компьютере сверяется со звуком")
 
