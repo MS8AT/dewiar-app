@@ -551,6 +551,7 @@ def parse_tool_call(raw):
         return None
     # экзамен 0.38.46 (Qwen): «<\n\nfunction=code_list>» — переводы строк внутри тега
     raw = re.sub(r"<\s*(function|parameter)\s*=\s*", r"<\1=", raw)
+    raw = re.sub(r'^<\s*(function|name|tool)"\s*:', r'{"\1":', raw)       # 0.38.48: «<function": "web_search", "arguments": {…}}»
     m = re.search(r"<function=([\w.\-]+)>(.*?)(?:</function>|$)", raw, re.S)
     if m:
         args = {k: _arg_value(v) for k, v in re.findall(r"<parameter=([\w.\-]+)>(.*?)(?:</parameter>|(?=<parameter=)|$)", m.group(2), re.S)}

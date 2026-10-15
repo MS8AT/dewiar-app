@@ -1064,7 +1064,7 @@ class AnswerMixin:
                 sentences.put(s_)
             blind_key = f"{prof.get('base_url')}|{prof.get('model')}"
             t_start = time.monotonic()
-            from quality import DELIVERABLE, REFUSAL_NUDGE, diagram_missing, looks_like_promise, looks_like_refusal, number_mismatch, promise_nudge
+            from quality import DELIVERABLE, REFUSAL_NUDGE, diagram_missing, saved_claim, looks_like_promise, looks_like_refusal, number_mismatch, promise_nudge
             called, nudged = set(), 0                    # какие действия уже были; сколько раз просили «сделай, а не обещай»
             deliver = bool(DELIVERABLE.search(text)) and any(x.get("name") == "start_task" for x in specs or [])
             # отговорку «нет доступа к интернету» на шаге 0 (когда есть поиск) просим переделать (ниже) — значит, первую
@@ -1081,6 +1081,7 @@ class AnswerMixin:
             seen_calls = {}                              # одинаковый вызов в одном ходе — не повторяем (результат уже есть)
             done_calls, checked = [], False                  # что вызвано с результатами — сверить числа ответа (number_mismatch)
             drew = False                                     # просили схему, а её нет — попросили нарисовать (раз за ход)
+            saved_checked = False                            # «записала» без единого действия — попросили записать (раз за ход)
             for step in range(6):                       # модель → действия → результаты → модель…
                 calls, step_text = [], ""
                 if step == 5 and specs:                  # последний шаг — только слова: ответить тем, что уже узнал
@@ -1169,6 +1170,16 @@ class AnswerMixin:
                     if fix:                                 # «таймер на 79 минут», а поставлено 59 (экзамен 14.10)
                         checked = True
                         log.info("✋ Число в ответе не совпадает с поставленным — прошу исправить")
+                        msgs = msgs + [{"role": "assistant", "content": step_text or "…"}, {"role": "user", "content": fix}]
+                        if turn.full.strip() and not turn.full.endswith(" "):
+                            turn.full += " "
+                        self.set_state("thinking")
+                        continue
+                if not calls and not turn.cancel.is_set() and step < 5 and specs and not saved_checked:
+                    fix = saved_claim(text, step_text, called)
+                    if fix:
+                        saved_checked = True
+                        log.info("✋ Сказала «записала», ничего не вызвав, — прошу записать")
                         msgs = msgs + [{"role": "assistant", "content": step_text or "…"}, {"role": "user", "content": fix}]
                         if turn.full.strip() and not turn.full.endswith(" "):
                             turn.full += " "

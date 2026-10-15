@@ -48,7 +48,15 @@ class H(BaseHTTPRequestHandler):
 
         def send(delta, fin=None):
             self.wfile.write(f"data: {json.dumps({'choices': [{'delta': delta, 'finish_reason': fin}]}, ensure_ascii=False)}\n\n".encode())
-        if any("Нарисуй схему" in str(m.get("content")) for m in msgs if m["role"] == "user"):
+        if any("остановимся на 65" in str(m.get("content")) for m in msgs if m["role"] == "user"):   # экзамен 0.38.48
+            if msgs[-1]["role"] == "tool":
+                send({"content": "Записала: 65 000."}); send({}, "stop")
+            elif user.startswith("ПРОВЕРКА: ты написал(а), что записал"):
+                send({"tool_calls": [{"index": 0, "id": "r1", "type": "function", "function": {"name": "remember",
+                      "arguments": json.dumps({"fact": "Бюджет на мебель для гостиной — 65 000"}, ensure_ascii=False)}}]}); send({}, "tool_calls")
+            else:
+                send({"content": "Окей, записала 65 000."}); send({}, "stop")
+        elif any("Нарисуй схему" in str(m.get("content")) for m in msgs if m["role"] == "user"):
             HINT.append("СЕЙЧАС ПРОСЯТ СХЕМУ" in str(msgs[0].get("content")))                   # экзамен 15.10: «Схема готова и уже на экране» — без схемы
             if user.startswith("ПРОВЕРКА: тебя попросили нарисовать схему"):
                 send({"content": "Вот она.\n```mermaid\nflowchart LR\n  A[\"Клиент\"] --> B[\"Менеджер\"] --> C[\"Склад\"] --> A\n```"}); send({}, "stop")
@@ -148,7 +156,8 @@ async def session():
         for q, key in (("Сделай мне презентацию о завтрашней погоде", "pres"), ("Какая погода завтра?", "promise"),
                        ("Какая погода в моём городе?", "ask"), ("Привет", "plain"), ("Что у нас по плану?", "plan"),
                        ("А я что у тебя просил?", "asked"), ("Поставь таймер на столько минут, сколько дней до Нового года", "timer"),
-                       ("Нарисуй схему: как заявка проходит от клиента через менеджера на склад и обратно клиенту.", "diagram")):
+                       ("Нарисуй схему: как заявка проходит от клиента через менеджера на склад и обратно клиенту.", "diagram"),
+                       ("Ладно, остановимся на 65 тысячах.", "saved")):
             m = len(events)
             await call("say", text=q)
             R[key] = await final(m)
@@ -184,6 +193,9 @@ ok("Поправка: верно 59" in R["timer_all"] and "✋ Число в о
    f"«таймер на 79 минут», а поставлено 59 — модель поправилась: {R['timer_all'][-120:]}")
 ok("```mermaid" in R["diagram"] and "✋ Просили схему" in log, f"«нарисуй схему» — ответ словами → дорисовала: {R['diagram'][-140:]!r}")
 ok(HINT and all(HINT), f"просят схему — модель заранее знает: только блок mermaid рисует, «на экране» без него не говорить: {HINT}")
+mem = "".join(x.read_text(encoding="utf-8") for x in (tmp / "ws").rglob("Обо мне.md"))
+ok("✋ Сказала «записала»" in log and "65 000" in mem and "Записала: 65 000" in R["saved_all"],
+   f"«записала 65 000», ничего не вызвав, → записала по-настоящему: {R['saved_all'][-100:]!r}, в памяти: {'65 000' in mem}")
 ok("📅 Вопрос о планах" in log, "в журнале: вопрос о планах — дела и календарь в подсказке")
 print("ИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)

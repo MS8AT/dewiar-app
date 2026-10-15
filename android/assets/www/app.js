@@ -1303,7 +1303,7 @@ function systemPrompt() {
     `Ты — один из команды помощников: ${others}. Позвать коллегу — инструмент call_persona. Разговор пользователя с коллегой приходит тебе справкой «[До этого пользователь говорил не с тобой…]»: это их разговор — не продолжай его и не отвечай за коллегу, пока пользователь сам об этом не попросит; отвечай на то, что он говорит тебе.`,
     "Ты работаешь на телефоне пользователя (Android). Когда просят что-то сделать — вызывай инструмент, а не объясняй, как это сделать: "
     + "напоминания, будильники и таймеры (set_reminder; время — точной датой ISO, ты знаешь, который час), звонки (call), SMS (send_sms — откроется сообщение, отправит пользователь), "
-    + "радио прямо здесь, в приложении (play_radio, radio_control — на любую просьбу про радио или «включи музыку», не сайты и не приложения), "
+    + "радио прямо здесь, в приложении (play_radio, radio_control — на любую просьбу про радио или «включи музыку», не сайты и не приложения; просят ПОДОБРАТЬ или посоветовать песни, плейлист — назови конкретные известные песни списком в ответе, радио сам не включай, если не просили включить), "
     + "маршрут на карте — «как дойти», «проложи пешком», геоточка или ссылка на карту (route: карта сама ведёт кратчайшим путём, дворами), "
     + "календарь телефона — «что у меня завтра», «какие встречи на неделе» (calendar_list), «запиши в календарь», «назначь встречу» (calendar_add: сначала спроси «записать?», запиши после «да»), "
     + "приложения (open_app), сайты (open_url), поиск в интернете (web_search, read_webpage), погода (weather), фонарик, громкость, заметки (save_note, find_notes), "
@@ -1397,7 +1397,7 @@ function jsonEnd(s) {
 }
 /* вызов функции из текста: JSON (Qwen/Hermes), GLM (<arg_key>/<arg_value>), Qwen3-Coder (<function=…><parameter=…>), «имя {json}» */
 function parseToolCall(raw) {
-  raw = String(raw || "").trim().replace(/<\s*(function|parameter)\s*=\s*/g, "<$1="); if (!raw) return null;   // «<\n\nfunction=f>»
+  raw = String(raw || "").trim().replace(/<\s*(function|parameter)\s*=\s*/g, "<$1=").replace(/^<\s*(function|name|tool)"\s*:/, '{"$1":'); if (!raw) return null;   // «<\n\nfunction=f>»
   const val = (v) => { v = v.trim(); try { return JSON.parse(v); } catch (e) { return v; } };
   const two = raw.match(/^\{\s*"(?:function|name|tool|tool_name)"\s*:\s*"([A-Za-z_][\w.-]*)"\s*\}\s*(\{[\s\S]*\})/);   // {"function": "f"}\n{…аргументы}
   if (two) { try { const o = JSON.parse(two[2]); if (o && typeof o === "object") return { name: two[1], args: o }; } catch (e) { } }
@@ -1785,6 +1785,8 @@ async function ask(text, opts = {}) {
       const kb = await personaKnowledge(text);
       if (turnAbort !== ctl) return;
       if (kb) { msgs[0].content += kb; showBot("", "wait"); }
+      const pl = agendaPlans(text);                    // «что у меня в среду?» — запомненное и напоминания на этот день сразу
+      if (pl) msgs[0].content += "\n\nПЛАНЫ ПОЛЬЗОВАТЕЛЯ на этот день (кроме календаря):" + pl;
       if (DIAGRAM_ASK.test(text))                      // экзамен 15.10: «Схема готова, она уже на экране» — а схемы нет
         msgs[0].content += "\n\nСЕЙЧАС ПРОСЯТ СХЕМУ: в этом ответе обязательно блок ```mermaid (flowchart LR или TD, подписи узлов по-русски в кавычках) — только он и рисует схему на экране. Без блока схемы нет: не пиши «схема готова» или «на экране», не нарисовав её, и не делай схему через make_app. Сначала блок, потом одна-две фразы о главном.";
     }
@@ -2348,7 +2350,10 @@ const CLAIMS = [
     tool: "save_note", what: "сохранил(а) заметку" },
   // «Готово, калькулятор сделан», «Я сделала мини-презентацию — она уже открылась на экране» — где угодно в ответе
   { rx: /(?:^|[\s,.!—–-])(?:готово|сделал[аи]?|создал[аи]?|подготовил[аи]?|собрал[аи]?|написал[аи]?|вот)(?![а-яё])[^.!?]{0,80}(?:калькулятор|игр[уаы]|страниц|программ|приложени|таймер|конвертер|викторин|презентаци|слайд|открытк|шпаргалк)|(?:открыл[аио]?сь|открыт[аоы]?|появил[аио]?сь)\s+(?:у\s+тебя\s+|тебе\s+)?на\s+экран/i,
-    tool: "make_app", what: "сделал программу, страницу или презентацию" },
+    tool: "make_app", what: "сделал программу, страницу или презентацию",
+    // только когда такую вещь и просили: «вот вариант поздравления — можно написать на открытке» — не обещание программы
+    // (экзамен 0.6.42: Лира дописала к готовому поздравлению «Секунду — собираю. Ничего не вышло…»)
+    user: /калькулятор|игр[уаыое]|программ|приложени|таймер|конвертер|викторин|презентаци|слайд|страниц|сайт|открытк|шпаргалк|на\s+экран/i },
   // «Открыла сканер», «Наведите камеру на код» — без scan_code сканер не открылся (отзыв 11.10)
   { rx: /(?:открыл[аи]?|открываю|запускаю|запустил[аи]?|включил[аи]?|включаю)\s+(?:тебе\s+|вам\s+)?сканер|наведите\s+(?:камеру|телефон)\s+на\s+(?:код|qr|штрих)/i,
     tool: "scan_code", what: "открыл(а) сканер" },
@@ -2759,6 +2764,9 @@ async function runTool(name, a) {
       return { text: `${p.name} сейчас ответит сам.`, switchTo: p.id };
     }
     case "make_app": {
+      // «нарисуй схему» — схема блоком ```mermaid в ответе (картинкой в чате), а не мини-программой (экзамен 0.6.42)
+      if (turnAsk && DIAGRAM_ASK.test(turnAsk) && !/программ|приложени|игр[уаыое]|сайт|страниц|калькулятор/i.test(turnAsk))
+        return "Не сделано: схему рисуй блоком ```mermaid прямо в ответе (flowchart LR или TD, подписи по-русски в кавычках) — она появится на экране картинкой. Программа для этого не нужна.";
       const html = String(a.html || "").trim();
       if (!/<(?:html|body|div|script|button|canvas|main|section)\b/i.test(html)) return "Ошибка: html не пришёл — пришли весь HTML-файл в поле html (компактный код).";
       if (!/<\/(?:html|body|script|div|main|section)>\s*$/i.test(html)) return "Ошибка: HTML оборвался на середине — сделай короче и пришли целиком.";
@@ -3023,7 +3031,7 @@ const NOTE_RX = /^(?:(?:запиши|запишите|сохрани|добав�
 const FACT_RX = /^(?:(?:а|и|ну|пожалуйста|слушай)\s+)*запомни(?:те)?(?:\s*,?\s*(?:себе|мне|пожалуйста)(?![а-яё]))*\s*[:,.\-—]?\s*([\s\S]+)$/i;
 const FACT_ME = /(?<![а-яё])(?:я|у меня|у нас|мне|нам|мы|мой|моя|моё|мое|мои|моего|моей|моим|мою|наш[а-яё]*)(?![а-яё])/i;
 const FACT_SKIP = /^(?:(?:для|на время|в рамках|пока идет|до конца)\s+(?:этого\s+|нашего\s+)?(?:разговор|беседы|чата|диалог)|это\b|вот это\b|то,? что\b|(?:про|о|об|обо)\s+)/i;
-const DAY_WORD = /(?<![а-яё])(?:сегодня|завтра|послезавтра|в\s+(?:понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}\.\d{1,2})(?![а-яё])/i;
+const DAY_WORD = /(?<![а-яё])(?:сегодня|завтра|послезавтра|(?:в|во|на)\s+(?:понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)|\d{1,2}\.\d{1,2})(?![а-яё])/i;
 function factQuick(text) {
   const t = String(text || "").trim().replace(/^[А-ЯЁA-Z][а-яёa-z-]+\s*,\s*(?=\S)/, (m) => findPersona(m.replace(/[\s,]/g, ""), true) ? "" : m);
   const m = FACT_RX.exec(t); if (!m) return "";
@@ -3574,18 +3582,51 @@ async function calEvents(from, to) {
   if (r.error) throw new Error("календарь не прочитался: " + r.error);
   return r.events || [];
 }
+/* Планы на дни [from, to) не из календаря: запомненное «со слов пользователя» с датой «(на ДД.ММ.ГГГГ» (factQuick, remember)
+   и напоминания. Экзамен 0.6.42: «запомни: в среду встреча» запомнено, а на «что у меня в среду?» модель посмотрела только
+   календарь — «пусто». -> текст для модели или "". */
+function dayPlans(from, to) {
+  const facts = (S.memory || []).filter(f => { const m = /\(на (\d\d)\.(\d\d)\.(\d{4})/.exec(f); if (!m) return false;
+    const t = new Date(+m[3], +m[2] - 1, +m[1]).getTime(); return t >= from && t < to; });
+  let rem = []; try { rem = JSON.parse(D.alarms() || "[]").filter(x => x.at >= from && x.at < to).sort((x, y) => x.at - y.at); } catch (e) { }
+  if (!facts.length && !rem.length) return "";
+  return (facts.length ? "\nЕщё на эти дни — из памяти (пользователь сам просил запомнить): " + facts.map(f => f.replace(/^Со слов пользователя:\s*/, "")).join("; ") : "")
+    + (rem.length ? "\nНапоминания: " + rem.slice(0, 10).map(x => `${pad(new Date(x.at).getHours())}:${pad(new Date(x.at).getMinutes())} — ${x.title}`).join("; ") : "")
+    + "\nНазови и это — это тоже планы пользователя.";
+}
+// «что у меня в среду?», «какие планы на завтра?», «есть ли дела в пятницу?» -> dayPlans на этот день или ""
+function agendaPlans(text) {
+  const t = String(text || "");
+  if (!/(?:что|какие|есть ли|чем)[^.!?]{0,40}(?:у меня|у нас|план|дел[ао]?(?![а-яё])|встреч|занят)|(?:мои|мой)\s+(?:планы|день|дела)/i.test(t) || !DAY_WORD.test(t)) return "";
+  const d = dayOf(t); if (!d) return "";
+  return dayPlans(d.getTime(), d.getTime() + 864e5);
+}
+// «сегодня», «завтра», «послезавтра», «в/на среду» (ближайшая, сегодня — сегодня), «21 октября», «21.10» -> полночь дня или null
+function dayOf(text) {
+  const t = String(text || "").toLowerCase().replace(/ё/g, "е"), d = new Date(); d.setHours(0, 0, 0, 0);
+  if (/(?<![а-я])послезавтра/.test(t)) { d.setDate(d.getDate() + 2); return d; }
+  if (/(?<![а-я])завтра/.test(t)) { d.setDate(d.getDate() + 1); return d; }
+  if (/(?<![а-я])сегодня/.test(t)) return d;
+  const wd = /(?:в|во|на)\s+(воскресенье|понедельник|вторник|среду|четверг|пятницу|субботу)/.exec(t);
+  if (wd) { const n = ["воскресенье", "понедельник", "вторник", "среду", "четверг", "пятницу", "субботу"].indexOf(wd[1]); d.setDate(d.getDate() + (n - d.getDay() + 7) % 7); return d; }
+  const dm = /(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)/.exec(t) || /(\d{1,2})\.(\d{1,2})(?!\d)/.exec(t);
+  if (dm) { const m = isNaN(+dm[2]) ? MON.indexOf(dm[2]) : +dm[2] - 1, x = new Date(d.getFullYear(), m, +dm[1]); if (x < d) x.setFullYear(x.getFullYear() + 1); return x; }
+  return null;
+}
 async function calendarList(a) {
   const st = a.from ? calParse(a.from) : null, d0 = st ? new Date(st.ms) : new Date();
   const from = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate()).getTime();
   const days = Math.max(1, Math.min(31, Math.round(+a.days || 1))), to = from + days * 864e5;
+  const plans = a.query ? "" : dayPlans(from, to);
   let ev = await calEvents(from, to);
+  if (ev === null && plans) return "Календарь телефона недоступен (нет разрешения)." + plans;
   if (ev === null) return "Доступ к календарю не разрешён. Скажи пользователю одной фразой: чтобы я видела календарь, разрешите доступ — спрошу снова при следующем вопросе. Не выдумывай встреч.";
   const q = String(a.query || "").toLowerCase().trim();
   if (q) { const w = stems(q); ev = ev.filter(e => { const t = (e.title + " " + e.location).toLowerCase(); return t.includes(q) || (w.length && stems(t).some(x => w.includes(x))); }); }
   const span = days === 1 ? `${WD[new Date(from).getDay()].replace(/а$/, "у")}, ${new Date(from).getDate()} ${MON[new Date(from).getMonth()]}` : `${days} дн. с ${new Date(from).getDate()} ${MON[new Date(from).getMonth()]}`;
-  if (!ev.length) return `В календаре на ${span}${q ? ` по «${a.query}»` : ""} ничего нет.`;
+  if (!ev.length) return `В календаре на ${span}${q ? ` по «${a.query}»` : ""} ничего нет.` + plans;
   return `Календарь на ${span}${q ? ` по «${a.query}»` : ""} (${ev.length}):\n` + ev.slice(0, 40).map(calLine).join("\n")
-    + (ev.length > 40 ? `\n…и ещё ${ev.length - 40}.` : "") + "\nРасскажи главное коротко, своими словами; не добавляй встреч, которых здесь нет.";
+    + (ev.length > 40 ? `\n…и ещё ${ev.length - 40}.` : "") + plans + "\nРасскажи главное коротко, своими словами; не добавляй встреч, которых здесь нет.";
 }
 async function calendarAdd(a) {
   const st = calParse(a.start);

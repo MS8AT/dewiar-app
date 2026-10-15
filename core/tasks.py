@@ -1573,13 +1573,13 @@ class TaskManager:
                         t.data["stuck"] = True
                 if t.data.get("pause_now"):
                     why = t.data.pop("pause_now")
-                    t.data.update(status="paused", cycles=0, stale_cycles=0, activity="")
-                    t.save()
-                    t.journal(f"⏸ {why}")
-                    if not t.data.get("parent"):
+                    t.journal(f"⏸ {why}")                          # журнал и голос — до смены статуса: кто увидел «на паузе»,
+                    if not t.data.get("parent"):                   # видит и причину
                         self.host.announce(f"Задача «{t.title}» " + ("буксует — остановил её. Загляните в журнал задачи."
                                                                       if t.data.pop("stuck", False) else "на паузе: " + why[:1].lower() + why[1:]))
                     t.data.pop("stuck", None)
+                    t.data.update(status="paused", cycles=0, stale_cycles=0, activity="")
+                    t.save()
                     self._emit(t)
                     break
                 if t.data.pop("looped", False):
