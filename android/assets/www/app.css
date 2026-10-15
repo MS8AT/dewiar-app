@@ -64,14 +64,17 @@ body.radio-on #state.idle { display: none; }      /* в покое вместо 
 #rchip.wait b { opacity: .7; }
 @keyframes eq { 0%, 100% { height: 25%; } 50% { height: 100%; } }
 @keyframes rin { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-.who { display: flex; align-items: center; gap: 9px; padding: 5px 12px 5px 5px; border-radius: 999px; background: var(--frost); }
+.who { display: flex; align-items: center; gap: 9px; padding: 5px 12px 5px 5px; border-radius: 999px; background: var(--frost); flex: 0 1 auto; min-width: 0; }
 .who img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: #15152a; }
-.who span { font-weight: 600; font-size: 15px; }
+.who span { font-weight: 600; font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .who svg { width: 16px; height: 16px; color: var(--muted); }
 .ib { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); }
 .ib svg { width: 22px; height: 22px; }
 .ib.soft { background: var(--frost); }
 .ib:active { background: var(--frost-hi); }
+/* кнопки шапки — всегда кругом: на узком экране они сжимались по ширине, и подсветка нажатой («без голоса») выходила
+   приплюснутым овалом (отзыв 15.10). Уступает место имя персонажа — оно сокращается многоточием */
+#top .ib { flex: none; width: 42px; height: 42px; }
 /* голосом / текстом: перечёркнутый динамик и мягкая подсветка — видно с одного взгляда, что ассистент молчит */
 #b-voice .i-off, #b-voice.off .i-on { display: none; }
 #b-voice.off .i-off { display: block; }
@@ -542,7 +545,8 @@ body.neu .snd.on i, body.neu .snd.play i { background: var(--brand); }
 #b-close { position: relative; }
 #b-close .dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: #FF7AB6; box-shadow: 0 0 8px #FF7AB6; display: none; }
 #b-close.has .dot { display: block; }
-@media (max-width: 380px) { #top .ib { width: 40px; } .who span { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
+@media (max-width: 380px) { #top { gap: 3px; } #top .ib { width: 38px; height: 38px; } #top .ib svg { width: 20px; height: 20px; } .who span { max-width: 72px; }
+  .who { gap: 7px; padding-right: 10px; } .who svg { display: none; } }   /* стрелка — лишняя: имя важнее */
 .clp { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 10px 10px 12px; margin-bottom: 6px; border-radius: 16px; background: var(--frost); text-align: left; }
 .clp .ib { width: 40px; height: 40px; flex: none; } .clp .ib svg { width: 19px; height: 19px; }
 /* близкие сверху — лицами: видно сразу, кто есть; «+» — пригласить */
