@@ -152,6 +152,29 @@ class CommandsMixin:
                 from tools import launch
                 launch(["xdg-open", str(kn.root)])
                 return str(kn.root)
+            if cmd == "knowledge_open_file":           # источник под ответом: открыть файл (только из индекса поиска)
+                p = kn.file_path(a.get("key", ""))
+                if p is None:
+                    raise ValueError("этого файла больше нет")
+                from tools import launch
+                launch(["xdg-open", str(p)])
+                return str(p)
+            if cmd in ("knowledge_folders", "knowledge_folder_add", "knowledge_folder_remove"):   # свои папки для поиска
+                cur = [str(x) for x in (self.s.get("knowledge", "folders") or [])]
+                if cmd != "knowledge_folders":
+                    path = str(Path(os.path.expanduser(str(a.get("path") or "").strip())).resolve()) if a.get("path") else ""
+                    if cmd == "knowledge_folder_add":
+                        if not path or not Path(path).is_dir():
+                            raise ValueError("такой папки нет")
+                        if Path(path) in (Path.home(), Path(Path.home().anchor)) or len(Path(path).parts) <= 1:
+                            raise ValueError("весь диск или домашнюю папку целиком не берём — выберите папку с документами")
+                        cur = cur + [path] if path not in cur else cur
+                    else:
+                        cur = [x for x in cur if x != path and str(Path(x).resolve()) != path]
+                    self.s.update({"knowledge": {"folders": cur}})
+                    kn.kick.set()
+                    self.emit("tools", tools=self.toolbox.catalog())
+                return kn.folders_state()
             return {"folder": str(kn.root), "files": kn.list()}
         if cmd == "report":
             return self.save_report()

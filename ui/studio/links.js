@@ -20,9 +20,36 @@ function renderKn(files) {
     box.appendChild(row);
   });
 }
+/* свои папки для поиска (core/knowledge.py: индексируются в фоне; пока идёт — «читаю: 120 из 400») */
+let knFT = 0;
+function renderKnFolders(list) {
+  const box = $("#kn-folders"); box.innerHTML = ""; clearTimeout(knFT);
+  if (!list.length) { box.innerHTML = '<p class="hint">Своих папок пока нет.</p>'; return; }
+  list.forEach(f => {
+    const row = document.createElement("div"); row.className = "kn-row";
+    row.innerHTML = `<b></b><span></span><span></span><button class="btn small" title="Больше не искать в этой папке (файлы остаются)">Убрать</button>`;
+    $("b", row).textContent = f.path; row.title = f.path;
+    const st = $$("span", row);
+    st[0].className = f.error || !f.exists ? "bad" : "";
+    st[0].textContent = !f.exists ? "папки нет" : f.error ? f.error : f.busy ? `читаю: ${f.indexed || 0} из ${f.files || "…"}` : f.files == null ? "ждёт очереди" : `файлов: ${f.files}${f.skipped ? " (дальше — не берём)" : ""}`;
+    st[1].textContent = f.chunks ? `${f.chunks} отрывков` : "";
+    $("button", row).onclick = () => core.call("knowledge_folder_remove", { path: f.path }).then(renderKnFolders).catch(e => toast(e.message));
+    box.appendChild(row);
+  });
+  if (list.some(f => f.busy || f.files == null)) knFT = setTimeout(() => core.call("knowledge_folders").then(renderKnFolders).catch(() => {}), 2500);
+}
+$("#kn-fadd").onclick = async () => {
+  const a = window.api && window.api(); let path = "";
+  if (a && a.pick_folder) path = await a.pick_folder();
+  else path = prompt("Полный путь к папке с документами:") || "";
+  if (!path) return;
+  try { renderKnFolders(await core.call("knowledge_folder_add", { path })); $("#kn-fres").className = "res ok"; $("#kn-fres").textContent = "Добавлено — читаю файлы в фоне"; }
+  catch (e) { $("#kn-fres").className = "res bad"; $("#kn-fres").textContent = e.message; }
+};
 function loadMe() {
   core.call("memory_get").then(t => { $("#me-mem").value = t.trim(); }).catch(() => {});
   core.call("knowledge_list").then(r => renderKn(r.files)).catch(e => ($("#kn-res").textContent = e.message));
+  core.call("knowledge_folders").then(renderKnFolders).catch(() => {});
   const a = S && lastAccount; $("#kn-site").textContent = a && a.logged_in ? `Знания с сайта тоже подключены: аккаунт ${a.user && a.user.login || a.login} (раздел «Подключение»).` : "";
 }
 let lastAccount = null;

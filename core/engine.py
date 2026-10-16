@@ -122,8 +122,10 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.account = Account()
         self.toolbox.hooks["account"] = self.account
         from knowledge import Knowledge
-        self.knowledge = Knowledge(self.workspace, STATE_DIR / "knowledge.json")
+        self.knowledge = Knowledge(self.workspace, STATE_DIR / "knowledge.json", folders=lambda: self.s.get("knowledge", "folders") or [])
         self.toolbox.hooks["knowledge"] = self.knowledge
+        self.toolbox.hooks["sources"] = self._turn_sources          # найденные документы — источниками под ответом
+        threading.Thread(target=self.knowledge.watch, name="knowledge-folders", daemon=True).start()
         from prompter import Prompter
         self.mic_voice_t = 0.0                             # когда микрофон последний раз слышал речь (monotonic)
         self.prompter = Prompter(self)                     # суфлёр на встречах (core/prompter.py, окно ui/prompter.html)
@@ -571,7 +573,9 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
                 from engine_answer import ATT_DEFAULT_Q
                 if text.strip() == ATT_DEFAULT_Q:
                     text = ""
-            if type_ == "answer":                          # картинки, показанные в этом ответе, — к нему в ленту
+            if type_ == "answer" and kw.get("sources"):    # документы, по которым ответ, — к нему в ленту (открыть)
+                att = list(kw["sources"])
+            if type_ == "answer" and not att:              # картинки, показанные в этом ответе, — к нему в ленту
                 at, media = getattr(self, "_turn_media", None) or (0, [])
                 if media and time.monotonic() - at < 300:
                     att, self._turn_media = [{"kind": "image", "name": m.get("title", ""), "thumb": m.get("src", ""), "url": m.get("page", ""),

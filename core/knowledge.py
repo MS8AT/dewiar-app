@@ -11,6 +11,7 @@ import html
 import json
 import logging
 import math
+import os
 import re
 import subprocess
 import threading
@@ -104,11 +105,24 @@ def chunks(text):
     return out
 
 
+# Свои папки (идея 16.10: «поиск по любым папкам»): кроме «Знаний» — папки, которые человек выбрал в студии (Документы,
+# рабочая папка…). В индексе их файлы — под ключом «@<полный путь>»; индексируются в фоне (watch), с пределами, чтобы
+# не перемалывать весь диск: не больше FOLDER_FILES файлов на папку, файл до EXTRA_MAX, всего до EXTRA_CHUNKS отрывков;
+# служебные и скрытые папки пропускаются. Поиск — тот же, по всем сразу; у результата есть key, им открывают файл.
+SKIP_DIRS = {"node_modules", "__pycache__", "venv", "site-packages", "AppData", "Library", "$RECYCLE.BIN",
+             "System Volume Information", "Windows", "Program Files", "Program Files (x86)", "snap", "go", "target"}
+FOLDER_FILES, EXTRA_MAX, EXTRA_CHUNKS = 4000, 30 * 1024 * 1024, 80000
+
+
 class Knowledge:
-    def __init__(self, workspace, index_path):
+    def __init__(self, workspace, index_path, folders=None):
         self.ws, self.index_path = workspace, Path(index_path)
+        self.folders = folders or (lambda: [])   # -> [полный путь своей папки, …] (настройка knowledge.folders)
         self._lock = threading.Lock()
-        self.index = self._load()          # rel -> {"mtime", "size", "chunks": [..], "error"}
+        self.index = self._load()          # rel | «@полный путь» -> {"mtime", "size", "chunks": [..], "error"}
+        self._tok = {}                     # ключ -> [основы слов каждого отрывка]: не считать их заново на каждый поиск
+        self.fstate = {}                   # своя папка -> {files, indexed, skipped, busy, error}
+        self.kick = threading.Event()
 
     @property
     def root(self):
@@ -144,8 +158,9 @@ class Knowledge:
         return out
 
     def has_files(self):
+        """Есть ли где искать: файлы в «Знаниях» или уже прочитанные файлы своих папок."""
         try:
-            return bool(self.files())
+            return bool(self.files()) or any(k.startswith("@") for k in self.index)
         except OSError:
             return False
 
@@ -172,19 +187,148 @@ class Knowledge:
                     entry["error"] = str(e)[:200]
                     log.info("Знания: %s — %s", rel, entry["error"])
                 self.index[rel] = entry
+                self._forget(rel)
                 changed += 1
             for rel in list(self.index):
-                if rel not in seen:
+                if rel not in seen and not rel.startswith("@"):
                     del self.index[rel]
+                    self._forget(rel)
                     changed += 1
             if changed:
                 self._save()
             return changed
 
+    def _forget(self, key):
+        self._tok.pop(key, None)
+
     def list(self):
         self.refresh()
         return [{"path": rel, "size": e["size"], "chunks": len(e["chunks"]), "error": e.get("error", "")}
-                for rel, e in sorted(self.index.items())]
+                for rel, e in sorted(self.index.items()) if not rel.startswith("@")]
+
+    # ---------- свои папки ----------
+
+    def _walk(self, folder):
+        """Файлы своей папки, подходящие для поиска, — по порядку, без скрытых и служебных папок. -> (список, урезано ли)."""
+        out, cut = [], False
+        for dirpath, dirnames, filenames in os.walk(folder):
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith((".", "$")) and d not in SKIP_DIRS)
+            for f in sorted(filenames):
+                if f.startswith((".", "~$")) or Path(f).suffix.lower() not in EXTS:
+                    continue
+                if len(out) >= FOLDER_FILES:
+                    return out, True
+                out.append(Path(dirpath) / f)
+        return out, cut
+
+    def refresh_folders(self):
+        """Своя папка: новые и изменившиеся файлы — в индекс, пропавшие и убранные папки — из индекса. Долго (PDF,
+        тысячи файлов) — поэтому из фонового потока (watch); поиск в это время работает по тому, что уже есть."""
+        folders = []
+        for f in self.folders() or []:
+            p = Path(os.path.expanduser(str(f))).resolve()
+            if p.is_dir() and p not in folders:
+                folders.append(p)
+        seen, changed = set(), 0
+        total = sum(len(e["chunks"]) for k, e in self.index.items() if k.startswith("@"))
+        for folder in folders:
+            st = self.fstate.setdefault(str(folder), {})
+            st.update(busy=True, error="")
+            try:
+                files, cut = self._walk(folder)
+            except OSError as e:
+                st.update(busy=False, error=str(e)[:200])
+                continue
+            st.update(files=len(files), skipped=cut)
+            done = 0
+            for p in files:
+                key = "@" + p.as_posix()
+                seen.add(key)
+                try:
+                    stt = p.stat()
+                except OSError:
+                    continue
+                old = self.index.get(key)
+                if old and old.get("mtime") == stt.st_mtime and old.get("size") == stt.st_size:
+                    done += 1
+                    continue
+                entry = {"mtime": stt.st_mtime, "size": stt.st_size, "chunks": []}
+                try:
+                    if stt.st_size > EXTRA_MAX:
+                        raise RuntimeError("файл больше 30 МБ")
+                    if total > EXTRA_CHUNKS:
+                        raise RuntimeError("в своих папках уже слишком много текста — остальное не ищется")
+                    entry["chunks"] = chunks(extract(p))
+                    if not entry["chunks"]:
+                        entry["error"] = "в файле нет текста"
+                except Exception as e:  # noqa: BLE001
+                    entry["error"] = str(e)[:200]
+                total += len(entry["chunks"]) - len((old or {}).get("chunks") or [])
+                with self._lock:
+                    self.index[key] = entry
+                    self._forget(key)
+                changed += 1
+                done += 1
+                st["indexed"] = done
+                if changed % 100 == 0:
+                    with self._lock:
+                        self._save()
+            st.update(indexed=done, busy=False)
+        with self._lock:
+            for key in [k for k in self.index if k.startswith("@") and k not in seen]:
+                del self.index[key]
+                self._forget(key)
+                changed += 1
+            for k in [k for k in self.fstate if Path(k) not in folders]:
+                del self.fstate[k]
+            if changed:
+                self._save()
+        if changed:
+            log.info("Знания: свои папки — обновлено файлов %d", changed)
+        return changed
+
+    def watch(self, every=1200):
+        """Фоновый поток: свои папки — при запуске, раз в every секунд и сразу по kick (добавили папку в студии)."""
+        while True:
+            try:
+                self.refresh_folders()
+            except Exception:  # noqa: BLE001
+                log.exception("Знания: свои папки")
+            self.kick.wait(every)
+            self.kick.clear()
+
+    def folders_state(self):
+        """Для студии: [{path, name, files, indexed, chunks, busy, skipped, error}]."""
+        out = []
+        for f in self.folders() or []:
+            p = Path(os.path.expanduser(str(f))).resolve()
+            st = self.fstate.get(str(p), {})
+            pre = "@" + p.as_posix() + "/"
+            n = sum(len(e["chunks"]) for k, e in list(self.index.items()) if k.startswith(pre))
+            out.append({"path": str(p), "name": p.name or str(p), "exists": p.is_dir(), "files": st.get("files"), "indexed": st.get("indexed"),
+                        "chunks": n, "busy": bool(st.get("busy")), "skipped": bool(st.get("skipped")), "error": st.get("error", "")})
+        return out
+
+    def label(self, key):
+        """Как показывать файл: «Знания/…» или «<своя папка>/…»."""
+        if not key.startswith("@"):
+            return key
+        p = Path(key[1:])
+        for f in self.folders() or []:
+            base = Path(os.path.expanduser(str(f))).resolve()
+            try:
+                return (Path(base.name) / p.relative_to(base)).as_posix()
+            except ValueError:
+                continue
+        return p.name
+
+    def file_path(self, key):
+        """Ключ из результата поиска -> настоящий путь к файлу (только то, что есть в индексе) или None."""
+        key = str(key or "")
+        if key not in self.index:
+            return None
+        p = Path(key[1:]) if key.startswith("@") else self.root / key
+        return p if p.is_file() else None
 
     def search(self, query, limit=5):
         """-> [{path, score, text}] — лучшие отрывки, не больше двух из файла. Путь файла тоже участвует в поиске."""
@@ -192,25 +336,38 @@ class Knowledge:
         q = [w for w in words(query) if len(w) > 2] or words(query)     # короткие основы — только если других нет
         if not q:
             return []
-        docs = [(rel, i, c, words(rel + " " + c)) for rel, e in self.index.items() for i, c in enumerate(e["chunks"])]
+        with self._lock:
+            items = list(self.index.items())
+        docs = []
+        for rel, e in items:
+            tok = self._tok.get(rel)
+            if tok is None or len(tok) != len(e["chunks"]):
+                name = self.label(rel)
+                tok = []
+                for c in e["chunks"]:
+                    ws_ = words(name + " " + c)
+                    cnt = {}
+                    for w in ws_:
+                        cnt[w] = cnt.get(w, 0) + 1
+                    tok.append((cnt, len(ws_)))       # счётчик основ и длина — поиск по тысячам файлов за доли секунды
+                self._tok[rel] = tok
+            docs.extend((rel, i, c, tok[i]) for i, c in enumerate(e["chunks"]))
         if not docs:
             return []
         n = len(docs)
-        avg = sum(len(d[3]) for d in docs) / n or 1
-        df = {w: sum(1 for d in docs if w in d[3]) for w in set(q)}
+        avg = sum(d[3][1] for d in docs) / n or 1
+        qs = set(q)
+        df = {w: sum(1 for d in docs if w in d[3][0]) for w in qs}
         scored = []
-        for rel, i, c, ws in docs:
-            tf = {}
-            for w in ws:
-                if w in df:
-                    tf[w] = tf.get(w, 0) + 1
+        for rel, i, c, (cnt, ln) in docs:
+            tf = {w: cnt[w] for w in qs if w in cnt}
             if not tf:
                 continue
             s = 0.0
             for w, f in tf.items():
                 idf = math.log(1 + (n - df[w] + 0.5) / (df[w] + 0.5))
                 # BM25: k1=1.2, b=0.75 (как в recall.py)
-                s += idf * f * 2.2 / (f + 1.2 * (0.25 + 0.75 * len(ws) / avg))
+                s += idf * f * 2.2 / (f + 1.2 * (0.25 + 0.75 * ln / avg))
             s *= 1 + 0.3 * (len(tf) - 1)                        # совпало больше разных слов — выше
             scored.append((s, rel, i, c))
         scored.sort(key=lambda x: -x[0])
@@ -219,7 +376,7 @@ class Knowledge:
             if per_file.get(rel, 0) >= 2:                       # не больше двух отрывков из одного файла
                 continue
             per_file[rel] = per_file.get(rel, 0) + 1
-            out.append({"path": rel, "score": round(s, 2), "text": c})
+            out.append({"path": self.label(rel), "key": rel, "score": round(s, 2), "text": c})
             if len(out) >= limit:
                 break
         return out

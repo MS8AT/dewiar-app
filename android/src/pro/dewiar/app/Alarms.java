@@ -35,6 +35,7 @@ public final class Alarms {
         out.put(item);
         save(c, out);
         schedule(c, item);
+        if ("timer".equals(item.optString("kind"))) TimerNote.show(c, item);    // идущий таймер — с отсчётом в шторке
     }
 
     public static synchronized boolean remove(Context c, String id) {
@@ -48,6 +49,7 @@ public final class Alarms {
         save(c, out);
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
         am.cancel(pi(c, id, ""));
+        TimerNote.hide(c, id);
         return found;
     }
 

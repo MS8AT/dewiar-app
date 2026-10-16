@@ -276,6 +276,79 @@ class ToolsMixin:
         log.info("💡 Идея → %s (вложений %d)", note["path"], len(note["att"]))
         return {"kind": "note", "title": note["path"].rsplit("/", 1)[-1][:-3], "path": note["path"], "att": len(note["att"])}
 
+    def _turn_sources(self, items):
+        """search_documents нашёл файлы — запомнить их у текущего хода; после ответа под ним — источники (_sources_done)."""
+        turn = getattr(self, "turn", None)
+        if turn is None:
+            return
+        have = {x["key"] for x in getattr(turn, "sources", [])}
+        turn.sources = getattr(turn, "sources", []) + [x for x in items if x["key"] not in have]
+
+    def _sources_done(self, turn, answer):
+        """Источники ответа: файлы из поиска по документам, которые ответ называет (имя или его начало); не назвал ни
+        одного, а файл один — он. -> [{kind: file, name, key, label}] (их показывают виджет и «Чат»: нажать — открыть)."""
+        src = getattr(turn, "sources", None) or []
+        if not src or not (answer or "").strip():
+            return []
+        low = answer.lower().replace("ё", "е")
+
+        def named(x):
+            stem = Path(x["name"]).stem.lower().replace("ё", "е")
+            return stem and (stem in low or (len(stem) > 12 and stem[:12] in low) or x["name"].lower() in low)
+        hit = [x for x in src if named(x)]
+        if not hit and len({x["key"] for x in src}) == 1:
+            hit = src[:1]
+        return [{"kind": "file", "name": x["name"], "key": x["key"], "label": x["label"]} for x in hit[:4]]
+
+    def _timer_cmd(self, text, via=None):
+        """Таймеры голосом, без модели: «сколько осталось (на таймере)?», «добавь минуту / ещё 5 минут к таймеру»,
+        «отмени / выключи таймер». Таймеров нет — False (решает модель: «сколько осталось до Нового года» — не сюда)."""
+        t = re.sub(r"[?!.,]+", " ", (text or "").lower().replace("ё", "е"))
+        t = re.sub(r"^\s*[а-я]+\s+(?=(?:сколько|добав|продли|отмени|выключи|останови|убери|сбрось|еще)\b)", "", t.strip())   # «Лира, …»
+        t = re.sub(r"\s+", " ", t).strip()
+        timers = sorted((x for x in self.reminders.items if x.get("kind") == "timer" and not x.get("paused")), key=lambda x: x["at"])
+        if not timers:
+            return False
+        now = datetime.now()
+        left = lambda x: max(0, int((datetime.fromisoformat(x["at"]) - now).total_seconds()))   # noqa: E731
+
+        def dur(sec, acc=False):
+            """-> «4 минуты 29 секунд»; acc — винительный («добавил минуту»)."""
+            m, s_ = divmod(sec, 60)
+            h, m = divmod(m, 60)
+            w = lambda n, a, b, c: f"{n} " + (a if n % 10 == 1 and n % 100 != 11 else b if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else c)  # noqa: E731
+            parts = ([w(h, "час", "часа", "часов")] if h else []) + ([w(m, "минуту" if acc else "минута", "минуты", "минут")] if m else []) + \
+                    ([w(s_, "секунду" if acc else "секунда", "секунды", "секунд")] if s_ and not h and m < 10 else [])
+            out = " ".join(parts) or "меньше секунды"
+            return re.sub(r"^1 (минуту|секунду|час)$", r"\1", out) if acc else out
+        if re.fullmatch(r"(?:а )?(?:сколько (?:еще |там )?(?:осталось|остается|времени осталось|минут осталось)(?: (?:на|до|у) таймер[а-я]*)?"
+                        r"|сколько (?:там )?на таймере|сколько (?:еще|там)|что (?:там )?с таймером|таймер сколько)", t) \
+                or (re.search(r"таймер", t) and re.search(r"сколько|осталось", t)):
+            if len(timers) == 1:
+                msg = f"Осталось {dur(left(timers[0]))}."
+            else:
+                msg = "Осталось: " + "; ".join(f"{(x.get('text') or 'таймер')[:1].lower()}{(x.get('text') or 'таймер')[1:]} — {dur(left(x))}" for x in timers[:3]) + "."
+            self._say_quick(msg, text, via)
+            return True
+        m = re.fullmatch(r"(?:добавь|прибавь|продли(?: таймер)?(?: на)?|накинь|еще)(?: еще)? (\d+|одну|минуту|две|три|пять|десять|полминуты)?\s*"
+                         r"(минут[уы]?|секунд[уы]?)?(?: (?:к|на|в) таймер[а-я]*| таймер[а-я]*)?", t)
+        if m and (m.group(1) or m.group(2)) and ("таймер" in t or re.match(r"(?:добавь|прибавь|накинь)", t) or (t.startswith("еще") and (m.group(2) or m.group(1) in ("минуту", "полминуты")))):
+            words = {"одну": 1, "минуту": 1, "две": 2, "три": 3, "пять": 5, "десять": 10}
+            n = 30 if m.group(1) == "полминуты" else int(m.group(1)) if (m.group(1) or "").isdigit() else words.get(m.group(1) or "минуту", 1)
+            sec = n if (m.group(2) or "").startswith("секунд") else n * 60
+            x = timers[0]
+            new_at = datetime.fromisoformat(x["at"]) + timedelta(seconds=sec)
+            self.reminders.update(x["id"], {"at": new_at.replace(microsecond=0).isoformat(timespec="seconds")})
+            self._say_quick(f"Добавил {dur(sec, True)}. Теперь осталось {dur(left(dict(x, at=new_at.isoformat())))}.", text, via)
+            return True
+        if re.fullmatch(r"(?:отмени|выключи|останови|убери|сбрось|удали)(?: все)? таймер[а-я]*", t):
+            gone = timers if " все " in f" {t} " or len(timers) == 1 else timers[:1]
+            for x in gone:
+                self.reminders.remove(x["id"])
+            self._say_quick("Таймер отменён." if len(gone) == 1 else f"Отменил таймеры: {len(gone)}.", text, via)
+            return True
+        return False
+
     def _reminder_files(self, rid):
         """Вложения напоминания для окна-будильника: [{kind, name, path, thumb}] — миниатюры картинок data:URL."""
         from engine_answer import _thumb

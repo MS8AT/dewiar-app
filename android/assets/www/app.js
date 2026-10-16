@@ -2081,8 +2081,9 @@ function remindWhat(rest) {
 function addAlarm(title, at, kind, repeat, note) {
   if (repeat) at = rollRepeat(at, repeat);              // «будильник по будням в 7», сказанное в 7:20, — с завтрашнего, не сразу
   // who — кто ставил: его лицо и имя будут в уведомлении (Faces.java); note — заметка с фото и файлами напоминания
-  const x = JSON.parse(D.alarmSet(JSON.stringify(Object.assign({ title, at: at.getTime(), kind: kind || "reminder", repeat: repeat || "", who: S.persona || "" },
+  const x = JSON.parse(D.alarmSet(JSON.stringify(Object.assign({ title, at: at.getTime(), kind: kind || "reminder", repeat: repeat || "", who: S.persona || "", from: Date.now() },
     note ? { note } : {}))) || "{}");
+  if (x.kind === "timer") tmrShow();
   if (!D.exactAlarms()) toast("Чтобы будильники звонили минута в минуту, разрешите «Будильники и напоминания» в настройках.", 5000);
   needPerm(NOTIF); syncSoon();
   return x;
@@ -2090,7 +2091,65 @@ function addAlarm(title, at, kind, repeat, note) {
 function alarmCard(x) {
   return `<div class="pill"><span>${x.kind === "alarm" ? "⏰" : x.kind === "timer" ? "⏱" : "🔔"}</span><span><b>${esc(whenText(new Date(x.at)))}</b>${x.repeat ? " · " + REP_RU[x.repeat] : ""}${x.note ? " · 📎" : ""}<br>${esc(x.title)}</span><button onclick="cancelAlarm('${esc(x.id)}', this)">Отменить</button></div>`;
 }
-window.cancelAlarm = (id, btn) => { D.alarmCancel(id); syncSoon(); if (btn) btn.closest(".pill").innerHTML = "<span>Отменено</span>"; };
+window.cancelAlarm = (id, btn) => { D.alarmCancel(id); syncSoon(); tmrShow(); if (btn) btn.closest(".pill").innerHTML = "<span>Отменено</span>"; };
+/* ---------- таймер с обратным отсчётом (как у Алисы): на главном экране, а в шторке — тикающий отсчёт (TimerNote.java) ----------
+   Таймеры — будильники вида timer (D.alarms); строки рисуются раз в секунду, список перечитывается раз в 2 с. */
+let TMRS = [], tmrIv = 0, tmrRead = 0;
+/* Таймеры голосом без модели (как core/engine_tools.py _timer_cmd): таймеров нет — null, решает модель. */
+function timerVoice(t) {
+  const list = alarmsNow().filter(x => x.kind === "timer" && +x.at > Date.now()).sort((a, b) => a.at - b.at);
+  if (!list.length) return null;
+  t = t.replace(/[?!.,]/g, " ").replace(/\s+/g, " ").trim().replace(/ё/g, "е");
+  const dur = (sec, acc) => { const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s_ = sec % 60;
+    const w = (n, a, b, c) => `${n} ` + (n % 10 === 1 && n % 100 !== 11 ? a : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? b : c);
+    const p = [h ? w(h, "час", "часа", "часов") : "", m ? w(m, acc ? "минуту" : "минута", "минуты", "минут") : "", s_ && !h && m < 10 ? w(s_, acc ? "секунду" : "секунда", "секунды", "секунд") : ""].filter(Boolean);
+    const o = p.join(" ") || "меньше секунды"; return acc ? o.replace(/^1 (минуту|секунду|час)$/, "$1") : o; };
+  const left = (x) => Math.max(0, Math.round((+x.at - Date.now()) / 1000));
+  if (/^(?:а )?(?:сколько (?:еще |там )?(?:осталось|остается|времени осталось|минут осталось)(?: (?:на|до|у) таймер[а-я]*)?|сколько (?:там )?на таймере|сколько (?:еще|там)|что (?:там )?с таймером|таймер сколько)$/.test(t)
+      || (/таймер/.test(t) && /сколько|осталось/.test(t)))
+    return { say: list.length === 1 ? `Осталось ${dur(left(list[0]))}.` : "Осталось: " + list.slice(0, 3).map(x => `${(x.title || "таймер").replace(/^Т/, "т")} — ${dur(left(x))}`).join("; ") + "." };
+  let m = t.match(/^(?:добавь|прибавь|продли(?: таймер)?(?: на)?|накинь|еще)(?: еще)? (\d+|одну|минуту|две|три|пять|десять|полминуты)?\s*(минут[уы]?|секунд[уы]?)?(?: (?:к|на|в) таймер[а-я]*| таймер[а-я]*)?$/);
+  if (m && (m[1] || m[2]) && (/таймер/.test(t) || /^(?:добавь|прибавь|накинь)/.test(t) || (/^еще/.test(t) && (m[2] || ["минуту", "полминуты"].includes(m[1]))))) {
+    const n = m[1] === "полминуты" ? 30 : /^\d+$/.test(m[1] || "") ? +m[1] : ({ одну: 1, минуту: 1, две: 2, три: 3, пять: 5, десять: 10 })[m[1] || "минуту"] || 1;
+    const sec = /^секунд/.test(m[2] || "") || m[1] === "полминуты" ? n : n * 60, x = list[0];
+    if (typeof EXAM !== "undefined" && EXAM) x.at = +x.at + sec * 1000; else D.alarmSet(JSON.stringify(Object.assign({}, x, { at: +x.at + sec * 1000 })));
+    syncSoon(); tmrShow();
+    return { say: `${persona().gender === "female" ? "Добавила" : "Добавил"} ${dur(sec, true)}. Теперь осталось ${dur(left(Object.assign({}, x, { at: +x.at + (typeof EXAM !== "undefined" && EXAM ? 0 : sec * 1000) })))}.` };
+  }
+  if (/^(?:отмени|выключи|останови|убери|сбрось|удали)(?: все)? таймер[а-я]*$/.test(t)) {
+    const gone = / все /.test(` ${t} `) || list.length === 1 ? list : list.slice(0, 1);
+    gone.forEach(x => remDrop(x.id)); tmrShow();
+    return { say: gone.length === 1 ? "Таймер отменён." : `${persona().gender === "female" ? "Отменила" : "Отменил"} таймеры: ${gone.length}.` };
+  }
+  return null;
+}
+const tmrFmt = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), c = s % 60;
+  return h ? `${h}:${pad(m)}:${pad(c)}` : `${m}:${pad(c)}`; };
+const tmrSeen = {};                                   // таймер пришёл с компьютера без from — прогресс от того, как увидели
+function tmrShow() {
+  if (typeof EXAM !== "undefined" && EXAM) return;
+  const now = Date.now();
+  TMRS = JSON.parse(D.alarms() || "[]").filter(x => x.kind === "timer" && +x.at > now - 1500 && +x.at - now < 24 * 3600e3).sort((a, b) => a.at - b.at).slice(0, 3);
+  TMRS.forEach(x => { if (!x.from) x.from = tmrSeen[x.id] = tmrSeen[x.id] || now; });
+  const box = $("#tmrs"); if (!box) return;
+  box.hidden = !TMRS.length;
+  box.innerHTML = TMRS.map(x => { const mins = Math.round((x.at - x.from) / 60000);
+    const name = !x.title || /^Таймер( на .*)?$/i.test(x.title) ? (mins >= 1 ? `таймер на ${mins} мин` : "таймер") : x.title;
+    return `<div class="tr" data-id="${esc(x.id)}"><svg class="pg" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.5"/><circle class="fg" cx="18" cy="18" r="15.5" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg>`
+      + `<div class="tt"><b></b><span>${esc(name)}</span></div><button class="x" aria-label="Отменить таймер">${X_SVG}</button></div>`; }).join("");
+  $$("#tmrs .x").forEach(b => b.onclick = () => { D.alarmCancel(b.closest(".tr").dataset.id); syncSoon(); tmrShow(); });
+  clearInterval(tmrIv); tmrRead = now;
+  if (TMRS.length) { tmrIv = setInterval(tmrDraw, 250); tmrDraw(); }
+}
+function tmrDraw() {
+  const now = Date.now();
+  if (now - tmrRead > 2000) return tmrShow();             // отменили в шторке, сработал, пришёл с компьютера — перечитать
+  TMRS.forEach(x => { const r = $(`#tmrs .tr[data-id="${CSS.escape(x.id)}"]`); if (!r) return;
+    const left = +x.at - now, all = Math.max(1000, +x.at - x.from);
+    $(".tt b", r).textContent = tmrFmt(left); r.classList.toggle("end", left <= 10000);
+    $(".fg", r).style.strokeDashoffset = String(Math.min(100, Math.max(0, 100 - left / all * 100))); });
+  if (TMRS.every(x => +x.at < now - 1500)) tmrShow();
+}
 
 /* ---------- быстрые команды без модели (работают и без интернета) ---------- */
 /* -> {say, card?, silent? (не озвучивать), switchTo?/question? (передать другому персонажу)} или null — тогда решает модель.
@@ -2198,11 +2257,12 @@ async function quick(text) {
   }
   if ((m = t.match(/^(?:громкость|звук) (?:на )?(\d{1,3}|[а-я ]+?)(?: процент[а-яё]*|%)?$/)) && wordsNum(m[1]) != null) return { say: `Громкость ${devVolume("set", wordsNum(m[1]))}%.`, silent: true };
   if (/^(выключи|отключи) звук$|^без звука$/.test(t)) { devVolume("mute", 0); return { say: "Звук выключен.", silent: true }; }
+  { const tc = timerVoice(t); if (tc) return tc; }        // «сколько осталось?», «добавь минуту», «отмени таймер»
   if ((m = t.match(/^(?:поставь |заведи |запусти )?таймер (?:на )?(.+?) (секунд[а-яё]*|минут[а-яё]*|час[а-яё]*)$/))) {
     const n = wordsNum(m[1]); if (n != null && n > 0) {
       const ms = m[2].startsWith("сек") ? n * 1000 : m[2].startsWith("мин") ? n * 60000 : n * 3600000;
-      const x = addAlarm(`Таймер на ${m[1]} ${m[2]}`, new Date(Date.now() + ms), "timer", "");
-      return { say: `Таймер на ${m[1]} ${m[2]}.`, card: alarmCard(x) };
+      addAlarm(`Таймер на ${m[1]} ${m[2]}`, new Date(Date.now() + ms), "timer", "");
+      return { say: `Таймер на ${m[1]} ${m[2]}.` };                  // отсчёт — сразу под обликом (#tmrs), без карточки
     }
   }
   if ((m = t.match(/^(?:поставь |заведи )?(?:будильник|разбуди меня)(.*)$/))) {
@@ -4626,6 +4686,7 @@ function syncApply(it) {
     const was = exists ? JSON.parse(D.alarms() || "[]").find(x => x.id === it.id) : null, note = "note" in d ? d.note : was && was.note;
     D.alarmSet(JSON.stringify(Object.assign({ id: it.id, title: d.text || "Напоминание", at: +d.at, kind: ["alarm", "timer"].includes(d.kind) ? d.kind : "reminder", repeat: repFromDict(d.repeat) },
       note ? { note } : {})));
+    if (d.kind === "timer") setTimeout(tmrShow, 0);
   } else if (it.kind === "note") {
     const old = notes().find(x => x.id === it.id);
     let n = notes().filter(x => x.id !== it.id);
@@ -6158,6 +6219,9 @@ $("#b-close").onclick = () => openClose("");
 $("#cl-inv").onclick = () => { if (clTab === "ref") return refShare().catch(e => toast(e.message, 4000)); clInviteOpen(); };
 document.addEventListener("visibilitychange", () => { if (!document.hidden && syncCred()) { clPoll(); noteAttSoon(6000); } });
 setTimeout(() => { clLoad(); clBadge(); if (S.closePending && syncCred()) clAcceptLink(S.closePending); clPoll(); clSchedule(); noteAttSoon(9000); }, 4000);
+setTimeout(tmrShow, 700);                                       // идущие таймеры — сразу после запуска
+N.on("alarms", () => { tmrShow(); syncSoon(); });               // отменили таймер в шторке (AlarmReceiver)
+N.on("resume", () => tmrShow());
 
 /* ---------- «сам замечает»: открыли приложение после перерыва — коротко о главном (как core/presence.py) ----------
    Перерыв считается от того, когда приложение последний раз было на экране (S.welcome.seen). Первый раз за день после 3 часов —

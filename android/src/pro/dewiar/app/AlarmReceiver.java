@@ -18,6 +18,11 @@ public class AlarmReceiver extends BroadcastReceiver {
         String id = in.getStringExtra("id");
         if (id == null) return;
         // кнопки уведомления — на телефоне и на часах (Honor/Huawei, Wear OS и другие повторяют кнопки уведомления)
+        if (DONE.equals(in.getAction()) && in.getBooleanExtra("cancel", false)) {    // «Отменить» у идущего таймера (TimerNote)
+            Alarms.remove(c, id);
+            MainActivity.poke("alarms");
+            return;
+        }
         if (DONE.equals(in.getAction()) || SNOOZE.equals(in.getAction()) || MADE.equals(in.getAction())) {
             if (MADE.equals(in.getAction())) made(c, id, in.getStringExtra("title"));
             if (SNOOZE.equals(in.getAction())) AlarmActivity.snoozeLater(c, id, in.getStringExtra("title"), in.getStringExtra("kind"), in.getStringExtra("who"));

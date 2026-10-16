@@ -687,6 +687,10 @@ async def check_state(core, state, t_start):
                     return False
             if "hm" in want and f"{at:%H:%M}" != want["hm"]:
                 return False
+            if want.get("kind") and (x.get("kind") or "reminder") != want["kind"]:        # таймер — именно таймер (отсчёт на экране)
+                return False
+            if want.get("att") and int(x.get("att") or 0) < int(want["att"]):           # с картинкой — она правда при напоминании
+                return False
             if "within_h" in want:
                 h = (at - now).total_seconds() / 3600
                 if not (want["within_h"][0] <= h <= want["within_h"][1]):
@@ -829,6 +833,18 @@ async def seed(core, sd):
         r = await core.call("reminder_add", phrase=ph)
         if isinstance(r, dict) and r.get("id"):
             made["reminders"].append(r["id"])
+    for fd in (sd or {}).get("folders") or []:       # своя папка с документами (поиск в своих папках, 0.38.59)
+        d = core.tmp / "docs" / fd["name"]
+        for f in fd.get("files") or []:
+            (d / f["name"]).parent.mkdir(parents=True, exist_ok=True)
+            (d / f["name"]).write_text(f["text"], encoding="utf-8")
+        await core.call("knowledge_folder_add", path=str(d))
+        made.setdefault("folders", []).append(str(d))
+        for _ in range(60):                            # читается в фоне — ждём, пока прочитается
+            st = await core.call("knowledge_folders") or []
+            if any(x.get("path") == str(d.resolve()) and x.get("chunks") and not x.get("busy") for x in st):
+                break
+            await asyncio.sleep(0.5)
     return made
 
 
@@ -841,6 +857,11 @@ async def unseed(core, made):
     for rid in made.get("reminders") or []:
         try:
             await core.call("reminder_cancel", id=rid)
+        except Exception:  # noqa: BLE001
+            pass
+    for d in made.get("folders") or []:
+        try:
+            await core.call("knowledge_folder_remove", path=d)
         except Exception:  # noqa: BLE001
             pass
 
@@ -919,9 +940,14 @@ async def _run_scenario(core, sc, judge_prof, work, log, t0):
                     await core.call("persona_set", id=stp["persona"])
                 said = fill(stp["say"])
                 ans, ev = await core.say(said, img)
-                res["steps"].append({"say": said, "image": stp.get("image"), "answer": ans[:2000], "tools": tools_of(ev)})
+                src = [x.get("label") or x.get("name") for e in ev if e.get("type") == "answer" and e.get("done") for x in e.get("sources") or []]
+                res["steps"].append({"say": said, "image": stp.get("image"), "answer": ans[:2000], "tools": tools_of(ev), "sources": src})
             last = res["steps"][-1]["answer"]
             res["checks"] += check_answer(sc.get("expect"), last)
+            if sc.get("source"):                          # ответ по документам — под ним нужный файл (кнопка «открыть»)
+                got = [x for s_ in res["steps"] for x in s_.get("sources") or []]
+                res["checks"].append({"name": "под ответом — файл-источник", "ok": any(w.lower() in str(g).lower() for g in got for w in sc["source"]),
+                                      "detail": ", ".join(got) or "источников нет"})
             for name in sc.get("tool") or {}:              # действие правда выполнено (как на телефоне): show_images, mark_done…
                 used = [x["name"] for s in res["steps"] for x in s.get("tools") or []]
                 res["checks"].append({"name": f"действие {name} выполнено", "ok": any(x["name"] == name and x["ok"] for s in res["steps"]

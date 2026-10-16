@@ -119,6 +119,8 @@ class AnswerMixin:
             c = parse_capture(text)
             if c and self._capture(c, text, via):
                 return
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._timer_cmd(text, via):
+            return                                       # «сколько осталось?», «добавь минуту», «отмени таймер»
         if not raw and not quiet and not images:
             from when import parse as parse_when
             r = parse_when(text)
@@ -1350,7 +1352,8 @@ class AnswerMixin:
                         self.health_count("refused")
                 except Exception:  # noqa: BLE001
                     pass
-                self.emit("answer", text=turn.full, done=True, model=True)
+                turn.src_done = self._sources_done(turn, turn.full)
+                self.emit("answer", text=turn.full, done=True, model=True, sources=turn.src_done)
                 self.health_count("turns")
                 self.health_count("net_ok")
                 self._maybe_learn(text, prof)

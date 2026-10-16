@@ -145,6 +145,14 @@ const EXAM_PHONE = [
     steps: ["Лира, я позвонила Игорю и сделала тренировку. Отметь как исполненное"], expect: { none: ["не могу отметить", "нет такой возможности", "не умею"] },
     done: { min: 2, all: ["игор", "трениров"], reminder_gone: "игор" }, tool: { mark_done: {} },
     judge: "Отметил оба дела сделанными (mark_done): звонок Игорю и тренировку; напоминание «позвонить Игорю» закрыто; коротко и тепло похвалил. Сказать «не могу отметить» или «отметил», не вызвав инструмент, — 0 баллов." },
+  { id: "timer_count", group: "Напоминания", title: "Таймер: «сколько осталось?» и «добавь минуту»",
+    steps: ["Поставь таймер на 3 минуты", "Сколько осталось?", "Добавь минуту"], alarm: { kind: "timer", minutes: 4, tol: 1 },
+    expect: { any: ["осталось"] },
+    judge: "Поставил таймер на 3 минуты, на «сколько осталось?» назвал оставшееся время, на «добавь минуту» добавил её и сказал, сколько теперь осталось (около 4 минут)." },
+  { id: "remind_photo", group: "Напоминания", title: "Напоминание с фото — фото при нём",
+    steps: [{ say: "Напомни завтра в 10 про это", image: true }], alarm: { att: 1, within_h: [1, 40] },
+    expect: { any: ["фото"] },
+    judge: "Поставил напоминание на завтра в 10:00, фото приложено к нему (заметка напоминания с фото), коротко сказал, что фото будет в напоминании." },
   { id: "note_photo", group: "Заметки", title: "Фото к заметке — в заметке", steps: [{ say: "Сохрани в заметки: чек за краску для кухни", image: true }],
     note: { any: ["краск"], att: 1 }, expect: { none: ["…"] },
     judge: "Сохранил заметку про чек за краску вместе с фото и коротко подтвердил. Не пересказывал заметку обрезанной фразой с многоточием." },
@@ -309,6 +317,8 @@ function examChecks(sc, last, toolsAll, t0) {
       if (w.any && !w.any.some(s => x.title.toLowerCase().includes(s))) return false;
       if (w.minutes != null && Math.abs((x.at - t0) / 60000 - examNum(w.minutes)) > (w.tol || 2)) return false;
       if (w.within_h) { const h = (x.at - now) / 36e5; if (h < w.within_h[0] || h > w.within_h[1]) return false; }
+      if (w.kind && (x.kind || "reminder") !== w.kind) return false;            // таймер — именно таймер (отсчёт на экране)
+      if (w.att) { const n = x.note && notes().find(y => y.id === x.note); if (!n || (n.att || []).length < w.att) return false; }   // фото — при напоминании
       return true;
     };
     const fresh = EXAM.alarms.filter(x => x.made >= t0);
