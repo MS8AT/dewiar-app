@@ -61,6 +61,8 @@ class ToolsMixin:
             log.info("📝 save_note без просьбы записать — не пишу")
             return ("Не записано: пользователь не просил сохранять в заметки. Ответь прямо в чате (список — пунктами в "
                     "самом ответе) и не говори, что записала.")
+        if name == "set_reminder" and asked and isinstance(args, dict):
+            args = self._reminder_time_guard(asked, args)
         blocked, force, warn_q = self.toolbox.guard(name, args)
         if blocked:
             log.warning("🛡 Защита: %s %s — %s", name, json.dumps(args, ensure_ascii=False)[:200], blocked)
@@ -312,6 +314,51 @@ class ToolsMixin:
         if not hit and len({x["key"] for x in src}) == 1:
             hit = src[:1]
         return [{"kind": "file", "name": x["name"], "key": x["key"], "label": x["label"]} for x in hit[:4]]
+
+    def _reminder_time_guard(self, asked, args):
+        """«Через 20 минут / через полчаса / через 2 часа» — время считаем сами от часов компьютера, а не берём у модели:
+        модель могла посчитать от старого времени из разговора (16.10: «сколько времени» — «14:17» в 15:57). Остальное
+        (when словами) и так разбирает when.parse по настоящим часам. -> аргументы (исправленные или те же)."""
+        said = asked.split("\n\nВложения:", 1)[0]
+        if not re.search(r"(?<![а-яё])через\s+(?:\S+\s+){0,3}?(?:секунд|минут|час|полчаса|полтора)", said, re.I) or re.search(r"кажд", said, re.I):
+            return args
+        from when import parse
+        r = parse(said) or parse("напомни " + said)
+        if not r or r.get("repeat") or not r.get("at"):
+            return args
+        mine = r["at"]
+        theirs = None
+        try:
+            from tools import _when
+            theirs = _when(args)[0]
+        except Exception:  # noqa: BLE001
+            pass
+        if theirs is not None and abs((theirs - mine).total_seconds()) <= 90:
+            return args
+        log.warning("🕒 Напоминание: модель поставила %s, а «%s» — это %s; ставлю по часам",
+                    theirs and f"{theirs:%d.%m %H:%M}", said[:60], f"{mine:%d.%m %H:%M}")
+        out = {k: v for k, v in args.items() if k not in ("when", "in_minutes", "at")}
+        out["at"] = f"{mine:%Y-%m-%d %H:%M}"
+        return out
+
+    def _clock_cmd(self, text, via=None):
+        """«Сколько времени?», «который час?», «какое сегодня число?» — по часам компьютера, без модели (16.10: модель
+        ответила «14:17», когда было 15:57 — повторила время из своего прошлого ответа в разговоре). На телефоне — quick()."""
+        from engine_base import MONTHS, WEEKDAYS
+        t = re.sub(r"[?!.,]+", " ", (text or "").lower().replace("ё", "е"))
+        t = re.sub(r"\s+", " ", t).strip()
+        t = re.sub(r"^[а-я]+ (?=(?:а |скажи |подскажи )?(?:сколько|который|какое|какой|какая|время)\b)", "", t)   # «Лира, …»
+        t = re.sub(r"^(?:а |скажи |подскажи )+|(?: (?:пожалуйста|подскажи|скажи))+$", "", t).strip()
+        now = datetime.now()
+        if re.fullmatch(r"(?:сколько (?:сейчас )?(?:времени|время)|который (?:сейчас )?час|сколько (?:сейчас )?на часах|время|"
+                        r"(?:сколько|который) (?:сейчас )?(?:времени|час) (?:сейчас|у нас))", t):
+            self._say_quick(f"Сейчас {now:%H:%M}.", text, via)
+            return True
+        if re.fullmatch(r"(?:какое|какой|какая) (?:сегодня|сейчас) (?:число|день(?: недели)?|дата)|(?:какое|какая) (?:число|дата) (?:сегодня|сейчас)|"
+                        r"какой (?:сегодня )?день недели", t):
+            self._say_quick(f"Сегодня {WEEKDAYS[now.weekday()]}, {now.day} {MONTHS[now.month - 1]}.", text, via)
+            return True
+        return False
 
     def _timer_cmd(self, text, via=None):
         """Таймеры голосом, без модели: «сколько осталось (на таймере)?», «добавь минуту / ещё 5 минут к таймеру»,

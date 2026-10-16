@@ -484,11 +484,17 @@ class Core:
             "persona": "lira", "user_name": "", "stt": {"engine": "vosk"}, "tts": {"engine": "off"},
             "audio": {"sounds": False, "follow_up_seconds": 0}, "ui": {"intro": "done"}, "report": {"pulse": False, "auto": False},
             "welcome": {"on": False}, "diary": {"night": False}, "night": {"on": False},
+            # экзамен — песочница: никакой синхронизации с чужим (или своим) облаком (16.10: проверочные «бюджет на мебель»
+            # и «дни рождения Ани и Пети» оказались в «Обо мне» настоящего человека)
+            "sync": {"enabled": False},
             "tasks": {"auto_run": True, "self_check": True},
             "llm": {"active": "exam", "profiles": {"exam": self.profile}}}, ensure_ascii=False), encoding="utf-8")
         env = dict(os.environ, DEWIAR_CONFIG_DIR=str(cfg), DEWIAR_STATE_DIR=str(st), DEWIAR_WORKSPACE_DIR=str(ws),
                    DEWIAR_PORT=str(self.port), DEWIAR_ASSUME_AEC="1")
         env.pop("DEWIAR_PROMPTER_WAV", None)
+        # и никаких настроек из пакета: provision.json рядом с программой (у владельца — личный, с его ключом и именем)
+        # ядро экзамена применяло само («apply_on_upgrade») — и писало память экзамена в настоящий аккаунт
+        env["DEWIAR_PROVISION"] = str(self.tmp / "нет-provision.json")
         self.proc = subprocess.Popen([sys.executable, str(ROOT / "core/main.py"), "--server"], env=env,
                                      stdout=open(self.tmp / "core.log", "w"), stderr=subprocess.STDOUT)
         for _ in range(240):

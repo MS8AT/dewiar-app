@@ -264,8 +264,9 @@ class Diary:
             self.data["done"] = self.data["done"][-60:]
             if got["tomorrow"]:
                 self.data["insights"] = {"day": day.isoformat(), "title": got["title"], "lines": got["tomorrow"],
-                                         "written": time.time()}
-            self.data.setdefault("titles", {})[day.isoformat()] = {"title": got["title"], "mood": got["mood"]}
+                                         "written": time.time(), "who": name}
+            # кто писал: дневник один на всю команду, а писать мог любой персонаж (16.10: «переключил на Патрика — записи от Лиры»)
+            self.data.setdefault("titles", {})[day.isoformat()] = {"title": got["title"], "mood": got["mood"], "who": name}
             self._save()
             log.info("🌙 Дневник: %s — «%s» %s", day, got["title"], got["mood"])
             return dict(got, day=day.isoformat(), path=rel)

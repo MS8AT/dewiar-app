@@ -46,8 +46,30 @@ $("#kn-fadd").onclick = async () => {
   try { renderKnFolders(await core.call("knowledge_folder_add", { path })); $("#kn-fres").className = "res ok"; $("#kn-fres").textContent = "Добавлено — читаю файлы в фоне"; }
   catch (e) { $("#kn-fres").className = "res bad"; $("#kn-fres").textContent = e.message; }
 };
+/* Следы экзамена способностей (16.10: «Бюджет Миши на мебель… менялось 13 раз» в «Обо мне»): похожее на его фразы —
+   списком с галочками, убирает человек. «Оставить» — больше не показываем этот же набор (подпись в настройках ui.exam_clean). */
+const XT_KIND = { memory: "Память", note: "Заметки", money: "Расходы", done: "Сделано" };
+let xtItems = [];
+async function meExam() {
+  const box = $("#me-exam"); box.hidden = true;
+  try { xtItems = await core.call("exam_traces"); } catch (e) { return; }
+  const sig = xtItems.map(x => x.kind + ":" + x.id).sort().join("|");
+  if (!xtItems.length || ((S && S.ui) || {}).exam_clean === sig.length + ":" + sig.slice(0, 200)) return;
+  $("#me-exam-list").innerHTML = Object.keys(XT_KIND).filter(k => xtItems.some(x => x.kind === k)).map(k => `<h4>${XT_KIND[k]}</h4>` +
+    xtItems.map((x, i) => x.kind !== k ? "" : `<label><input type="checkbox" checked data-i="${i}"><span>${escH(x.text)}</span></label>`).join("")).join("");
+  box.hidden = false;
+  $("#me-exam-keep").onclick = () => { box.hidden = true; save({ ui: { exam_clean: sig.length + ":" + sig.slice(0, 200) } }, true); };
+  $("#me-exam-go").onclick = async () => {
+    const items = $$("#me-exam-list input:checked").map(c => xtItems[+c.dataset.i]);
+    try { const r = await core.call("exam_traces_remove", { items }); toast(r.removed ? `Убрано записей: ${r.removed}` : "Ничего не убрано", 3000); }
+    catch (e) { toast(e.message, 4000); return; }
+    core.call("memory_get").then(t => { $("#me-mem").value = t.trim(); }).catch(() => {});
+    meExam();
+  };
+}
 function loadMe() {
   core.call("memory_get").then(t => { $("#me-mem").value = t.trim(); }).catch(() => {});
+  meExam();
   core.call("knowledge_list").then(r => renderKn(r.files)).catch(e => ($("#kn-res").textContent = e.message));
   core.call("knowledge_folders").then(renderKnFolders).catch(() => {});
   const a = S && lastAccount; $("#kn-site").textContent = a && a.logged_in ? `Знания с сайта тоже подключены: аккаунт ${a.user && a.user.login || a.login} (раздел «Подключение»).` : "";

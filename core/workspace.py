@@ -546,7 +546,7 @@ class Workspace:
             first = night.group(1) if night else re.sub(r"^#+ .*$", "", body, flags=re.M).strip().split("\n\n")[0]
             t = titles.get(day.isoformat()) or {}
             out.append({"day": day.isoformat(), "path": p.relative_to(self.root).as_posix(), "title": t.get("title", ""),
-                        "mood": t.get("mood", ""), "night": bool(night), "count": len(re.findall(r"^(?:### |## 🌙)", body, re.M)),
+                        "mood": t.get("mood", ""), "who": t.get("who", ""), "night": bool(night), "count": len(re.findall(r"^(?:### |## 🌙)", body, re.M)),
                         "preview": re.sub(r"\s+", " ", first)[:220], "text": text})
         return out[:120]
 

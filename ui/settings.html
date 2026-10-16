@@ -426,6 +426,13 @@
     <h1>Обо мне</h1>
     <p class="lead">Что ассистент знает о вас и ваших делах. Всё хранится на этом компьютере, в папке ассистента.</p>
     <div class="row" style="margin-bottom:6px"><label class="f">Как вас зовут<input type="text" placeholder="необязательно" data-k="user_name"></label></div>
+    <!-- следы экзамена способностей (core/examtrace.py): похожее на его проверочные фразы — человек отмечает и убирает сам -->
+    <div id="me-exam" class="xtrace" hidden>
+      <b>Похоже, сюда попали записи экзамена Dewiar</b>
+      <p>Это проверочные фразы экзамена способностей — писали их не вы. Отметьте, что убрать; остальное останется как есть.</p>
+      <div id="me-exam-list"></div>
+      <div class="actions" style="margin:12px 0 0"><button class="btn primary" id="me-exam-go">Убрать отмеченное</button><button class="btn" id="me-exam-keep">Оставить</button></div>
+    </div>
     <h2>Что ассистент помнит</h2>
     <p class="hint" style="margin-bottom:10px">Ассистент читает это перед каждым ответом и дописывает сам, когда узнаёт что-то важное надолго («запомни, что…»). Правьте и стирайте свободно.</p>
     <textarea id="me-mem" rows="9" style="width:100%;resize:vertical" placeholder="- Работаю бухгалтером, начало дня в 9:00&#10;- Дочь Маша, 7 лет&#10;- Люблю короткие ответы"></textarea>

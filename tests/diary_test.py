@@ -75,6 +75,8 @@ di.data["insights"]["day"] = str(today - dt.timedelta(days=4))
 ok(di.prompt() == "", "старые выводы (4 дня) в подсказку уже не идут")
 h.workspace.diary("Днём записал короткую мысль.", "Лира")
 days = h.workspace.diary_days(di.data.get("titles"))
+ok(days[1].get("who") == "Лира" and (di.data.get("insights") or {}).get("who") == "Лира",
+   "у ночной записи — кто писал (16.10: переключил на Патрика — а записи Лиры подписаны как его)")
 ok(days[0]["day"] == str(today) and days[1]["title"] == "Первый день" and days[1]["night"] and days[1]["preview"].startswith("Сегодня хозяин"),
    f"студия: дни с заголовками и началом текста ({[(x['day'], x['title'], x['count']) for x in days]})")
 
@@ -223,5 +225,22 @@ try:
        "вчерашний отмечен описанным; о сегодняшнем ночью напишет ещё раз, полнее")
 finally:
     mock.terminate()
+
+# студия: дневник общий — у записи подпись, кто писал, а не имя текущего персонажа (16.10)
+from playwright.sync_api import sync_playwright  # noqa: E402
+DAY = {"day": "2026-10-15", "title": "Тихий четверг", "mood": "🌙", "who": "Лира", "night": True, "count": 1, "preview": "День…",
+       "text": "# Дневник — 15 октября 2026\n\n## 🌙 Ночью — о прожитом дне · «Тихий четверг» 🌙\n\nДень, в котором я сказала всего две реплики.\n"}
+with sync_playwright() as p:
+    b = p.chromium.launch(); pg = b.new_page(viewport={"width": 1360, "height": 900}); perr = []
+    pg.on("pageerror", lambda e: perr.append(str(e)))
+    pg.add_init_script("window.pywebview = { api: new Proxy({}, { get: () => () => Promise.resolve(true) }) };")
+    pg.goto((ROOT / "ui/settings.html").as_uri() + "?port=1"); pg.wait_for_timeout(1000)
+    r = pg.evaluate("""async (day) => { core.call = (c) => Promise.resolve(c === 'diary_list' ? { days: [day], insights: { lines: ['Короче по утрам'], who: 'Лира' } } : {});
+        await loadDiary(); await new Promise(r => setTimeout(r, 300));
+        return [$('#d-lead').textContent, $('#d-ins').textContent, $('#d-days').textContent, $('#d-page').textContent]; }""", DAY)
+    ok("Общий дневник" in r[0] and "Лира" in r[1] and "Лира" in r[2] and "пишет Лира" in r[3],
+       f"студия: дневник общий, у записи — кто её написал: {[x[:80] for x in r]}")
+    ok(not perr, f"студия без ошибок: {perr[:2]}")
+    b.close()
 print("ИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)

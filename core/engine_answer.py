@@ -119,6 +119,8 @@ class AnswerMixin:
             c = parse_capture(text)
             if c and self._capture(c, text, via):
                 return
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._clock_cmd(text, via):
+            return                                       # «сколько времени?», «какое сегодня число?» — по часам, без модели
         if not raw and not quiet and not images and "\n\nВложения:" not in text and self._timer_cmd(text, via):
             return                                       # «сколько осталось?», «добавь минуту», «отмени таймер»
         if not raw and not quiet and not images:
@@ -250,7 +252,7 @@ class AnswerMixin:
         # ближайшая неделя по дням — чтобы «в среду», «через сколько дней» не считались в уме с ошибкой (экзамен 11.10)
         week = "; ".join(f"{WEEKDAYS[(now + timedelta(days=i)).weekday()]} — {(now + timedelta(days=i)).day} {MONTHS[(now + timedelta(days=i)).month - 1]}"
                          for i in range(1, 8))
-        now_str += f". Ближайшие дни: {week}. Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой"
+        now_str += ". Это время верное, а время и даты из прошлых реплик разговора устарели — не повторяй их" + f". Ближайшие дни: {week}. Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой"
         base = self.personas.system_prompt(self.s.get("persona"), self.s.get("user_name") or "", now_str)
         mem = self.workspace.memory_text()
         if mem:

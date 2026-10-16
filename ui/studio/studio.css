@@ -1120,3 +1120,13 @@ html.st-light dialog.nwdlg { background: #fff; }
 .capbox #cap-key { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
 .capbox .hint.ok { color: var(--good); } .capbox .hint.bad { color: var(--bad); }
 .capbox code { font: 12.5px ui-monospace, "Ubuntu Mono", monospace; background: rgba(255,255,255,.08); padding: 2px 8px; border-radius: 6px; user-select: all; word-break: break-all; }
+
+/* «Обо мне»: похоже на записи экзамена — тихая янтарная карточка со списком (links.js meExam) */
+.xtrace { margin: 14px 0 20px; padding: 16px 18px; border-radius: 16px; background: color-mix(in srgb, #FFB547 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #FFB547 32%, transparent); max-width: 820px; }
+.xtrace > b { display: block; font-size: 14px; color: var(--ink); }
+.xtrace > p { margin: 4px 0 10px; color: var(--muted); font-size: 12.5px; }
+.xtrace h4 { margin: 10px 0 4px; font-size: 11.5px; font-weight: 600; color: var(--dim); }
+.xtrace label { display: flex; gap: 10px; align-items: flex-start; padding: 6px 4px; border-radius: 8px; font-size: 13px; line-height: 1.4; cursor: pointer; }
+.xtrace label:hover { background: var(--panel); }
+.xtrace input { margin-top: 3px; accent-color: #FFB547; flex: none; }

@@ -407,9 +407,13 @@ def parse(text, now=None):
             if not day and when <= now and when.replace(hour=hh + 12) > now:
                 when = when.replace(hour=hh + 12)        # «в 3» в 10 утра — это 15:00
         if when <= now:
-            if day:
+            if day and re.search(r"понедельник|вторник|сред|четверг|пятниц|суббот|воскресен", rest[day[1][0]:day[1][1]]):
+                when += timedelta(days=7)                # «в пятницу в 15» в пятницу в 16:30 — следующая пятница (16.10:
+                                                         # было «не понял» — и напоминание уходило модели)
+            elif day:
                 return None                              # «сегодня в 8» — уже прошло: пусть уточнит модель
-            when += timedelta(days=1)
+            else:
+                when += timedelta(days=1)
     else:
         return None
     what = _restore_case(_clean_text(_cut(rest, spans)), text)

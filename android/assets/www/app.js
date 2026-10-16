@@ -1334,7 +1334,7 @@ function systemPrompt() {
   const parts = [p.character, window.DEWIAR_TALK_RULES || "", (window.DEWIAR_GENDER_RULES || {})[p.gender] || "", p.focus, window.DEWIAR_VOICE_RULES || "Отвечай коротко, живой речью, по-русски.",
     `Ты — один из команды помощников: ${others}. Позвать коллегу — инструмент call_persona. Разговор пользователя с коллегой приходит тебе справкой «[До этого пользователь говорил не с тобой…]»: это их разговор — не продолжай его и не отвечай за коллегу, пока пользователь сам об этом не попросит; отвечай на то, что он говорит тебе.`,
     "Ты работаешь на телефоне пользователя (Android). Когда просят что-то сделать — вызывай инструмент, а не объясняй, как это сделать: "
-    + "напоминания, будильники и таймеры (set_reminder; время — точной датой ISO, ты знаешь, который час), звонки (call), SMS (send_sms — откроется сообщение, отправит пользователь), "
+    + "напоминания, будильники и таймеры (set_reminder; когда — словами пользователя в when, время посчитает телефон), звонки (call), SMS (send_sms — откроется сообщение, отправит пользователь), "
     + "радио прямо здесь, в приложении (play_radio, radio_control — на любую просьбу про радио или «включи музыку», не сайты и не приложения; просят ПОДОБРАТЬ или посоветовать песни, плейлист — назови конкретные известные песни списком в ответе, радио сам не включай, если не просили включить), "
     + "маршрут на карте — «как дойти», «проложи пешком», геоточка или ссылка на карту (route: карта сама ведёт кратчайшим путём, дворами), "
     + "календарь телефона — «что у меня завтра», «какие встречи на неделе» (calendar_list), «запиши в календарь», «назначь встречу» (calendar_add: сначала спроси «записать?», запиши после «да»), "
@@ -1355,7 +1355,7 @@ function systemPrompt() {
     + "У тебя есть камера телефона (take_photo): «сфотографируй меня», «посмотри, что это», «прочитай надпись» — снимай и описывай. "
     + "«Посмотри, как я выгляжу», «покажи мне моё лицо» — take_photo с camera: front (камера на человека); «где я», «что вокруг», «другой камерой» — camera: back. "
     + "Снимок уже сделан и его просят показать снова («покажи фото», «покажи на экране») — show_photo. Не отвечай «Вот» и «Смотрю», не вызвав камеру: без вызова ничего не покажется.",
-    `Сейчас ${nowText()}.`,
+    `Сейчас ${nowText()}. Это время верное, а время и даты из прошлых реплик разговора устарели — не повторяй их.`,
     // ближайшая неделя по дням — «в среду», «через сколько дней» не считаются в уме с ошибкой (экзамен 11.10)
     "Ближайшие дни: " + [1, 2, 3, 4, 5, 6, 7].map(i => { const d = new Date(Date.now() + i * 864e5); return `${WD[d.getDay()]} — ${d.getDate()} ${MON[d.getMonth()]}`; }).join("; ")
       + ". Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой и сравни."];
@@ -2043,14 +2043,15 @@ function parseWhen(t) {
     const ms = m[2].startsWith("сек") ? n * 1000 : m[2].startsWith("мин") || m[2].startsWith("пол") ? n * 60000 : n * 3600000;
     return { at: new Date(now.getTime() + ms), repeat: "", rel: true, rest: t.replace(m[0], " ") };
   }
-  let day = new Date(now), hasDay = false, repeat = "";
+  let day = new Date(now), hasDay = false, repeat = "", dowToday = false;
   if (/каждый день|ежедневно|каждое утро|каждый вечер/.test(t)) { repeat = "daily"; hasDay = true; }
   else if (/по будням|в будни/.test(t)) { repeat = "weekdays"; hasDay = true; }
   if (/послезавтра/.test(t)) { day.setDate(day.getDate() + 2); hasDay = true; }
   else if (/завтра/.test(t)) { day.setDate(day.getDate() + 1); hasDay = true; }
   for (const [k, v] of Object.entries(DOW)) {
     const r = new RegExp("(?:в|во|каждый|каждую|каждое|по)\\s+" + k);
-    if (r.test(t)) { let d = (v - now.getDay() + 7) % 7; if (d === 0) d = 7; day = new Date(now); day.setDate(now.getDate() + d); hasDay = true; if (/кажд|по\s/.test(t.match(r)[0])) repeat = "weekly"; break; }
+    // «в пятницу» в пятницу — сегодня, если час ещё впереди, иначе через неделю (как when.py на компьютере; 16.10)
+    if (r.test(t)) { const d = (v - now.getDay() + 7) % 7; day = new Date(now); day.setDate(now.getDate() + d); hasDay = true; dowToday = d === 0; if (/кажд|по\s/.test(t.match(r)[0])) repeat = "weekly"; break; }
   }
   m = t.match(/(?:\sв|\sна|\sк)\s+(\d{1,2})(?:[:.\s](\d{2}))?(?:\s*(утра|дня|вечера|ночи))?(?=\s)/) || t.match(/\s(\d{1,2}):(\d{2})\s/);
   let h = null, mi = 0;
@@ -2061,6 +2062,7 @@ function parseWhen(t) {
   if (h > 23 || mi > 59) return null;
   day.setHours(h, mi, 0, 0);
   if (!hasDay && day <= now) day.setDate(day.getDate() + 1);
+  if (dowToday && !repeat && day <= now) day.setDate(day.getDate() + 7);
   if (repeat && day <= now) day.setDate(day.getDate() + (repeat === "weekly" ? 7 : 1));
   return { at: day, repeat, rest: t.replace(m ? m[0] : "", " ") };
 }
@@ -2676,8 +2678,8 @@ function calcEval(src) {
 
 function toolSpecs() {
   const t = [
-    { name: "set_reminder", description: "Поставить напоминание, будильник или таймер. at — дата и время ISO (ГГГГ-ММ-ДДTЧЧ:ММ, местное) — посчитай сам от текущего времени; или in_minutes. kind: reminder | alarm (будильник) | timer. repeat: '' | daily | weekdays | weekly.",
-      parameters: O({ text: STR, at: STR, in_minutes: NUM, kind: { type: "string", enum: ["reminder", "alarm", "timer"] }, repeat: { type: "string", enum: ["", "daily", "weekdays", "weekly"] } }, ["text"]) },
+    { name: "set_reminder", description: "Поставить напоминание, будильник или таймер. when — когда, словами пользователя («через 20 минут», «завтра в 9», «в пятницу в 18:30») — время посчитает телефон по своим часам, сам не считай; at — дата и время ISO (ГГГГ-ММ-ДДTЧЧ:ММ, местное) — только если when не подходит. kind: reminder | alarm (будильник) | timer. repeat: '' | daily | weekdays | weekly.",
+      parameters: O({ text: STR, when: STR, at: STR, in_minutes: NUM, kind: { type: "string", enum: ["reminder", "alarm", "timer"] }, repeat: { type: "string", enum: ["", "daily", "weekdays", "weekly"] } }, ["text"]) },
     { name: "list_reminders", description: "Какие напоминания и будильники стоят.", parameters: O({}) },
     { name: "calc", description: "Посчитать точно: любые вычисления (проценты, суммы, скидки, деление) и даты. Считай ВСЕГДА этим инструментом, не в уме. Выражение: 2350 * 17 / 100, (1200 - 15%) * 3; даты ГГГГ-ММ-ДД: days_until(\"2027-01-01\") — сколько дней до даты, days_between(\"2026-10-01\", \"2026-12-31\"), weekday(\"2026-10-14\").",
       parameters: O({ expression: STR }, ["expression"]) },
@@ -2769,6 +2771,11 @@ async function runTool(name, a) {
       if (a.in_minutes) at = new Date(Date.now() + a.in_minutes * 60000);
       else if (a.when && !a.at) { const w = parseWhen(a.when); if (w) { at = w.at; if (!a.repeat && w.repeat) a.repeat = w.repeat; } }
       else if (a.at) { at = new Date(a.at); if (isNaN(at)) { const w = parseWhen(a.at); at = w && w.at; } }
+      // «через 20 минут» — считаем сами от часов телефона, а не берём у модели: она могла посчитать от старого времени
+      // из разговора (16.10: «сколько времени» — «14:17» в 15:57)
+      { const said = String(turnAsk || "").split("\n\nВложения:")[0];
+        if (!a.repeat && /(^|[^а-яё])через\s+(?:\S+\s+){0,3}?(?:секунд|минут|час|полчаса|полтора)/i.test(said) && !/кажд/i.test(said)) {
+          const w = parseWhen(said); if (w && w.rel && (!at || isNaN(at) || Math.abs(w.at - at) > 90000)) at = w.at; } }
       if (!at || isNaN(at)) return "Ошибка: не понял время — спроси у пользователя, когда напомнить.";
       let moved = "";                                    // «на 17:00», а уже 17:26 — на завтра в 17:00, а не в прошлое
       if (at < new Date(Date.now() - 60000) && !a.repeat) { while (at < new Date()) at = new Date(at.getTime() + 864e5); moved = " Это время сегодня уже прошло — поэтому на завтра; так и скажи."; }

@@ -33,7 +33,7 @@ function renderDiaryDay(day) {
   const parts = diarySections(day.text).map(s => {
     if (s.night) {
       const t = s.head.match(/«(.+?)»\s*(.*)$/), [main, tom] = s.body.split(/\n\*\*На завтра:\*\*\n/);
-      return `<div class="dentry night"><div class="dt">🌙 Ночью — о прожитом дне</div>${t ? `<h3>${escH(t[1])}<span class="mood">${escH(t[2] || "")}</span></h3>` : ""}
+      return `<div class="dentry night"><div class="dt">🌙 Ночью — о прожитом дне${day.who ? " · пишет " + escH(day.who) : ""}</div>${t ? `<h3>${escH(t[1])}<span class="mood">${escH(t[2] || "")}</span></h3>` : ""}
         ${md(main.trim())}${tom ? `<div class="tom"><b>На завтра</b>${md(tom.trim())}</div>` : ""}</div>`;
     }
     return `<div class="dentry">${s.head ? `<div class="dt">${escH(s.head)}</div>` : ""}${md(s.body.trim())}</div>`;
@@ -46,18 +46,19 @@ function renderDiaryDay(day) {
 }
 async function loadDiary(focus) {
   const name = curName();
-  const a = curA();
-  $("#d-lead").textContent = `Здесь ${name} записывает свою жизнь рядом с вами: что было, что узнал${a} о вас, о чём думал${a}. ` +
-    "Днём — короткие мысли после разговоров, а ночью — запись о прожитом дне и выводы на завтра, которые помогают в разговорах днём.";
+  // дневник один на всю команду: днём пишет тот, кто говорил, ночью — тот, кто был с вами (подпись — у каждой записи);
+  // раньше здесь стояло имя текущего персонажа, и записи Лиры выглядели записями Патрика (16.10)
+  $("#d-lead").textContent = "Общий дневник ваших помощников: что было, что узнали о вас, о чём думали. Днём — короткие мысли " +
+    "после разговоров, ночью — запись о прожитом дне и выводы на завтра. У каждой записи — кто её написал.";
   try {
     const r = await core.call("diary_list");
     dDays = r.days || [];
     const ins = r.insights || {};
-    $("#d-ins").innerHTML = (ins.lines || []).length ? `<h3>🌙 Что ${escH(name)} решил${a} учесть сегодня</h3><ul>${ins.lines.map(x => `<li>${escH(x)}</li>`).join("")}</ul>` : "";
+    $("#d-ins").innerHTML = (ins.lines || []).length ? `<h3>🌙 Что учесть сегодня — выводы ночной записи${ins.who ? " · " + escH(ins.who) : ""}</h3><ul>${ins.lines.map(x => `<li>${escH(x)}</li>`).join("")}</ul>` : "";
     const box = $("#d-days"); box.innerHTML = "";
     dDays.forEach(x => {
       const d = dDate(x.day), el = document.createElement("div"); el.className = "dday"; el.dataset.d = x.day;
-      el.innerHTML = `<div class="dn">${d.getDate()}<small>${MON3[d.getMonth()]}</small></div><b></b><span class="dm">${WD[d.getDay()]} · ${x.count} ${x.count === 1 ? "запись" : x.count < 5 ? "записи" : "записей"}${x.night ? " · 🌙" : ""}</span><span class="dp"></span>`;
+      el.innerHTML = `<div class="dn">${d.getDate()}<small>${MON3[d.getMonth()]}</small></div><b></b><span class="dm">${WD[d.getDay()]} · ${x.count} ${x.count === 1 ? "запись" : x.count < 5 ? "записи" : "записей"}${x.night ? " · 🌙" : ""}${x.who ? " " + escH(x.who) : ""}</span><span class="dp"></span>`;
       $("b", el).textContent = (x.title ? x.title + " " : x.night ? "" : "Мысли дня ") + (x.mood || "");
       if (!x.title && x.night) $("b", el).textContent = "Ночная запись";
       $(".dp", el).textContent = x.preview || "";

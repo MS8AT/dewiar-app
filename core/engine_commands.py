@@ -529,6 +529,13 @@ class CommandsMixin:
                 kfiles = []
             return build(self.workspace.ensure(), skills=self.skills.catalog(), user_name=self.s.get("user_name") or "",
                          knowledge_files=kfiles)
+        if cmd in ("exam_traces", "exam_traces_remove"):   # следы экзамена в «Обо мне», заметках, расходах (examtrace.py)
+            import examtrace
+            if cmd == "exam_traces":
+                return examtrace.find(self.workspace, self.money, self.done)
+            n = examtrace.remove(self.workspace, self.money, self.done, list(a.get("items") or []))
+            log.info("🧹 записи экзамена убраны: %s", n)     # удаление уйдёт ближайшей синхронизацией — и с телефона тоже
+            return {"removed": n}
         if cmd == "memory_get":
             return self.workspace.memory_get()
         if cmd == "memory_set":
