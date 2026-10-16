@@ -1301,6 +1301,31 @@ class AnswerMixin:
                 if turn.full.strip() and not turn.full.endswith(" "):
                     turn.full += " "
                 self.set_state("thinking")
+            if not turn.cancel.is_set() and not turn.full.strip() and done_calls and not (set(getattr(turn, "tools_ok", None) or []) - INFO_TOOLS):
+                # отчёт №69: прочитала страницу трижды, поискала — и вернула пустоту («Не получилось: пустой ответ»).
+                # Сведения уже есть — просим ответить по ним словами, без новых действий (один раз)
+                log.warning("Модель замолчала после поиска и чтения — прошу ответить по найденному")
+                ask_ = [{"role": "user", "content": "Ответь мне сейчас словами по тому, что уже нашлось выше (страницы, поиск). "
+                                                    "Новых действий не будет. Чего-то не хватило — так и скажи и предложи, "
+                                                    "что сделать дальше (например, какие разделы сайта открыть)."}]
+                try:
+                    for kind, val in stream_events(prof, system, msgs + ask_, cancel=turn.cancel, tools=None):
+                        if kind == "tools" or turn.cancel.is_set():
+                            continue
+                        turn.full += val
+                        for s_ in split.feed(codef.feed(val)):
+                            speak(s_)
+                    for s_ in split.feed(codef.flush()) + split.flush():
+                        speak(s_)
+                except LLMError as e:
+                    log.info("И по найденному ответа нет: %s", e)
+                if not turn.full.strip() and not turn.cancel.is_set():
+                    # и так ничего — не «Не получилось: пустой ответ», а честно: что сделано и что дальше
+                    seen = [c["args"].get("url") or c["args"].get("query") for c in done_calls if c["name"] in ("read_webpage", "web_search")]
+                    turn.full = ("Я прочитал " + ("страницу " + str(seen[0]) if seen and str(seen[0]).startswith("http") else "найденное")
+                                 + ", но ответ не сложился. Спросите точнее — например, какой раздел разобрать или что именно собрать.")
+                    turn.full = self._g(turn.full) if hasattr(self, "_g") else turn.full
+                    sentences.put(turn.full)
             if not turn.cancel.is_set():
                 if not turn.full.strip() and getattr(turn, "tools_ok", None) and not (set(turn.tools_ok) & INFO_TOOLS):
                     # действие сделано, а слов модель не добавила; фоновая задача только началась — не «Готово» (отзыв 13.10)

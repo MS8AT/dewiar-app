@@ -153,6 +153,8 @@ public class MainActivity extends Activity implements Net.Sink {
             String a = i.getAction();
             if ("pro.dewiar.TYPE".equals(a)) {
                 pending = new JSONObject().put("action", "type");
+            } else if ("pro.dewiar.CAPTURE".equals(a)) {            // значок «Записать» на рабочем столе (CaptureWidget)
+                pending = new JSONObject().put("action", "capture");
             } else if ("pro.dewiar.NOTE".equals(a)) {               // «Посмотреть вложения» в окне напоминания (AlarmActivity)
                 pending = new JSONObject().put("action", "note").put("id", i.getStringExtra("note"));
             } else if ("pro.dewiar.CLOSE".equals(a)) {              // уведомление «Близких» (CloseWatch) — открыть переписку

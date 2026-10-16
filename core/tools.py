@@ -208,8 +208,12 @@ def t_show_images(a, ctx):
 
 
 def html_to_text(page):
-    """Грубо: HTML -> текст для модели (без скриптов, стилей, навигации, шапки и подвала)."""
-    page = re.sub(r"(?is)<(script|style|noscript|svg|nav|footer|header)[^>]*>.*?</\1>", " ", page)
+    """Грубо: HTML -> текст для модели (без скриптов, стилей, навигации, боковых меню, шапки и подвала). Есть <main> или
+    <article> с текстом — берём его (отчёт №69: у справочника на Nextra первые тысячи знаков были боковым меню)."""
+    page = re.sub(r"(?is)<(script|style|noscript|svg|nav|footer|header|aside)[^>]*>.*?</\1>", " ", page)
+    m = re.search(r"(?is)<(main|article)\b[^>]*>(.*)</\1>", page)
+    if m and len(re.sub(r"<[^>]+>|\s+", "", m.group(2))) > 200:
+        page = m.group(2)
     page = re.sub(r"(?i)<br\s*/?>|</p>|</h\d>|</li>|</div>", "\n", page)
     text = html.unescape(re.sub(r"<[^>]+>", " ", page))
     text = re.sub(r"[ \t\r\f\v]+", " ", text)
@@ -295,8 +299,31 @@ def t_read_webpage(a, ctx):
             except Exception as e2:  # noqa: BLE001
                 log.info("Страница через сервер Dewiar не открылась: %s", e2)
         raise ToolError(f"страница не открылась: {e}") from e
-    text = html_to_text(r.text) if "html" in r.headers.get("content-type", "html") else r.text
-    return page_excerpt(text, find, question)
+    if "html" not in r.headers.get("content-type", "html"):
+        return page_excerpt(r.text, find, question)
+    out = page_excerpt(html_to_text(r.text), find, question)
+    links = page_links(r.text, str(r.url))
+    if len(links) >= 3 and out != PAGE_EMPTY:      # справочник, документация: что ещё есть на сайте — открыть нужное
+        out += "\n\nРазделы этого сайта (нужное можно открыть read_webpage по адресу):\n" + "\n".join(f"- {t} — {u}" for t, u in links)
+    return out
+
+
+def page_links(page, base, limit=30):
+    """Ссылки страницы на тот же сайт -> [(текст, адрес)] без повторов, якорей и файлов (для разбора справочников)."""
+    from urllib.parse import urljoin, urlparse
+    host = urlparse(base).netloc
+    seen, out = {base.split("#")[0].rstrip("/")}, []
+    for href, inner in re.findall(r'(?is)<a\b[^>]*?href=["\']([^"\'#][^"\']*)["\'][^>]*>(.*?)</a>', page or ""):
+        u = urljoin(base, html.unescape(href)).split("#")[0]
+        t = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", inner))).strip()
+        if urlparse(u).netloc != host or not u.startswith("http") or not t or len(t) > 90 \
+                or re.search(r"\.(png|jpe?g|gif|svg|pdf|zip|css|js|xml|ico)(\?|$)", u, re.I) or u.rstrip("/") in seen:
+            continue
+        seen.add(u.rstrip("/"))
+        out.append((t, u))
+        if len(out) >= limit:
+            break
+    return out
 
 
 def desktop_apps():

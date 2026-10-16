@@ -41,6 +41,8 @@ const D = window.Dewiar || (() => {
     alarmSet(j) { const x = JSON.parse(j); x.id = x.id || "a" + Date.now(); const i = alarms.findIndex(a => a.id === x.id); if (i >= 0) alarms[i] = x; else alarms.push(x); return JSON.stringify(x); },
     alarmCancel(id) { const i = alarms.findIndex(a => a.id === id); if (i >= 0) alarms.splice(i, 1); return i >= 0; },
     alarms: () => JSON.stringify(alarms), alarmHistory: () => "[]", exactAlarms: () => true,
+    _w: { on: true, placed: 0, pin: true }, widgetState() { return JSON.stringify(this._w); }, widgetSet(on) { this._w.on = !!on; },
+    widgetPin() { this._w.placed++; return true; }, home() { window._home = (window._home || 0) + 1; },
     _cal: [], calEvents(j) { const q = JSON.parse(j); return JSON.stringify({ events: this._cal.filter(e => e.end > q.from && e.begin < q.to).sort((a, b) => a.begin - b.begin) }); },
     calAdd(j) { const e = JSON.parse(j); e.id = this._cal.length + 1; e.calendar = "Мой календарь"; this._cal.push(e); return JSON.stringify({ id: e.id, calendar: e.calendar }); },
     calOpenInsert(j) { window._calInsert = JSON.parse(j); return true; },
@@ -1017,6 +1019,11 @@ function cloudEars() {
   if (S.llm.cloud && S.llm.stt) return { url: cloudBase() + "?p=", key: S.llm.api_key };
   return null;
 }
+/* Сервер не пустил слушать (402 — талеры или заряд закончились, 429 — дневной лимит, 401/403 — ключ) — раньше было
+   «Не получилось услышать: сервер распознавания ответил 402», и всё. Теперь, если у телефона есть своё распознавание,
+   слушает оно — 30 минут или до перезапуска приложения, потом снова пробуем сервер (вдруг пополнили). */
+let sttSysUntil = 0;
+const STT_DENIED = /ответил (40[1-3]|429)\b/;
 function sttServerUrl(u) { return u.replace(/\/+$/, "") + (/(transcriptions)$/.test(u) ? "" : "/audio/transcriptions"); }
 async function listen() {
   stopVoice();
@@ -1025,6 +1032,7 @@ async function listen() {
   setState("listening"); sttActive = true; sttStarted = false; if (!dict) D.vibrate(18);
   let server = S.stt.engine === "server" && S.stt.url ? { url: S.stt.url, key: S.stt.key || "", model: S.stt.model || "" } : null;
   if (!server && (!D.recognizer() || sttOnce)) { const c = sttOnce || cloudEars(); sttOnce = null; if (c) server = { url: c.url, key: c.key, model: "gigaam" }; }
+  if (server && Date.now() < sttSysUntil && D.recognizer()) server = null;     // сервер не пускает (талеры) — слушает телефон
   if (!server && !D.recognizer()) {
     sttActive = false; setState("idle");
     showBot("В этом устройстве нет распознавания речи. Войдите аккаунтом dewiar.pro (Настройки → Мозг) — слушать будет сервер Dewiar. Или напишите текстом.", "err"); return;
@@ -1068,7 +1076,7 @@ function sttStall(why) {
   sttActive = false; D.cancelListen(); sttGen++;
   plog("warn", "распознавание: нет ответа (" + why + ", " + sttVia + ")");
   if (why === "start" && sttVia === "system" && !sttStarted) {
-    const c = cloudEars();
+    const c = Date.now() < sttSysUntil ? null : cloudEars();     // сервер сейчас не пускает — не ходим по кругу
     if (c) {
       // Первый раз — только этот вопрос слушает сервер (распознаватель мог просто долго подключаться к сети);
       // второй раз подряд — насовсем. Заработал сам — счётчик сбрасывается (sttAlive).
@@ -1127,7 +1135,23 @@ N.on("stt_error", e => {
   sttRetry = 0;
   plog([6, 7, 5].includes(e.code) ? "info" : "warn", `распознавание (${sttVia}): ${e.code === 6 ? "речи не было" + (/громкость/.test(e.msg || "") ? " — " + String(e.msg).replace(/^[^(]*/, "") : "") : e.code === 7 ? "не расслышал" : "ошибка " + (e.code ?? "") + " " + (e.msg || "")}`);
   // распознаватель телефона сломался, не начав слушать (не запустился, нет сервиса, сеть) — слушает сервер Dewiar
-  if (sttVia === "system" && !sttStarted && ![6, 7].includes(e.code) && cloudEars()) { sttActive = true; sttStall("start"); return; }
+  if (sttVia === "system" && !sttStarted && ![6, 7].includes(e.code) && cloudEars() && Date.now() >= sttSysUntil) { sttActive = true; sttStall("start"); return; }
+  // сервер не пустил (кончились талеры, лимит, ключ) — слушает сам телефон; сказанное пропало, просим повторить
+  if (sttVia === "server" && STT_DENIED.test(String(e.msg || ""))) {
+    const why = String(e.msg).replace(/^[^:]*:?\s*/, "").trim();
+    vCount("stt_denied"); plog("warn", "распознавание: сервер не пустил — " + clip(e.msg, 160));
+    if (D.recognizer()) {
+      sttSysUntil = Date.now() + 30 * 60e3; setState("idle"); showYou("");
+      // сразу слушаем снова — уже телефоном; объяснение — всплывающей строкой (listen очищает ответ на экране)
+      toast(`${/талер|заряд|счёт|счет|закончил/i.test(why) ? "ИИ-талеры на распознавание закончились" : "Сервер распознавания сейчас не пускает"} — `
+        + "слушает сам телефон. Скажите ещё раз.", 6000);
+      setTimeout(() => { if (state === "idle" && !busy) listen(); }, 700);
+      return;
+    }
+    setState("idle"); showYou("");
+    showBot((why || "Сервер распознавания не пускает.") + " Своего распознавания у этого телефона нет — напишите текстом.", "err");
+    return;
+  }
   if (heardPartial || dict) { if (dictMore(heardPartial, false)) return; askHeard(dictTake(heardPartial)); return; }
   setState("idle"); showYou("");
   // молча (коды SpeechRecognizer, Speech.java): 6 — речи не было, 7 — не расслышал, 5 — отменено, 11 — распознаватель отключился
@@ -1758,7 +1782,10 @@ async function ask(text, opts = {}) {
   const att = opts.attach || [], pics = att.filter(a => a.kind === "image"), docs = att.filter(a => a.kind === "text");
   if (pics.length) { showCard(`<div class="attshow">${pics.map(a => `<img src="${a.url}" alt="">`).join("")}</div>`); cardSticky = Date.now() + 60000; }
   turnAtt = att; turnAsk = opts.hidden ? "" : text;    // hidden — просьба приложения (сканер, сводка): без проверки
-  const fast = opts.hidden ? null : att.length ? (remindAttQuick(text, att) || (() => { const say = noteQuick(text, att); return say ? { say } : null; })()) : await quick(text);
+  const cap = !opts.hidden && captureAt && Date.now() - captureAt < 120000; captureAt = 0;     // сказано после «Записать»
+  let fast = opts.hidden ? null : att.length ? (remindAttQuick(text, att) || (() => { const say = noteQuick(text, att); return say ? { say } : null; })()) : await quick(text);
+  if (cap && (!fast || fast.switchTo)) fast = { say: ideaNote(text, att) };       // не напоминание и не заметка по форме — в «Идеи»
+  if (cap) captureBack();
   if (fast && fast.switchTo) { setState("idle"); showYou(text); switchPersona(fast.switchTo, fast.question); return; }
   if (fast) { fast.say = gfix(fast.say); history.push({ role: "user", content: text }, { role: "assistant", content: fast.say, who: persona().id, t: Date.now() }); saveH(); convAfter(); dayTurn(text, fast.say); answerLocal(fast); return; }
   if (!S.llm.base_url && loggedIn()) showBot("Подключаюсь к мозгу — секунду…", "wait");
@@ -3055,12 +3082,29 @@ function pageExcerpt(text, find, question) {
   for (const [a, b] of merged) { if (left <= 200) break; const piece = text.slice(a, Math.min(b, a + left)); out.push(piece); left -= piece.length; }
   return out.join("\n…\n") + `\n[Страница длинная (${text.length} знаков): выше начало и места со словами «${terms.join(", ")}». Чего здесь нет — того на странице не видно; не додумывай.]`;
 }
+function pageLinks(page, base, limit = 30) {
+  let host = ""; try { host = new URL(base).host; } catch (e) { return []; }
+  const seen = new Set([base.split("#")[0].replace(/\/$/, "")]), out = [];
+  for (const m of page.matchAll(/<a\b[^>]*?href=["']([^"'#][^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    let u = ""; try { u = new URL(m[1].replace(/&amp;/g, "&"), base).href.split("#")[0]; } catch (e) { continue; }
+    const t = stripHtml(m[2]);
+    if (!u.startsWith("http") || new URL(u).host !== host || !t || t.length > 90 || /\.(png|jpe?g|gif|svg|pdf|zip|css|js|xml|ico)(\?|$)/i.test(u) || seen.has(u.replace(/\/$/, ""))) continue;
+    seen.add(u.replace(/\/$/, "")); out.push([t, u]); if (out.length >= limit) break;
+  }
+  return out;
+}
 async function readPage(url, find) {
   if (!/^https?:/.test(url)) url = "https://" + url;
   try {
     const r = await http("GET", url, { headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 14) Dewiar" }, timeout: 20000 });
     if (r.status === 403 || r.status === 451) throw new Error("сайт не пускает (" + r.status + ")");
-    return pageExcerpt(stripHtml(r.body || ""), find, turnQ);
+    // отчёт №69 (как на компьютере, tools.html_to_text): без меню и боковых панелей; есть <main>/<article> — он;
+    // в конце — разделы того же сайта, их можно открыть
+    let h = String(r.body || "").replace(/<(nav|header|footer|aside|noscript|svg)\b[\s\S]*?<\/\1>/gi, " ");
+    const main = /<(main|article)\b[^>]*>([\s\S]*)<\/\1>/i.exec(h);
+    if (main && stripHtml(main[2]).length > 200) h = main[2];
+    const out = pageExcerpt(stripHtml(h), find, turnQ), links = pageLinks(String(r.body || ""), url);
+    return links.length >= 3 && !/^Страница открылась, но текста/.test(out) ? out + "\n\nРазделы этого сайта (нужное можно открыть read_webpage по адресу):\n" + links.map(([t, u]) => `- ${t} — ${u}`).join("\n") : out;
   } catch (e) {
     try { return pageExcerpt(String((await dewiarWeb("fetch", url)).text || ""), find, turnQ); }
     catch (e2) { return `Ошибка: страница не открылась (${e.message}).`; }
@@ -3111,6 +3155,30 @@ function factQuick(text) {
   const she = persona().gender === "female" ? "Запомнила" : "Запомнил";
   const w = WD[day ? day.getDay() : 0], inDay = (w === "вторник" ? "во " : "в ") + ({ среда: "среду", пятница: "пятницу", суббота: "субботу" }[w] || w);
   return day ? `${she}: ${inDay}, ${day.getDate()} ${MON[day.getMonth()]}.` : `${she}.`;
+}
+/* Значок «Записать» (CaptureWidget): приложение открылось — сразу слушаем; сказанное — напоминание («напомни…»), заметка
+   («запиши…») или мысль в «Заметки/Идеи» как есть, без модели. Записали — через пару секунд обратно на рабочий стол. */
+let captureAt = 0, captureHome = 0;
+function captureStart() {
+  closeSheets(); captureAt = Date.now(); vCount("capture");
+  showBot("Говорите — запишу в «Идеи». «Напомни завтра в 10…» — поставлю напоминание.");
+  setTimeout(() => { if (state === "idle" || state === "speaking") listen(); }, 250);
+}
+function captureBack() {
+  clearTimeout(captureHome);
+  // ответ договорён (или текстом) — уходим на рабочий стол; человек начал что-то делать в приложении — остаёмся
+  const t0 = Date.now(), tick = () => { if (Date.now() - lastUserAct < 1500 && Date.now() - t0 > 1500) return;
+    if (state === "idle" && !busy) { try { D.home(); } catch (e) { } return; } if (Date.now() - t0 < 20000) captureHome = setTimeout(tick, 500); };
+  captureHome = setTimeout(tick, 2600);
+}
+function ideaNote(text, att) {
+  let body = String(text || "").trim().replace(/^[«"]|[»"]$/g, "");
+  body = body ? body[0].toUpperCase() + body.slice(1) : "Фото";
+  const words = body.replace(/[.!?…].*$/s, "").split(/\s+/), title = words.slice(0, 6).join(" ").replace(/[,:;—–-]+$/, "") + (words.length > 6 ? "…" : "");
+  const files = noteAttSave(att || []); turnAtt = [];
+  const n = notes(); n.push(Object.assign({ id: "n" + Date.now(), title, text: body, time: Date.now(), folder: "Идеи" }, files.length ? { att: files } : {})); saveNotes(n);
+  plog("info", "💡 идея без модели: " + clip(title, 60));
+  return `${persona().gender === "female" ? "Записала" : "Записал"} в «Идеи».`;
 }
 function noteQuick(text, att) {
   const t = String(text || "").trim().replace(/^[А-ЯЁA-Z][а-яёa-z-]+\s*,\s*(?=\S)/, (m) => findPersona(m.replace(/[\s,]/g, ""), true) ? "" : m);
@@ -3453,8 +3521,13 @@ function doneHead(s) {
     if (next) chips.push(`<button class="ach" data-tip="${esc(next.icon + " " + next.name + " — " + next.what + " · сейчас " + achVal(next, s) + " из " + next.n)}">${next.icon}<span>${Math.min(achVal(next, s), next.n)}/${next.n}</span></button>`);
   }
   return `<div class="donehd"><div class="dnum"><b>${s.today}</b><small>${s.today ? delaRu(s.today) + " сегодня" : "дел сегодня"}</small></div><div class="dside">`
-    + `<span class="dstreak">${s.streak >= 2 ? `🔥 ${s.streak} ${dnRu(s.streak)} подряд` : s.today ? "Первый день серии" : s.total ? "Отметьте дело — серия продолжится" : "Сделали дело — отметьте его"}</span>`
+    + `<span class="dstreak">${s.streak >= 2 ? `🔥 ${s.streak} ${dnRu(s.streak)} подряд` : s.today ? "Первый день серии" : s.total ? "Отметьте дело — серия продолжится" : "Сделали дело — отметьте его"}`
+    + `<button class="dwhy${doneWhy ? " on" : ""}" id="done-why" aria-label="Что это за награды" aria-expanded="${doneWhy}">?</button></span>`
     + `<div class="achs">${chips.join("")}</div></div></div>`
+    + (doneWhy ? `<div class="donewhy" id="done-whybox"><b>Зачем это</b><p>Сделали дело — отметьте: скажите «я позвонила маме, отметь», нажмите ✓ у напоминания или впишите ниже. `
+      + `Отмеченное попадает сюда, а за него — значки: за дела за день (3, 5, 7, 10), за дни подряд и за всё время. Яркие — уже ваши, бледные — следующие, `
+      + `нажмите на значок — сколько осталось. Это просто чтобы видеть, сколько уже сделано, и радоваться: ничего не тратится, видите только вы.</p>`
+      + `<button class="btn" id="done-whyok">Понятно</button></div>` : "")
     + `<form class="doneadd" id="done-add"><input placeholder="Что уже сделали?" maxlength="120" enterkeyhint="done" aria-label="Что сделали"><button class="ib" aria-label="Отметить сделанным">✓</button></form>`;
 }
 // «Мой день» — какой сегодня день: «Среда, 15 октября» (просьба 15.10: «почему он не пишет число и день недели?»)
@@ -3484,6 +3557,9 @@ function renderDay() {
       if (!x.repeat) { D.alarmCancel(x.id); syncSoon(); } celebrate(Object.assign(doneAdd([{ title: x.title, rid: x.id }], "tap"), { closed: [] })); renderDay(); });
     $$("[data-undo]", box).forEach(b => b.onclick = () => { const x = doneUndo(b.dataset.undo); renderDay(); if (x) toast("Отметка снята: " + x.title, 2000); });
     $$(".ach", box).forEach(b => b.onclick = () => toast(b.dataset.tip, 2600));
+    const why = $("#done-why", box), seen = () => { if (!S.doneWhySeen) { S.doneWhySeen = true; saveS(); } };
+    if (why) why.onclick = () => { doneWhy = !doneWhy; seen(); renderDay(); };
+    if ($("#done-whyok", box)) { seen(); $("#done-whyok", box).onclick = () => { doneWhy = false; renderDay(); }; }
     const f = $("#done-add", box);
     f.onsubmit = (e) => { e.preventDefault(); const t = $("input", f).value.trim(); if (!t) { $("input", f).focus(); return; } markDone([t], "tap"); renderDay(); };
   } else if (dayTab === "notes") {
@@ -3611,8 +3687,20 @@ function celebrate(r) {
   if (!big) return;
   confetti();
   const a = r.fresh[r.fresh.length - 1];
-  showCard(`<div class="achc">${a ? `<i>${a.icon}</i><div><b>${esc(a.name)}</b><small>Новое достижение · ${esc(a.what)}</small></div>`
-    : `<i>🎉</i><div><b>${r.mile} ${delaRu(r.mile)} за сегодня</b><small>${s.streak >= 2 ? s.streak + " " + dnRu(s.streak) + " подряд · " : ""}так держать</small></div>`}</div>`);
+  // отзыв 16.10: «нужен крестик, и чтобы по нажатию было понятно, что это за награды» — карточка ведёт в «Мой день» → «Дела»
+  // (там все значки и объяснение), ✕ — убрать; пока объяснение не открывали, внизу подсказка «Что это за награды?»
+  showCard(`<div class="achc" id="achc" role="button" tabindex="0" aria-label="Открыть дела и достижения">${a ? `<i>${a.icon}</i><div class="achb"><b>${esc(a.name)}</b><small>Новое достижение · ${esc(a.what)}</small>`
+    : `<i>🎉</i><div class="achb"><b>${r.mile} ${delaRu(r.mile)} за сегодня</b><small>${s.streak >= 2 ? s.streak + " " + dnRu(s.streak) + " подряд · " : ""}так держать</small>`}`
+    + `<em>${S.doneWhySeen ? "Все значки — в «Мой день»" : "Что это за награды? Нажмите"}</em></div><button class="achx" aria-label="Убрать">${X_SVG}</button></div>`);
+  const c = $("#achc"); if (!c) return;
+  c.onclick = (e) => { if (e.target.closest(".achx")) { e.stopPropagation(); showCard(""); return; } openDone(!S.doneWhySeen); };
+  c.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDone(!S.doneWhySeen); } };
+}
+/* «Мой день» → «Дела»: сделанное, серия и все значки; why — сразу с объяснением, зачем это */
+let doneWhy = false;
+function openDone(why) {
+  showCard(""); doneWhy = !!why;
+  openSheet("#sh-day"); dayTab = "rem"; $$("#day-tabs button").forEach(x => x.classList.toggle("on", x.dataset.t === "rem")); renderDay();
 }
 function confetti() {
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -4201,6 +4289,7 @@ function renderSettings() {
       <p class="hint"><b>1.</b> «Получить ключ» → войдите в Яндекс тем же аккаунтом, что в «Доме с Алисой» → «Разрешить».<br><b>2.</b> Скопируйте ключ, который покажет Яндекс (начинается с y0_), и вставьте сюда.</p>
       <button class="btn w" id="home-auth" style="margin-bottom:10px">Получить ключ</button>
       <label class="f"><span>Ключ от Яндекса</span><input id="home-tok" type="password" placeholder="y0_…"></label><button class="btn p w" id="home-go">Подключить</button>`}<div class="res" id="home-res"></div></div>
+      <h3>Значок «Записать»</h3><div class="card">${widgetCard()}</div>
       <h3>Синхронизация</h3><div class="card">${syncCard()}</div>
       <h3>Разрешения</h3><div class="card">${perms.map(([p, n]) => `<div class="sw"><div>${n}</div>${D.has(p) ? `<span class="res ok" style="margin:0">есть</span>` : `<button class="btn" data-perm="${p}">Разрешить</button>`}</div>`).join("")}
       <div class="sw"><div>Точные будильники</div>${D.exactAlarms() ? `<span class="res ok" style="margin:0">есть</span>` : `<button class="btn" onclick="Dewiar.openSettings('alarms')">Разрешить</button>`}</div></div>
@@ -4368,6 +4457,9 @@ function wireSettings(info) {
       if (!confirm(`Забыть разговор и всё, что ${persona().name} помнит о вас (${(S.memory || []).length} записей)?`)) return;
       if (!confirm("Точно? Это нельзя отменить. Память сотрётся и на компьютере после синхронизации.")) return;
       history = []; saveH(); convReset(); S.memory = []; saveS(); syncSoon(); toast("Забыл"); };
+    if (g("wg-on")) g("wg-on").onchange = () => { try { D.widgetSet(g("wg-on").checked); } catch (e) { } renderSettings(); };
+    if (g("wg-pin")) g("wg-pin").onclick = () => { let ok = false; try { ok = D.widgetPin(); } catch (e) { }
+      const r = g("wg-res"); r.className = "res" + (ok ? " ok" : ""); r.textContent = ok ? "Подтвердите на экране — и значок появится на рабочем столе" : "Добавьте вручную: долгое нажатие на рабочем столе → «Виджеты» → Dewiar"; };
     if (g("sy-now")) g("sy-now").onclick = async () => { const r = g("sy-res"); r.className = "res"; r.textContent = "синхронизирую…"; await syncRun(true); renderSettings(); };
     if (g("sy-on")) g("sy-on").onchange = () => { S.sync.on = g("sy-on").checked; saveS(); if (S.sync.on) syncSoon(); renderSettings(); };
   }
@@ -4643,6 +4735,16 @@ async function syncRun(manual) {
   } finally { syncBusy = false; }
 }
 function syncSoon() { if (SANDBOX) return; clearTimeout(syncTimer); syncTimer = setTimeout(() => syncRun(false), 3000); }   // экзамен — без обмена   // несколько правок подряд — один обмен
+/* Значок «Записать» на рабочем столе (CaptureWidget.java): включён по умолчанию; «Добавить на экран» — Android 8+ */
+function widgetCard() {
+  let w = {}; try { w = JSON.parse(D.widgetState ? D.widgetState() : "{}") || {}; } catch (e) { }
+  if (w.on === undefined) return `<p class="hint" style="margin:0">Обновите приложение — в этой версии значка ещё нет.</p>`;
+  return `<div class="sw"><div>Значок на рабочем столе<small class="hint" style="display:block;margin:2px 0 0">одно нажатие — Dewiar слушает и записывает мысль в «Идеи» или ставит напоминание («напомни завтра в 10…»), потом сам уходит</small></div>
+    <label class="tg"><input type="checkbox" id="wg-on" ${w.on ? "checked" : ""}><i></i></label></div>`
+    + (w.on ? (w.placed ? `<div class="res ok">На рабочем столе: ${w.placed}</div>`
+      : w.pin ? `<button class="btn w" id="wg-pin" style="margin-top:8px">Добавить на рабочий стол</button><div class="res" id="wg-res"></div>`
+      : `<p class="hint" style="margin:8px 0 0">Добавить: долгое нажатие на рабочем столе → «Виджеты» → Dewiar → «Записать».</p>`) : "");
+}
 function syncCard() {
   const c = syncCred(), s = syncStatus, t = s.at ? new Date(s.at) : null;
   if (!c) return `<p class="hint" style="margin-top:0">Напоминания, заметки, расходы и память — одинаковые на телефоне и компьютере. Нужен ключ Dewiar или вход аккаунтом dewiar.pro (Настройки → Мозг) — тот же, что на компьютере.</p>`;
@@ -5456,6 +5558,7 @@ function handleIntent(e) {
     renderAtts(); $("#typebox").classList.add("on"); if (e.text && !$("#typed").value) $("#typed").value = String(e.text).slice(0, 2000);
     $("#typed").placeholder = "Например: напомни завтра в 10"; setTimeout(() => $("#typed").focus(), 300); }
   else if (e.action === "note") openNoteSoon(e.id);           // «Посмотреть вложения» в окне напоминания
+  else if (e.action === "capture") captureStart();             // значок «Записать» на рабочем столе
   else if (e.action === "import") { try { const m = JSON.parse(e.text); if (!cfgAsk(m)) return; applyConfig(m, ""); showBot("Настройки с компьютера применены. Мозг: " + brainName() + "."); } catch (x) { showBot("Файл настроек не подошёл: " + x.message, "err"); } }
   else if (e.action === "link" && /^dewiar:\/\/import/.test(e.url || "")) {        // QR из студии на компьютере
     try {

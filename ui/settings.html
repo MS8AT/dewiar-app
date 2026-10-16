@@ -1132,6 +1132,16 @@
     <div class="switch"><div>Узнавать любые имена<span>Короткие фразы проверяет точная модель, поэтому работают имена, которых нет в словаре, — например, «Нова» или «Девиар». Немного нагружает процессор, только когда кто-то говорит.</span></div><label class="tg"><input type="checkbox" data-k="audio.asr_wake"><i></i></label></div>
     <div class="switch"><div>Звуковые сигналы<span>Короткий сигнал «слушаю» и «больше не слушаю».</span></div><label class="tg"><input type="checkbox" data-k="audio.sounds"><i></i></label></div>
     <div class="switch"><div>Сигнал «ваша очередь»<span>Тихий звук, когда ответ закончен и можно сразу говорить, без имени.</span></div><label class="tg"><input type="checkbox" data-k="audio.turn_tone"><i></i></label></div>
+    <h2>Закинуть идею одной клавишей</h2>
+    <div class="capbox" id="cap-box">
+      <div class="switch slim"><div>Окно «Закинуть идею» по сочетанию клавиш<span>Из любой программы: свежий скриншот из буфера уже приложен — напишите пару слов и Enter. «Напомни завтра в 10 …» — напоминание с картинками, остальное — в заметки «Идеи». Без модели и без голоса.</span></div><label class="tg"><input type="checkbox" id="cap-on"><i></i></label></div>
+      <div class="row capkey">
+        <label class="f">Сочетание<input type="text" id="cap-key" placeholder="Ctrl+Alt+N" autocomplete="off" spellcheck="false"></label>
+        <button class="btn small" id="cap-try">Открыть окно сейчас</button>
+      </div>
+      <p class="hint" id="cap-st"></p>
+      <p class="hint" id="cap-cmdh" hidden>Команда для своего сочетания: <code id="cap-cmd"></code></p>
+    </div>
     <h2>Разговор</h2>
     <div class="row">
       <label class="f">Как перебивать<select data-k="audio.barge_in">
@@ -1388,6 +1398,7 @@
 <script src="studio/close.js"></script>
 <script src="studio/refs.js"></script>
 <script src="studio/notes.js"></script>
+<script src="studio/capture.js"></script>
 <script src="assets/rich.js"></script>
 <script src="studio/chat.js"></script>
 <script src="studio/news.js"></script>

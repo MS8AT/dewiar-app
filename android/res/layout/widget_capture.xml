@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Значок «Записать» на рабочем столе (CaptureWidget): одно нажатие — Dewiar слушает и записывает мысль в «Идеи»
+     или ставит напоминание. Разметка RemoteViews: только простые виды. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/w_bg"
+    android:paddingLeft="10dp"
+    android:paddingRight="18dp">
+    <ImageView
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:padding="9dp"
+        android:background="@drawable/w_mic_bg"
+        android:src="@drawable/w_mic"
+        android:contentDescription="Микрофон"/>
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginLeft="10dp"
+        android:orientation="vertical">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Записать"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:maxLines="1"/>
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="идея или «напомни…»"
+            android:textColor="#B9B5D6"
+            android:textSize="11.5sp"
+            android:maxLines="1"/>
+    </LinearLayout>
+</LinearLayout>

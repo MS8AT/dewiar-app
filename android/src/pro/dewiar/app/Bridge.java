@@ -358,6 +358,15 @@ public final class Bridge {
 
     @JavascriptInterface public String alarmHistory() { return Alarms.history(a); }
 
+    // значок «Записать» на рабочем столе (CaptureWidget): состояние, вкл/выкл, добавить на экран; home — свернуть приложение
+    @JavascriptInterface public String widgetState() { return CaptureWidget.state(a).toString(); }
+
+    @JavascriptInterface public void widgetSet(boolean on) { CaptureWidget.set(a, on); }
+
+    @JavascriptInterface public boolean widgetPin() { return CaptureWidget.pin(a); }
+
+    @JavascriptInterface public void home() { a.runOnUiThread(new Runnable() { @Override public void run() { a.moveTaskToBack(true); } }); }
+
     @JavascriptInterface public boolean exactAlarms() {
         return Compat.canExact((android.app.AlarmManager) a.getSystemService(Context.ALARM_SERVICE));
     }

@@ -643,8 +643,23 @@ body.neu .clsend textarea, body.neu #cl-name { background: var(--glass); box-sha
 .it .x.ok { background: rgba(75,227,161,.16); color: var(--good); font-size: 16px; font-weight: 700; }
 .achc { display: flex; gap: 14px; align-items: center; padding: 14px 16px; border-radius: 20px; text-align: left;
   background: radial-gradient(120% 160% at 0% 0%, rgba(255,201,120,.2), transparent 62%), var(--frost); animation: achin .5s cubic-bezier(.2,1.4,.4,1); }
+.achc { position: relative; cursor: pointer; padding-right: 48px; }
 .achc i { font-style: normal; font-size: 40px; line-height: 1; }
+.achc .achb { min-width: 0; }
 .achc b { display: block; font-size: 17px; } .achc small { color: var(--muted); font-size: 13px; }
+.achc em { display: block; margin-top: 4px; font-style: normal; font-size: 12.5px; font-weight: 600; color: #FFC978; }
+.achc:active { transform: scale(.985); }
+.achc:focus-visible { outline: 2px solid rgba(255,201,120,.7); outline-offset: 2px; }
+.achx { position: absolute; top: 8px; right: 8px; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(255,255,255,.08); color: var(--muted); }
+.achx svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.dwhy { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-left: 8px; border-radius: 50%; vertical-align: 1px;
+  background: rgba(255,255,255,.09); color: var(--muted); font-size: 13px; font-weight: 700; }
+.dwhy.on { background: rgba(255,201,120,.2); color: #FFE1B0; }
+.donewhy { padding: 14px 16px; border-radius: 18px; margin: -2px 0 10px; background: rgba(255,201,120,.08); border: 1px solid rgba(255,201,120,.18); }
+.donewhy b { display: block; font-size: 15px; margin-bottom: 4px; }
+.donewhy p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.45; color: var(--dim); }
+.donewhy .btn { padding: 8px 16px; }
 .confetti { position: fixed; inset: 0; pointer-events: none; z-index: 9999; overflow: hidden; }
 .confetti i { position: absolute; top: -14px; height: 10px; border-radius: 2px; animation: cf 1.7s cubic-bezier(.25,.6,.4,1) forwards; }
 @keyframes cf { to { transform: translate(var(--dx), 105vh) rotate(var(--r)); } }
@@ -694,3 +709,6 @@ body.light .clrx, body.light .clrepick { background: #fff; box-shadow: 0 6px 18p
 #picview .pv-t { color: #ddd; font-size: 13px; text-align: center; max-width: 520px; }
 #hlist .msg.a .ans { font-size: inherit; }
 #hlist .msg.a .ans p { margin: 0 0 6px; }
+/* светлые темы: подсказка и объяснение достижений — тёмным янтарём, а не светлым */
+body.light .achc em, body.light .dwhy.on, body.light .ach.on { color: #9a5a00; }
+body.light .donewhy p { color: var(--ink); }

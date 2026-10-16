@@ -115,6 +115,8 @@ def card_r():
     """Скругление карточки под масштаб — как в странице (border-radius × zoom)."""
     return int(round(CARD_RADIUS * ZOOM[0]))
 ALARM_TITLE = "Dewiar — напоминание"
+CAPTURE_TITLE = "Dewiar — закинуть идею"
+CAPTURE_RADIUS = 24
 ALARM_RADIUS = 26
 PROMPTER_TITLE = "Dewiar — суфлёр"
 PROMPTER_RADIUS = 24
@@ -1443,6 +1445,141 @@ class Api:
     def _alarm_closed(self):
         self._alarm = None
 
+    # ---------- «Закинуть идею»: окно capture.html по одной клавише (ui/hotkey.py) ----------
+
+    def show_capture(self):
+        """Окно «Закинуть идею» по центру, поверх всех и в фокусе: картинка из буфера уже приложена, пиши и Enter.
+        Одно: открыто — показать и дать фокус. Скругляем до показа, как окно напоминания."""
+        import threading
+        import webview
+        old = getattr(self, "_capture", None)
+        if old is not None:                            # окно не закрываем, а прячем — второй раз оно появляется сразу
+            try:
+                old.show()
+                old.evaluate_js("window.capOpen && capOpen()")
+                self._focus_title(CAPTURE_TITLE)
+                return True
+            except Exception:  # noqa: BLE001
+                self._capture = None
+        w, h = 600, 440
+        try:
+            if WIN:
+                l, t_, r, b = winshell.work_area()
+                sw, sh, ox, oy = r - l, b - t_, l, t_
+            else:
+                scr = webview.screens[0]
+                sw, sh, ox, oy = scr.width, scr.height, getattr(scr, "x", 0), getattr(scr, "y", 0)
+            x, y = int(ox + (sw - w) / 2), int(oy + (sh - h) / 2.6)
+        except Exception:  # noqa: BLE001
+            x = y = None
+        win = webview.create_window(CAPTURE_TITLE, self._url("capture.html"), width=w, height=h, x=x, y=y,
+                                    resizable=False, frameless=True, easy_drag=False, on_top=True, focus=True, hidden=True,
+                                    background_color="#0d0b14", js_api=self, **_no_shadow())   # тянуть — за заголовок: в поле выделяют текст
+        self._capture = win
+        win.events.closed += lambda *a: setattr(self, "_capture", None) if self._capture is win else None
+        done, lock = [], threading.Lock()
+
+        def reveal():
+            with lock:
+                if done:
+                    return
+                done.append(1)
+            try:
+                if WIN:
+                    winshell.shape(int(win.native.Handle.ToInt64()), "alarm", CAPTURE_RADIUS)
+                    win.show()
+                    return
+
+                def run():
+                    from gi.repository import Gtk
+                    gw = next((g for g in Gtk.Window.list_toplevels() if g.get_title() == CAPTURE_TITLE), None)
+                    if gw is None:
+                        return False
+                    gw.set_skip_taskbar_hint(True)
+                    gw.realize()
+                    shape_window(gw, "alarm", (w, h), CAPTURE_RADIUS)
+                    gw.show_all()
+                    if x is not None:
+                        gw.get_window().move(x, y)
+                    _present(gw)
+                    return True
+                if not self._gtk(run, timeout=5):
+                    win.show()
+            except Exception as e:  # noqa: BLE001
+                print(f"Окно «Закинуть идею»: {e}", file=sys.stderr)
+                try:
+                    win.show()
+                except Exception:  # noqa: BLE001
+                    pass
+        win.events.loaded += lambda *a: threading.Thread(target=reveal, daemon=True).start()
+        threading.Timer(4.0, reveal).start()
+        return True
+
+    def _focus_title(self, title):
+        """Linux: окно с этим заголовком — вперёд и в фокус (сочетание клавиш нажато в чужой программе)."""
+        if WIN:
+            return
+
+        def run():
+            from gi.repository import Gtk
+            gw = next((g for g in Gtk.Window.list_toplevels() if g.get_title() == title), None)
+            if gw is not None:
+                _present(gw)
+            return True
+        self._gtk(run)
+
+    def close_capture(self):
+        win = getattr(self, "_capture", None)
+        if win is not None:
+            try:
+                win.hide()
+            except Exception:  # noqa: BLE001
+                self._capture = None
+                try:
+                    win.destroy()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def capture_status(self):
+        """Студия: включено ли сочетание и работает ли оно на этом рабочем столе. -> {on, key, works, how, command}."""
+        import hotkey
+        uis = ui_settings()
+        key = uis.get("capture_key") or hotkey.DEFAULT
+        on = uis.get("capture", True) is not False
+        out = {"on": on, "key": key, "works": False, "how": "", "command": hotkey.command(ROOT)}
+        if WIN:
+            out.update(works=bool(on and getattr(self, "_hk_ok", False)),
+                       how="работает в любой программе" if getattr(self, "_hk_ok", False) else
+                       ("Windows не дала это сочетание — его заняла другая программа; выберите другое" if on else ""))
+            return out
+        try:
+            if not hotkey.gnome_available():
+                out["how"] = "на этом рабочем столе назначьте сочетание сами — командой ниже (Настройки → Клавиатура)"
+                return out
+            st = hotkey.gnome_state(key)
+            out.update(works=bool(on and st["on"] and st["binding"]), conflict=st["conflict"],
+                       how="работает в любой программе (это сочетание — в настройках клавиатуры GNOME)" if st["on"] else
+                       (f"{key} занято сочетанием «{st['conflict']}»" if st["conflict"] else ""))
+        except Exception as e:  # noqa: BLE001
+            out["how"] = f"не получилось проверить: {e}"
+        return out
+
+    def capture_set(self, on=True, key=""):
+        """Студия: включить/выключить «Закинуть идею» одной клавишей, сменить сочетание. -> capture_status()."""
+        import hotkey
+        key = (key or ui_settings().get("capture_key") or hotkey.DEFAULT).strip()
+        if not hotkey.parse(key):
+            return dict(self.capture_status(), error=f"не понял «{key}» — нужно с Ctrl, Alt или Win и буквой, например Ctrl+Alt+N")
+        try:
+            if WIN:
+                winshell.core_call(WS_PORT, self.token, "settings_save", {"patch": {"ui": {"capture": bool(on), "capture_key": key}}})
+            else:
+                _core_save_ui(self.token, {"capture": bool(on), "capture_key": key})
+        except Exception as e:  # noqa: BLE001
+            print(f"Настройка «Закинуть идею» не сохранилась: {e}", file=sys.stderr)
+        err = capture_apply(self, bool(on), key)
+        return dict(self.capture_status(), **({"error": err} if err else {}))
+
     # ---------- суфлёр: окно-карточка у правого края, поверх всех окон ----------
 
     def open_prompter(self):
@@ -1666,7 +1803,7 @@ class LinuxTray:
         self.ind = AI.Indicator.new("dewiar", str(icon), AI.IndicatorCategory.APPLICATION_STATUS)
         self.ind.set_title("Dewiar")
         menu = Gtk.Menu()
-        for title, fn in (("Показать Dewiar", api.from_tray), ("Убрать в трей", api.to_tray),
+        for title, fn in (("Показать Dewiar", api.from_tray), ("Закинуть идею", api.show_capture), ("Убрать в трей", api.to_tray),
                           ("Студия", lambda: api.open_settings()), (None, None), ("Выйти из Dewiar", api.quit_all)):
             if title is None:
                 menu.append(Gtk.SeparatorMenuItem())
@@ -1682,6 +1819,70 @@ class LinuxTray:
 
 
 _TRAY = []
+
+
+def _present(gw):
+    """Окно — вперёд и в фокус. Сочетание клавиш нажато в чужой программе — GNOME не даёт фокус «просто так»: время
+    события берём у X-сервера (present_with_time), иначе окно лишь мигнёт «Dewiar готов»."""
+    try:
+        import gi
+        gi.require_version("GdkX11", "3.0")
+        from gi.repository import GdkX11
+        gdkw = gw.get_window()
+        if isinstance(gdkw, GdkX11.X11Window):
+            gw.present_with_time(GdkX11.x11_get_server_time(gdkw))
+            return
+    except Exception:  # noqa: BLE001
+        pass
+    gw.present()
+
+
+def _core_save_ui(token, patch):
+    """Сохранить ui.* в настройках ядра (Linux: тот же WebSocket, что у страниц)."""
+    from websockets.sync.client import connect
+    with connect(f"ws://127.0.0.1:{WS_PORT}", open_timeout=3, close_timeout=1) as ws:
+        ws.send(json.dumps({"cmd": "hello", "token": token}))
+        ws.recv(timeout=3)
+        ws.send(json.dumps({"id": 1, "cmd": "settings_save", "args": {"patch": {"ui": patch}}}))
+        ws.recv(timeout=3)
+
+
+def capture_boot(api, uis):
+    """При запуске: сочетание «Закинуть идею» включено — назначить. GNOME: уже назначено нами с той же клавишей и
+    командой — не трогаем; Windows — регистрируем каждый запуск (живёт, пока жив процесс)."""
+    import hotkey
+    key = uis.get("capture_key") or hotkey.DEFAULT
+    try:
+        if not WIN and hotkey.gnome_available():
+            st = hotkey.gnome_state(key)
+            if st["on"] and st["binding"] == hotkey.to_gnome(key) and st["command"] == hotkey.command(ROOT):
+                return
+        err = capture_apply(api, True, key)
+        if err:
+            print(f"«Закинуть идею»: {err}", file=sys.stderr)
+    except Exception as e:  # noqa: BLE001
+        print(f"«Закинуть идею»: {e}", file=sys.stderr)
+
+
+def capture_apply(api, on, key):
+    """Назначить (или снять) сочетание «Закинуть идею»: Windows — RegisterHotKey значка в трее, Linux/GNOME — своё
+    сочетание GNOME с командой «dewiar --capture». -> текст ошибки или ""."""
+    import hotkey
+    try:
+        if WIN:
+            tray = getattr(api, "_tray", None)
+            if tray is None or not hasattr(tray, "hotkey"):
+                return "нет значка в трее — сочетание не назначить"
+            spec = hotkey.to_win(key) if on else None
+            api._hk_ok = bool(tray.hotkey(spec[0] if spec else None, spec[1] if spec else 0, api.show_capture)) and on
+            return "" if api._hk_ok or not on else f"{key} уже занято другой программой — выберите другое сочетание"
+        if not hotkey.gnome_available():
+            return ""
+        ok, msg = hotkey.gnome_set(on, key, hotkey.command(ROOT))
+        return "" if ok else msg
+    except Exception as e:  # noqa: BLE001 — сочетание не главное: программа работает и без него
+        print(f"Сочетание «Закинуть идею»: {e}", file=sys.stderr)
+        return str(e)
 
 
 def _no_shadow():
@@ -1774,6 +1975,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--settings", action="store_true")
     ap.add_argument("--autostart", action="store_true", help="запуск вместе с системой: убранный в трей виджет остаётся в трее")
+    ap.add_argument("--capture", action="store_true", help="окно «Закинуть идею» (сочетание клавиш, ui/hotkey.py)")
     ap.add_argument("target", nargs="?", help="файл .dewiar или ссылка dewiar://connect?server=…")
     args = ap.parse_args()
     from urllib.parse import quote
@@ -1788,6 +1990,12 @@ def main():
 
     if WIN:
         return main_win(args, extra)
+    if args.capture:                           # сочетание клавиш: программа работает — сразу сигнал, без коробки systemd
+        fh = lock("ui")
+        if fh is None:
+            (Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / f"dewiar-show-{os.getuid()}").write_text("capture")
+            return
+        fh.close()                             # не запущена — запускаемся как обычно, окно идеи откроется после старта
     _own_box()
     migrate_from_cortex()
     fresh = not SETTINGS_PATH.exists() or ui_settings().get("welcome") == ""   # первый запуск — откроем «Первые шаги»
@@ -1807,7 +2015,7 @@ def main():
         # Интерфейс уже запущен — просим его показаться и выходим. Сигнал-файл: «hud» или «settings» + параметры
         # студии (&import=…, &address=…); его ждёт watch() в on_start, на Windows — то же в main_win.
         (Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / f"dewiar-show-{os.getuid()}").write_text(
-            ("settings" + extra) if args.settings else "hud")
+            "capture" if args.capture else ("settings" + extra) if args.settings else "hud")
         return
 
     ensure_core()
@@ -1860,15 +2068,22 @@ def main():
             api.open_settings("connect" if extra else "", extra)
         elif fresh:
             api.open_settings("")
+        elif args.capture:
+            api.show_capture()
         import threading
         sig = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / f"dewiar-show-{os.getuid()}"
+        if uis.get("capture", True) is not False:          # «Закинуть идею» одной клавишей — назначить (GNOME), если ещё нет
+            threading.Thread(target=capture_boot, args=(api, uis), daemon=True).start()
 
         def watch():
             while True:
-                time.sleep(0.5)
+                time.sleep(0.2)                    # сочетание «Закинуть идею» — окно должно появиться сразу
                 if sig.exists():
                     what = sig.read_text().strip()
                     sig.unlink()
+                    if what == "capture":                  # сочетание клавиш: только окно идеи, виджет не трогаем
+                        api.show_capture()
+                        continue
                     api.from_tray()
                     if what.startswith("settings"):
                         q = what[len("settings"):]
@@ -1898,7 +2113,7 @@ def main_win(args, extra):
         except OSError:
             other = ""
         if other == me:
-            sig.write_text(("settings" + extra) if args.settings else "hud", encoding="utf-8")
+            sig.write_text("capture" if args.capture else ("settings" + extra) if args.settings else "hud", encoding="utf-8")
             return
         print(f"Запущен другой интерфейс ({other or 'старая версия'}) — завершаю его", file=sys.stderr)
         for name in ("ui.pid", "core.pid"):
@@ -1936,7 +2151,7 @@ def main_win(args, extra):
     started = threading.Event()
     api._tray = winshell.Tray(icon, on_show=lambda: api.from_tray() if started.is_set() else studio_in_browser(),
                              on_studio=lambda: api.open_settings() if started.is_set() else studio_in_browser(),
-                             on_quit=api.quit_all)
+                             on_quit=api.quit_all, on_capture=lambda: api.show_capture() if started.is_set() else None)
     _TRAY.append(api._tray)
     try:
         if os.environ.get("DEWIAR_NO_WEBVIEW"):        # проверка запасного пути (как без WebView2)
@@ -1984,13 +2199,20 @@ def main_win(args, extra):
             api.open_settings("connect" if extra else "", extra)
         elif fresh:
             api.open_settings("")
+        elif args.capture:
+            api.show_capture()
+        if uis.get("capture", True) is not False:
+            threading.Thread(target=capture_boot, args=(api, uis), daemon=True).start()
 
         def watch():
             while True:
-                time.sleep(0.5)
+                time.sleep(0.2)                    # сочетание «Закинуть идею» — окно должно появиться сразу
                 if sig.exists():
                     what = sig.read_text(encoding="utf-8").strip()
                     sig.unlink()
+                    if what == "capture":
+                        api.show_capture()
+                        continue
                     api.from_tray()
                     if what.startswith("settings"):
                         q = what[len("settings"):]

@@ -113,7 +113,12 @@ def shape(h, kind, radius=28):
     ставит её заново (_win_shape)."""
     _, _, w, hgt = rect(h)
     if kind == "mini":
-        rgn = gdi32.CreateEllipticRgn(0, 0, w + 1, hgt + 1)
+        # круг по меньшей стороне, по центру окна: на мониторе с масштабом 100 % Windows не даёт окну быть уже своей
+        # минимальной ширины (~120 px), и значок 96×96 становился 120×96 — овалом (отзыв 16.10, широкий монитор).
+        # Значок на странице и так стоит по центру (hud.html body.mini #card)
+        d = min(w, hgt)
+        x0, y0 = (w - d) // 2, (hgt - d) // 2
+        rgn = gdi32.CreateEllipticRgn(x0, y0, x0 + d + 1, y0 + d + 1)
     else:
         r = int(radius * scale(h)) * 2
         rgn = gdi32.CreateRoundRectRgn(0, 0, w + 1, hgt + 1, r, r)
@@ -254,6 +259,7 @@ TPM_RIGHTBUTTON, TPM_RETURNCMD, TPM_NONOTIFY = 0x0002, 0x0100, 0x0080
 MF_STRING, MF_SEPARATOR, MF_DEFAULT = 0, 0x800, 0x1000
 IMAGE_ICON, LR_LOADFROMFILE, LR_DEFAULTSIZE = 1, 0x10, 0x40
 TRAY_MSG = WM_APP + 1
+WM_HOTKEY, WM_HOTKEY_SET, HOTKEY_ID = 0x0312, WM_APP + 2, 0xD3A1    # «Закинуть идею» (ui/hotkey.py)
 
 
 class WNDCLASSEXW(ctypes.Structure):
@@ -290,6 +296,8 @@ def _api():
     u.RegisterWindowMessageW.restype = wintypes.UINT
     u.RegisterWindowMessageW.argtypes = [wintypes.LPCWSTR]
     u.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
+    u.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+    u.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
     s.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
     s.Shell_NotifyIconW.restype = wintypes.BOOL
     k.GetModuleHandleW.restype = wintypes.HMODULE
@@ -302,9 +310,10 @@ class Tray:
     Своё скрытое окно и цикл сообщений — в потоке tray (конструктор ждёт его до 5 с); пункты меню выполняются
     каждый в своём потоке, чтобы не держать цикл. ok — значок действительно добавлен."""
 
-    def __init__(self, icon_path, on_show, on_studio, on_quit):
+    def __init__(self, icon_path, on_show, on_studio, on_quit, on_capture=None):
         self.icon_path, self.hwnd, self.ok = str(icon_path), None, False
-        self.items = [(1, "Показать Dewiar", on_show), (2, "Студия", on_studio), (0, None, None), (3, "Выход", on_quit)]
+        self.items = [(1, "Показать Dewiar", on_show)] + ([(4, "Закинуть идею", on_capture)] if on_capture else []) + \
+                     [(2, "Студия", on_studio), (0, None, None), (3, "Выход", on_quit)]
         self._ready = threading.Event()
         threading.Thread(target=self._run, name="tray", daemon=True).start()
         self._ready.wait(5)
@@ -345,6 +354,12 @@ class Tray:
                     self._fire(1)
                 elif ev in (WM_RBUTTONUP, WM_CONTEXTMENU):
                     self._menu()
+                return 0
+            if msg == WM_HOTKEY_SET:
+                self._hk_apply()
+                return 0
+            if msg == WM_HOTKEY and wp == HOTKEY_ID and getattr(self, "_hk_fn", None):
+                threading.Thread(target=self._hk_fn, daemon=True).start()
                 return 0
             if msg == self.taskbar_created:                # Проводник перезапустился — значок пропал, вернуть
                 self._add()
@@ -389,6 +404,25 @@ class Tray:
         while self.u.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             self.u.TranslateMessage(ctypes.byref(msg))
             self.u.DispatchMessageW(ctypes.byref(msg))
+
+    def hotkey(self, mods, vk, fn):
+        """Сочетание клавиш на всю систему (RegisterHotKey окна значка): fn — в своём потоке. Регистрировать можно только
+        из потока окна — просим его сообщением и ждём ответа. mods=None — снять. -> True, если Windows приняла."""
+        if not (self.ok and self.hwnd):
+            return False
+        self._hk = (mods, vk, fn, threading.Event(), [False])
+        self.u.PostMessageW(self.hwnd, WM_HOTKEY_SET, 0, 0)
+        self._hk[3].wait(3)
+        return self._hk[4][0]
+
+    def _hk_apply(self):
+        mods, vk, fn, done, res = self._hk
+        try:
+            self.u.UnregisterHotKey(self.hwnd, HOTKEY_ID)
+            self._hk_fn = fn
+            res[0] = True if mods is None else bool(self.u.RegisterHotKey(self.hwnd, HOTKEY_ID, mods, vk))
+        finally:
+            done.set()
 
     def notify(self, text, title="Dewiar"):
         """Всплывающее сообщение от значка (в Windows 10/11 — уведомление). Длины обрезаем под поля NOTIFYICONDATAW."""

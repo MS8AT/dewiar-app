@@ -13,6 +13,9 @@ NOTE_ASK_RX = re.compile(r"заметк|запиш|запис|сохран|за�
 QUERY_TOOLS = ("find_notes", "web_search", "show_images")     # без query — бессмысленны: тему берём из просьбы
 
 
+CAPTURE_FOLDER = "Идеи"            # «Закинуть идею» (capture_save) — заметки сюда: «Заметки/Идеи/…»
+
+
 def _att_word(att):
     """[{kind…}] -> «2 картинки», «картинка и файл» — для уведомлений."""
     def plural(n, one, few, many):
@@ -226,6 +229,52 @@ class ToolsMixin:
                     self.close.natt_share(sid, rel.rsplit("/", 1)[-1][:-3], files)
             except Exception as e:  # noqa: BLE001 — нет связи или входа: на телефоне останется заметка без картинок
                 log.info("вложения заметки — телефону: не отправились: %s", e)
+
+    def capture_save(self, text, files, images):
+        """«Закинуть идею» (окно capture.html по Ctrl+Alt+N): без модели и без голоса. «Напомни завтра в 10 …» —
+        напоминание (с картинками — в их заметке, как _reminder_with_files), остальное — заметка в «Заметки/Идеи»
+        с картинками и файлами. -> {kind, title, when?, path?, att}."""
+        import base64
+        from when import parse as parse_when
+        data = []
+        for k, im in enumerate(images[:12]):
+            mime = im[5:im.index(";")] if im.startswith("data:") and ";" in im[:40] else "image/jpeg"
+            ext = {"image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}.get(mime, ".jpg")
+            files.append({"name": time.strftime("Снимок %d.%m %H-%M-%S") + (f" ({k + 1})" if k else "") + ext, "b64": im})
+        for f in files[:12]:
+            raw = str(f.get("b64") or "")
+            try:
+                b = base64.b64decode(raw.split(",", 1)[1] if raw.startswith("data:") else raw)
+            except ValueError:
+                continue
+            if b:
+                data.append((Path(str(f.get("name") or "файл")).name or "файл", b))
+        text = re.sub(r"[ \t]+\n", "\n", str(text or "")).strip()
+        if not text and not data:
+            raise ValueError("пусто — напишите мысль или вставьте картинку")
+        r = parse_when(text) if re.match(r"(?i)\s*(напомни|напоминай|разбуди|будильник|таймер|засеки)", text) else None
+        if r:
+            from when import human
+            if data:
+                self._reminder_note_from(r, text, data, chat=False)
+            item = self.reminders.add(r["at"], r["text"], r["repeat"], r["kind"], extra={"note": r.get("note")})
+            pub = self._reminder_public(item)
+            self.emit("reminder_set", item=pub, text="")
+            log.info("💡 Идея → напоминание %s: %s (вложений %d)", human(r["at"]), r["text"], len(data))
+            return {"kind": "reminder", "title": item["text"], "when": pub["when"], "id": item["id"], "att": pub.get("att", 0)}
+        first = text.split("\n", 1)[0].strip()
+        words = re.sub(r"[.!?…:;—].*$", "", first).split()          # название — до первой точки, двоеточия, тире
+        title = (" ".join(words[:7]) + ("…" if len(words) > 7 else "")).strip(" ,:;—-") if words else time.strftime("Идея %d.%m %H-%M")
+        note = self.workspace.note_with_files(title, text, data, folder=CAPTURE_FOLDER)
+        if note["att"]:
+            self.note_files_out(note["path"], [x["path"] for x in note["att"]])
+        sy = getattr(self, "sync", None)
+        if sy is not None:
+            sy.soon.set()
+        self.emit("note_saved", kind="note", title=note["path"].rsplit("/", 1)[-1][:-3], path=note["path"], text=text[:200])
+        self.emit("notes_changed")
+        log.info("💡 Идея → %s (вложений %d)", note["path"], len(note["att"]))
+        return {"kind": "note", "title": note["path"].rsplit("/", 1)[-1][:-3], "path": note["path"], "att": len(note["att"])}
 
     def _reminder_files(self, rid):
         """Вложения напоминания для окна-будильника: [{kind, name, path, thumb}] — миниатюры картинок data:URL."""
@@ -612,6 +661,14 @@ class ToolsMixin:
             return self._reminder_public(item)
         if cmd == "reminder_files":                   # окно-будильник: картинки и файлы напоминания
             return self._reminder_files(a.get("id") or "")
+        if cmd == "capture_parse":                    # окно «Закинуть идею»: что будет с этим текстом
+            r = parse_when(a.get("text") or "") if re.match(r"(?i)\s*(напомни|напоминай|разбуди|будильник|таймер|засеки)", a.get("text") or "") else None
+            if not r:
+                return {"kind": "note", "folder": CAPTURE_FOLDER}
+            from when import describe_repeat, human
+            return {"kind": "reminder", "text": r["text"], "when": human(r["at"]), "repeat_text": describe_repeat(r["repeat"])}
+        if cmd == "capture_save":
+            return self.capture_save(a.get("text") or "", list(a.get("files") or []), list(a.get("images") or []))
         if cmd == "job_add":                          # «Готовые дела» в студии: фраза с расписанием + точный текст дела
             from jobs import parse as parse_job
             c = parse_job(a.get("phrase") or "")

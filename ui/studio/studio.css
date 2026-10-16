@@ -1114,3 +1114,9 @@ html.st-light dialog.nwdlg { background: #fff; }
 .ch-chat.over .ch-drop { display: grid; }
 .cl-m.wide { max-width: min(86%, 720px); }
 .cl-m .dw-gallery { min-width: min(520px, 60vw); }
+/* «Звук и поведение» → «Закинуть идею одной клавишей» (studio/capture.js) */
+.capbox .capkey { align-items: flex-end; margin-top: 4px; }
+.capbox .capkey .f { max-width: 220px; }
+.capbox #cap-key { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.capbox .hint.ok { color: var(--good); } .capbox .hint.bad { color: var(--bad); }
+.capbox code { font: 12.5px ui-monospace, "Ubuntu Mono", monospace; background: rgba(255,255,255,.08); padding: 2px 8px; border-radius: 6px; user-select: all; word-break: break-all; }

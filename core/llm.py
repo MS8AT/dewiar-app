@@ -8,10 +8,12 @@ parse_tool_call), проверка и поиск серверов (test_profile,
 текста к озвучке (CodeFilter, SentenceSplitter, speakable). Способ вызова инструментов хранит engine_answer.py.
 """
 
+import contextlib
 import os
 import json
 import logging
 import re
+import sys
 import time
 
 import httpx
@@ -665,6 +667,32 @@ def probe_tools(p):
     return "none"
 
 
+@contextlib.contextmanager
+def _stream_retry(method, url, tries=2, **kw):
+    """httpx.stream, но соединение не установилось (сеть моргнула, сервер не принял подключение) — ещё раз: запрос
+    ещё не ушёл, повторять безопасно. Отчёт №69: «сервер модели не ответил вовремя» через 5 с, а следующий вопрос —
+    ответ за 9 с. Ошибки после подключения не повторяем."""
+    for i in range(tries):
+        cm = httpx.stream(method, url, **kw)
+        try:
+            r = cm.__enter__()
+        except (httpx.ConnectTimeout, httpx.ConnectError) as e:
+            if i == tries - 1:
+                raise
+            log.info("Сервер модели: соединение не установилось (%s) — пробую ещё раз", type(e).__name__)
+            time.sleep(0.8)
+            continue
+        exc = (None, None, None)
+        try:
+            yield r
+        except BaseException:
+            exc = sys.exc_info()
+            raise
+        finally:
+            cm.__exit__(*exc)
+        return
+
+
 class _Collector:
     """Разбор ответа любого из форматов: поток OpenAI (SSE), один JSON целиком, поток Ollama (NDJSON),
     события Anthropic. Текст ответа отдельно от «размышлений» (их только считает — reasoning, в символах)
@@ -899,7 +927,7 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
         col.tags.known = {x["name"] for x in (tools_all or [])}   # голый JSON в тексте — вызов, только если такая функция есть
         bare = BareCallCatcher([x["name"] for x in (tools_all or [])] if prompt_tools_mode(p) or native else [])
         got_text = False
-        with httpx.stream("POST", url, json=body, headers=_headers(p), timeout=timeout) as r:
+        with _stream_retry("POST", url, json=body, headers=_headers(p), timeout=timeout) as r:
             if r.status_code >= 400:
                 r.read()
                 err = r.text.lower()

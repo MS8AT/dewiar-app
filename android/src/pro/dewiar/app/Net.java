@@ -131,7 +131,11 @@ public final class Net {
         int code = c.getResponseCode();
         String text = readAll(code >= 400 ? c.getErrorStream() : c.getInputStream());
         c.disconnect();
-        if (code >= 400) throw new Exception("сервер распознавания ответил " + code);
+        if (code >= 400) {                                  // и что сказал сервер («Заряд Dewiar Облака закончился…») — приложение решит, что делать
+            String why = "";
+            try { why = new JSONObject(text).getJSONObject("error").optString("message", ""); } catch (Exception ignored) { }
+            throw new Exception("сервер распознавания ответил " + code + (why.isEmpty() ? "" : ": " + (why.length() > 200 ? why.substring(0, 200) : why)));
+        }
         return text;
     }
 }

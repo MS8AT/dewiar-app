@@ -76,6 +76,11 @@
         <activity android:name=".AlarmActivity" android:exported="false" android:showWhenLocked="true" android:turnScreenOn="true"
             android:launchMode="singleInstance" android:excludeFromRecents="true" android:screenOrientation="fullUser"/>
         <receiver android:name=".AlarmReceiver" android:exported="false"/>
+        <!-- значок «Записать» на рабочем столе; включается и выключается в настройках (CaptureWidget.set) -->
+        <receiver android:name=".CaptureWidget" android:exported="true" android:label="@string/w_capture">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_capture"/>
+        </receiver>
         <!-- «Близкие»: раз в ~15 минут — есть ли новые сообщения, пока приложение закрыто -->
         <service android:name=".CloseWatch" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE"/>
         <!-- «Близкие» на связи: длинный запрос к облаку — сообщения и звонки сразу, даже когда приложение закрыто.

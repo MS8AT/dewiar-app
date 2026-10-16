@@ -339,7 +339,7 @@ class CommandsMixin:
         if cmd in ("done", "done_add", "done_undo", "done_reminder"):    # «Дела»: сделанное и достижения (студия, done.py)
             return self._done_cmd(cmd, a)
         if cmd in ("reminders", "reminder_add", "reminder_update", "reminder_cancel", "alarm_ack", "alarm_snooze",
-                   "alarm_get", "alarm_test", "reminder_parse", "job_add", "job_run", "reminder_files"):
+                   "alarm_get", "alarm_test", "reminder_parse", "job_add", "job_run", "reminder_files", "capture_parse", "capture_save"):
             return self._reminder_cmd(cmd, a)
         if cmd.startswith("money_") or cmd == "calendar_month":      # деньги и календарь (студия → «Календарь»)
             m = self.money
