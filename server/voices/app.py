@@ -278,7 +278,10 @@ def lang_of(text: str, asked: str = "") -> str:
     if asked:
         return {"ru": "Russian", "en": "English", "zh": "Chinese", "de": "German", "fr": "French", "es": "Spanish",
                 "it": "Italian", "pt": "Portuguese", "ja": "Japanese", "ko": "Korean"}.get(asked.lower()[:2], asked)
-    return "Russian" if re.search(r"[А-Яа-яЁё]", text) else "Auto"
+    # одни цифры («14:10», «2026») — по-русски, а не «на угад» (отзыв 16.10: время прозвучало как «ствисе»)
+    if re.search(r"[А-Яа-яЁё]", text) or (re.search(r"\d", text) and not re.search(r"[A-Za-z]", text)):
+        return "Russian"
+    return "Auto"
 
 
 # ── звук ─────────────────────────────────────────────────────────────────
@@ -307,7 +310,9 @@ def trim(a: np.ndarray, sr: int = OUT_SR) -> np.ndarray:
     if on.size == 0:
         return a[:0]
     s = max(0, (on[0] - 4) * fr)
-    e = min(a.size, (on[-1] + 7) * fr)
+    # конец — щедрее и по более тихому порогу: тихое последнее слово («…равно два») не срезается (отзыв 16.10)
+    tail = np.where(rms > max(0.003, rms.max() * 0.008))[0]
+    e = min(a.size, (max(on[-1], tail[-1] if tail.size else on[-1]) + 14) * fr)
     return a[s:e]
 
 

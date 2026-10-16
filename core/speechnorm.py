@@ -203,6 +203,19 @@ def _year(m):
     return f"{w or number_words(n)} {g}"
 
 
+_MONTH_LIST = _MONTHS.split("|")
+
+
+def _ddate(m):
+    """«14.10.2026» → «четырнадцатое октября две тысячи двадцать шестого года» (после «до/с/к…» — в нужном падеже)."""
+    pre, d, mo, y = m.group(1) or "", int(m.group(2)), int(m.group(3)), int(m.group(4))
+    if not (1 <= d <= 31 and 1 <= mo <= 12):
+        return m.group(0)
+    p = pre.strip().lower()
+    form = "gen" if p in ("до", "с", "со", "от", "после", "около", "начиная с", "кроме") else "dat" if p in ("к", "ко", "по") else "n_nom"
+    return f"{pre}{ordinal_words(d, form) or number_words(d)} {_MONTH_LIST[mo - 1]} {ordinal_words(y, 'gen') or number_words(y)} года"
+
+
 def speech_norm(text, latin=True):
     """latin=False — только числа, суммы, проценты, время (Piper, eSpeak, голос Windows: латиницу они читают сами)."""
     t = str(text or "")
@@ -214,6 +227,12 @@ def speech_norm(text, latin=True):
                lambda m: _money(re.match(num, (m.group("n") or m.group("n2")) + ("," + (m.group("k") or m.group("k2")) if (m.group("k") or m.group("k2")) else "")), "usd"), t)
     t = re.sub(num + r"\s*(?:€|EUR)", lambda m: _money(m, "eur"), t)
     t = re.sub(r"(?<![\d.,:])(\d{1,9}),(\d{1,2})(?!\d|[.,]\d)", _decimal, t)
+    # пример со знаками: «12 - 10 = 2», «3 × 4», «8 ÷ 2» — словами (отзыв 16.10: «равно 2» — двойку не было слышно)
+    t = re.sub(r"(?<=\d)\s*=\s*(?=[-−]?\d)", " равно ", t)
+    t = re.sub(r"(?<=\d)\s+[-−–]\s+(?=\d)", " минус ", t)
+    t = re.sub(r"(?<=\d)\s*\+\s*(?=\d)", " плюс ", t)
+    t = re.sub(r"(?<=\d)\s*[×*]\s*(?=\d)", " умножить на ", t)
+    t = re.sub(r"(?<=\d)\s*÷\s*(?=\d)", " разделить на ", t)
     t = re.sub(r"https?://\S+", "ссылка", t)
     if latin:
         t = re.sub(r"\b(?=\w*\d)(?=\w*[A-Za-z])[A-Za-z0-9_]{4,}\b", " ", t)   # 17e9, x86_64 — служебные метки вслух не нужны
@@ -222,14 +241,20 @@ def speech_norm(text, latin=True):
     t = re.sub(r"(?<![\w-])[-−](?=\d)", "минус ", t)
     t = re.sub(r"(\d+)\s*%", lambda m: f"{number_words(int(m.group(1)))} {_plural(int(m.group(1)), ('процент', 'процента', 'процентов'))}", t)
     t = re.sub(r"(\d+)\s*°\s*[CС]?(?![A-Za-zА-Яа-яЁё])", lambda m: f"{number_words(int(m.group(1)))} {_plural(int(m.group(1)), ('градус', 'градуса', 'градусов'))}", t)
+    t = re.sub(r"((?:(?<=\s)|^)(?:до|с|со|от|после|около|к|ко|по)\s+)?(?<![\d.,:])(\d{1,2})\.(\d{1,2})\.(\d{4})(?![\d.,]\d)", _ddate, t, flags=re.I)
     t = re.sub(r"(?<![\d.,:])(\d{3,4})\s+(год|года|году|годом|годе)(?![а-яё])", _year, t)
     t = re.sub(r"((?:(?<=\s)|^)(?:до|с|со|от|после|около|к|ко|по|на|в)\s+)?(?<![\d.,:])(\d{1,2})\s+(" + _MONTHS + r")(?![а-яё])", _date, t, flags=re.I)
     # число перед словом — в его роде: «1 минута», «2 недели», «1 сообщение» (время 10:30 и дроби уже словами)
     t = re.sub(r"(?<![\d.,:])(\d{1,15})(?![\d.,:])(\s+)([А-Яа-яЁё]+)", lambda m: _agree(int(m.group(1)), m.group(3)) + m.group(2) + m.group(3), t)
     t = re.sub(r"\b([01]?\d|2[0-3]):[0-5]\d\b|\d+(?:[.,]\d+)*", _num, t)
     if not latin:
-        return re.sub(r"[ \t]+", " ", t.replace("№", "номер ")).strip()
+        return _end(re.sub(r"[ \t]+", " ", t.replace("№", "номер ")).strip())
     t = re.sub(r"[A-Za-z]+(?:-[A-Za-z]+)?", lambda m: latin_word(m.group(0)), t)
     t = t.replace("&", " и ").replace("+", " плюс ").replace("=", " равно ").replace("№", "номер ")
     t = re.sub(r"[^А-Яа-яЁё ,.!?:;—\-«»\"()']+", " ", t)
-    return re.sub(r"\s+", " ", t).strip()
+    return _end(re.sub(r"\s+", " ", t).strip())
+
+
+def _end(t):
+    """Фраза без точки в конце — с точкой: иначе голос сервера глотал последнее слово («…равно два» — без «два»)."""
+    return t + "." if t and re.search(r"[0-9A-Za-zА-Яа-яЁё»)\"']$", t) else t

@@ -10,6 +10,10 @@ from engine_base import *  # noqa: F401,F403 — общие импорты и п
 # просьба записать: «запиши», «сохрани», «в заметки», «запомни списком», «зафиксируй», «в файл»
 NOTE_ASK_RX = re.compile(r"заметк|запиш|запис|сохран|запомн|занеси|зафиксир|в\s+файл|в\s+папк|конспект", re.I)
 
+# «сгенерируй / нарисуй картинку …» — просьба нарисовать, а не найти (отчёт 70); слово «картинку» — часть просьбы
+_PIC = r"(?:картинк|изображени|рисун|арт|аватар|логотип|постер|обо[ий])\w*"
+GEN_IMG_RX = re.compile(r"(?<![а-яё])(?:(?:с?генерир\w*|сгенер\w*|сгень\w*|нарису\w*|изобраз\w*)(?:\s+(?:мне\s+|нам\s+)?" + _PIC + r")?"
+                        r"|(?:создай|сделай|придумай)\w*\s+(?:мне\s+|нам\s+)?" + _PIC + ")", re.I)
 QUERY_TOOLS = ("find_notes", "web_search", "show_images")     # без query — бессмысленны: тему берём из просьбы
 
 
@@ -48,6 +52,8 @@ class ToolsMixin:
             # «ничего»; тема — из самой просьбы («…про работу» → «работу»), иначе просьба целиком
             m = re.search(r"(?<![а-яё])(?:про|насч[её]т|об?|по поводу)\s+([^\s,.?!]+(?:\s+[^\s,.?!]+)?)", asked, re.I)
             args["query"] = (m.group(1) if m else asked).strip()[:200]
+            if name == "show_images":                  # «сгенерь картинку …» — искать само «…», без просьбы
+                args["query"] = GEN_IMG_RX.sub(" ", args["query"]).strip(" \t\"«»") or args["query"]
             log.info("🛠  %s без запроса — беру из просьбы: %s", name, redact(args["query"]))
         if name == "save_note" and asked is not None and not NOTE_ASK_RX.search(asked):
             # стихи, список идей, ответ на вопрос — в чат, а не в заметки без спроса (экзамен 11.10: «записала это в
@@ -75,6 +81,13 @@ class ToolsMixin:
         try:
             res = self.toolbox.run(name, args)
             turn.tools_ok = getattr(turn, "tools_ok", []) + [name]
+            if name == "show_images" and asked and GEN_IMG_RX.search(asked):
+                # отчёт 70: «сгенерь картинку „Жека-пулемёт“» — показали найденные в интернете и выдали за ответ; рисовать
+                # картинки Dewiar не умеет — пусть модель скажет это честно
+                note = ("\n\nВАЖНО: это картинки, найденные в интернете, а не нарисованные. Рисовать (генерировать) картинки "
+                        "Dewiar пока не умеет — скажи об этом честно одной фразой и предложи найденные как похожие. "
+                        "Не говори «нарисовала» и «сгенерировала».")
+                res = dict(res, text=str(res.get("text", "")) + note) if isinstance(res, dict) else str(res) + note
             if name == "set_reminder" and asked and "\n\nВложения:" in asked and isinstance(res, str):
                 res = self._reminder_link_files(turn, res)
             out = res["text"] if isinstance(res, dict) else str(res)

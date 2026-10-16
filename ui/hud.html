@@ -223,6 +223,10 @@
   #lightbox.on { display: flex; }
   #lightbox img { max-width: 100%; max-height: calc(100% - 40px); border-radius: 12px; object-fit: contain; }
   #lightbox span { font-size: 12px; color: var(--muted); text-align: center; }
+  #lb-x { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border: 0; border-radius: 50%; display: grid; place-items: center;
+    background: rgba(255,255,255,.12); color: #fff; cursor: pointer; }
+  #lb-x:hover, #lb-x:focus-visible { background: rgba(255,255,255,.24); outline: none; }
+  #lb-x svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
   #ask { display: none; width: 100%; }
   /* поле ввода — одна карточка: текст сверху, под ним вложения и «отправить» */
   .askbox { border-radius: 18px; background: var(--glass); box-shadow: var(--glass-shadow); padding: 9px 6px 4px 13px; transition: background .2s; }
@@ -397,7 +401,7 @@
     </div>
   </div>
   <div id="team"></div>
-  <div id="lightbox"><img alt=""><span></span></div>
+  <div id="lightbox" title="Закрыть — щелчок или Esc"><button id="lb-x" title="Закрыть (Esc)" aria-label="Закрыть картинку"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button><img alt=""><span></span></div>
   <button id="intro-skip" title="Закончить знакомство">Пропустить</button>
   <!-- слева сверху (появляется при наведении, как «свернуть» справа): сообщить о проблеме — нужна редко, а место на
        панели отдано заметкам (отзыв 11.10) -->
@@ -957,7 +961,9 @@ function holdFinish(cancel) {
 core.on("hold", e => { if (!e.on && hold && hold.on) { clearInterval(hold.timer); hold = null; holdShow(); } });   // ядро само закончило (предел 10 минут)
 card.addEventListener("pointerdown", async (ev) => {
   // строки задачи и обновления — кнопки: не перехватываем указатель, иначе щелчок до них не дойдёт
-  if (ev.button !== 0 || ev.target.closest("button, input, #cap, #note, #upd, #task, #yn")) return;
+  // большая картинка (#lightbox) — тоже: захват указателя уводил щелчок «закрыть» на карточку, и картинка закрывала
+  // виджет намертво (отчёт 70: «при картинке виснет виджет — нужно перезапускать»)
+  if (ev.button !== 0 || ev.target.closest("button, input, #cap, #note, #upd, #task, #yn, #lightbox")) return;
   card.setPointerCapture(ev.pointerId);
   drag = { sx: ev.screenX, sy: ev.screenY, moved: false, pos: null, orb: !!ev.target.closest("#orb") };
   if (drag.orb) holdBegin("mouse");
@@ -1293,6 +1299,7 @@ core.on("heard", e => { if (e.text) tlReset(e.text); })
       moreBtn();
     });
 $("lightbox").onclick = () => $("lightbox").classList.remove("on");
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("lightbox").classList.contains("on")) { e.preventDefault(); $("lightbox").classList.remove("on"); } }, true);
 $("askin").addEventListener("input", fitAsk);
 $("askin").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.isComposing) { e.preventDefault(); sendAsk(); }

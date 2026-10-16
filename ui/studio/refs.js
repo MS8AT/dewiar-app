@@ -33,6 +33,10 @@ function rfRow(x, key, sub) {
   return `<div class="rf-p ${RF.sel === key ? "cur" : ""}" data-k="${key}"><i class="cl-ava" style="--c:${window.DewiarRefNet ? DewiarRefNet.color(x.name) : clColor(x.name)}">${clEsc((q.name || "?").slice(0, 1).toUpperCase())}</i>
     <span><b>${clEsc(q.name)}</b><small>${sub}</small></span>${act}</div>`;
 }
+/* «ссылку открыли» — сколько разных людей открыли страницу приглашения (сервер считает сам, превью мессенджеров — нет);
+   поставивший Dewiar с того же устройства и вошедший засчитывается без кода (cloud.php ref_auto) */
+const rfHow = (d) => `Кто поставит Dewiar с того же устройства и войдёт, появится здесь сам; ставят в другой сети или на другом устройстве — пусть введут код ${d.code}.`;
+const rfPeople = (n) => n + (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? " человека" : " человек");
 function rfRender() {
   const d = RF.d; if (!d) return;
   const list = d.invited || [], calm = !!$("#rf-net .rn");
@@ -40,7 +44,7 @@ function rfRender() {
   if (!$("#rf-qr").dataset.link || $("#rf-qr").dataset.link !== d.link) {     // печать Dewiar со ссылкой — навести камеру телефона
     const seal = window.DewiarCodes ? DewiarCodes.seal(d.link) : ""; $("#rf-qr").innerHTML = seal || qrSvg(d.link); $("#rf-qr").dataset.link = d.link; }
   $("#rf-rules").textContent = (d.bonus > 0 ? `Вам +${refTal(d.bonus)} тал. за каждого друга, который попользуется Dewiar ${d.days} дн.` : "Поделитесь Dewiar с друзьями.")
-    + (d.bonus_new > 0 ? ` Другу — +${refTal(d.bonus_new)} тал. сразу, как введёт код.` : "");
+    + (d.bonus_new > 0 ? ` Другу — +${refTal(d.bonus_new)} тал. сразу, как подключит Dewiar.` : "");
   $("#rf-use").style.display = d.can_use ? "" : "none";
   if (window.DewiarRefNet) {
     const net = Object.assign({}, d, { invited: list.map(x => { const q = rfPeer(x); return Object.assign({}, x, { label: q.name, close: q.pid }); }) });
@@ -51,7 +55,9 @@ function rfRender() {
   $("#rf-by").innerHTML = d.by ? `<h2>Вас пригласил</h2><div class="rf-list">${rfRow(d.by, "by", "с этого приглашения вы в Dewiar")}</div>` : "";
   $("#rf-h").textContent = list.length ? `Приглашённые · ${list.length}` : "Приглашённые";
   $("#rf-list").innerHTML = list.length ? list.map((x, i) => rfRow(x, i, refState(x) + (x.sub ? ` · позвал ещё ${x.sub}` : ""))).join("")
-    : `<div class="rf-empty"><b>Пока никого</b><span>Скопируйте приглашение или покажите печать — каждый засчитанный друг станет новой звездой.</span></div>`;
+    : `<div class="rf-empty"><b>Пока никого</b><span>${clEsc(d.opened > 0 ? `Ссылку открыли ${rfPeople(+d.opened)}, но Dewiar по ней пока никто не подключил. ` + rfHow(d)
+      : "Скопируйте приглашение или покажите печать. Друг, который поставит Dewiar по ссылке, появится здесь сам; каждый засчитанный — новая звезда.")}</span></div>`;
+  if (list.length && d.opened > list.length) $("#rf-list").insertAdjacentHTML("beforeend", `<p class="hint rf-op">${clEsc(`Ссылку открыли ${rfPeople(+d.opened)}. ` + rfHow(d))}</p>`);
   $$(".rf-p").forEach(r => r.onclick = (e) => { if (e.target.closest("button")) return; const k = r.dataset.k === "by" ? "by" : +r.dataset.k; RF.sel = RF.sel === k ? null : k; rfRender(); });
   $$(".rf-p [data-w]").forEach(b => b.onclick = () => { $('nav button[data-p="close"]').click(); setTimeout(() => clOpen(b.dataset.w), 250); });
   $$(".rf-p [data-c]").forEach(b => b.onclick = () => core.call("close_call", { pid: b.dataset.c, video: false }).then(r => toast("Звоню " + r.name + " — окно звонка открыто в браузере", 3000)).catch(e => toast(e.message, 4000)));

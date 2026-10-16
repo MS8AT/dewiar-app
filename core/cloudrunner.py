@@ -411,7 +411,7 @@ class Space:
         """Ход изменившихся задач — в синхронизацию; законченные — с файлами, и их заявки из очереди удаляем."""
         with self._lock:
             ids, self._dirty = self._dirty, set()
-        changes = []
+        changes, sent_del = [], []
         for tid in ids:
             t = self.tasks.tasks.get(tid)
             if t is None:
@@ -427,13 +427,16 @@ class Space:
             changes.append({"kind": "task", "id": "c" + t.id, "data": item, "updated": _now_ms()})
             if t.status in FINAL and tid in self.reqs:
                 changes.append({"kind": "taskreq", "id": self.reqs[tid], "data": {}, "updated": _now_ms(), "deleted": True})
+                sent_del.append(tid)
         if not changes:
             return
         if self.sync(changes) is None:                     # облако не ответило — повторим в следующий раз
             with self._lock:
                 self._dirty |= ids
             return
-        done = [tid for tid in ids if tid in self.reqs and (self.tasks.tasks.get(tid) is None or self.tasks.tasks[tid].status in FINAL)]
+        # забываем только те заявки, удаление которых правда ушло: задача, закончившаяся, пока шёл этот обмен, ещё помечена
+        # «изменилась» — её удаление уйдёт следующим (раньше заявка забывалась без удаления и висела в очереди — проверка моргала)
+        done = [tid for tid in ids if tid in self.reqs and (self.tasks.tasks.get(tid) is None or tid in sent_del)]
         for tid in done:
             self.reqs.pop(tid, None)
         if done:

@@ -28,6 +28,7 @@ cp "$ROOT/ui/assets/qrcode.js" "$B/assets/www/"                     # QR-код 
 cp "$ROOT/ui/assets/call.js" "$B/assets/www/"                       # звонки «Близким» (WebRTC) — тот же код, что у компьютера
 cp "$ROOT/ui/assets/codes.js" "$ROOT/ui/assets/vendor/zxing.min.js" "$B/assets/www/"   # печать Dewiar (Aztec) и сканер кодов
 cp "$ROOT/ui/assets/refnet.js" "$B/assets/www/"                     # «Моё созвездие» — приглашённые друзья картиной
+cp "$ROOT/ui/assets/speechnorm.js" "$B/assets/www/"                 # числа словами для голоса сервера — как core/speechnorm.py
 cp "$ROOT/ui/assets/rich.js" "$B/assets/www/"                       # схемы Mermaid и картинки к рассказу — тот же код, что у компьютера
 mkdir -p "$B/assets/www/vendor" && cp "$ROOT/ui/assets/vendor/mermaid.min.js" "$ROOT/ui/assets/vendor/mermaid.LICENSE-MIT" "$B/assets/www/vendor/"
 cp "$ROOT/ui/assets/vendor/zxing.LICENSE-APACHE-2.0" "$B/assets/www/"

@@ -134,7 +134,8 @@ try:
         pg.keyboard.type("напомни в пятницу в 15:00 показать Саше")
         time.sleep(0.6)
         w = pg.evaluate("document.getElementById('what').textContent")
-        ok("Напомню" in w and "в 15:00" in w and "Показать Саше" in w, f"под полем видно, что получится: {w!r}")
+        # в пятницу до 15:00 «в пятницу» — это сегодня, и подпись честно говорит «через N мин»
+        ok("Напомню" in w and ("в 15:00" in w or "через" in w) and "Показать Саше" in w, f"под полем видно, что получится: {w!r}")
         if SHOT:
             pg.screenshot(path=str(Path(SHOT) / "capture.png"))
         pg.keyboard.press("Enter"); time.sleep(0.8)

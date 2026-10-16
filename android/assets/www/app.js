@@ -1243,9 +1243,12 @@ function say(text) {
       JSON.stringify({ text: t, model_id: S.tts.el_model || "eleven_flash_v2_5", voice_settings: { speed: Math.max(0.7, Math.min(1.2, +S.tts.rate || 1)) } }));
   } else if (!srvDown && ((S.tts.engine === "server" && S.tts.url) || cv)) {
     sayTexts.set(id, t);
+    // голосу сервера — уже словами: «14:10» → «четырнадцать десять» (ui/assets/speechnorm.js, как core/speechnorm.py);
+    // старая служба голосов читала цифры странно («ствисе», отзыв 16.10), а новая сделает это сама — дважды не мешает
+    const said = window.DewiarSpeech ? (DewiarSpeech.norm(t, false) || t) : t;
     const u = cv ? cv.url : S.tts.url, url = u.replace(/\/+$/, "") + (/speech$/.test(u) ? "" : "/audio/speech");
-    const body = cv ? { model: "tts-1", input: t, voice: persona().voice_remote || (persona().gender === "female" ? "serena" : "aiden"), persona: persona().id || "", response_format: "wav", speed: +S.tts.rate || 1 }
-      : { model: S.tts.model || "tts-1", input: t, voice: (fem ? S.tts.voice : (S.tts.voice_m || S.tts.voice)) || "alloy", persona: persona().id || "", response_format: "mp3" };
+    const body = cv ? { model: "tts-1", input: said, voice: persona().voice_remote || (persona().gender === "female" ? "serena" : "aiden"), persona: persona().id || "", response_format: "wav", speed: +S.tts.rate || 1 }
+      : { model: S.tts.model || "tts-1", input: said, voice: (fem ? S.tts.voice : (S.tts.voice_m || S.tts.voice)) || "alloy", persona: persona().id || "", response_format: "mp3" };
     D.speakRemote(id, url, cv ? cv.key : (S.tts.key || ""), JSON.stringify(body));
   } else {
     if (!D.ttsReady()) {
@@ -5019,7 +5022,8 @@ function refDraw(calm) {
     ${d.by ? `<h3>Вас пригласил</h3>${refRow(d.by, "by", "с этого приглашения вы в Dewiar")}` : ""}
     <h3>Приглашённые${list.length ? ` · ${list.length}` : ""}</h3>
     ${list.length ? list.map((x, i) => refRow(x, i, refState(x) + (x.sub ? ` · позвал ещё ${x.sub}` : ""))).join("")
-      : `<div class="card"><b>Пока никого</b><p class="hint" style="margin:4px 0 0">Нажмите «Пригласить» — ссылка с вашим кодом уйдёт в любой мессенджер. Каждый засчитанный друг — новая звезда.</p></div>`}
+      : `<div class="card"><b>Пока никого</b><p class="hint" style="margin:4px 0 0">${esc(refEmpty(d))}</p></div>`}
+    ${list.length && d.opened > list.length ? `<p class="hint" style="margin:6px 4px 0">${esc(refOpened(d))}</p>` : ""}
     <p class="hint" style="margin:10px 4px">Переписываться и созваниваться можно с теми, кого пригласили вы, и с тем, кто пригласил вас, — когда оба согласны: «Позвать в Близкие».</p>
     ${d.can_use ? `<details class="more" style="margin:4px 2px 0"><summary>Есть код приглашения?</summary><div class="row2" style="margin-top:6px"><input id="ref-code" placeholder="6 знаков" autocapitalize="characters" style="flex:1;padding:12px 14px;border-radius:14px;border:0;background:var(--field)"><button class="btn p" id="ref-use">Ввести</button></div><div class="res" id="ref-res"></div></details>` : ""}`;
   if (window.DewiarRefNet) {
@@ -5041,6 +5045,13 @@ function refDraw(calm) {
     try { const u = await refUse($("#ref-code").value); r.className = "res ok"; r.textContent = u.gift > 0 ? `Готово — вам +${talers(u.gift)} тал.` : "Готово — код принят."; cloudBalance(true).then(cloudFill).catch(() => { }); refInfo = null; setTimeout(refTab, 1500); }
     catch (e) { r.className = "res bad"; r.textContent = e.message; } };
 }
+/* «ссылку открыли» — сколько разных людей открыли страницу приглашения (сервер считает сам; превью мессенджеров — нет).
+   Друг, который ставит Dewiar с того же телефона и входит, засчитывается без кода (cloud.php ref_auto). */
+const refHow = (d) => `Кто поставит Dewiar с того же телефона и войдёт, появится здесь сам; ставят на компьютер или в другой сети — пусть введут код ${d.code}.`;
+const refPeople = (n) => n + (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? " человека" : " человек");
+const refOpened = (d) => `Ссылку открыли ${refPeople(+d.opened || 0)}. ` + refHow(d);
+const refEmpty = (d) => d.opened > 0 ? `Ссылку открыли ${refPeople(+d.opened)}, но Dewiar по ней пока никто не подключил. ` + refHow(d)
+  : "Нажмите «Пригласить» — ссылка с вашим кодом уйдёт в любой мессенджер. Друг, который поставит Dewiar по ней, появится здесь сам; каждый засчитанный — новая звезда.";
 const refShareText = (d) => `Попробуй Dewiar — помощницу Лиру для телефона и компьютера: слышит по имени, отвечает голосом, помнит и напоминает. ${d.link}\nКод приглашения: ${d.code}`;
 async function refShare() {
   const d = refInfo || await cloudGet(cloudBase(), S.llm.api_key, "/ref"); refInfo = d;

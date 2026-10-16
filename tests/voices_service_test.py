@@ -36,6 +36,16 @@ ok(all(len(x) <= 220 for x, _ in p) and len(p) >= 2, f"длинное — по �
 ok(A.clean("**Дэвиа\u0301р** — `код`") == "Дэвиа\u0301р — код" and A.plain("Дэвиа\u0301р, прив+ет, 2+2") == "Дэвиар, привет, 2+2"
    and A.stress_marks("Дэвиа\u0301р") == "Дэви+ар", "разметка убрана; ударения: ESpeech — «+» перед гласной, Qwen — без них (2+2 не трогаем)")
 ok(A.lang_of("Привет") == "Russian" and A.lang_of("Hello") == "Auto" and A.lang_of("x", "en") == "English", "язык по тексту")
+ok(A.lang_of("14:10") == "Russian" and A.lang_of("2026.") == "Russian" and A.lang_of("iPhone 15") == "Auto",
+   "одни цифры («14:10») — по-русски (отзыв 16.10: время прозвучало «ствисе»)")
+import numpy as _np  # noqa: E402
+_sr = A.OUT_SR
+_loud = 0.5 * _np.sin(_np.arange(int(_sr * 0.6)) / _sr * 2 * _np.pi * 220)
+_quiet = 0.006 * _np.sin(_np.arange(int(_sr * 0.25)) / _sr * 2 * _np.pi * 220)       # тихое последнее слово
+_w = _np.concatenate([_np.zeros(_sr // 5), _loud, _quiet, _np.zeros(_sr // 2)]).astype(_np.float32)
+_t = A.trim(_w)
+ok(_t.size >= _loud.size + _quiet.size and _t.size < _w.size - _sr // 5,
+   f"обрезка тишины не срезает тихое последнее слово («…равно два», отзыв 16.10): {_t.size / _sr:.2f} с из {_w.size / _sr:.2f}")
 
 # ── кто каким голосом ──
 A.cfg_save({"voices": {"anna": {"kind": "clone", "audio": "anna.wav", "text": "т", "gender": "female"}},
