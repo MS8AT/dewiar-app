@@ -916,7 +916,7 @@ function note(st) {
   bar.firstChild.style.width = ld && ld.f != null && ld.f < 1 ? Math.round(ld.f * 100) + "%" : "";
   const dl = Object.values(st.downloads || {}).find(v => v < 1);
   const base = st.note ? st.note + (dl !== undefined && !ld ? ` ${Math.round(dl * 100)}%` : "") :
-    st.meeting ? (st.meeting.mode === "pause" ? "🎧 Созвон — слушаю только по кнопке" : "🎧 Созвон — откликаюсь только на главное имя") : "";
+    st.meeting ? `🎧 Созвон${(st.meeting.apps || []).length ? " (" + st.meeting.apps.join(", ") + ")" : ""} — ` + (st.meeting.mode === "pause" ? "слушаю только по кнопке" : "откликаюсь только на главное имя") : "";   // какая программа — видно сразу (отзыв 17.10, OBS)
   $("note").textContent = [ld && st.note && /^(Загружаю|Скачиваю)/.test(st.note) ? "" : base, ldText].filter(Boolean).join("\n");
   // созвон или компьютеру не хватает памяти (status.tight) — облик почти неподвижен, кадры редкие
   if (typeof entity !== "undefined") entity.calm = !!(st.meeting && st.meeting.mode === "pause") || !!st.tight;

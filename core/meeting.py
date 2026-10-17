@@ -17,10 +17,15 @@ WIN = os.name == "nt"
 IGNORE = re.compile(r"pavucontrol|volume control|gnome-shell|gnome-control-center|settings|cinnamon|plasma|kmix|"
                     r"pipewire|wireplumber|pulseaudio|easyeffects|pulseeffects|speech-dispatcher|dewiar|python|"
                     r"echo-cancel|loopback|xdg-desktop-portal|peak|parec|pacat|arecord", re.I)
+# Запись видео и звука — тоже не созвон (отзыв 17.10: «включил OBS для записи видео, и Лира стала глухой и беззвучной» —
+# OBS пишет с микрофона, Dewiar решал «созвон» и слушал только по кнопке). Программы записи экрана и звука.
+RECORDERS = re.compile(r"^obs(?:64|32)?(?:\.exe)?$|obs-studio|obsproject|simplescreenrecorder|kazam|vokoscreen|kooha|"
+                       r"gpu-screen-recorder|screen ?recorder|screencast|audacity|bandicam|camtasia|sharex|"
+                       r"nvidia share|nvcontainer|xbox ?game ?bar|gamebar", re.I)
 # Часть имени программы → как назвать её человеку (созвон в браузере — просто «браузер»)
 NICE = {"zoom": "Zoom", "teams": "Teams", "telegram": "Telegram", "skype": "Skype", "discord": "Discord", "slack": "Slack",
         "chrome": "браузер", "chromium": "браузер", "firefox": "браузер", "yandex": "браузер", "opera": "браузер",
-        "brave": "браузер", "vivaldi": "браузер", "msedge": "браузер", "edge": "браузер", "obs": "OBS", "whatsapp": "WhatsApp",
+        "brave": "браузер", "vivaldi": "браузер", "msedge": "браузер", "edge": "браузер", "whatsapp": "WhatsApp",
         "viber": "Viber", "webex": "Webex", "jitsi": "Jitsi", "mattermost": "Mattermost", "element": "Element"}
 
 
@@ -52,7 +57,7 @@ def _linux():
                 continue
             if pl.get("stream.monitor") or "peak" in (pl.get("media.name") or "").lower():
                 continue
-            if IGNORE.search(name) or IGNORE.search(binary):
+            if IGNORE.search(name) or IGNORE.search(binary) or RECORDERS.search(name) or RECORDERS.search(binary):
                 continue
             if so.corked:                                  # поток есть, но микрофон на паузе (выключен в созвоне)
                 continue
@@ -93,6 +98,9 @@ def _windows():
             if stop == 0 and start > 0:
                 app = sub.replace("#", "\\")
                 if mine and mine in app.lower() or "python" in app.lower():
+                    continue
+                exe = app.rsplit("\\", 1)[-1].split("_")[0]
+                if RECORDERS.search(exe) or RECORDERS.search(app):   # OBS и другие программы записи — не созвон
                     continue
                 out.append(_nice(app.rsplit("\\", 1)[-1].split("_")[0]))
         winreg.CloseKey(k)

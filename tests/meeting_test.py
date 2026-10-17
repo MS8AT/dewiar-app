@@ -32,6 +32,17 @@ shutil.copy(shutil.which("pacat"), zoom)
 mine = subprocess.Popen(["pacat", "--record", "-d", "t_mic"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1)
 ok(mic_users() == [], "pacat, регуляторы громкости, сам Dewiar — не созвон")
+# OBS пишет видео с микрофоном — не созвон (отзыв 17.10: «включил OBS — Лира стала глухой»)
+obs = tmp / "obs"
+shutil.copy(shutil.which("pacat"), obs)
+rec = subprocess.Popen([str(obs), "--record", "-d", "t_mic"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(1.2)
+ok(mic_users() == [], f"OBS записывает видео с микрофоном — не созвон: {mic_users()}")
+rec.terminate()
+import meeting as _M  # noqa: E402
+ok(all(_M.RECORDERS.search(x) for x in ("obs64.exe", "obs-studio", "com.obsproject.Studio", "simplescreenrecorder", "kooha"))
+   and not any(_M.RECORDERS.search(x) for x in ("zoom", "Telegram", "obsidian", "chrome")),
+   "программы записи (OBS и др.) — не созвон и на Windows; Zoom, Telegram, браузер — созвон")
 
 import websockets  # noqa: E402
 PORT, LLM_PORT = 8819, 8149
