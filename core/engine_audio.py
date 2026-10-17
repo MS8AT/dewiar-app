@@ -267,7 +267,7 @@ class AudioMixin:
                     self.restart_audio.clear()
                     self.aec.teardown()
                 elif last_err and ("device -1" in last_err or "No Default Input" in last_err or "Invalid device" in last_err):
-                    self.note("Микрофон не найден — подключите его или выберите в студии («Слух»)"
+                    self.note("Микрофон не найден — подключите его или выберите в студии («Звук и поведение» → «Микрофон»)"
                               + ("; в Windows проверьте «Параметры → Конфиденциальность → Микрофон» — доступ для приложений"
                                  if os.name == "nt" else "") + ". Пока можно писать в виджете.")
                     self.stopping.wait(5)
@@ -292,33 +292,64 @@ class AudioMixin:
         real = [n for n in names if not virt.search(n)]
         if fake and not real:
             text = (f"Микрофон молчит: Windows видит только виртуальный микрофон «{fake[0]}» — настоящего нет. Подключите микрофон "
-                    "(или включите его в «Параметры → Система → Звук»), затем выберите его в студии → «Слух»." if os.name == "nt" else
-                    f"Микрофон молчит: есть только виртуальный «{fake[0]}». Подключите настоящий и выберите его в студии → «Слух».")
+                    "(или включите его в «Параметры → Система → Звук»), затем выберите его в студии → «Звук и поведение» → «Микрофон»." if os.name == "nt" else
+                    f"Микрофон молчит: есть только виртуальный «{fake[0]}». Подключите настоящий и выберите его в студии → «Звук и поведение» → «Микрофон».")
         elif virt.search(cur) or (not cur and fake and os.name == "nt"):
             text = (f"Микрофон почти ничего не слышит — похоже, слушаю виртуальный «{cur or fake[0]}». "
-                    f"Выберите настоящий микрофон{' («' + real[0] + '»)' if real else ''} в студии → «Слух».")
+                    f"Выберите настоящий микрофон{' («' + real[0] + '»)' if real else ''} в студии → «Звук и поведение» → «Микрофон».")
         elif exact and os.name == "nt":
             text = ("Микрофон молчит: Windows не даёт программам его слушать. Откройте «Параметры → Конфиденциальность и защита → "
                     "Микрофон» и включите «Доступ к микрофону» и «Разрешить классическим приложениям доступ к микрофону». "
-                    "Или выберите другой микрофон в студии → «Слух».")
+                    "Или выберите другой микрофон в студии → «Звук и поведение» → «Микрофон».")
         elif exact:
-            text = "Микрофон молчит — проверьте, что он включён и не выключен звук записи, или выберите другой в студии → «Слух»."
+            text = "Микрофон молчит — проверьте, что он включён и не выключен звук записи, или выберите другой в студии → «Звук и поведение» → «Микрофон»."
         else:
             text = ("Микрофон почти ничего не слышит: громкость записи на нуле или выбран не тот микрофон. Проверьте уровень "
-                    "микрофона в настройках звука системы или выберите другой в студии → «Слух».")
+                    "микрофона в настройках звука системы или выберите другой в студии → «Звук и поведение» → «Микрофон».")
         if not exact and time.monotonic() - getattr(self, "_mic_hint_at", -1e9) < 1800:
             return                                       # «почти тишина» бывает и в очень тихой комнате — не чаще раза в полчаса
         self._mic_hint_at = time.monotonic()
         log.warning("🎤 15 с от микрофона %s — %s (микрофоны: %s)", "полная тишина (нули)" if exact else "почти тишина (пик ≤ 3)",
                     text[:80], ", ".join(names) or "—")
         self.note(text)
-        self.push("Микрофон молчит", text, telegram=False)
+        body = re.sub(r"^Микрофон молчит\s*[—:]\s*", "", text)          # заголовок уже «Микрофон молчит» — без повтора
+        self.push("Микрофон молчит", body[:1].upper() + body[1:], telegram=False)
         self.report_problem("mic_silent", "микрофон молчит: " + ("нули" if exact else "почти тишина") + f"; устройства: {', '.join(names)[:200]}")
         if exact and os.name == "nt" and not fake:
             try:
                 os.startfile("ms-settings:privacy-microphone")  # noqa: S606 — сразу открыть нужную страницу настроек
             except OSError:
                 pass
+
+    def _mic_zero_step(self, st, frame, now):
+        """Кадр микрофона — не тишина ли подряд. Ровные нули (Windows запретил доступ, или поток застрял — после OBS) или
+        «почти ничего» — пик ≤ 3 из 32767 (виртуальный микрофон, громкость записи на нуле): живой микрофон даже в тихой
+        комнате шумит сильнее. Нули 5 с — сами переоткрываем микрофон и эхоподавление (отзыв 17.10: «OBS уже выключил,
+        но она меня не слышит»), не чаще раза в 2 минуты; тишина 15 с — подсказка человеку (_mic_silent).
+        st — {"since", "told", "all"} этого потока. -> "heal" (переоткрыть) или None."""
+        zeros = not frame.strip(b"\x00")
+        peak = 0 if zeros else int(np.abs(np.frombuffer(frame, dtype=np.int16).astype(np.int32)).max())
+        if peak > 3:
+            if st["told"]:
+                self.note("")
+                log.info("🎤 Микрофон снова слышно")
+            st.update(since=None, told=False, all=True)
+            return None
+        if st["since"] is None:
+            st.update(since=now, all=zeros)
+            return None
+        st["all"] = st["all"] and zeros
+        # только в покое: во время ответа переоткрытие сняло бы эхоподавление вместе с её голосом, а в разговоре — оборвало бы его
+        if st["all"] and not st["told"] and now - st["since"] > 5 and now - getattr(self, "_zero_heal_at", -1e9) > 120 \
+                and getattr(self, "state", "idle") == "idle" and getattr(self, "hold", None) is None:
+            self._zero_heal_at = now
+            log.warning("🎤 Из микрофона идут одни нули — переоткрываю микрофон и эхоподавление")
+            self.restart_audio.set()
+            return "heal"
+        if not st["told"] and now - st["since"] > 15:
+            st["told"] = True
+            self._mic_silent(exact=st["all"])
+        return None
 
     def _listen(self):
         """Главный цикл слуха, кадр за кадром: проверка «микрофон молчит», полудуплекс во время ответа,
@@ -331,7 +362,7 @@ class AudioMixin:
         bs, quiet, ducked = 0, 0, False                 # перебивание речью: кадры речи, тишины, приглушили ли
         echo = collections.deque(maxlen=90)             # громкость остаточного эха своего голоса (~3 с)
         half_echo = collections.deque(maxlen=100)       # полудуплекс: громкость своего голоса в микрофоне (~3 с)
-        zero_since, zero_told, zero_all = None, False, True   # поток идёт, а в нём нули или почти нули (см. _mic_silent)
+        zst = {"since": None, "told": False, "all": True}      # поток идёт, а в нём нули или почти нули (_mic_zero_step)
         while not self.stopping.is_set() and not self.restart_audio.is_set():
             frame = self.capture.read()
             if not frame:
@@ -356,23 +387,8 @@ class AudioMixin:
                 self.vad.reset()
                 self.spotter.rec.Reset()
                 in_speech, utt, silence, starts, preroll = False, [], 0, 0, collections.deque(maxlen=12)
-            if not self.wav_input:
-                # ровные нули (Windows запретил доступ) или «почти ничего» — пик ≤ 3 из 32767 (виртуальный микрофон вместо
-                # настоящего, громкость записи на нуле): живой микрофон даже в тихой комнате шумит сильнее
-                zeros = not frame.strip(b"\x00")
-                peak = 0 if zeros else int(np.abs(np.frombuffer(frame, dtype=np.int16).astype(np.int32)).max())
-                if peak > 3:
-                    if zero_told:
-                        self.note("")
-                        log.info("🎤 Микрофон снова слышно")
-                    zero_since, zero_told, zero_all = None, False, True
-                elif zero_since is None:
-                    zero_since, zero_all = now, zeros
-                else:
-                    zero_all = zero_all and zeros
-                    if not zero_told and now - zero_since > 15:
-                        zero_told = True
-                        self._mic_silent(exact=zero_all)
+            if not self.wav_input and self._mic_zero_step(zst, frame, now) == "heal":
+                return
             speaking = self.state == "speaking"
             if speaking and not self.status["aec"]:
                 # полудуплекс: себя не слушаем — кроме короткого «стоп / хватит / пауза / отмена»
