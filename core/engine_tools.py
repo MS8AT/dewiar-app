@@ -361,6 +361,78 @@ class ToolsMixin:
             return True
         return False
 
+    def _call_cmd(self, text, via=None):
+        """«Позвони Людмиле (по видео)», «набери маме» — человеку из «Близких» звоним сразу, без модели (съёмка 17.10:
+        раз позвонила, потом раз за разом «Звоню Людмиле.» — и ничего: модель повторяла прошлый ответ, не вызывая звонка).
+        Нет такого человека в «Близких» — решает модель (телефонная книга, мессенджеры). -> обработано ли."""
+        t = re.sub(r"[?!.,]+", " ", (text or "").lower().replace("ё", "е"))
+        t = re.sub(r"\s+", " ", t).strip()
+        m = re.fullmatch(r"(?:[а-я]+ )?(?:пожалуйста )?(?:позвони|набери|звякни|сделай (?:видео)?звонок|видеозвонок)(?: мне)?"
+                         r" (?P<who>.+?)(?P<video> (?:по )?(?:видео(?:связи|звонку)?|видеосвязи))?(?: пожалуйста)?", t)
+        if not m or getattr(self, "close", None) is None or len(m.group("who").split()) > 3:
+            return False
+        from close import CloseError
+        try:
+            p = self.close.person(m.group("who"))
+        except CloseError:
+            return False
+        video = bool(m.group("video"))
+        tool_ev = self.emit
+        args = {"to": p["name"], "video": video}
+        tool_ev("tool", name="close_call", title="Близкие: позвонить", status="run", args=args, detail=p["name"])   # видно в виджете и экзамене
+        log.info("🛠  close_call %s (быстро, без модели)", json.dumps(args, ensure_ascii=False))
+        try:
+            r = self.close.call(p["pid"], video)
+        except CloseError as e:
+            tool_ev("tool", name="close_call", title="Близкие: позвонить", status="error", error=str(e))
+            self._say_quick(f"Не получилось позвонить: {e}", text, via)
+            return True
+        tool_ev("tool", name="close_call", title="Близкие: позвонить", status="done", detail=p["name"], result=f"звоню {r.get('name')}")
+        orig = re.search(r"\s+".join(map(re.escape, m.group("who").split())), (text or "").replace("ё", "е").replace("Ё", "Е"), re.I)
+        who = orig.group(0) if orig else m.group("who")                          # как сказал человек: «Людмиле», «маме»
+        self._say_quick(f"Звоню {who}" + (" по видео." if video else "."), text, via)
+        return True
+
+    _SEND_RX = re.compile(r"^\s*(?:[А-ЯЁ][а-яё]+\s*,\s*)?(?:пожалуйста,?\s*)?(?:отправь|напиши|передай|скинь)(?:\s+пожалуйста)?"
+                          r"(?:\s+сообщение)?\s+(?P<who>[А-ЯЁа-яё-]+(?:\s+[А-ЯЁа-яё-]+){0,2}?)(?:\s+сообщение)?"
+                          r"\s*(?:[:.,—–-]\s*(?:что\s+)?|\s+что\s+|\s*(?=[«\"„]))(?P<msg>\S.*)$", re.I | re.S)
+
+    def _send_cmd(self, text, via=None):
+        """«Отправь Людмиле сообщение: «Привет»», «Напиши Андрею: …», «Отправь сообщение Лёхе. Лёха, привет!» — человеку из
+        «Близких» отправляем сразу, без модели (съёмка 17.10: «каждый раз говорит, что отправила, — и ничего»: модель
+        повторяла «Отправила …» из разговора, не вызывая отправку). Каждое слово адресата должно указывать на этого
+        человека (иначе «письмо Андрею» ушло бы в «Близкие»); почта, Telegram, WhatsApp, SMS — решает модель."""
+        m = self._SEND_RX.match(text or "")
+        if not m or getattr(self, "close", None) is None or re.search(r"почт|письм|e-?mail|телеграм|telegram|whatsapp|вотсап|ватсап|"
+                                                                      r"вайбер|viber|смс|sms|эсэмэс|max\b|макс\b", text or "", re.I):
+            return False
+        from close import CloseError, match_name
+        who = m.group("who").strip()
+        try:
+            p = self.close.person(who)
+        except CloseError:
+            return False
+        if any(match_name(w, [p]) is not p for w in who.split()):
+            return False
+        msg = m.group("msg").strip().strip("«»\"„“ ").strip()
+        msg = re.sub(r"[»\"“]\s*\.?$", "", msg).strip()
+        if not msg or len(msg) > 2000:
+            return False
+        msg = msg[:1].upper() + msg[1:]
+        tool_ev = self.emit
+        args = {"to": p["name"], "text": msg}
+        tool_ev("tool", name="close_send", title="Близкие: написать", status="run", args=args, detail=p["name"])
+        log.info("🛠  close_send %s (быстро, без модели)", p["name"])                       # текст сообщения — не в журнал
+        try:
+            self.close.send(p["pid"], msg)
+        except CloseError as e:
+            tool_ev("tool", name="close_send", title="Близкие: написать", status="error", error=str(e))
+            self._say_quick(f"Не получилось отправить: {e}", text, via)
+            return True
+        tool_ev("tool", name="close_send", title="Близкие: написать", status="done", detail=p["name"], result=f"отправлено {p['name']}")
+        self._say_quick(f"Отправила {who}.", text, via)
+        return True
+
     def _timer_cmd(self, text, via=None):
         """Таймеры голосом, без модели: «сколько осталось (на таймере)?», «добавь минуту / ещё 5 минут к таймеру»,
         «отмени / выключи таймер». Таймеров нет — False (решает модель: «сколько осталось до Нового года» — не сюда)."""

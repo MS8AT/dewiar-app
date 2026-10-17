@@ -126,6 +126,10 @@ class AnswerMixin:
                 return
         if not raw and not quiet and not images and "\n\nВложения:" not in text and self._clock_cmd(text, via):
             return                                       # «сколько времени?», «какое сегодня число?» — по часам, без модели
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._send_cmd(text, via):
+            return                                       # «напиши Андрею: привет» — человеку из «Близких» сразу, без модели
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._call_cmd(text, via):
+            return                                       # «позвони Людмиле по видео» — человеку из «Близких» сразу, без модели
         if not raw and not quiet and not images and "\n\nВложения:" not in text and self._timer_cmd(text, via):
             return                                       # «сколько осталось?», «добавь минуту», «отмени таймер»
         if not raw and not quiet and not images:
@@ -1165,7 +1169,7 @@ class AnswerMixin:
                 sentences.put(s_)
             blind_key = f"{prof.get('base_url')}|{prof.get('model')}"
             t_start = time.monotonic()
-            from quality import DELIVERABLE, REFUSAL_NUDGE, diagram_missing, reminder_missing, saved_claim, looks_like_promise, looks_like_refusal, number_mismatch, promise_nudge
+            from quality import DELIVERABLE, REFUSAL_NUDGE, action_claim, diagram_missing, reminder_missing, saved_claim, looks_like_promise, looks_like_refusal, number_mismatch, promise_nudge
             called, nudged = set(), 0                    # какие действия уже были; сколько раз просили «сделай, а не обещай»
             deliver = bool(DELIVERABLE.search(text)) and any(x.get("name") == "start_task" for x in specs or [])
             # отговорку «нет доступа к интернету» на шаге 0 (когда есть поиск) просим переделать (ниже) — значит, первую
@@ -1279,7 +1283,8 @@ class AnswerMixin:
                         self.set_state("thinking")
                         continue
                 if not calls and not turn.cancel.is_set() and step < 5 and specs and not saved_checked:
-                    fix = reminder_missing(text, turn.full, called) or saved_claim(text, step_text, called)
+                    fix = reminder_missing(text, turn.full, called) or saved_claim(text, step_text, called) \
+                        or action_claim(text, step_text, called)
                     if fix:
                         saved_checked = True
                         log.info("✋ Сказала «готово/записала» или не поставила просимое напоминание — прошу сделать")
