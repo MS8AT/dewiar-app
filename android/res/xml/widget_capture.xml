@@ -5,7 +5,7 @@
     android:minResizeWidth="110dp"
     android:minResizeHeight="40dp"
     android:resizeMode="horizontal|vertical"
-    android:updatePeriodMillis="0"
+    android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/widget_capture"
     android:widgetCategory="home_screen"
     android:description="@string/w_capture_desc"/>

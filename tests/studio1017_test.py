@@ -48,6 +48,12 @@ ok("@drawable/w_brain" in lay and "w_mic" not in lay and "<stroke" not in bg and
    and all(r == g == b == 255 for r, g, b, a in im.getdata() if a > 0) and max(a for *_, a in im.getdata()) < 255,
    "телефон: значок «Записать» — белый полупрозрачный мозг на матово-чёрной «таблетке» без обводки")
 
+cw = (ROOT / "android/src/pro/dewiar/app/CaptureWidget.java").read_text(encoding="utf-8")
+al = (ROOT / "android/src/pro/dewiar/app/Alarms.java").read_text(encoding="utf-8")
+ok('android:id="@+id/w_sub"' in lay and '#B3FFFFFF' in lay and 'paddingLeft="16dp"' in lay
+   and "v.setTextViewText(R.id.w_sub, nextLine(c))" in cw and "CaptureWidget.refresh(c);" in al.split("private static void save", 1)[1][:200],
+   "телефон: подпись значка белая полупрозрачная, мозг не прижат к краю; в подписи — ближайшее напоминание (обновляется при изменении)")
+
 
 def free():
     s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p

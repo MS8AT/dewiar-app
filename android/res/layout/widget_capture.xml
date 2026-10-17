@@ -9,18 +9,19 @@
     android:orientation="horizontal"
     android:gravity="center_vertical"
     android:background="@drawable/w_bg"
-    android:paddingLeft="8dp"
+    android:paddingLeft="16dp"
     android:paddingRight="18dp">
     <ImageView
-        android:layout_width="52dp"
-        android:layout_height="52dp"
+        android:layout_width="46dp"
+        android:layout_height="46dp"
         android:scaleType="fitCenter"
         android:src="@drawable/w_brain"
         android:contentDescription="Dewiar слушает"/>
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
+        android:layout_weight="1"
         android:layout_height="wrap_content"
-        android:layout_marginLeft="6dp"
+        android:layout_marginLeft="12dp"
         android:orientation="vertical">
         <TextView
             android:layout_width="wrap_content"
@@ -31,10 +32,13 @@
             android:textStyle="bold"
             android:maxLines="1"/>
         <TextView
+            android:id="@+id/w_sub"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="идея или напоминание"
-            android:textColor="#C8C2EE"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="#B3FFFFFF"
             android:textSize="11.5sp"
             android:maxLines="1"/>
     </LinearLayout>

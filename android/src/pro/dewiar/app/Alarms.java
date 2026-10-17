@@ -23,7 +23,10 @@ public final class Alarms {
         try { return new JSONArray(sp(c).getString("items", "[]")); } catch (Exception e) { return new JSONArray(); }
     }
 
-    private static void save(Context c, JSONArray a) { sp(c).edit().putString("items", a.toString()).apply(); }
+    private static void save(Context c, JSONArray a) {
+        sp(c).edit().putString("items", a.toString()).apply();
+        CaptureWidget.refresh(c);           // на значке «Записать» — ближайшее напоминание
+    }
 
     /** item: {id, at (мс), title, kind: reminder|alarm|timer, repeat: ""|daily|weekdays|weekly} */
     public static synchronized void put(Context c, JSONObject item) throws Exception {
