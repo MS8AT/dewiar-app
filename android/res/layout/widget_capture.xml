@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Значок «Записать» на рабочем столе (CaptureWidget), мозг Dewiar (стиль brain из entities.js, w_brain.png) на
+<!-- Значок «Записать» на рабочем столе (CaptureWidget), мозг Dewiar (стиль brain из entities.js, белый полупрозрачный, w_brain.png) на
      матово-чёрном без обводки (отзыв 17.10: «некрасивая… может в неё мозг… чёрный, обводку убрать»). Одно нажатие — Dewiar слушает и записывает мысль в «Идеи»
      или ставит напоминание. Разметка RemoteViews: только простые виды. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"

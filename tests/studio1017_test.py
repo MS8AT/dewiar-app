@@ -44,8 +44,9 @@ lay = (ROOT / "android/res/layout/widget_capture.xml").read_text(encoding="utf-8
 bg = (ROOT / "android/res/drawable/w_bg.xml").read_text(encoding="utf-8")
 from PIL import Image  # noqa: E402
 im = Image.open(ROOT / "android/res/drawable-nodpi/w_brain.png")
-ok("@drawable/w_brain" in lay and "w_mic" not in lay and "<stroke" not in bg and "<gradient" not in bg and "#EE0A0A0D" in bg and im.mode == "RGBA" and im.size[0] >= 144,
-   "телефон: значок «Записать» — мозг Dewiar на матово-чёрном без обводки")
+ok("@drawable/w_brain" in lay and "w_mic" not in lay and "<stroke" not in bg and "<gradient" not in bg and "#EE0A0A0D" in bg and im.mode == "RGBA" and im.size[0] >= 144 and '"999dp"' in bg
+   and all(r == g == b == 255 for r, g, b, a in im.getdata() if a > 0) and max(a for *_, a in im.getdata()) < 255,
+   "телефон: значок «Записать» — белый полупрозрачный мозг на матово-чёрной «таблетке» без обводки")
 
 
 def free():
