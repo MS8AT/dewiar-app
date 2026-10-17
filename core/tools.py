@@ -276,6 +276,45 @@ def page_excerpt(text, find="", question=""):
             f"«{', '.join(terms)}». Чего здесь нет — того на странице не видно; не додумывай.]")
 
 
+WMO = {0: "ясно", 1: "в основном ясно", 2: "переменная облачность", 3: "пасмурно", 45: "туман", 48: "изморозь", 51: "морось",
+       53: "морось", 55: "сильная морось", 61: "небольшой дождь", 63: "дождь", 65: "сильный дождь", 66: "ледяной дождь",
+       67: "ледяной дождь", 71: "небольшой снег", 73: "снег", 75: "сильный снег", 77: "снежная крупа", 80: "ливень", 81: "ливни",
+       82: "сильные ливни", 85: "снегопад", 86: "сильный снегопад", 95: "гроза", 96: "гроза с градом", 99: "гроза с градом"}
+
+
+def t_weather(a, ctx):
+    """Погода из Open-Meteo (как на телефоне, app.js weather): сейчас и по дням. Экзамен 16.10: компьютер искал сайт погоды,
+    сайт отдал одно меню — и модель выдумала «+7…+12». Здесь — настоящие числа или честная ошибка."""
+    import datetime as _dt
+    city = str(a.get("city") or "").strip()
+    days = max(1, min(7, int(float(a.get("days") or 3))))
+    if not city:
+        raise ToolError("спроси, в каком городе")
+    try:
+        g = httpx.get("https://geocoding-api.open-meteo.com/v1/search", params={"name": city, "count": 1, "language": "ru"},
+                      headers=UA, timeout=12).json()
+        p = (g.get("results") or [None])[0]
+        if not p:
+            return f"Город «{city}» не нашёлся — уточни название."
+        w = httpx.get("https://api.open-meteo.com/v1/forecast", headers=UA, timeout=12, params={
+            "latitude": p["latitude"], "longitude": p["longitude"], "timezone": "auto", "forecast_days": days,
+            "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation",
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"}).json()
+    except (httpx.HTTPError, ValueError) as e:
+        raise ToolError(f"прогноз сейчас не получить ({e}) — так и скажи, цифры не придумывай")
+    c, d = w.get("current") or {}, w.get("daily") or {}
+    out = [f"{p.get('name', city)}: сейчас {round(c.get('temperature_2m', 0))}°, ощущается как {round(c.get('apparent_temperature', 0))}°, "
+           f"{WMO.get(c.get('weather_code'), '')}, ветер {round(c.get('wind_speed_10m', 0))} км/ч."]
+    today = _dt.date.today()
+    for i, t in enumerate(d.get("time") or []):
+        k = (_dt.date.fromisoformat(t) - today).days
+        mark = {0: " (сегодня)", 1: " (завтра)", 2: " (послезавтра)"}.get(k, "")
+        pr = (d.get("precipitation_probability_max") or [None] * 99)[i]
+        out.append(f"{t}{mark}: {round(d['temperature_2m_min'][i])}…{round(d['temperature_2m_max'][i])}°, "
+                   f"{WMO.get(d['weather_code'][i], '')}, осадки {pr if pr is not None else '?'}%")
+    return "\n".join(out) + "\n[Прогноз Open-Meteo. Называй только эти числа.]"
+
+
 def t_read_webpage(a, ctx):
     """Текст страницы, не больше PAGE_MAX символов — чтобы одна страница не съела контекст модели; длинная — начало и
     куски вокруг нужных слов (find или слова вопроса), пустая — честно «текста нет»."""
@@ -2017,7 +2056,10 @@ TOOLS = {
               S({"to": {"type": "string"}, "from": {"type": "string"}, "mode": {"type": "string", "enum": ["walk", "transit", "car", "bike"]},
                  "app": {"type": "string", "enum": ["yandex", "google"]}}, ["to"]), "safe", t_route, "Карта: маршрут"),
     "open_url": ("Открыть сайт в браузере по умолчанию.", S({"url": {"type": "string", "description": "адрес сайта"}}, ["url"]), "safe", t_open_url, "Браузер: открыть сайт"),
-    "web_search": ("Найти в интернете свежую информацию (новости, погода, курсы, факты). Возвращает список результатов со ссылками.", S({"query": {"type": "string"}}, ["query"]), "safe", t_web_search, "Поиск в интернете"),
+    "web_search": ("Найти в интернете свежую информацию (новости, курсы, факты; погода — инструментом weather). Возвращает список результатов со ссылками.", S({"query": {"type": "string"}}, ["query"]), "safe", t_web_search, "Поиск в интернете"),
+    "weather": ("Погода сейчас и на ближайшие дни по городу (настоящий прогноз; погоду не ищи в интернете — бери отсюда). "
+                "city — город (не назван — из памяти о пользователе, иначе спроси), days — на сколько дней (1–7).",
+                S({"city": {"type": "string"}, "days": {"type": "number"}}, ["city"]), "safe", t_weather, "Погода"),
     "read_webpage": ("Прочитать текст веб-страницы по адресу (например, из результатов поиска). Длинная страница — начало и "
                      "места со словами find (или вопроса).", S({"url": {"type": "string"}, "find": {"type": "string", "description":
                      "что ищешь на странице, если она длинная: «Доллар США», «15 октября»"}}, ["url"]), "safe", t_read_webpage, "Чтение веб-страниц"),

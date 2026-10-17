@@ -889,8 +889,35 @@ async def program_state(core, sd):
     return "; ".join(out)
 
 
+async def reset_state(core):
+    """Каждое испытание — с чистого листа (экзамен 16.10: «отчёт по продажам» из одного испытания всплывал в плейлисте и
+    советах про кино, заметка «Позвонить Ольге» — в «содержимом скриншота», а фоновая задача прошлого испытания докладывала
+    «готова» вместо новой презентации). Память, заметки, напоминания, расходы и идущие задачи прошлых испытаний — убираем."""
+    try:
+        await core.call("memory_set", text="")
+    except Exception:  # noqa: BLE001
+        pass
+    root = core.tmp / "ws" / "Заметки"
+    if root.is_dir():
+        shutil.rmtree(root, ignore_errors=True)
+    for cmd, lst, kill, key in (("reminders", None, "reminder_cancel", "id"), ("money_list", None, "money_delete", "id"),
+                                ("tasks_list", None, "task_delete", "id")):
+        try:
+            items = await core.call(cmd) or []
+        except Exception:  # noqa: BLE001
+            continue
+        for x in items if isinstance(items, list) else []:
+            try:
+                if cmd == "tasks_list" and x.get("status") not in ("done", "failed", "error", "stopped", "cancelled"):
+                    await core.call("task_stop", id=x.get(key))
+                await core.call(kill, id=x.get(key))
+            except Exception:  # noqa: BLE001
+                pass
+
+
 async def run_scenario(core, sc, judge_prof, work, log):
     t0 = time.time()
+    await reset_state(core)
     made = await seed(core, sc.get("seed")) if sc.get("seed") else {}
     try:
         return await _run_scenario(core, sc, judge_prof, work, log, t0)

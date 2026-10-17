@@ -53,6 +53,10 @@ d2 = today + timedelta(days=2)
 ctx2 = Eng(f"- Сдать отчёт (на {d2:%d.%m.%Y})").agenda_context(f"Какие планы на {wd_names[other]}?")
 ok(f"{d2:%d.%m}" in ctx2 and "Сдать отчёт" in ctx2 and f"{today:%d.%m}" not in ctx2, f"другой день недели — ближайший: {ctx2[-160:]!r}")
 ok(Eng("").agenda_context("Расскажи про среду в истории") == "", "не вопрос о планах — без подсказки")
+# 17.10 (суббота): «Какие планы на понедельник?» давало всю неделю — в «понедельник» тоже есть «недел»
+ctx3 = Eng("").agenda_context("Какие планы на понедельник?")
+mon = today + timedelta(days=(0 - today.weekday()) % 7 or 7) if today.weekday() else today
+ok(f"{mon:%d.%m}" in ctx3 and ctx3.count("ничего не запланировано") <= 2, f"«планы на понедельник» — понедельник, а не вся неделя: {ctx3[-120:]!r}")
 
 # 2–3. страницы
 page = "Банк России. Официальные курсы. " + " ".join(f"{c} Валюта{i} {i}.{i:04d}" for i, c in enumerate(["AUD", "AZN"] * 400)) \

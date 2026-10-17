@@ -397,6 +397,11 @@ async function examScenario(sc) {
   const t0 = Date.now(), res = { id: sc.id, group: sc.group, title: sc.title, video: false, steps: [], checks: [] };
   try {
     convReset(); history = [];                                                   // eslint-disable-line no-global-assign
+    // каждое испытание — с чистого листа (экзамен 16.10: на «сколько осталось?» назвала ещё два таймера от прошлых
+    // испытаний; «Бюджет Миши» и «Молодец, Миша» — имя и память владельца телефона в проверочном разговоре).
+    // Всё это — в песочнице: настоящие настройки и файлы examFinish вернёт как были
+    EXAM.alarms = []; EXAM.calendar = []; S.memory = []; S.user_name = "";
+    ["notes.json", "money.json", DONE_F].forEach(f => { SANDBOX.files[f] = "[]"; });
     seeded = examSeed(sc.seed);
     for (const st of sc.steps) {
       if (EXAM.stop) break;

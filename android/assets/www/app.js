@@ -2855,7 +2855,17 @@ async function runTool(name, a) {
     }
     case "web_search": return await webSearch(a.query || "");
     case "show_images": return await webImages(a.query || "", a.count);
-    case "read_webpage": return await readPage(a.url || "", a.find || "");
+    case "read_webpage": {
+      // экзамен 16.10: модель шесть раз звала read_webpage без адреса («Invalid host: https://») — адрес из слов человека
+      // («посмотри сайт https://www.python.org/», «открой python.org»), как на компьютере (engine_tools, QUERY_TOOLS)
+      let url = String(a.url || "").trim();
+      if (!/[a-zа-я0-9]\.[a-zа-я]{2,}/i.test(url)) {
+        const m = /(https?:\/\/[^\s«»"'<>]+)|(?<![@\w.-])((?:[a-zа-я0-9-]+\.)+(?:ru|рф|by|com|org|net|io|dev|pro|info|ua|kz|me|app|ai|tv|su)(?:\/[^\s«»"'<>]*)?)/i.exec(String(turnAsk || "").split("\n\nВложения:")[0]);
+        if (!m) return "Ошибка: не пришёл адрес страницы — возьми его из слов пользователя и вызови read_webpage с url.";
+        url = (m[1] || m[2]).replace(/[.,;:!?)]+$/, "");
+      }
+      return await readPage(url, a.find || "");
+    }
     case "weather": return await weather(a.city || "", a.days || 3);
     case "flashlight": return devTorch(!!a.on) ? (a.on ? "Фонарик включён." : "Фонарик выключен.") : "Фонарика нет.";
     case "take_photo": {

@@ -972,7 +972,7 @@ class ToolsMixin:
             days = [today + timedelta(days=2)]
         elif "завтра" in low:
             days = [today + timedelta(days=1)]
-        elif "недел" in low:
+        elif re.search(r"(?<![а-яё])недел", low):          # «на неделю», но не «на понедельник» (в нём тоже «недел»)
             days = [today + timedelta(days=i) for i in range(7)]
         elif any(w in low for w, _ in self.WEEKDAY_Q):
             wd = next(n for w, n in self.WEEKDAY_Q if w in low)

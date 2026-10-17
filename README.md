@@ -13,14 +13,21 @@
 <a href="https://dewiar.pro/dwrapp/Dewiar.apk"><img src="https://img.shields.io/badge/Android-%D1%81%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-3ddc84?style=for-the-badge&logo=android&logoColor=white" alt="Android — скачать"></a>
 <a href="https://dewiar.pro/dwrapp/download.php"><img src="https://img.shields.io/badge/%D0%92%D1%81%D0%B5%20%D1%83%D1%81%D1%82%D1%80%D0%BE%D0%B9%D1%81%D1%82%D0%B2%D0%B0-dewiar.pro-FF7AC6?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Все устройства — dewiar.pro"></a>
 
-![версия](https://img.shields.io/badge/%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F-0.37.0-7c5cff)
-![телефон](https://img.shields.io/badge/Android-0.5.0-3ddc84)
+[![версия](https://img.shields.io/github/v/release/dwr-git/dewiar-app?label=%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F&color=7c5cff)](https://github.com/dwr-git/dewiar-app/releases/latest)
+[![звёзды](https://img.shields.io/github/stars/dwr-git/dewiar-app?style=flat&label=%E2%98%85&color=FFB547)](https://github.com/dwr-git/dewiar-app/stargazers)
 [![Проверки](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml/badge.svg)](https://github.com/dwr-git/dewiar-app/actions/workflows/checks.yml)
 
 [Сайт](https://dewiar.pro) · [Руководство](https://dewiar.pro/dwrapp/guide.php) · [Свой сервер](docs/self-hosting.md) ·
 [История версий](CHANGELOG.md) · [Для разработчика](CONTRIBUTING.md)
 
 </div>
+
+> **In English.** Dewiar is a voice assistant with a team of AI characters for Windows, Ubuntu and Android. Call it
+> by name and talk: it sets reminders (with screenshots attached), calls and messages your people, builds walking
+> routes, reads receipts from a photo, remembers what you told it — and how that changed, runs big tasks (even code
+> fixes against tests) in the background. Risky actions need your "yes". Any model works: your own (vLLM, Ollama,
+> llama.cpp, LM Studio) or a cloud one. Every release passes a 50+ scenario exam judged by a separate model.
+> The interface speaks Russian for now. If you like the idea, a ⭐ helps the project grow.
 
 ## Что умеет
 
@@ -155,7 +162,7 @@ flowchart LR
 | `server/` | Серверы речи и синтеза для своей машины с видеокартой (`install-server.sh`) |
 | `packaging/`, `tools/` | Пакет `.deb`, установщики Windows, выпуск версии одной командой |
 | `data/` | Облики персонажей, встроенные навыки, модель VAD, радио |
-| `tests/` | 172 наборов проверок: настоящее ядро, окна в Chromium, телефон на подменённом мосте |
+| `tests/` | 173 наборов проверок: настоящее ядро, окна в Chromium, телефон на подменённом мосте |
 
 </details>
 
@@ -170,6 +177,11 @@ tools/build_deb.sh dist         # пакет Linux;  tools/build_win.sh — Wind
 ```
 
 Как сообщить об ошибке, предложить правку и правила кода — в [CONTRIBUTING.md](CONTRIBUTING.md). Нашли уязвимость — [SECURITY.md](SECURITY.md).
+
+## Поддержать
+
+Понравилось — поставьте ⭐ репозиторию: так Dewiar находят другие. Нашли ошибку или есть идея —
+[откройте issue](https://github.com/dwr-git/dewiar-app/issues/new/choose), отвечаем быстро.
 
 ## Авторы
 

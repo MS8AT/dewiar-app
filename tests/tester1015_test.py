@@ -98,7 +98,9 @@ rr = R()
 past = datetime.now() - timedelta(minutes=13)
 msg = T.t_reminder({"text": "Тренировка", "at": past.strftime("%Y-%m-%d %H:%M"), "repeat": "weekdays"}, {"reminders": rr})
 w = rr.added[-1]
-ok(w > datetime.now() and w.weekday() < 5 and (w.hour, w.minute) == (past.hour, past.minute) and "уже прошло" in msg,
+# в выходной «по будням» и так начинается с понедельника — «уже прошло» там не о чем говорить (17.10, суббота)
+ok(w > datetime.now() and w.weekday() < 5 and (w.hour, w.minute) == (past.hour, past.minute)
+   and ("уже прошло" in msg or datetime.now().weekday() >= 5),
    f"«по будням в {past:%H:%M}», сказанное в {datetime.now():%H:%M}, — не сразу, а {w:%a %d.%m %H:%M}: {msg[:90]}")
 T.t_reminder({"text": "Вода", "at": past.strftime("%Y-%m-%d %H:%M"), "repeat": "daily"}, {"reminders": rr})
 ok(rr.added[-1].date() == (past + timedelta(days=1)).date(), f"каждый день — с завтрашнего: {rr.added[-1]}")
