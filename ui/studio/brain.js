@@ -234,7 +234,7 @@ function renderReminders(items) {
       const btn = (icon, title, fn) => { const b = document.createElement("button"); b.title = title; b.innerHTML = `<svg viewBox="0 0 24 24">${RI[icon]}</svg>`; b.onclick = fn; act.appendChild(b); };
       if (x.repeat) btn(x.paused ? "play" : "pause", x.paused ? "Возобновить" : "Пауза", () => core.call("reminder_update", { id: x.id, patch: { paused: !x.paused } }).then(loadReminders).catch(e => toast(e.message)));
       if (x.kind !== "job" && x.kind !== "alarm" && x.kind !== "timer")
-        btn("ok", "Сделано", () => core.call("done_reminder", { id: x.id }).then((r) => { doneCelebrate(r); loadReminders(); }).catch(e => toast(e.message)));
+        btn("ok", "Сделано", () => core.call("done_reminder", { id: x.id }).then(() => loadReminders()).catch(e => toast(e.message)));
       btn("edit", "Изменить", () => editReminder(el, x));
       btn("del", "Удалить", () => core.call("reminder_cancel", { id: x.id }).then(() => { toast("Удалено"); loadReminders(); }).catch(e => toast(e.message)));
       box.appendChild(el);
@@ -349,11 +349,12 @@ function doneCelebrate(r) {
 }
 async function doneAdd() {
   const v = $("#d-phrase").value.trim(); if (!v) { $("#d-phrase").focus(); return; }
-  try { const r = await core.call("done_add", { title: v }); $("#d-phrase").value = ""; doneCelebrate(r); loadReminders(); } catch (e) { toast(e.message); }
+  try { await core.call("done_add", { title: v }); $("#d-phrase").value = ""; loadReminders(); } catch (e) { toast(e.message); }
 }
 $("#d-add").onclick = doneAdd;
 $("#d-phrase").onkeydown = (e) => { if (e.key === "Enter") doneAdd(); };
-core.on("done", e => { if ($("#p-reminders").classList.contains("cur")) renderDone(e); });
+// отметка любым путём — кнопкой, голосом («я позвонил в банк»), моделью — празднуем здесь один раз (отзыв 17.10: показать в видео)
+core.on("done", e => { if (!$("#p-reminders").classList.contains("cur")) return; renderDone(e); if ((e.added || []).length) doneCelebrate(e); });
 let rpT = null;
 // пока пишут — показываем, как ядро поняло фразу (тот же разбор, что у голосовой команды)
 $("#r-phrase").oninput = () => { clearTimeout(rpT); const v = $("#r-phrase").value.trim(); const el = $("#r-parse");

@@ -1561,7 +1561,7 @@ def t_mark_done(a, ctx):
     rem = ctx.get("reminders")
     closed, lst = [], []
     for t in items:
-        m = D.reminder_match(t, list(rem.items) if rem is not None else [])
+        m = D.reminder_match(t, list(rem.items) if rem is not None else [], ahead=True)
         if m:
             if not m.get("repeat"):
                 rem.remove(m["id"])

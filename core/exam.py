@@ -705,6 +705,9 @@ async def check_state(core, state, t_start):
         hit = [x for x in fresh if fits(x)]
         out.append({"name": "напоминание поставлено как надо", "ok": bool(hit),
                     "detail": "; ".join(f"{x.get('text')} — {x.get('at')}" for x in fresh[:4]) or "напоминаний нет"})
+        if want.get("all"):                               # план дня: на каждое дело — своё напоминание (17.10)
+            miss = [w for w in want["all"] if not any(w.lower() in (x.get("text") or "").lower() and fits(dict(x, text=w)) for x in fresh)]
+            out.append({"name": "на каждое дело — своё напоминание", "ok": not miss, "detail": ("нет: " + ", ".join(miss)) if miss else ""})
     if "done" in state:                                   # «отметь как исполненное» — дела правда в журнале «Дела» (отчёт №14)
         want = state["done"]
         d = await core.call("done") or {}

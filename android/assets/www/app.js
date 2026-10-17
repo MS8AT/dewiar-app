@@ -2076,9 +2076,8 @@ function wordsNum(s) {
 const DOW = { "понедельник": 1, "вторник": 2, "сред": 3, "четверг": 4, "пятниц": 5, "суббот": 6, "воскресень": 0 };
 /* -> {at: Date, repeat: ""|daily|weekdays|weekly, rel?, rest} или null — времени во фразе нет. rest — фраза без слов о времени
    (из неё берут, о чём напомнить). Только время без дня и оно уже прошло — завтра; день без времени — 9:00. */
-function parseWhen(t) {
+function parseWhen(t, now = new Date()) {
   t = " " + String(t || "").toLowerCase().replace(/ё/g, "е") + " ";
-  const now = new Date();
   let m = t.match(/через\s+(?:(\S+(?:\s+(?:и\s+)?\S+)?)\s+)?(секунд[а-яё]*|минут[а-яё]*|час[а-яё]*|полчаса|полтора часа)/);
   if (m) {
     let n = m[2].startsWith("полчаса") ? 30 : m[2].startsWith("полтора") ? 90 : (m[1] ? wordsNum(m[1]) : 1);
@@ -2129,7 +2128,8 @@ function remindWhat(rest) {
 function addAlarm(title, at, kind, repeat, note) {
   if (repeat) at = rollRepeat(at, repeat);              // «будильник по будням в 7», сказанное в 7:20, — с завтрашнего, не сразу
   // who — кто ставил: его лицо и имя будут в уведомлении (Faces.java); note — заметка с фото и файлами напоминания
-  const x = JSON.parse(D.alarmSet(JSON.stringify(Object.assign({ title, at: at.getTime(), kind: kind || "reminder", repeat: repeat || "", who: S.persona || "", from: Date.now() },
+  // id свой и неповторимый: план дня ставит три дела за одну миллисекунду, а «a» + время у телефона совпадало — дела затирали друг друга
+  const x = JSON.parse(D.alarmSet(JSON.stringify(Object.assign({ id: "a" + Date.now() + Math.random().toString(36).slice(2, 6), title, at: at.getTime(), kind: kind || "reminder", repeat: repeat || "", who: S.persona || "", from: Date.now() },
     note ? { note } : {}))) || "{}");
   if (x.kind === "timer") tmrShow();
   if (!D.exactAlarms()) toast("Чтобы будильники звонили минута в минуту, разрешите «Будильники и напоминания» в настройках.", 5000);
@@ -2278,6 +2278,9 @@ async function quick(text) {
   if (NEW_CONV_RX.test(t) || NEW_CONV_RX.test(t.replace(/^\S+\s+/, ""))) { convReset(); return { say: "Хорошо, начинаем с чистого листа." }; }
   // «запиши в заметки …», «добавь в заметки …», «заметка: …» — сразу в заметки, без модели: модель иногда отвечала
   // «Записала.», не вызвав save_note, и заметка терялась (отзыв 11.10). Текст — как сказан, заголовок — первые слова.
+  // «запланируй на сегодня: в 13 …, в 16 …» — дела дня; «я позвонил в банк», «готово, купил хлеб» — отметка (17.10, без модели)
+  { const pq = planQuick(text); if (pq) return pq; }
+  { const dq = doneQuick(text); if (dq) return dq; }
   { const n = noteQuick(text); if (n) return { say: n }; }
   { const f = factQuick(text); if (f) return { say: f }; }
   // «покажи напоминания», «какие у меня напоминания» — открыть и сказать, сколько (модель иногда отвечала «чистый лист»,
@@ -3800,17 +3803,31 @@ const stems = (t) => String(t || "").toLowerCase().replace(/ё/g, "е").split(/[
 // в экзамене напоминания — его песочница (exam.js), не настоящие
 const examOn = () => typeof EXAM !== "undefined" && !!EXAM;
 function remDrop(id) { if (examOn()) { EXAM.alarms = EXAM.alarms.filter(x => x.id !== id); return; } D.alarmCancel(id); syncSoon(); }
-function remMatch(title, now = Date.now()) {
+// совпадение — и хотя бы одно не глаголом: «позвонил маме» ≠ «позвонить в банк» (общий только «позв»), как done._hit_ok
+const VERB_END = /(?:ть|ться|ти|[аеиоуыяю]л|[аеиоуыяю]л[аи]|лся|лась|лись)$/;
+function hitOk(title, said) {
+  const words = String(title || "").toLowerCase().replace(/ё/g, "е").split(/[^a-zа-я0-9]+/).filter(w => w.length > 2 && !/^(это|как|для|что|все|уже|мне|меня|надо|нужно|сделал[аи]?|сделать)$/.test(w));
+  if (!words.length) return 0;
+  const hits = words.filter(w => said.includes(w.slice(0, 4))); if (!hits.length) return 0;
+  const nouns = words.filter(w => !VERB_END.test(w));
+  if (nouns.length && !hits.some(w => nouns.includes(w))) return 0;
+  return hits.length / words.length;
+}
+// ahead — на сегодня не нашлось: и разовое на ближайшие 36 часов («я позвонил в банк» в 22:40, а план — на завтра в 13)
+function remMatch(title, now = Date.now(), ahead = true) {
   const w = stems(title); if (!w.length) return null;
-  const end = new Date(Math.max(new Date(now).setHours(23, 59, 59, 0), now + 3 * 3600e3));   // поздно вечером — и сразу после полуночи
-  let best = null, bs = 0;
-  for (const x of alarmsNow()) {
-    if (x.kind === "timer" || x.kind === "alarm" || (!x.repeat && x.at > end.getTime())) continue;
-    const r = stems(x.title); if (!r.length) continue;
-    const hit = r.filter(s => w.includes(s)).length, sc = hit / r.length;
-    if (hit && sc >= 0.5 && sc > bs) { best = x; bs = sc; }
+  const ends = [Math.max(new Date(now).setHours(23, 59, 59, 0), now + 3 * 3600e3)];   // поздно вечером — и сразу после полуночи
+  if (ahead) ends.push(now + 36 * 3600e3);
+  for (const end of ends) {
+    let best = null, bs = 0;
+    for (const x of alarmsNow()) {
+      if (x.kind === "timer" || x.kind === "alarm" || (!x.repeat && x.at > end)) continue;
+      const sc = hitOk(x.title, w);
+      if (sc >= 0.5 && sc > bs) { best = x; bs = sc; }
+    }
+    if (best) return best;
   }
-  return best;
+  return null;
 }
 /* Отметить дела (инструмент и кнопки): подходящее разовое напоминание на сегодня закрывается, повторяющееся остаётся. */
 function markDone(titles, src) {
@@ -3830,6 +3847,125 @@ function doneSay(r) {
     + ` Сегодня сделано ${s.today} ${delaRu(s.today)}` + (s.streak >= 2 ? `, ${s.streak} ${dnRu(s.streak)} подряд` : "") + ", всего " + s.total + "."
     + (ach ? ` Новое достижение: ${ach}.` : r.mile ? ` Рубеж дня: ${r.mile} ${delaRu(r.mile)}!` : "")
     + " Похвали коротко и тепло, одной фразой" + (ach ? ", назови достижение" : "") + "; не перечисляй дела заново.";
+}
+/* План дня и «сделано» — без модели, как core/dayplan.py (отзыв 17.10: «Запланируй на сегодня: в 13 позвонить в банк,
+   в 16 тренировка, в 19 купить подарок маме» — «записала», а в «Делах» пусто: модель писала в календарь). Меняешь здесь —
+   меняй и там. На каждое дело — напоминание; дело без времени — на 20:00; прошедшее время сегодня — на завтра. */
+const PLAN_RX = /^\s*(?:[а-я]+,\s*)?(?:(?:а|и|ну|пожалуйста|слушай)\s+)*(?:(?:за|с)планируй(?:те)?(?:\s+(?:мне|нам))?(?:\s+(?:дела|задачи))?|(?:составь|запиши|сделай|создай)(?:те)?\s+(?:мне\s+)?план(?:\s+(?:дел|дня))?|(?:добавь|внеси|поставь|запиши)(?:те)?\s+(?:мне\s+)?в\s+(?:мой\s+)?план(?:\s+(?:дел|дня|на\s+день))?|(?:мой\s+|мои\s+)?(?:план|планы|дела|задачи)\s+(?=на\s+(?:сегодня|завтра|послезавтра|день)))([\s\S]*)$/;
+const PLAN_NOT = /календар|встреч|созвон с|совещан|мероприят|отпуск|поездк|путешеств|бюджет|ремонт|свадьб|меню(?![а-я])/;
+const PLAN_REMIND = /^\s*(?:[а-я]+,\s*)?(?:напомни(?:те)?|поставь(?:те)?\s+(?:мне\s+)?напоминани[яе])\s+([\s\S]*)$/;
+const PLAN_TIME = /(?:^|[^а-я])(?:в|к|на)\s+\d{1,2}(?:[:.]\d{2})?(?:\s*(?:час[а-я]*|ч(?![а-я])))?(?:\s+(?:утра|дня|вечера|ночи))?|(?:^|[^а-я])(?:утром|днем|вечером)(?![а-я])/;
+const PLAN_EVENING = 20;
+function restoreCase(what, raw) {
+  const o = {}; for (const w of String(raw || "").match(/[\p{L}\d-]+/gu) || []) { const k = w.toLowerCase().replace(/ё/g, "е"); if (!(k in o)) o[k] = w; }
+  return String(what).split(" ").map(w => /^\d+$/.test(w) ? w : (o[w] || w)).join(" ");
+}
+const capFirst = (t) => t ? t[0].toUpperCase() + t.slice(1) : t;
+function planParse(text, now = new Date()) {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+  if (!raw || /\?\s*$/.test(raw) || raw.includes("\n\nВложения:")) return null;
+  const t = raw.toLowerCase().replace(/ё/g, "е");
+  let m = t.match(PLAN_RX), remind = false;
+  if (!m) { m = t.match(PLAN_REMIND); remind = true; if (!m) return null; }
+  let rest = m[1];
+  if (PLAN_NOT.test(rest)) return null;
+  let day = "";
+  const dm = rest.slice(0, 40).match(/(?:^|[^а-я])(?:на\s+)?(сегодня|завтра|послезавтра|день)(?![а-я])/);
+  if (dm) { day = dm[1] === "день" ? "" : dm[1]; rest = rest.slice(0, dm.index) + " " + rest.slice(dm.index + dm[0].length); }
+  rest = rest.replace(/^\s*(?:мне|нам|такие|следующие|вот|дела|задачи)\s+/, " ").replace(/^[\s:—,.-]+|[\s:—,.-]+$/g, "");
+  const segs = rest.split(/\s*(?:[,;\n]|\.\s+|\s—\s)\s*|\s+(?:и|а\s+потом|потом|затем|а)\s+(?=(?:в|к)\s+\d)/).map(x => (x || "").replace(/^[\s.:—-]+|[\s.:—-]+$/g, "")).filter(Boolean);
+  if (!segs.length || segs.length > 12) return null;
+  const timed = segs.filter(x => PLAN_TIME.test(x));
+  if (remind && timed.length < 2) return null;              // одно «напомни…» — обычное напоминание (модель)
+  if (!remind && !timed.length && segs.length < 2) return null;   // «запланируй отпуск» — не план дня
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
+  const base = new Date(today.getTime() + ({ "завтра": 1, "послезавтра": 2 }[day] || 0) * 864e5);
+  const items = [];
+  for (let x of segs) {
+    if (PLAN_TIME.test(x)) {
+      x = x.replace(/(^|[^а-я])(в|к)\s+([1-7])(?![\d:.])(?!\s*(?:час[а-я]*\s+)?(?:утра|ночи))/, (_, a, b, h) => `${a}${b} ${+h + 12}`);   // «в 3 забрать детей» — 15:00
+      const w = parseWhen((day && day !== "сегодня" ? day + " " : "") + x, now);
+      if (!w || w.rel || w.repeat) return null;
+      const what = remindWhat(w.rest).replace(/^(?:и|а|еще|также)\s+/, "");
+      if (!what) return null;
+      items.push({ text: capFirst(restoreCase(what, raw)), at: w.at, moved: w.at >= new Date(base.getTime() + 864e5) && !(day === "завтра" || day === "послезавтра") });
+    } else {
+      const what = x.replace(/^(?:и|а|еще|также)\s+/, "").trim();
+      if (what.length < 3 || what.split(" ").length > 10) return null;
+      let at = new Date(base); at.setHours(PLAN_EVENING, 0, 0, 0); let moved = false;
+      if (at <= now) { at = new Date(at.getTime() + 864e5); moved = true; }
+      items.push({ text: capFirst(restoreCase(what, raw)), at, moved, untimed: true });
+    }
+  }
+  return { items, day: base, today };
+}
+function planSay(p, now = new Date()) {
+  const loose = p.items.filter(x => x.untimed), items = p.items.filter(x => !x.untimed).sort((a, b) => a.at - b.at);
+  const low = (x) => /^.[А-ЯЁA-Z]/.test(x.text) ? x.text : x.text[0].toLowerCase() + x.text.slice(1);
+  const hm = (d) => pad(d.getHours()) + ":" + pad(d.getMinutes()), dk = (d) => Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / 864e5);
+  const dname = (d) => ({ 0: "сегодня", 1: "завтра", 2: "послезавтра" })[dk(d)] || `${d.getDate()} ${MON[d.getMonth()]}`;
+  const all = items.concat(loose), days = [...new Set(all.map(x => dk(x.at)))];
+  let out;
+  if (days.length === 1) {
+    const lst = items.map(x => `${hm(x.at)} — ${low(x)}`).concat(loose.length ? [loose.map(low).join(", ")] : []).join("; ");
+    let head = all.length > 1 ? `Записал план на ${dname(all[0].at)}` : `Записал в план на ${dname(all[0].at)}`;
+    if (all.some(x => x.moved) && p.day.getTime() === p.today.getTime()) head = `Сегодня это время уже прошло — записал план на ${dname(all[0].at)}`;
+    out = `${head}: ${lst}.`;
+  } else {
+    const by = {}; all.slice().sort((a, b) => a.at - b.at).forEach(x => (by[dk(x.at)] = by[dk(x.at)] || []).push(x));
+    out = "Записал план: " + Object.keys(by).sort().map(k => capFirst(dname(by[k][0].at)) + " — " + by[k].map(x => (x.untimed ? "" : hm(x.at) + " ") + low(x)).join("; ")).join(". ") + ".";
+    if (all.some(x => x.moved)) out += " Что уже прошло сегодня — перенёс на завтра.";
+  }
+  if (loose.length) out += ` ${loose.length > 1 ? "Дела" : "Дело"} без времени — напомню в ${PLAN_EVENING}:00.`;
+  return out + " Сделаете — скажите, и я отмечу.";
+}
+function planQuick(text) {
+  if (examOn()) return null;
+  const p = planParse(text); if (!p) return null;
+  const made = p.items.map(x => addAlarm(x.text, x.at, "reminder", ""));
+  plog("info", "🗓 план дня (без модели): " + made.map(x => `${whenText(new Date(x.at))} ${x.title}`).join("; "));
+  setTimeout(() => openDone(false), 400);           // сразу видно: «Мой день» → «Дела»
+  return { say: planSay(p) };
+}
+const DONE_PAST = "[а-я]+(?:л|ла|ли|лся|лась|лись)";
+const DONE_EXPLICIT = [
+  /^(?:отметь(?:те)?|отмечай|поставь(?:те)?\s+(?:галочку|отметку))(?:\s+(?:мне|пожалуйста))?(?:\s*,?\s*что\s+)?(?:\s+(?:как|что)?\s*(?:сделанн[а-я]*|выполненн[а-я]*|исполненн[а-я]*|готов[а-я]*|сделано|выполнено))?\s*[:,—-]?\s*(?:что\s+)?(.+)$/,
+  /^(?:готово|сделано|выполнено|галочка)\s*[,:—-]?\s+(.+)$/,
+  /^(.+?)\s*[—:-]?\s+(?:готово|сделано|выполнено)$/];
+const DONE_IMPLICIT = new RegExp("^(?:(?:ну|так|всё|все|итак|кстати)\\s*,?\\s+)?(?:я\\s+)?(?:уже\\s+|только\\s+что\\s+|сегодня\\s+)?(" + DONE_PAST + "(?:\\s.+)?)$");
+const DONE_NOT = /(?:^|[^а-я])(?:не|вчера|завтра|хочу|хотел[аи]?|надо|нужно|буду|будем|собираюсь|планирую|может|если|забыл[аи]?|напомни|когда|зачем|почему|сколько|отмени|сними|убери)(?![а-я])/;
+function doneParse(text) {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+  let t = raw.toLowerCase().replace(/ё/g, "е").replace(/[\s.!]+$/, "");
+  t = t.replace(/^([а-я]+),\s*(?=\S)/, (m0, w) => findPersona(w, true) ? "" : m0);
+  if (!t || /\?$/.test(t) || t.length > 160) return null;
+  if (/^(?:отметь|отмечай|поставь)/.test(t) && /(?:^|[^а-я])(?:не|ошибк|сним)|календар|карт[еуа]|заметк|будильник|напоминани/.test(t)) return null;
+  let explicit = false, x = null;
+  for (const rx of DONE_EXPLICIT) { const m = t.match(rx); if (m && m[1].trim()) { explicit = true; x = m[1]; break; } }
+  if (x === null) {
+    if (DONE_NOT.test(t) || t.split(" ").length > 12) return null;
+    const m = t.match(DONE_IMPLICIT); if (!m) return null; x = m[1];
+  } else if (/(?:^|[^а-я])(?:не|завтра|буду|надо|нужно)(?![а-я])/.test(x)) return null;
+  const parts = x.split(new RegExp("\\s*[,;]\\s*|\\s+(?:и|а\\s+еще|а\\s+также|потом|еще)\\s+(?=(?:я\\s+)?" + DONE_PAST + "(?![а-я]))"));
+  const items = parts.map(p => (p || "").replace(/^[\s.:—-]+|[\s.:—-]+$/g, "").replace(/^(?:(?:я|и|уже|еще|также)\s+)+/, "").replace(/\s+(?:уже|сегодня|только что|готово|сделано)$/, "").trim())
+    .filter(p => p.length >= 3).map(p => capFirst(restoreCase(p, raw)));
+  return items.length ? { items, explicit } : null;
+}
+function doneSpeak(r) {
+  const n = r.stats.today, a = r.fresh[r.fresh.length - 1];
+  let out = `Отметил ${r.items.map(x => "«" + x.title + "»").join(", ")}.`;
+  out += a ? ` Сегодня уже ${n} ${delaRu(n)} — новое достижение «${a.name}»!` : r.mile ? ` Уже ${n} ${delaRu(n)} за сегодня — так держать!` : ` Сегодня ${n === 1 ? "это первое дело" : "уже " + n + " " + delaRu(n)}.`;
+  if (r.stats.streak >= 2 && (a || r.mile || n === 1)) out += ` Серия — ${r.stats.streak} ${dnRu(r.stats.streak)} подряд.`;
+  return out;
+}
+function doneQuick(text) {
+  if (examOn()) return null;
+  const d = doneParse(text); if (!d) return null;
+  if (!d.explicit && !d.items.every(t => remMatch(t))) return null;   // «я позвонил в банк» — только если это дело из плана
+  const r = markDone(d.items, "voice");
+  plog("info", "✓ сделано (без модели): " + r.items.map(x => x.title).join("; "));
+  if ($("#sh-day.on") && dayTab === "rem") renderDay();
+  return { say: doneSpeak(r) };
 }
 /* Праздник: короткий тост на каждое дело; рубеж дня и новый значок — конфетти, вибрация и карточка. */
 function celebrate(r) {
@@ -3892,7 +4028,7 @@ function doneReport(days) {
 }
 function donePrompt() {
   const s = doneStats();
-  return "ДЕЛА И ДОСТИЖЕНИЯ. Пользователь говорит, что сделал дело («я позвонила Игорю и сделала тренировку», «отметь как исполненное», «готово, купил хлеб») — "
+  return "ДЕЛА И ДОСТИЖЕНИЯ. «Запланируй на сегодня…», «план на день», «мои дела на завтра» — это дела, не календарь: на каждое дело — свой set_reminder с его временем (в календарь — только если сказано «в календарь» или это встреча). Пользователь говорит, что сделал дело («я позвонила Игорю и сделала тренировку», «отметь как исполненное», «готово, купил хлеб») — "
     + "вызови mark_done (каждое дело — отдельной строкой, коротко: «Позвонить Игорю», «Тренировка»), подходящее напоминание закроется само; потом похвали коротко, одной фразой. "
     + "Отметил по ошибке — mark_done с undo. «Что я сегодня сделал», «мои достижения» — done_report. "
     + `Сейчас: сегодня сделано ${s.today} ${delaRu(s.today)}` + (s.items.length ? ` (${s.items.slice(-6).map(x => x.title).join("; ")})` : "")

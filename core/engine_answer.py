@@ -138,6 +138,10 @@ class AnswerMixin:
             return                                       # «напиши Андрею: привет» — человеку из «Близких» сразу, без модели
         if not raw and not quiet and not images and "\n\nВложения:" not in text and self._call_cmd(text, via):
             return                                       # «позвони Людмиле по видео» — человеку из «Близких» сразу, без модели
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._plan_cmd(text, via):
+            return                                       # «запланируй на сегодня: в 13 …, в 16 …» — дела дня, без модели
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._mark_cmd(text, via):
+            return                                       # «я позвонил в банк», «готово, купил хлеб» — отметка, без модели
         if not raw and not quiet and not images and "\n\nВложения:" not in text and self._timer_cmd(text, via):
             return                                       # «сколько осталось?», «добавь минуту», «отмени таймер»
         if not raw and not quiet and not images:

@@ -361,6 +361,50 @@ class ToolsMixin:
             return True
         return False
 
+    def _plan_cmd(self, text, via=None):
+        """План дня без модели (отзыв 17.10: «Запланируй на сегодня: в 13 позвонить в банк, в 16 тренировка…» — модель
+        отвечала «записала» и писала в календарь, а в «Делах» пусто): на каждое дело — напоминание (dayplan.parse_plan)."""
+        import dayplan
+        p = dayplan.parse_plan(text)
+        if not p:
+            return False
+        acts = []
+        for x in p["items"]:
+            item = self.reminders.add(x["at"], x["text"], None, "reminder")
+            self.emit("reminder_set", item=self._reminder_public(item), text="")
+            acts.append("set_reminder")
+        log.info("🗓 План дня (без модели): %s", "; ".join(f"{x['at']:%d.%m %H:%M} {x['text']}" for x in p["items"]))
+        self._say_quick(dayplan.plan_say(p), text, via, acts=acts)
+        return True
+
+    def _mark_cmd(self, text, via=None):
+        """«Я позвонил в банк», «готово, купил подарок маме», «отметь тренировку» — отметка без модели (отзыв 17.10: для
+        съёмки геймификации). Без «отметь / готово» — только если каждое дело совпало с напоминанием из плана."""
+        import dayplan
+        import done as D
+        d = dayplan.parse_done(text)
+        if not d:
+            return False
+        rem = list(self.reminders.items)
+        hits = [D.reminder_match(t, rem, ahead=True) for t in d["items"]]
+        if not d["explicit"] and not all(hits):
+            return False
+        lst, closed = [], []
+        for t, m in zip(d["items"], hits):
+            if m:
+                if not m.get("repeat"):
+                    self.reminders.remove(m["id"])
+                    closed.append(m.get("text") or "")
+                lst.append({"title": m.get("text") or t, "rid": m["id"]})
+            else:
+                lst.append({"title": t})
+        r = self.done.add(lst, "voice")
+        self.emit("done", **self.done.public(), fresh=[{"icon": x[3], "name": x[4], "what": x[5]} for x in r["fresh"]], mile=r["mile"],
+                  added=[x["title"] for x in r["items"]])
+        log.info("✓ Сделано (без модели): %s", "; ".join(x["title"] for x in r["items"]))
+        self._say_quick(dayplan.done_say(r, closed), text, via, acts=["mark_done"])
+        return True
+
     def _call_cmd(self, text, via=None):
         """«Позвони Людмиле (по видео)», «набери маме» — человеку из «Близких» звоним сразу, без модели (съёмка 17.10:
         раз позвонила, потом раз за разом «Звоню Людмиле.» — и ничего: модель повторяла прошлый ответ, не вызывая звонка).
@@ -830,7 +874,7 @@ class ToolsMixin:
             if not title:
                 raise ValueError("напишите, что сделано")
             import done as D
-            m = D.reminder_match(title, list(self.reminders.items))
+            m = D.reminder_match(title, list(self.reminders.items), ahead=True)
             if m and not m.get("repeat"):
                 self.reminders.remove(m["id"])
             r = dn.add([{"title": m.get("text"), "rid": m["id"]} if m else title], "pc")

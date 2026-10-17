@@ -142,6 +142,10 @@ const EXAM_PHONE = [
   { id: "draw_diagram", group: "Разговор", title: "«Нарисуй схему» — схема Mermaid, а не отказ",
     steps: ["Нарисуй схему: как заявка проходит от клиента через менеджера на склад и обратно клиенту."], expect: { any: ["mermaid"], none: ["не могу рисовать", "не умею рисовать"] },
     judge: "Нарисовал схему блоком ```mermaid (она видна картинкой под ответом): клиент → менеджер → склад → клиент, подписи по-русски; вслух — одна-две фразы, без чтения кода. Отказ или схема только словами — 0 баллов." },
+  { id: "plan_day", group: "Напоминания", title: "«Запланируй на завтра: в 13…, в 16…, в 19…» — три дела в «Делах», не календарь",
+    steps: ["Запланируй на завтра: в 13 позвонить в банк, в 16 тренировка, в 19 купить подарок маме"], expect: { none: ["не могу", "в календар"] },
+    alarm: { any: ["банк", "трениров", "подар"], all: ["банк", "трениров", "подар"], within_h: [1, 50], nocal: true },
+    judge: "План дня — это дела: три напоминания на завтра (13:00 позвонить в банк, 16:00 тренировка, 19:00 купить подарок маме), видны в «Мой день» → «Дела»; коротко подтвердил план. Записал в календарь вместо дел или сказал «записала», не поставив, — 0 баллов (отзыв 17.10)." },
   { id: "done_mark", group: "Заметки", title: "«Я позвонила Игорю и сделала тренировку — отметь как исполненное»", seed: { alarms: [{ title: "позвонить Игорю", in_h: 0.3 }] },
     steps: ["Лира, я позвонила Игорю и сделала тренировку. Отметь как исполненное"], expect: { none: ["не могу отметить", "нет такой возможности", "не умею"] },
     done: { min: 2, all: ["игор", "трениров"], reminder_gone: "игор" }, tool: { mark_done: {} },
@@ -327,6 +331,8 @@ function examChecks(sc, last, toolsAll, t0) {
     };
     const fresh = EXAM.alarms.filter(x => x.made >= t0);
     out.push({ name: "напоминание поставлено как надо", ok: fresh.some(fits), detail: (fresh.length ? fresh : EXAM.alarms).map(x => `${x.title} — ${new Date(x.at).toLocaleString("ru-RU")}`).join("; ").slice(0, 300) });
+    if (w.all) { const miss = w.all.filter(k => !fresh.some(x => x.title.toLowerCase().includes(k) && fits(Object.assign({}, x, { title: k })))); out.push({ name: "на каждое дело — своё напоминание", ok: !miss.length, detail: miss.length ? "нет: " + miss.join(", ") : "" }); }   // план дня (17.10)
+    if (w.nocal) { const c = (EXAM.calendar || []).filter(x => x.made >= t0); out.push({ name: "план — в «Делах», не в календаре", ok: !c.length, detail: c.map(x => x.title).join("; ") }); }
   }
   if (sc.calendar) {                                     // встреча правда в календаре (песочница экзамена), в нужный день и час
     const w = sc.calendar, fresh = (EXAM.calendar || []).filter(x => x.made >= t0);

@@ -196,31 +196,52 @@ def _b36(n):
     return out or "0"
 
 
-def reminder_match(title, reminders, now=None):
-    """Напоминание на сегодня, которое и есть это дело (не будильник и не таймер; разовое — до конца дня, повтор — любое)."""
+_VERB = re.compile(r"(?:ть|ться|ти|[аеиоуыяю]л|[аеиоуыяю]л[аи]|лся|лась|лись)$")
+
+
+def _hit_ok(title_words, said):
+    """Совпадение по основам — и хотя бы одно не глаголом («позвонил маме» ≠ «позвонить в банк»: общий только «позв»),
+    если в напоминании есть не только глаголы."""
+    words = [x for x in re.split(r"[^a-zа-я0-9]+", str(title_words or "").lower().replace("ё", "е")) if len(x) > 2 and not _STOP.match(x)]
+    if not words:
+        return 0.0
+    hits = [x for x in words if x[:4] in said]
+    if not hits:
+        return 0.0
+    nouns = [x for x in words if not _VERB.search(x)]
+    if nouns and not any(x in nouns for x in hits):
+        return 0.0
+    return len(hits) / len(words)
+
+
+def reminder_match(title, reminders, now=None, ahead=False):
+    """Напоминание, которое и есть это дело (не будильник и не таймер): разовое — до конца сегодняшнего дня (поздно
+    вечером — и сразу после полуночи), повтор — любое. ahead — не нашлось на сегодня: и разовое на ближайшие 36 часов
+    («я позвонил в банк» в 22:40, а план поставлен на завтра в 13 — сделано раньше)."""
     w = stems(title)
     if not w:
         return None
     now = now or dt.datetime.now()
-    end = max(now.replace(hour=23, minute=59, second=59), now + dt.timedelta(hours=3))   # поздно вечером — и то, что сразу после полуночи
-    best, bs = None, 0.0
-    for x in reminders:
-        if x.get("kind") in ("alarm", "timer", "job") or x.get("paused"):
-            continue
-        try:
-            at = dt.datetime.fromisoformat(x["at"])
-        except (KeyError, ValueError):
-            continue
-        if not x.get("repeat") and at > end:
-            continue
-        r = stems(x.get("text"))
-        if not r:
-            continue
-        hit = sum(1 for s in r if s in w)
-        sc = hit / len(r)
-        if hit and sc >= 0.5 and sc > bs:
-            best, bs = x, sc
-    return best
+    ends = [max(now.replace(hour=23, minute=59, second=59), now + dt.timedelta(hours=3))]
+    if ahead:
+        ends.append(now + dt.timedelta(hours=36))
+    for end in ends:
+        best, bs = None, 0.0
+        for x in reminders:
+            if x.get("kind") in ("alarm", "timer", "job") or x.get("paused"):
+                continue
+            try:
+                at = dt.datetime.fromisoformat(x["at"])
+            except (KeyError, ValueError):
+                continue
+            if not x.get("repeat") and at > end:
+                continue
+            sc = _hit_ok(x.get("text"), w)
+            if sc >= 0.5 and sc > bs:
+                best, bs = x, sc
+        if best is not None:
+            return best
+    return None
 
 
 def say(r, closed=()):
@@ -269,7 +290,9 @@ def report(done, days=1):
 
 def prompt(done):
     s = done.stats()
-    out = ("\n\nДЕЛА И ДОСТИЖЕНИЯ. Пользователь говорит, что сделал дело («я позвонил Игорю и сделал тренировку», «отметь как "
+    out = ("\n\nДЕЛА И ДОСТИЖЕНИЯ. «Запланируй на сегодня…», «план на день», «мои дела на завтра» — это дела, не календарь: "
+           "на каждое дело — свой set_reminder с его временем (в календарь — только если сказано «в календарь» или это встреча). "
+           "Пользователь говорит, что сделал дело («я позвонил Игорю и сделал тренировку», «отметь как "
            "исполненное», «готово, купил хлеб») — вызови mark_done (каждое дело — отдельной строкой, коротко: «Позвонить Игорю», "
            "«Тренировка»), подходящее напоминание закроется само; потом похвали коротко, одной фразой. Отметил по ошибке — "
            "mark_done с undo. «Что я сегодня сделал», «мои достижения» — done_report. "
