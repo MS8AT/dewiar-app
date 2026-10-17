@@ -38,7 +38,10 @@ else:
 # Два непрозрачных окна: карточка и значок (переключение — set_mode). Скругление — формой окна (X Shape на Linux,
 # SetWindowRgn на Windows), тень рисует сама система (GNOME даёт тень непрозрачным окнам без рамки). Прозрачное
 # окно не годится: на части систем его полупрозрачные пиксели накапливаются между кадрами.
-BASE_SIZES = {"card": (300, 420), "mini": (96, 96)}
+# Значок-шарик убран (отзыв 17.10: «шарик мелкий, часто не понятно, слушает она или нет… может этот кружочек вообще
+# убрать?») — окно одно, карточка; «Спрячься» и «—» прячут в трей. Код формы "mini" и hud.html?mode=mini остаются
+# безвредными, но окно значка не создаётся (минус один WebKit — быстрее запуск и меньше памяти).
+BASE_SIZES = {"card": (300, 420)}
 SIZES = dict(BASE_SIZES)                # под масштаб интерфейса (ui.zoom) — set_zoom_sizes; меняется на месте
 TITLES = {"card": "Dewiar", "mini": "Dewiar — значок"}
 CARD_RADIUS = 28
@@ -2039,7 +2042,7 @@ def main():
     api = Api(token)
 
     set_zoom_sizes(uis.get("zoom"))                          # окна виджета — под масштаб интерфейса
-    mode = "mini" if uis.get("hud_mode") == "mini" else "card"
+    mode = "card"                                            # шарика больше нет: сохранённый hud_mode «mini» — тоже карточка
     x, y = uis.get("hud_x"), uis.get("hud_y")                 # положение карточки
     if x is None or y is None:
         try:
@@ -2047,7 +2050,7 @@ def main():
             x, y = scr.width - SIZES["card"][0] - MARGIN, scr.height - SIZES["card"][1] - MARGIN - 40
         except Exception:  # noqa: BLE001
             x, y = 100, 100
-    for m in ("card", "mini"):
+    for m in ("card",):
         w, h = SIZES[m]
         api.wins[m] = webview.create_window(TITLES[m], api._url("hud.html", "&mode=" + m), width=w, height=h,
                                             resizable=False, min_size=(w, h), frameless=True, easy_drag=False,
@@ -2175,12 +2178,12 @@ def main_win(args, extra):
         return
 
     set_zoom_sizes(uis.get("zoom"))                          # окна виджета — под масштаб интерфейса
-    mode = "mini" if uis.get("hud_mode") == "mini" else "card"
+    mode = "card"                                            # шарика больше нет: сохранённый hud_mode «mini» — тоже карточка
     x, y = uis.get("hud_x"), uis.get("hud_y")
     if x is None or y is None:
         l, t_, r, b = winshell.work_area()
         x, y = int(r - SIZES["card"][0] - MARGIN), int(b - SIZES["card"][1] - MARGIN)
-    for m in ("card", "mini"):
+    for m in ("card",):
         w, h = SIZES[m]
         # shadow=False (_no_shadow): pywebview 6 для окон «с тенью» включает рамку DWM (DwmExtendFrameIntoClientArea +
         # NCRENDERING_POLICY) — с ней Windows перестаёт резать окно по форме SetWindowRgn: углы остаются острыми,

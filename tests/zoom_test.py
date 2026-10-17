@@ -48,8 +48,8 @@ api.save_pos = lambda m="card": [1000, 600]            # карточка 300×4
 api._place = lambda m, cx, cy: placed.append((m, cx, cy)) or [cx, cy]
 A.set_zoom_sizes(1)
 p = api.set_zoom(0.8)
-ok(A.SIZES == {"card": (240, 336), "mini": (77, 77)} and ("resize", 240, 336) in gws["card"].calls and ("req", 77, 77) in gws["mini"].calls,
-   f"виджет 80 %: окна 240×336 и 77×77: {A.SIZES}")
+ok(A.SIZES == {"card": (240, 336)} and ("resize", 240, 336) in gws["card"].calls,
+   f"виджет 80 %: окно 240×336 (шарика больше нет): {A.SIZES}")
 ok(p == [1060, 684] and placed == [("card", 1060, 684)], f"правый нижний угол карточки на месте (1300, 1020): {p}")
 ok(A.card_r() == 22, f"скругление окна — под масштаб: {A.card_r()}")
 ok(api.set_zoom(0.8) is None and len(placed) == 1, "тот же масштаб — окна не трогаем")

@@ -366,6 +366,12 @@
   pre .cp { position: sticky; float: right; left: 100%; top: 0; margin: -4px -6px 0 8px; border: 0; border-radius: 8px; padding: 3px 8px;
             background: rgba(255,255,255,.1); color: var(--ink); font: 11px "Manrope", sans-serif; cursor: pointer; }
   pre .cp:hover { background: rgba(255,255,255,.18); }
+  /* Подсказки кнопок — свои, внутри карточки (отзыв 17.10: системная подсказка у портрета вылезала за края виджета и
+     обрезалась). title переезжает в data-tip при наведении; подсказка переносится по словам и не выходит за окно. */
+  #htip { position: fixed; z-index: 99; max-width: calc(100vw - 20px); padding: 7px 11px; border-radius: 12px; pointer-events: none;
+          background: rgba(14,14,18,.96); color: #ECEAF5; font: 500 12px/1.4 "Manrope", sans-serif; box-shadow: 0 10px 26px -10px rgba(0,0,0,.7);
+          opacity: 0; transition: opacity .12s; }
+  #htip.on { opacity: 1; }
 </style>
 </head>
 <body>
@@ -408,7 +414,6 @@
     <button class="btn" id="b-bug" title="Сообщить о проблеме — сниму экран и открою форму жалобы"><svg viewBox="0 0 24 24"><rect x="6.5" y="7" width="11" height="14.5" rx="5.5"/><path d="M8.8 7.6a3.2 3.2 0 0 1 6.4 0M12 11.5v10M6.5 12.5H2.5M21.5 12.5h-4M6.8 17.5 3 19.8M17.2 17.5l3.8 2.3M7.5 9.2 4 6.5M16.5 9.2 20 6.5"/></svg></button>
   </div>
   <div id="corner">
-    <button class="btn" id="b-mini" title="Свернуть в значок (ассистент продолжит слушать)"><svg viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg></button>
     <button class="btn" id="b-tray" title="Спрятать — появлюсь сам, когда позовёте по имени или придёт напоминание"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
   </div>
   <div id="bar">
@@ -1112,7 +1117,6 @@ function setMode(m, auto = false) {
   const a = api(); if (!a || m === mode) return;
   a.set_mode(m, auto).then(p => { if (p && !auto) core.call("settings_save", { patch: { ui: { hud_mode: m, hud_x: p[0], hud_y: p[1] } } }).catch(() => {}); }).catch(() => {});
 }
-$("b-mini").onclick = () => setMode("mini");
 $("b-team").onclick = (e) => { e.stopPropagation(); $("team").classList.toggle("show"); };
 document.addEventListener("click", (e) => { if (!e.target.closest("#team")) $("team").classList.remove("show"); });
 $("grow").onclick = () => setMode("card");
@@ -1305,6 +1309,30 @@ $("askin").addEventListener("keydown", (e) => {
   else if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); sendAsk(); }
   if (e.key === "Escape") $("b-type").click();
 });
+</script>
+<div id="htip" role="tooltip" aria-hidden="true"></div>
+<script>
+(function () {                                  // подсказки кнопок внутри карточки (см. #htip в стилях)
+  const tip = document.getElementById("htip"); let cur = null, timer = 0;
+  const hide = () => { clearTimeout(timer); tip.classList.remove("on"); cur = null; };
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target.closest && e.target.closest("[title], [data-tip]");
+    if (!el || el === cur) return;
+    if (el.hasAttribute("title")) { el.dataset.tip = el.getAttribute("title"); el.removeAttribute("title"); }
+    if (!el.dataset.tip) return;
+    hide(); cur = el;
+    timer = setTimeout(() => {
+      if (cur !== el || !el.isConnected) return;
+      tip.textContent = el.dataset.tip;
+      const r = el.getBoundingClientRect(), w = Math.min(tip.offsetWidth, innerWidth - 20), h = tip.offsetHeight;
+      const x = Math.max(10, Math.min(innerWidth - w - 10, r.left + r.width / 2 - w / 2));
+      const y = r.bottom + 8 + h <= innerHeight - 6 ? r.bottom + 8 : Math.max(6, r.top - h - 8);
+      tip.style.left = x + "px"; tip.style.top = y + "px"; tip.classList.add("on");
+    }, 550);
+  });
+  document.addEventListener("mouseout", (e) => { if (cur && !cur.contains(e.relatedTarget)) hide(); });
+  ["mousedown", "wheel", "keydown", "blur"].forEach(k => addEventListener(k, hide, true));
+})();
 </script>
 </body>
 </html>
