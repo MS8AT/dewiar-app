@@ -1457,9 +1457,21 @@ class Api:
         import threading
         import webview
         old = getattr(self, "_capture", None)
+        if old is not None and getattr(self, "_capture_shown", False):
+            # окно уже на экране — то же сочетание прячет его (отзыв 17.10: окно уехало за край экрана, и закрыть его было
+            # нечем — крестик оказался за пределами экрана)
+            self.close_capture()
+            return True
         if old is not None:                            # окно не закрываем, а прячем — второй раз оно появляется сразу
             try:
+                self._capture_shown = True
                 old.show()
+                if not WIN:
+                    def place():
+                        from gi.repository import Gtk
+                        _keep_on_screen(next((g for g in Gtk.Window.list_toplevels() if g.get_title() == CAPTURE_TITLE), None), True)
+                        return True
+                    self._gtk(place)                       # снова там, где мышь, и целиком на экране
                 old.evaluate_js("window.capOpen && capOpen()")
                 self._focus_title(CAPTURE_TITLE)
                 return True
@@ -1476,6 +1488,7 @@ class Api:
             x, y = int(ox + (sw - w) / 2), int(oy + (sh - h) / 2.6)
         except Exception:  # noqa: BLE001
             x = y = None
+        self._capture_shown = True
         win = webview.create_window(CAPTURE_TITLE, self._url("capture.html"), width=w, height=h, x=x, y=y,
                                     resizable=False, frameless=True, easy_drag=False, on_top=True, focus=True, hidden=True,
                                     background_color="#0d0b14", js_api=self, **_no_shadow())   # тянуть — за заголовок: в поле выделяют текст
@@ -1505,8 +1518,7 @@ class Api:
                     # заголовок двигает оконный менеджер, как у суфлёра: на трёх мониторах окно не прыгает на другой экран
                     self._wm_drag(gw, lambda px, py, ww: py < CAPTURE_BAR and px < ww - CAPTURE_BTNS)
                     gw.show_all()
-                    if x is not None:
-                        gw.get_window().move(x, y)
+                    _keep_on_screen(gw, True)              # на том мониторе, где мышь, и целиком на экране
                     _present(gw)
                     return True
                 if not self._gtk(run, timeout=5):
@@ -1536,6 +1548,7 @@ class Api:
 
     def close_capture(self):
         win = getattr(self, "_capture", None)
+        self._capture_shown = False
         if win is not None:
             try:
                 win.hide()
@@ -1825,6 +1838,45 @@ class LinuxTray:
 
 
 _TRAY = []
+
+
+def _keep_on_screen(gw, center=False):
+    """Окно целиком на экране (отзыв 17.10: окно «Закинуть идею» уехало на другой монитор, верх — за краем экрана,
+    крестик недоступен). center — поставить по центру монитора, где сейчас мышь (там, где человек работает). Ещё раз
+    проверяем после того, как оконный менеджер расставит окно (через 150 и 600 мс). Главный поток GTK."""
+    if gw is None:
+        return
+    from gi.repository import Gdk, GLib
+
+    def fit(first):
+        try:
+            gdkw = gw.get_window()
+            if gdkw is None:
+                return False
+            disp = Gdk.Display.get_default()
+            w, h = gw.get_size()
+            if first and center:
+                _, px, py = disp.get_default_seat().get_pointer().get_position()
+                mon = disp.get_monitor_at_point(px, py)
+            else:
+                x0, y0 = gdkw.get_root_origin()
+                mon = disp.get_monitor_at_point(x0 + w // 2, max(y0, 0) + h // 2)
+            g = mon.get_workarea()
+            if first and center:
+                x, y = g.x + (g.width - w) // 2, g.y + int((g.height - h) / 2.6)
+            else:
+                x, y = gdkw.get_root_origin()
+            nx = max(g.x, min(x, g.x + g.width - w))
+            ny = max(g.y, min(y, g.y + g.height - h))
+            if (nx, ny) != (x, y) or (first and center):
+                gw.move(nx, ny)
+                gdkw.move(nx, ny)
+        except Exception as e:  # noqa: BLE001
+            print(f"Окно на экране: {e}", file=sys.stderr)
+        return False
+    fit(True)
+    GLib.timeout_add(150, lambda: fit(False))
+    GLib.timeout_add(600, lambda: fit(False))
 
 
 def _present(gw):

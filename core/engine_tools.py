@@ -390,7 +390,35 @@ class ToolsMixin:
         tool_ev("tool", name="close_call", title="Близкие: позвонить", status="done", detail=p["name"], result=f"звоню {r.get('name')}")
         orig = re.search(r"\s+".join(map(re.escape, m.group("who").split())), (text or "").replace("ё", "е").replace("Ё", "Е"), re.I)
         who = orig.group(0) if orig else m.group("who")                          # как сказал человек: «Людмиле», «маме»
-        self._say_quick(f"Звоню {who}" + (" по видео." if video else "."), text, via)
+        self._say_quick(f"Звоню {who}" + (" по видео." if video else "."), text, via, acts=["close_call"])
+        return True
+
+    def _youtube_cmd(self, text, via=None):
+        """«Включи смешное видео на YouTube», «найди на ютубе лекцию про …» — сразу play_youtube, без модели (съёмка 17.10:
+        раз сработало, потом раз за разом «Включаю.» — и ничего: модель повторяла прошлый ответ, не вызывая действие)."""
+        t = re.sub(r"[?!.,«»\"]+", " ", (text or "").lower().replace("ё", "е"))
+        t = re.sub(r"\s+", " ", t).strip()
+        yt = r"(?:ютуб[еау]?|ютьюб[еау]?|youtube|you tube)"
+        m = (re.fullmatch(rf"(?:[а-я]+ )?(?:пожалуйста )?(?:включи|поставь|найди|открой|покажи)(?: мне)? (?P<q>.+?) (?:на|в|с|из) {yt}(?: пожалуйста)?", t)
+             or re.fullmatch(rf"(?:[а-я]+ )?(?:пожалуйста )?(?:включи|поставь|найди|открой|покажи)(?: мне)? (?:на|в) {yt} (?P<q>.+?)(?: пожалуйста)?", t))
+        if not m:
+            return False
+        q = re.sub(r"\b(?:какое-нибудь|какой-нибудь|какую-нибудь|что-нибудь|какое-то|какой-то|мне|нам)\b", " ", m.group("q"))
+        q = re.sub(r"\s+", " ", q).strip()
+        if not q or len(q) > 120:
+            return False
+        import tools as T
+        self.emit("tool", name="play_youtube", title="YouTube: включить", status="run", args={"query": q}, detail=q)
+        log.info("🛠  play_youtube %s (быстро, без модели)", q)
+        try:
+            res = T.t_play_youtube({"query": q}, {})
+        except Exception as e:  # noqa: BLE001
+            self.emit("tool", name="play_youtube", title="YouTube: включить", status="error", error=str(e))
+            self._say_quick(f"Не получилось открыть YouTube: {e}", text, via)
+            return True
+        self.emit("tool", name="play_youtube", title="YouTube: включить", status="done", detail=q, result=str(res)[:300])
+        say = str(res).replace("Открыл поиск", "Открываю поиск").replace("Открыл на", "Включаю на")
+        self._say_quick(say, text, via, acts=["play_youtube"])
         return True
 
     _SEND_RX = re.compile(r"^\s*(?:[А-ЯЁ][а-яё]+\s*,\s*)?(?:пожалуйста,?\s*)?(?:отправь|напиши|передай|скинь)(?:\s+пожалуйста)?"
@@ -430,7 +458,7 @@ class ToolsMixin:
             self._say_quick(f"Не получилось отправить: {e}", text, via)
             return True
         tool_ev("tool", name="close_send", title="Близкие: написать", status="done", detail=p["name"], result=f"отправлено {p['name']}")
-        self._say_quick(f"Отправила {who}.", text, via)
+        self._say_quick(f"Отправила {who}.", text, via, acts=["close_send"])
         return True
 
     def _timer_cmd(self, text, via=None):
@@ -941,7 +969,7 @@ class ToolsMixin:
         self._say_quick(msg, said, via)
         return True
 
-    def _say_quick(self, msg, said, via=None, then=None, note=None):
+    def _say_quick(self, msg, said, via=None, then=None, note=None, acts=None):
         """Ответить одной фразой без модели (поставил напоминание, записал заметку) и запомнить в разговоре.
         then() — когда фраза сказана (и если её не перебили): «спрячься» прячет виджет уже после «Прячусь».
         note — как получен ответ (расчёт с числами): только в историю, чтобы на «как ты посчитал?» модель знала."""
@@ -964,7 +992,7 @@ class ToolsMixin:
         def run():
             self._speak_worker(turn, q)
             self.history += [{"role": "user", "content": said}, {"role": "assistant", "content": msg + (f" (Расчёт: {note}.)" if note else ""),
-                                                                 "who": self.s.get("persona")}]
+                                                                 "who": self.s.get("persona"), **({"acts": list(acts)} if acts else {})}]
             self._conv_after()
             with self._turn_lock:
                 if self.turn is turn:

@@ -120,6 +120,46 @@ ok(r == [True, True, True, True, False, False, False]
    and said2[0] == "Отправила Людмиле.",
    f"сообщение близкому — сразу, без модели; письмо, Telegram, стих — модели: {r}, {sent}")
 ok("self._send_cmd(text, via)" in (ROOT / "core/engine_answer.py").read_text(encoding="utf-8"), "быстрая отправка стоит перед моделью")
+# «Включи смешное видео на YouTube» — сразу play_youtube, без модели (съёмка 17.10: «говорит, что включает, — и ничего»)
+import tools as TT  # noqa: E402
+opened = []
+TT.launch = lambda cmd, **k: opened.append(cmd[-1])
+said3 = []
+e3 = types.SimpleNamespace(emit=lambda *a, **k: None, _say_quick=lambda msg, text, via=None, **k: said3.append((msg, k.get("acts"))))
+r = [ET.ToolsMixin._youtube_cmd(e3, q) for q in ("Включи смешное видео на YouTube.", "найди мне на YouTube какое-нибудь смешное видео.",
+                                                  "Лира, включи на ютубе лекцию про космос", "Включи музыку", "Открой YouTube")]
+ok(r == [True, True, True, False, False] and len(opened) == 3 and all("youtube.com" in u for u in opened)
+   and all(a == ["play_youtube"] for _, a in said3),
+   f"«включи смешное видео на YouTube» — ролик открывается сразу, без модели; в истории помечено действие: {r}, {said3[:1]}")
+# ссылка — в новом окне браузера (видео открывалось вкладкой в свёрнутом окне на другом мониторе)
+import tempfile as _tf  # noqa: E402
+home = Path(_tf.mkdtemp()); (home / ".local/share/applications").mkdir(parents=True)
+(home / ".local/share/applications/google-chrome.desktop").write_text("[Desktop Entry]\nExec=/usr/bin/google-chrome-stable %U\n"
+                                                                      "[Desktop Action new-window]\nExec=/usr/bin/google-chrome-stable --new-window\n")
+real_run, real_dry, real_home = TT.subprocess.run, TT.DRY, os.environ.get("HOME")
+TT.subprocess.run = lambda *a, **k: types.SimpleNamespace(stdout="google-chrome.desktop\n")
+TT.DRY, os.environ["HOME"] = None, str(home)
+try:
+    bc = TT.browser_cmd("https://www.youtube.com/watch?v=x")
+    TT.subprocess.run = lambda *a, **k: types.SimpleNamespace(stdout="org.gnome.Epiphany.desktop\n")
+    bc2 = TT.browser_cmd("https://x.ru")
+finally:
+    TT.subprocess.run, TT.DRY = real_run, real_dry
+    if real_home:
+        os.environ["HOME"] = real_home
+ok(bc == ["/usr/bin/google-chrome-stable", "--new-window", "https://www.youtube.com/watch?v=x"] and bc2 == ["xdg-open", "https://x.ru"],
+   f"ролик и сайты — в новом окне браузера (Chrome/Firefox), прочие — как раньше: {bc}, {bc2}")
+# в истории за словами видно действие — модель не копирует «Включаю.» без вызова
+import engine_answer as EA  # noqa: E402
+w = EA.team_window([{"role": "user", "content": "включи видео"}, {"role": "assistant", "content": "Включаю.", "who": "lira", "acts": ["play_youtube"]}],
+                   "lira", lambda x: x)
+ok("выполнено инструментами: play_youtube" in w[-1]["content"] and "СЛОВА НЕ ДЕЙСТВУЮТ" in (ROOT / "core/engine_answer.py").read_text(encoding="utf-8"),
+   "в истории для модели ответ помечен выполненным действием; в подсказке — «слова не действуют, вызывай снова»")
+from llm import CodeFilter  # noqa: E402
+cf = CodeFilter()
+spoken = cf.feed("Включаю.\n[в этом ответе выполнено инструментами: play_youtube]\nГотово.") + cf.flush()
+ok(spoken == "Включаю.\nГотово." and EA.ACTS_RX.sub("", "Включаю. [в этом ответе выполнено инструментами: x]") == "Включаю.",
+   f"пометку модель могла повторить — вслух и на экране её нет: {spoken!r}")
 ok("self._call_cmd(text, via)" in (ROOT / "core/engine_answer.py").read_text(encoding="utf-8"), "быстрый звонок стоит перед моделью")
 ok("or action_claim(text, step_text, called)" in (ROOT / "core/engine_answer.py").read_text(encoding="utf-8"), "проверка стоит в ходе разговора")
 if fails:

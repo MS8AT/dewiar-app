@@ -87,6 +87,44 @@ def launch(cmd):
                      start_new_session=True)
 
 
+_BROWSER_NEW_WINDOW = re.compile(r"chrome|chromium|firefox|yandex|brave|opera|vivaldi|edge|librewolf|floorp|waterfox", re.I)
+
+
+def browser_cmd(url):
+    """Команда открыть адрес в браузере — в НОВОМ окне (отзыв 17.10: «включи смешное видео на YouTube» раз сработало, потом
+    «включаю» — и ничего: ролик открывался новой вкладкой в окне браузера, которое было свёрнуто или на другом мониторе).
+    Браузер по умолчанию (xdg-settings) из семейства Chrome/Firefox — с --new-window; иначе и в тестах — xdg-open."""
+    if DRY or WIN:
+        return ["xdg-open", url]
+    try:
+        desk = subprocess.run(["xdg-settings", "get", "default-web-browser"], capture_output=True, text=True, timeout=3,
+                              env=desktop_env()).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        desk = ""
+    if not desk.endswith(".desktop") or not _BROWSER_NEW_WINDOW.search(desk):
+        return ["xdg-open", url]
+    dirs = [Path.home() / ".local/share/applications", Path("/usr/share/applications"), Path("/usr/local/share/applications"),
+            Path("/var/lib/snapd/desktop/applications"), Path("/var/lib/flatpak/exports/share/applications"),
+            Path.home() / ".local/share/flatpak/exports/share/applications"]
+    for d in dirs:
+        f = d / desk
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        m = re.search(r"^Exec=(.+)$", text.split("[Desktop Action", 1)[0], re.M)
+        if not m:
+            break
+        try:
+            parts = [x for x in shlex.split(m.group(1)) if not x.startswith("%")]
+        except ValueError:
+            break
+        if parts and not any(x in ("--new-window", "-new-window") for x in parts):
+            return parts + ["--new-window", url]
+        break
+    return ["xdg-open", url]
+
+
 # ---------- инструменты ----------
 
 def t_open_url(a, ctx):
@@ -95,7 +133,7 @@ def t_open_url(a, ctx):
         url = "https://" + url
     if not re.match(r"^https?://[^\s/$.?#].[^\s]*$", url):
         raise ToolError("это не похоже на адрес сайта")
-    launch(["xdg-open", url])
+    launch(browser_cmd(url))
     return f"Открыл в браузере: {url}"
 
 
@@ -528,7 +566,7 @@ def t_yandex_music(a, ctx):
     path = "search?text=" + urllib.parse.quote(q) if q else ""
     app = yandex_music_installed()
     url = ("yandexmusic://" + path) if app else (MUSIC_APPS["yandex"]["web"] + "/" + path)
-    launch(["xdg-open", url])
+    launch(browser_cmd(url))
     hook = ctx.get("music_app")
     if hook:
         hook("yandex")
@@ -608,7 +646,7 @@ def t_play_youtube(a, ctx):
             log.info("Поиск на YouTube: %s", ex)
     if not url:
         url, title = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(q), None
-    launch(["xdg-open", url])
+    launch(browser_cmd(url))
     return f"Открыл на YouTube: «{title}»." if title else f"Открыл поиск на YouTube: {q}."
 
 
@@ -718,7 +756,7 @@ def t_media(a, ctx):
 def t_play_music(a, ctx):
     q = (a.get("query") or "").strip()
     url = "https://music.youtube.com/search?q=" + urllib.parse.quote(q) if q else "https://music.youtube.com/"
-    launch(["xdg-open", url])
+    launch(browser_cmd(url))
     return f"Открыл YouTube Music{': ' + q if q else ''}. Пользователь нажмёт воспроизведение."
 
 

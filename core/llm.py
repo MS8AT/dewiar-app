@@ -1267,6 +1267,7 @@ class CodeFilter:
 
     NOTE = "Команды и код — на экране. "
     _CMD = re.compile(r"^\s*(\$ |sudo |>>> |#!/)")
+    _ACTS = "[в этом ответе выполнено"
 
     def __init__(self):
         self.pend, self.code, self.told, self.skip, self.start = "", False, False, False, True
@@ -1298,8 +1299,11 @@ class CodeFilter:
                     if len(lead) >= 3 or (lead and not "```".startswith(lead)):
                         self.start, self.skip, self.pend = False, True, ""
                     continue
+                if lead.startswith(self._ACTS):           # пометка истории «[в этом ответе выполнено…]» — вслух не читаем
+                    self.start, self.skip, self.pend = False, True, ""
+                    continue
                 if lead and ("```".startswith(lead) or "$ ".startswith(lead) or "sudo ".startswith(lead)
-                             or ">>> ".startswith(lead) or "#!/".startswith(lead)):
+                             or ">>> ".startswith(lead) or "#!/".startswith(lead) or self._ACTS.startswith(lead)):
                     continue                              # ещё не ясно — ждём пару символов
                 if self._CMD.match(self.pend):
                     out += self._note()

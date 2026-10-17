@@ -27,7 +27,12 @@ def team_window(hist, me, name_of):
     out, i = [], 0
     while i < len(msgs):
         if owner[i] == me:
-            out.append({"role": msgs[i]["role"], "content": msgs[i]["content"]})
+            c = msgs[i]["content"]
+            if msgs[i]["role"] == "assistant" and msgs[i].get("acts"):
+                # что было сделано за этим ответом (съёмка 17.10: в истории оставались одни слова «Звоню», «Включаю»,
+                # «Отправила» — и модель решала, что достаточно сказать их ещё раз, не вызывая действие)
+                c += "\n[в этом ответе выполнено инструментами: " + ", ".join(msgs[i]["acts"]) + "]"
+            out.append({"role": msgs[i]["role"], "content": c})
             i += 1
             continue
         j, who = i, owner[i]
@@ -42,6 +47,7 @@ def team_window(hist, me, name_of):
     return out
 
 ATT_DEFAULT_Q = "Посмотри вложения и коротко скажи, что в них."
+ACTS_RX = re.compile(r"\s*\[в этом ответе выполнено[^\]]*\]?")       # пометка в истории (team_window) — не для человека
 
 
 def _norm_answer(t):
@@ -126,6 +132,8 @@ class AnswerMixin:
                 return
         if not raw and not quiet and not images and "\n\nВложения:" not in text and self._clock_cmd(text, via):
             return                                       # «сколько времени?», «какое сегодня число?» — по часам, без модели
+        if not raw and not quiet and not images and "\n\nВложения:" not in text and self._youtube_cmd(text, via):
+            return                                       # «включи смешное видео на YouTube» — сразу, без модели
         if not raw and not quiet and not images and "\n\nВложения:" not in text and self._send_cmd(text, via):
             return                                       # «напиши Андрею: привет» — человеку из «Близких» сразу, без модели
         if not raw and not quiet and not images and "\n\nВложения:" not in text and self._call_cmd(text, via):
@@ -307,6 +315,9 @@ class AnswerMixin:
                      "Никогда не говори, что у тебя нет доступа к интернету или свежим данным: погода — инструментом weather (настоящий "
                      "прогноз), новости, курсы, расписания — ищи (web_search) и отвечай по найденному. "
                      "Перед долгим действием можно коротко сказать, что делаешь. После — одной фразой скажи итог. "
+                     "СЛОВА НЕ ДЕЙСТВУЮТ: «включаю», «звоню», «отправила», «ставлю» ничего не делают — делает только вызов "
+                     "инструмента. Просят действие снова (то же видео, звонок, сообщение) — вызывай инструмент снова, каждый раз; "
+                     "не копируй свой прошлый ответ из разговора: там за словами стояли вызовы (они помечены «выполнено инструментами»). "
                      "СЧЁТ: любые вычисления — проценты, суммы, итоги, скидки, курсы, даты, «сколько дней до…» — только "
                      "инструментом calc, никогда в уме; потом назови результат. Просят объяснить, как посчитал, — покажи сам расчёт "
                      "с числами (например «2 350 × 17 / 100 = 399,5»), а не «использовал калькулятор». Просьба с условием («если завтра дождь — "
@@ -1385,7 +1396,7 @@ class AnswerMixin:
                 if fake:
                     turn.full = turn.full.rstrip() + " " + fake
                     self.note(fake)
-                turn.full = fem(turn.full)
+                turn.full = fem(ACTS_RX.sub("", turn.full)).strip()   # пометку «выполнено инструментами» модель могла повторить
                 try:
                     import boundaries
                     if boundaries.refused(turn.full):
@@ -1429,8 +1440,9 @@ class AnswerMixin:
             return
         if turn.full.strip():
             said = text + (" [к сообщению была приложена картинка]" if images else "")
+            acts = list(dict.fromkeys(getattr(turn, "tools_ok", None) or []))
             self.history += [{"role": "user", "content": said},
-                             {"role": "assistant", "content": turn.full.strip(), "who": self.s.get("persona")}]
+                             {"role": "assistant", "content": turn.full.strip(), "who": self.s.get("persona"), **({"acts": acts} if acts else {})}]
             self.last_turn_time = time.monotonic()
             self._conv_after()
             if not turn.via:

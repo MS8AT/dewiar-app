@@ -21,6 +21,23 @@ ok('BASE_SIZES = {"card": (300, 420)}' in app and app.count('for m in ("card",):
    "одно окно виджета — карточка; сохранённый «mini» тоже открывается карточкой (Linux и Windows)")
 ok('id="b-mini"' not in hud and "setMode(\"mini\")" not in hud, "в карточке нет кнопки «свернуть в значок»")
 
+# «Закинуть идею» (отзыв 17.10: окно уехало на другой монитор, верх за краем экрана — закрыть было нечем): ставим на монитор,
+# где мышь, и держим целиком в рабочей области; то же сочетание ещё раз — окно прячется
+cap = app.split("    def show_capture", 1)[1].split("    def _focus_title", 1)[0]
+ok("_keep_on_screen(gw, True)" in cap and "self.close_capture()" in cap and "def _keep_on_screen(gw, center=False)" in app
+   and "get_workarea()" in app.split("def _keep_on_screen", 1)[1][:2500],
+   "окно идеи: на мониторе с мышью и целиком на экране; повторное сочетание — прячет")
+import types  # noqa: E402
+sys.path.insert(0, str(ROOT / "ui"))
+try:
+    import app as A  # noqa: E402
+    calls = []
+    st = types.SimpleNamespace(_capture=object(), _capture_shown=True, close_capture=lambda: calls.append("close"))
+    r = A.Api.show_capture(st)
+    ok(r is True and calls == ["close"], f"окно идеи на экране — сочетание его прячет: {calls}")
+except ImportError as e:
+    print(f"(ui/app.py не импортируется здесь: {e} — проверено по тексту)")
+
 from playwright.sync_api import sync_playwright  # noqa: E402
 with sync_playwright() as p:
     b = p.chromium.launch(); pg = b.new_page(viewport={"width": 300, "height": 420})
