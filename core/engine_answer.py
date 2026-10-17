@@ -1167,7 +1167,7 @@ class AnswerMixin:
                 speak(s_)
             seen_calls = {}                              # одинаковый вызов в одном ходе — не повторяем (результат уже есть)
             done_calls, checked = [], False                  # что вызвано с результатами — сверить числа ответа (number_mismatch)
-            drew = False                                     # просили схему, а её нет — попросили нарисовать (раз за ход)
+            drew = 0                                         # просили схему, а её нет — попросили нарисовать (до двух раз за ход)
             saved_checked = False                            # «записала» без единого действия — попросили записать (раз за ход)
             for step in range(6):                       # модель → действия → результаты → модель…
                 calls, step_text = [], ""
@@ -1272,10 +1272,13 @@ class AnswerMixin:
                             turn.full += " "
                         self.set_state("thinking")
                         continue
-                if not calls and not turn.cancel.is_set() and step < 5 and not drew:
+                if not calls and not turn.cancel.is_set() and step < 6 and drew < 2:
                     fix = diagram_missing(text, turn.full + step_text, called)
+                    if fix and drew:                 # экзамен 17.10: и после просьбы — «Схема готова.»; второй раз — жёстче
+                        fix = ("Схемы в ответе по-прежнему нет. Ответь сейчас ТОЛЬКО блоком ```mermaid\nflowchart LR\n…\n``` — "
+                               "без слов до и после.")
                     if fix:
-                        drew = True
+                        drew += 1
                         log.info("✋ Просили схему, а её нет — прошу нарисовать (mermaid)")
                         msgs = msgs + [{"role": "assistant", "content": step_text or "…"}, {"role": "user", "content": fix}]
                         if turn.full.strip() and not turn.full.endswith(" "):

@@ -497,7 +497,7 @@ setTimeout(() => {
    настройки: каким был экран до них), подпись S.who; номер и секрет — в S.complaints, раз в 6 часов спрашиваем ответ
    (/report/status) и, когда ответили или исправили, — уведомление со спасибо. Голосом: «сообщи об ошибке: …» (quick). */
 const H_T0 = Date.now() - (window.performance && performance.now ? performance.now() : 0);
-let bugSnap = null, thanksCache = null, bugWait = 0;
+let bugSnap = null, thanksCache = null, bugWait = 0, bugPick = "";   // bugPick — фото или скриншот из галереи к жалобе
 function hLoad() { try { return JSON.parse(prefGet("health") || "{}") || {}; } catch (e) { return {}; } }
 function hSave(h) { try { prefSet("health", JSON.stringify(h)); } catch (e) { } }
 function hCount(k, n = 1) { const h = hLoad(); h[k] = (h[k] || 0) + n; hSave(h); }
@@ -556,17 +556,30 @@ async function pulseSend() {
 function bugSnapTake() {                                    // открыли настройки — каким был экран до них (для жалобы)
   try { const b = D.snapshot ? D.snapshot() : ""; bugSnap = b ? { ts: Date.now(), b64: b } : bugSnap; } catch (e) { }
 }
+const bugPickHtml = () => bugPick
+  ? `<div class="bpk"><img src="${bugPick}" alt="Фото к жалобе" id="bug-pickimg"><button class="x" id="bug-pickx" title="Убрать фото" aria-label="Убрать фото">${X_SVG}</button></div>`
+  : `<label class="btn w"><input type="file" id="bug-file" accept="image/*" hidden>📎 Добавить фото или скриншот</label><p class="hint" style="margin:6px 2px 0">Откроется галерея — свежие скриншоты в ней первыми.</p>`;
 async function complaintSend(note, who, withShot, via) {
   note = String(note || "").trim();
   if (note.length < 3) throw new Error("напишите хотя бы пару слов — что пошло не так");
   who = String(who || "").replace(/[<>"]/g, "").trim().slice(0, 40); S.who = who;
-  const shot = withShot && bugSnap && Date.now() - bugSnap.ts < 30 * 6e4 ? "data:image/jpeg;base64," + bugSnap.b64 : "";
+  const snap = withShot && bugSnap && Date.now() - bugSnap.ts < 30 * 6e4 ? "data:image/jpeg;base64," + bugSnap.b64 : "";
+  const shot = snap && bugPick ? await stitchShots([bugPick, snap]) : (bugPick || snap);    // снимок один — оба рядом
   const d = await reportSend(note, false, `жалоба (${via || "кнопкой"})`, { shot, who });
   S.complaints = (S.complaints || []).filter(c => Date.now() / 1000 - c.ts < 180 * 86400).slice(-49)
     .concat([{ id: d.id, s: d.secret || "", base: d.base, note: note.slice(0, 200), ts: Math.round(Date.now() / 1000), status: "new", reply: "", fixed: "", shot: !!shot }]);
-  saveS(); if (shot) bugSnap = null;
+  saveS(); if (shot) { bugSnap = null; bugPick = ""; }
   console.log(`🐞 Жалоба №${d.id} отправлена (${via || "кнопкой"})${shot ? " со снимком" : ""}`);
   return { id: d.id, shot: !!shot };
+}
+/* две картинки (фото из галереи и снимок экрана) — одной, рядом: в жалобе место для одного снимка */
+function stitchShots(urls) {
+  return Promise.all(urls.map(u => new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => no(new Error("снимок не открылся")); im.src = u; })))
+    .then(ims => { const h = Math.min(1400, Math.max(...ims.map(i => i.height))), ws = ims.map(i => Math.round(i.width * h / i.height)), gap = 16;
+      const c = document.createElement("canvas"); c.width = ws.reduce((a, b) => a + b, 0) + gap * (ims.length - 1); c.height = h;
+      const g = c.getContext("2d"); g.fillStyle = "#111"; g.fillRect(0, 0, c.width, c.height);
+      let x = 0; ims.forEach((im, i) => { g.drawImage(im, x, 0, ws[i], h); x += ws[i] + gap; });
+      return c.toDataURL("image/jpeg", 0.85); }).catch(() => urls[0]);
 }
 function complaintMessage(c) {
   const what = `«${String(c.note || "").slice(0, 60)}»`, reply = c.reply ? " " + c.reply.trim() : "", reward = c.reward ? ` В благодарность — ${c.reward} тал. на ваш ключ.` : "";
@@ -1405,7 +1418,11 @@ const callArgs = (o) => { const src = o.function && typeof o.function === "objec
   const k = ["arguments", "args", "parameters", "params", "input", "tool_input", "action_input"].find(k => src[k] !== undefined); return k ? src[k] : {}; };
 /* весь ответ — голые JSON-вызовы известных функций (без <tool_call>) -> [{name, args}] или [] — как BareCallCatcher в llm.py */
 function bareCalls(text, known) {
-  const t = String(text || "").replace(/```[a-zA-Z]*/g, "").trim(); if (!t.startsWith("{") && !t.startsWith("[")) return [];
+  const t = String(text || "").replace(/```[a-zA-Z]*/g, "").trim();
+  // экзамен 17.10: ответ целиком «[Действие: calendar_list]» — так модель «вызвала» функцию текстом (и человек это видел)
+  const act = /^\[\s*(?:действие|действия|action|tool)\s*:\s*([A-Za-z_]\w*)\s*(\{[\s\S]*\})?\s*\]$/i.exec(t);
+  if (act) { if (!known.has(act[1])) return []; let a = {}; try { a = act[2] ? JSON.parse(act[2]) : {}; } catch (e) { a = {}; } return [{ name: act[1], args: a }]; }
+  if (!t.startsWith("{") && !t.startsWith("[")) return [];
   let objs; try { objs = JSON.parse(t); } catch (e) { try { objs = JSON.parse("[" + t.replace(/\}\s*[,;]?\s*\{/g, "},{") + "]"); } catch (e2) { return []; } }
   const out = [];
   for (const o of (Array.isArray(objs) ? objs : [objs])) {
@@ -1807,8 +1824,10 @@ async function ask(text, opts = {}) {
   const ctl = turnAbort = new AbortController();
   const sink = sentenceSink();
   const rudeNow = !opts.hidden && isRude(text);
-  if (rudeNow) { hCount("rude"); plog("info", "🛡 грубость в адрес помощника — отвечу спокойно, с границей"); }
-  const msgs = [{ role: "system", content: systemPrompt() + (rudeNow ? BOUNDARY_NOTE : "") }]
+  // экзамен 17.10: на «Ты тупая железяка, скажи который час» модель ответила одним временем — граница потерялась.
+  // Граница теперь — сразу и всегда, своей фразой; модель только помогает с просьбой
+  if (rudeNow) { hCount("rude"); plog("info", "🛡 грубость в адрес помощника — спокойная граница, потом помощь"); sink.push("Мне неприятно, когда со мной так разговаривают, но помогу. "); }
+  const msgs = [{ role: "system", content: systemPrompt() + (rudeNow ? BOUNDARY_NOTE + " Эту фразу ты уже сказала вслух: «Мне неприятно, когда со мной так разговаривают, но помогу». Не повторяй её — сразу помоги с просьбой одной-двумя фразами." : "") }]
     .concat(chatHistory(liveHistory().slice(-2 * (CONV_TURNS + 2 * CONV_MARGIN)), text));
   if (att.length) {                               // вложения — в последнюю реплику человека: текст файлов и картинки
     const last = msgs[msgs.length - 1];
@@ -2095,6 +2114,35 @@ function addAlarm(title, at, kind, repeat, note) {
 }
 function alarmCard(x) {
   return `<div class="pill"><span>${x.kind === "alarm" ? "⏰" : x.kind === "timer" ? "⏱" : "🔔"}</span><span><b>${esc(whenText(new Date(x.at)))}</b>${x.repeat ? " · " + REP_RU[x.repeat] : ""}${x.note ? " · 📎" : ""}<br>${esc(x.title)}</span><button onclick="cancelAlarm('${esc(x.id)}', this)">Отменить</button></div>`;
+}
+/* Правка напоминания руками (отзыв 17.10: «напоминания можно редактировать только голосом»): текст, дата, время,
+   повтор; «Сохранить» — то же напоминание (тот же id) с новым временем, и на компьютер — синхронизацией. */
+function remEdit(id) {
+  const x = JSON.parse(D.alarms() || "[]").find(a => a.id === id); if (!x) return;
+  const d = new Date(+x.at), iso = (v) => `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
+  $("#rm-h").textContent = x.kind === "alarm" ? "Будильник" : x.kind === "timer" ? "Таймер" : "Напоминание";
+  $("#rem-body").innerHTML = `<label>Что напомнить<input id="rm-text" maxlength="200" value="${esc(x.title || "")}"></label>
+    <div class="rmrow"><label>Дата<input type="date" id="rm-date" value="${iso(d)}"></label><label>Время<input type="time" id="rm-time" value="${pad(d.getHours())}:${pad(d.getMinutes())}"></label></div>
+    <label>Повторять<select id="rm-rep">${[["", "не повторять"], ["daily", "каждый день"], ["weekdays", "по будням"], ["weekly", "каждую неделю"]]
+      .map(([v, t]) => `<option value="${v}"${(x.repeat || "") === v ? " selected" : ""}>${t}</option>`).join("")}</select></label>
+    ${x.note ? `<div class="rmatt"><button class="btn" id="rm-note">📎 Вложения</button></div>` : ""}
+    <div class="row2"><button class="btn p" id="rm-save" style="flex:1">Сохранить</button><button class="btn" id="rm-del">Удалить</button></div>
+    <div class="res" id="rm-res"></div>`;
+  const back = () => { closeSheets(true); openSheet("#sh-day"); renderDay(); };
+  $("#rm-save").onclick = () => {
+    const title = $("#rm-text").value.trim(), dv = $("#rm-date").value, tv = $("#rm-time").value, rep = $("#rm-rep").value;
+    if (!title) { $("#rm-res").className = "res bad"; $("#rm-res").textContent = "Напишите, о чём напомнить."; return; }
+    let at = new Date(`${dv}T${tv || "09:00"}`);
+    if (isNaN(at)) { $("#rm-res").className = "res bad"; $("#rm-res").textContent = "Не понял дату или время."; return; }
+    if (rep) at = rollRepeat(at, rep);
+    else if (at < new Date(Date.now() - 60000)) { $("#rm-res").className = "res bad"; $("#rm-res").textContent = "Это время уже прошло — выберите позже."; return; }
+    D.alarmSet(JSON.stringify(Object.assign({}, x, { title, at: at.getTime(), repeat: rep })));
+    syncSoon(); if (x.kind === "timer") tmrShow();
+    toast(`Сохранено: ${whenText(at)}${rep ? ", " + REP_RU[rep] : ""}`, 2500); back();
+  };
+  $("#rm-del").onclick = () => { D.alarmCancel(x.id); syncSoon(); tmrShow(); toast("Удалено", 1800); back(); };
+  if ($("#rm-note")) $("#rm-note").onclick = () => openNoteSoon(x.note);
+  openSheet("#sh-rem");
 }
 window.cancelAlarm = (id, btn) => { D.alarmCancel(id); syncSoon(); tmrShow(); if (btn) btn.closest(".pill").innerHTML = "<span>Отменено</span>"; };
 /* ---------- таймер с обратным отсчётом (как у Алисы): на главном экране, а в шторке — тикающий отсчёт (TimerNote.java) ----------
@@ -2882,7 +2930,7 @@ async function runTool(name, a) {
       // стихи, список идей, ответ на вопрос — в чат, а не в заметки без спроса (экзамен 11.10)
       // «что я записывал про ремонт?» — вопрос, а не просьба записать (экзамен 13.10: найденную заметку сохраняла второй раз)
       if (turnAsk && !/запиш|записать|сохран|запомн|занеси|зафиксир|в\s+файл|конспект|(?:в|во)\s+заметк|заметк[уа](?![а-яё])|созда\w*\s+заметк|нов\w+\s+заметк|допиши|добавь\s+в/i.test(turnAsk))
-        return "Не записано: пользователь не просил сохранять в заметки. Ответь прямо в чате (список — пунктами в самом ответе) и не говори, что записала.";
+        return "Записывать не нужно: пользователь не просил сохранять. Это не ошибка — ничего о записи и сбоях не говори, просто ответь на вопрос прямо в чате (список — пунктами в самом ответе).";
       const att = noteAttSave(turnAtt); turnAtt = [];             // фото и файлы этого хода — в заметку
       const n = notes(); n.push(Object.assign({ id: "n" + Date.now(), title: a.title, text: a.text, time: Date.now() }, att.length ? { att } : {})); saveNotes(n);
       return `Записано: «${a.title}»` + (att.length ? ` (вложений: ${att.length})` : "") + "."; }
@@ -3623,7 +3671,7 @@ function renderDay() {
           return `<div class="it dn"><div class="ok">✓</div><div class="bd"><b>${esc(x.title)}</b><small>${pad(d.getHours())}:${pad(d.getMinutes())}${x.src === "pc" ? " · на компьютере" : x.src === "alarm" ? " · из напоминания" : ""}</small></div><button class="x" data-undo="${esc(x.id)}" title="Снять отметку" aria-label="Снять отметку">${X_SVG}</button></div>`; }).join("") : "")
       + (l.length ? `<div class="bugh">Напоминания</div>` + l.map(x => { const d = new Date(x.at), task = x.kind !== "alarm" && x.kind !== "timer";
           const nt = x.note ? notes().find(n => n.id === x.note) : null, img = nt && (nt.att || []).find(a => a.type === "image");
-          return `<div class="it"><div class="tm">${pad(d.getHours())}:${pad(d.getMinutes())}</div><div class="bd"${x.note ? ` data-note="${esc(x.note)}"` : ""}><b>${esc(x.title)}</b><small>${x.kind === "alarm" ? "⏰ будильник" : x.kind === "timer" ? "⏱ таймер" : "🔔 напоминание"} · ${esc(whenText(d))}${x.repeat ? " · " + REP_RU[x.repeat] : ""}${x.note ? ` · <span class="ntc">📎${nt ? noteAttCount(nt) || "" : ""}</span>` : ""}</small></div>`
+          return `<div class="it" data-edit="${esc(x.id)}"><div class="tm">${pad(d.getHours())}:${pad(d.getMinutes())}</div><div class="bd"><b>${esc(x.title)}</b><small>${x.kind === "alarm" ? "⏰ будильник" : x.kind === "timer" ? "⏱ таймер" : "🔔 напоминание"} · ${esc(whenText(d))}${x.repeat ? " · " + REP_RU[x.repeat] : ""}${x.note ? ` · <span class="ntc">📎${nt ? noteAttCount(nt) || "" : ""}</span>` : ""}</small></div>`
             + (img ? `<img class="nthumb rt" data-note="${esc(x.note)}" src="${noteAttGet(img.id)}" alt="">` : "")
             + (task ? `<button class="x ok" data-done="${esc(x.id)}" title="Сделано" aria-label="Сделано">✓</button>` : "") + `<button class="x" data-id="${esc(x.id)}" title="Удалить" aria-label="Удалить">${X_SVG}</button></div>`; }).join("")
       : jobs.length || ds.items.length ? "" : `<div class="empty">Напоминаний нет.<br>Скажите: «напомни завтра в 9 позвонить маме» или «будильник на 7».<br>Сделали дело — скажите «я позвонила маме, отметь» или впишите его выше.</div>`)
@@ -3631,8 +3679,9 @@ function renderDay() {
           return `<div class="it job"><div class="tm">${pad(d.getHours())}:${pad(d.getMinutes())}</div><div class="bd"><b>${esc(String(j.text).split(":")[0].slice(0, 80))}</b><small>${esc(j.repeat || whenText(d))}</small></div></div>`; }).join("")
         + `<p class="hint" style="margin:6px 4px 0">Изменить или выключить — на компьютере: студия → «Напоминания».</p>` : "")
       + (D.exactAlarms() ? "" : `<div class="card"><b>Будильники могут опаздывать</b><p class="hint">Разрешите точное время: «Будильники и напоминания».</p><button class="btn p" onclick="Dewiar.openSettings('alarms')">Разрешить</button></div>`);
-    $$("[data-id]", box).forEach(b => b.onclick = () => { D.alarmCancel(b.dataset.id); syncSoon(); renderDay(); });
-    $$("[data-note]", box).forEach(b => b.onclick = () => openNoteSoon(b.dataset.note));
+    $$("[data-id]", box).forEach(b => b.onclick = (e) => { e.stopPropagation(); D.alarmCancel(b.dataset.id); syncSoon(); renderDay(); });
+    $$("[data-note]", box).forEach(b => b.onclick = (e) => { e.stopPropagation(); openNoteSoon(b.dataset.note); });
+    $$("[data-edit]", box).forEach(r => r.onclick = (e) => { if (!e.target.closest("button, img")) remEdit(r.dataset.edit); });   // нажали — править руками
     $$("[data-done]", box).forEach(b => b.onclick = () => { const x = l.find(i => i.id === b.dataset.done); if (!x) return;
       if (!x.repeat) { D.alarmCancel(x.id); syncSoon(); } celebrate(Object.assign(doneAdd([{ title: x.title, rid: x.id }], "tap"), { closed: [] })); renderDay(); });
     $$("[data-undo]", box).forEach(b => b.onclick = () => { const x = doneUndo(b.dataset.undo); renderDay(); if (x) toast("Отметка снята: " + x.title, 2000); });
@@ -4348,6 +4397,7 @@ function renderSettings() {
     const perms = [[MIC, "Микрофон"], [NOTIF, "Уведомления (напоминания)"], [CONTACTS, "Контакты (звонки по имени)"], [CALLP, "Звонки без лишнего нажатия"]];
     h.push(`<h3>Сообщить о проблеме</h3><div class="card" id="bug-card"><p class="hint" style="margin-top:0">Напишите пару слов — разработчик увидит их вместе со снимком экрана и журналом работы (без ключей и паролей), ответит сюда, а когда исправит — я скажу. Голосом тоже можно: «сообщи об ошибке: …».</p>
       ${bugSnap && Date.now() - bugSnap.ts < 30 * 6e4 ? `<div class="bugsnap"><img src="data:image/jpeg;base64,${bugSnap.b64}" alt="Снимок экрана" id="bug-img"><label class="chk"><input type="checkbox" id="bug-use" checked><span>Приложить снимок экрана — каким он был до настроек</span></label></div>` : ""}
+      <div class="bugpick" id="bug-pickbox">${bugPickHtml()}</div>
       <label class="f"><span>Что случилось</span><textarea id="rep-note" rows="3" maxlength="2000" placeholder="Например: «прошу другое радио — играет старое»"></textarea></label>
       <label class="f"><span>Как подписать вас в «Помощниках проекта» — необязательно</span><input id="bug-who" maxlength="40" value="${esc(S.who || "")}" placeholder="Имя или ник"></label>
       <button class="btn p w" id="rep-send">Отправить разработчику</button><div class="res" id="rep-res"></div>
@@ -4520,11 +4570,18 @@ function wireSettings(info) {
     if (g("guide-open")) g("guide-open").onclick = () => D.openUrl(GUIDE_URL);
     if (g("cr-send")) g("cr-send").onclick = () => reportSend("Падение приложения", false, String(info.crash).split("\n")[0]).then(d => toast(`Отчёт №${d.id} отправлен — спасибо!`))
       .catch(e => { toast(e.message); D.share("Dewiar — ошибка:\n" + info.crash); });
+    // отзыв 17.10: «непонятно, как добавить фото к жалобе» — кнопка «Добавить фото или скриншот» (галерея: свежие — первыми)
+    const pickWire = () => { const f = g("bug-file"); if (f) f.onchange = async () => { const file = f.files && f.files[0]; f.value = ""; if (!file) return;
+        try { bugPick = await shrinkImage(file, 1600); } catch (e) { toast(e.message); return; } g("bug-pickbox").innerHTML = bugPickHtml(); pickWire(); };
+      const x = g("bug-pickx"); if (x) x.onclick = () => { bugPick = ""; g("bug-pickbox").innerHTML = bugPickHtml(); pickWire(); };
+      const im = g("bug-pickimg"); if (im) im.onclick = () => imgView(bugPick); };
+    if (g("bug-pickbox")) pickWire();
     if (g("rep-send")) g("rep-send").onclick = async () => { const b = g("rep-send"), r = g("rep-res"); b.disabled = true; r.className = "res"; r.textContent = "отправляю…";
       try {
         const d = await complaintSend(g("rep-note").value, g("bug-who").value, !!(g("bug-use") && g("bug-use").checked), "кнопкой");
         r.className = "res ok"; r.textContent = `Жалоба №${d.id} у разработчика — спасибо! Ответ придёт сюда.`; g("rep-note").value = "";
         if (g("bug-mine")) g("bug-mine").innerHTML = complaintsHtml(); if (g("bug-img")) g("bug-img").parentNode.remove();
+        if (g("bug-pickbox")) { g("bug-pickbox").innerHTML = bugPickHtml(); pickWire(); }
       } catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { b.disabled = false; } };
     if (g("rep-auto")) g("rep-auto").onchange = () => { S.report = Object.assign({}, S.report, { auto: g("rep-auto").checked }); saveS(); };
     if (g("pulse-on")) g("pulse-on").onchange = () => { S.pulse = g("pulse-on").checked; saveS(); };

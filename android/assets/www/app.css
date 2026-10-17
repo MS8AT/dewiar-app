@@ -730,3 +730,19 @@ body.light .clrx, body.light .clrepick { background: #fff; box-shadow: 0 6px 18p
 /* светлые темы: подсказка и объяснение достижений — тёмным янтарём, а не светлым */
 body.light .achc em, body.light .dwhy.on, body.light .ach.on { color: #9a5a00; }
 body.light .donewhy p { color: var(--ink); }
+
+/* правка напоминания руками (отзыв 17.10: «напоминания можно править только голосом») */
+#rem-body label { display: block; font-size: 12.5px; color: var(--muted); margin: 0 4px 6px; }
+#rem-body input, #rem-body select { width: 100%; border: 0; border-radius: 14px; background: var(--field); color: var(--ink); font-size: 16px; padding: 12px 14px; margin: 4px 0 12px; outline: none; }
+#rem-body #rm-text { font-weight: 600; }
+#rem-body .rmrow { display: flex; gap: 10px; }
+#rem-body .rmrow label { flex: 1; margin: 0; }
+#rem-body .rmatt { margin: -2px 0 12px; }
+.it[data-edit] { cursor: pointer; }
+
+/* жалоба: фото или скриншот из галереи */
+.bugpick { margin: 0 0 12px; }
+.bugpick .bpk { position: relative; width: 46%; }
+.bugpick .bpk img { display: block; width: 100%; max-height: 240px; object-fit: cover; object-position: top; border-radius: 12px; box-shadow: 0 6px 20px -10px #000; }
+.bugpick .bpk .x { position: absolute; top: 6px; right: 6px; }
+.bugpick label.btn { display: block; text-align: center; }
