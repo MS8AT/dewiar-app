@@ -56,7 +56,7 @@ function clHead() {
   $("#cl-who").textContent = p.name;
   $("#cl-devs").textContent = (p.devs || []).length ? "устройств: " + p.devs.length + " · сообщения шифруются" : "ещё не открывал Dewiar после приглашения";
   $("#cl-call").style.display = $("#cl-vcall").style.display = (p.devs || []).length ? "" : "none";
-  $("#cl-pick").textContent = CL.pick ? "Готово" : "Выбрать";
+  $("#cl-pick").textContent = CL.pick ? "Готово" : "Удалить сообщения";
 }
 async function clOpen(pid) {
   if (CL.cur !== pid) clPickOff();
@@ -74,12 +74,20 @@ function clReClose() { $$(".cl-repick").forEach(x => x.remove()); }
 function clRePick(el, m) {
   clReClose();
   const pop = document.createElement("div"); pop.className = "cl-repick"; pop.setAttribute("role", "menu");
-  pop.innerHTML = CL_EMO.map(e => `<button role="menuitem" data-e="${e}" class="${(m.rx || {}).me === e ? "on" : ""}" title="Реакция ${e}">${e}</button>`).join("");
+  // реакции и «Удалить у меня» (отзыв 17.10: «в близких не вижу удаления сообщений») — как долгое нажатие на телефоне
+  pop.innerHTML = CL_EMO.map(e => `<button role="menuitem" data-e="${e}" class="${(m.rx || {}).me === e ? "on" : ""}" title="Реакция ${e}">${e}</button>`).join("")
+    + `<i class="cl-resep" aria-hidden="true"></i><button role="menuitem" class="cl-redel" title="Удалить у меня — у близкого сообщение останется" aria-label="Удалить у меня"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 7l1 12.5a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg></button>`;
   document.body.appendChild(pop);
   const r = el.getBoundingClientRect(), w = pop.offsetWidth;
   pop.style.left = Math.max(8, Math.min(innerWidth - w - 8, m.out ? r.right - w : r.left)) + "px";
   pop.style.top = Math.max(8, r.top - pop.offsetHeight - 6) + "px";
-  $$("button", pop).forEach(b => b.onclick = async () => {
+  $(".cl-redel", pop).onclick = async () => {
+    clReClose();
+    try { const r = await core.call("close_forget", { pid: CL.cur, mids: [m.mid] }); CL.st = r.state || CL.st;
+      CL.hist = await core.call("close_history", { pid: CL.cur }); clMsgs(); clRender(); toast("Удалено у вас — у близкого сообщение осталось", 2600); }
+    catch (x) { toast(x.message, 4000); }
+  };
+  $$("button[data-e]", pop).forEach(b => b.onclick = async () => {
     const e = (m.rx || {}).me === b.dataset.e ? "" : b.dataset.e; clReClose();
     try { await core.call("close_react", { pid: CL.cur, mid: m.mid, e }); CL.hist = await core.call("close_history", { pid: CL.cur }); clMsgs(); }
     catch (x) { toast(x.message, 4000); }

@@ -44,9 +44,9 @@ lay = (ROOT / "android/res/layout/widget_capture.xml").read_text(encoding="utf-8
 bg = (ROOT / "android/res/drawable/w_bg.xml").read_text(encoding="utf-8")
 from PIL import Image  # noqa: E402
 im = Image.open(ROOT / "android/res/drawable-nodpi/w_brain.png")
-ok("@drawable/w_brain" in lay and "w_mic" not in lay and "<stroke" not in bg and "<gradient" not in bg and "#EE0A0A0D" in bg and im.mode == "RGBA" and im.size[0] >= 144 and '"999dp"' in bg
+ok("@drawable/w_brain" in lay and "w_mic" not in lay and "<stroke" not in bg and "<gradient" not in bg and "#EE0A0A0D" in bg and im.mode == "RGBA" and im.size[0] >= 144 and '"22dp"' in bg
    and all(r == g == b == 255 for r, g, b, a in im.getdata() if a > 0) and max(a for *_, a in im.getdata()) < 255,
-   "телефон: значок «Записать» — белый полупрозрачный мозг на матово-чёрной «таблетке» без обводки")
+   "телефон: значок «Записать» — белый полупрозрачный мозг на матово-чёрном без обводки, скругление 22dp")
 
 cw = (ROOT / "android/src/pro/dewiar/app/CaptureWidget.java").read_text(encoding="utf-8")
 al = (ROOT / "android/src/pro/dewiar/app/Alarms.java").read_text(encoding="utf-8")
@@ -105,7 +105,7 @@ try:
         # ---------- «Близкие»: выбрать и удалить у себя ----------
         pg.click('nav button[data-p="close"]'); pg.wait_for_timeout(800)
         pg.click(f'#cl-people .cl-p[data-pid="{PID}"]'); pg.wait_for_timeout(500)
-        ok(pg.is_visible("#cl-pick") and pg.inner_text("#cl-pick") == "Выбрать", "в шапке переписки — «Выбрать»")
+        ok(pg.is_visible("#cl-pick") and pg.inner_text("#cl-pick") == "Удалить сообщения", "в шапке переписки — «Удалить сообщения»")
         pg.click("#cl-pick"); pg.wait_for_timeout(200)
         r = [pg.is_visible("#cl-selbar"), pg.is_visible("#cl-send"), pg.is_disabled("#cl-seldel")]
         ok(r == [True, False, True],
@@ -119,6 +119,12 @@ try:
         ok(left == ["Привет", "Привет", "Михалыч, я доехал, всё ок", "Отлично!"] and not pg.is_visible("#cl-selbar") and pg.is_visible("#cl-send"),
            f"«Удалить у меня» — ушли только отмеченные, режим выключен: {left}")
         ok(pg.evaluate("() => document.querySelectorAll('#cl-msgs .cl-m').length") == 4, "в окне — оставшиеся четыре")
+        # правой кнопкой по одному сообщению — «Удалить у меня» в меню (отзыв 17.10: «не вижу удаления сообщений»)
+        pg.click('#cl-msgs .cl-m[data-i="1"]', button="right"); pg.wait_for_timeout(200)
+        has = pg.is_visible(".cl-repick .cl-redel")
+        pg.click(".cl-repick .cl-redel"); pg.wait_for_timeout(800)
+        left = [m["t"] for m in closest()["hist"].get(PID, [])]
+        ok(has and left == ["Привет", "Михалыч, я доехал, всё ок", "Отлично!"], f"правая кнопка по сообщению — «Удалить у меня»: {left}")
         pg.click("#cl-pick"); pg.click("#cl-selall"); pg.wait_for_timeout(100)
         ok(pg.inner_text("#cl-seldel") == "Очистить переписку", "«Отметить все» — кнопка становится «Очистить переписку»")
         pg.click("#cl-seldel"); pg.wait_for_timeout(800)

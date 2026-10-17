@@ -1147,3 +1147,5 @@ html.st-light dialog.nwdlg { background: #fff; }
 .cl-selbar { display: flex; align-items: center; gap: 8px; padding: 12px 14px; font-size: 13.5px; color: var(--muted); box-shadow: 0 -10px 20px -18px rgba(0,0,0,.8); }
 .cl-selbar[hidden] { display: none; }
 #cl-selnum { font-weight: 600; color: var(--ink); }
+.cl-resep { width: 1px; align-self: stretch; margin: 6px 4px; background: rgba(127,127,127,.3); }
+.cl-repick .cl-redel { color: var(--bad); } .cl-repick .cl-redel:hover { transform: none; background: rgba(255,107,138,.16); }
