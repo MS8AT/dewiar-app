@@ -44,6 +44,11 @@ def team_window(hist, me, name_of):
 ATT_DEFAULT_Q = "Посмотри вложения и коротко скажи, что в них."
 
 
+def _norm_answer(t):
+    """Ответ без регистра, знаков и пробелов — сравнить с прошлыми («Я Лира.» == «я лира»)."""
+    return re.sub(r"[\W_]+", " ", str(t or "").lower()).strip()
+
+
 def _thumb(data, side=320):
     """Миниатюра картинки для ленты «Чата» (data:URL, JPEG ~10–25 КБ) или "" — если не картинка."""
     try:
@@ -1178,6 +1183,8 @@ class AnswerMixin:
             done_calls, checked = [], False                  # что вызвано с результатами — сверить числа ответа (number_mismatch)
             drew = 0                                         # просили схему, а её нет — попросили нарисовать (до двух раз за ход)
             saved_checked = False                            # «записала» без единого действия — попросили записать (раз за ход)
+            repeat_checked = False                           # ответ слово в слово как недавний — попросили ответить по существу (раз за ход)
+            prev_said = {_norm_answer(m.get("content")) for m in self.history[-8:] if m.get("role") == "assistant" and m.get("content")}
             for step in range(6):                       # модель → действия → результаты → модель…
                 calls, step_text = [], ""
                 if step == 5 and specs:                  # последний шаг — только слова: ответить тем, что уже узнал
@@ -1281,6 +1288,20 @@ class AnswerMixin:
                             turn.full += " "
                         self.set_state("thinking")
                         continue
+                if not calls and not called and not turn.cancel.is_set() and step < 6 and not repeat_checked \
+                        and 0 < len(turn.full.strip()) < 160 and _norm_answer(turn.full) in prev_said:
+                    # отзыв 17.10 (съёмка): на «расскажи о себе», «подробнее», «что ты умеешь» Лира раз за разом отвечала
+                    # «Я Лира.» — модель копировала свои прошлые реплики из разговора. Повтор — просим ответить по существу
+                    repeat_checked = True
+                    log.info("✋ Ответ слово в слово как недавний («%s») — прошу ответить по существу", turn.full.strip()[:40])
+                    fix = (f"Ты слово в слово повторил(а) свой прошлый ответ «{turn.full.strip()[:80]}». Человек спрашивает снова — "
+                           "значит, тот ответ его не устроил. Ответь сейчас по существу на его последний вопрос, развёрнуто и "
+                           "живо, своими словами; прошлый ответ не повторяй.")
+                    msgs = msgs + [{"role": "assistant", "content": step_text or "…"}, {"role": "user", "content": fix}]
+                    if turn.full.strip() and not turn.full.endswith(" "):
+                        turn.full += " "
+                    self.set_state("thinking")
+                    continue
                 if not calls and not turn.cancel.is_set() and step < 6 and drew < 2:
                     fix = diagram_missing(text, turn.full + step_text, called)
                     if fix and drew:                 # экзамен 17.10: и после просьбы — «Схема готова.»; второй раз — жёстче

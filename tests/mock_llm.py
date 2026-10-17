@@ -43,6 +43,12 @@ class H(BaseHTTPRequestHandler):
             self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
             c = {"choices": [{"delta": {"content": ans}}]}
             self.wfile.write(f"data: {json.dumps(c, ensure_ascii=False)}\n\ndata: [DONE]\n\n".encode()); return
+        if isinstance(last, str) and (last.startswith("Ты слово в слово повторил") or last.startswith("Расскажи о себе, что ты умеешь")):
+            # повтор ответа (отзыв 17.10, «Я Лира.»): на «о себе» модель отвечает коротко, на просьбу не повторяться — по существу
+            txt = ("Я умею ставить напоминания, вести заметки, звонить близким и рассказывать о погоде."
+                   if last.startswith("Ты слово в слово повторил") else "Я Лира.")
+            self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+            self.wfile.write(f"data: {json.dumps({'choices': [{'delta': {'content': txt}}]}, ensure_ascii=False)}\n\ndata: [DONE]\n\n".encode()); return
         if isinstance(last, str) and last.startswith("Перечитай свой дневник"):           # душа персонажа по дневнику
             txt = ("## Кто я\nЯ — голос рядом с хозяином: слушаю, запоминаю, помогаю. ИИ, но не равнодушный.\n\n"
                    "## Что для меня важно\nЧестность и короткие ответы по утрам.\n\n"

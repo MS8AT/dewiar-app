@@ -376,6 +376,8 @@ class Player:
     (тесты, запуск с --null-audio)."""
 
     AHEAD = 0.25
+    LEAD = 0.25          # тишина перед ответом: устройство вывода (и эхоподавление) «просыпается» на первых долях секунды —
+                         # без неё пропадала первая буква («Я Лира» звучало «лира», отзыв 17.10)
 
     def __init__(self, device="", on_level=None, null=False):
         self.device, self.on_level, self.null = device, on_level, null
@@ -393,6 +395,7 @@ class Player:
             self._kill()
             self.rate, self._stopped, self.gain = rate, False, 1.0
             self._t0, self._written = time.monotonic(), 0
+            self._lead = 0 if self.null else int(rate * self.LEAD) * 2
             if self.null:
                 return
             backend = _backend()
@@ -421,6 +424,8 @@ class Player:
     def write(self, pcm: bytes) -> bool:
         """Пишет кусками по 40 мс, выдерживая опережение AHEAD. -> False — остановлено (перебили) или вывод упал."""
         step = int(self.rate * 0.04) * 2
+        if getattr(self, "_lead", 0):
+            pcm, self._lead = b"\x00" * self._lead + pcm, 0
         for i in range(0, len(pcm), step):
             if self._stopped:
                 return False
