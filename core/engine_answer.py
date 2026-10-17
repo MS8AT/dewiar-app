@@ -1084,6 +1084,12 @@ class AnswerMixin:
                 # сложная просьба — модель думает (дольше, но стих с рифмой, а расчёт со смыслом); лимит — с запасом на размышления
                 prof = dict(prof, think="on", max_tokens=max(6144, int(prof.get("max_tokens") or 0)))
                 log.info("🧠 Сложная просьба — модель подумает перед ответом")
+            from llm import creative_temp
+            ask0 = text.split("\n\nВложения:")[0]
+            temp = creative_temp(ask0, prof.get("temperature", 0.7))
+            if temp != float(prof.get("temperature", 0.7)):
+                prof = dict(prof, temperature=temp)       # творческая просьба — смелее (отзыв 17.10 про креатив)
+                log.info("🎨 Творческая просьба — температура %.2f", temp)
             specs = self.toolbox.specs() if self.s.get("tools", "enabled_all") is not False else []
             mode = (self.s.get("llm", "tools_modes") or {}).get(self._tools_key(prof))
             if mode in ("native", "prompt"):
@@ -1092,6 +1098,9 @@ class AnswerMixin:
                 self.probe_tools_bg()                  # ещё не проверяли — проверим в фоне, этот ответ — в режиме по умолчанию
             system = self._system(bool(specs))
             import boundaries
+            from llm import POEM_ASK, POEM_NOTE
+            if POEM_ASK.search(text.split("\n\nВложения:")[0]):
+                system += POEM_NOTE                     # стихи — рифмы по ударению подбираются заранее
             if boundaries.rude(text):                  # грубят самому помощнику — спокойная граница в этом ходе, счётчик в пульс
                 system += boundaries.NOTE
                 self.health_count("rude")

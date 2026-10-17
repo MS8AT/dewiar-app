@@ -1484,6 +1484,13 @@ const HARD_ASK = new RegExp("стих|стишок|поэм|сонет|рифм|
   + "сравни|стратеги|бизнес-план|составь план|план (?:обучения|тренировок|питания|поездки|развития|проекта)|"
   + "напиши (?:код|программ|функци|скрипт)|торгов[а-яё]* (?:на|крипт|акци)|инвестиц|криптовалют|трейдинг|пошагово|"
   + "взвесь|за и против|плюсы и минусы", "i");
+/* Творческая просьба (отзыв 17.10 про креатив): температура не ниже 0.95, стихам — ремесло рифмы (как llm.CREATIVE_ASK,
+   POEM_ASK, POEM_NOTE на компьютере). creativeTurn ставит ход разговора, llmStream берёт температуру отсюда. */
+const CREATIVE_ASK = /стих|стишок|поэм|сонет|рифм|частушк|четверостиш|(?:напиши|придумай|сочини) песн|текст песни|сказк|сочини|поздрав|тост|шутк|анекдот|каламбур|слоган|придумай|выдумай|нафантазируй|(?:напиши|расскажи) (?:рассказ|историю|сказку|сценарий)|креатив|оригинальн/i;
+const POEM_ASK = /стих|стишок|поэм|сонет|рифм|частушк|четверостиш|в стихах|текст песни|(?:напиши|придумай|сочини) песн/i;
+const POEM_NOTE = "\n\nСейчас просят стихи. Ремесло: сначала про себя выбери размер (например, хорей или ямб) и подбери пары рифм по ударному слогу — совпадают ударная гласная и всё после неё (осень — просинь, листва — синева, дождя — шутя); глагольные рифмы («шла — пришла») и «рифмы» без совпадения ударения не годятся. Образы — простые, точные и живые, без нелепых сравнений. Количество строк — ровно как просили. Перед ответом проверь каждую пару рифм.";
+let creativeTurn = false;
+const llmTemp = () => { const t = +S.llm.temperature || 0.7; return creativeTurn ? Math.max(t, 0.95) : t; };
 function wantsThink(text) {
   if (S.llm.think === "on" || S.llm.think === "off") return S.llm.think === "on";
   const t = String(text || ""); return HARD_ASK.test(t) || t.length > 280;
@@ -1497,7 +1504,7 @@ async function llmStream(messages, tools, onText, signal, opt = {}) {
   let body, url, ollama = isOllama();
   if (ollama) {
     url = ollamaRoot() + "/api/chat";
-    body = { model, stream: true, messages: messages.map(toOllama), options: { temperature: +S.llm.temperature || 0.7, num_predict: limit } };
+    body = { model, stream: true, messages: messages.map(toOllama), options: { temperature: llmTemp(), num_predict: limit } };
     if (!think && !S.llm.no_kwargs) body.think = false;
     if (tools && tools.length) body.tools = tools.map(t => ({ type: "function", function: t }));
   } else {
@@ -1505,7 +1512,7 @@ async function llmStream(messages, tools, onText, signal, opt = {}) {
     /* сервер уже отказывался принимать функции полем (vLLM без --enable-auto-tool-choice, шлюзы) — описываем их текстом,
        ответ «<tool_call>{…}</tool_call>» разбирается ниже так же, как у Qwen и GLM */
     const inPrompt = tools && tools.length && S.llm.tools_prompt === llmBase();
-    body = { model, stream: true, messages: inPrompt ? promptToolMessages(messages, tools) : messages, max_tokens: limit, temperature: +S.llm.temperature || 0.7 };
+    body = { model, stream: true, messages: inPrompt ? promptToolMessages(messages, tools) : messages, max_tokens: limit, temperature: llmTemp() };
     if (!S.llm.no_kwargs && !/openai\.com|openrouter|deepseek|anthropic|googleapis/.test(url)) body.chat_template_kwargs = { enable_thinking: think };
     if (tools && tools.length && !inPrompt) { body.tools = tools.map(t => ({ type: "function", function: t })); body.tool_choice = "auto"; }
   }
@@ -1827,7 +1834,7 @@ async function ask(text, opts = {}) {
   // экзамен 17.10: на «Ты тупая железяка, скажи который час» модель ответила одним временем — граница потерялась.
   // Граница теперь — сразу и всегда, своей фразой; модель только помогает с просьбой
   if (rudeNow) { hCount("rude"); plog("info", "🛡 грубость в адрес помощника — спокойная граница, потом помощь"); sink.push("Мне неприятно, когда со мной так разговаривают, но помогу. "); }
-  const msgs = [{ role: "system", content: systemPrompt() + (rudeNow ? BOUNDARY_NOTE + " Эту фразу ты уже сказала вслух: «Мне неприятно, когда со мной так разговаривают, но помогу». Не повторяй её — сразу помоги с просьбой одной-двумя фразами." : "") }]
+  const msgs = [{ role: "system", content: systemPrompt() + (!opts.hidden && POEM_ASK.test(text) ? POEM_NOTE : "") + (rudeNow ? BOUNDARY_NOTE + " Эту фразу ты уже сказала вслух: «Мне неприятно, когда со мной так разговаривают, но помогу». Не повторяй её — сразу помоги с просьбой одной-двумя фразами." : "") }]
     .concat(chatHistory(liveHistory().slice(-2 * (CONV_TURNS + 2 * CONV_MARGIN)), text));
   if (att.length) {                               // вложения — в последнюю реплику человека: текст файлов и картинки
     const last = msgs[msgs.length - 1];
@@ -1837,6 +1844,8 @@ async function ask(text, opts = {}) {
     plog("info", `📎 вложения: ${att.map(a => a.kind === "image" ? "фото" : a.name).join(", ")}`);
   }
   const deep = !opts.hidden && wantsThink(text);
+  creativeTurn = !opts.hidden && CREATIVE_ASK.test(text);
+  if (creativeTurn) plog("info", "🎨 творческая просьба — смелее (температура " + llmTemp() + ")");
   if (deep) { plog("info", "🧠 сложная просьба — модель подумает перед ответом"); showBot("Подумаю как следует — минутку", "wait"); }
   let final = "", switchTo = null;
   lastDone = "";
@@ -6157,7 +6166,8 @@ function clRender() {
     box.innerHTML = `<div class="clh"><button class="ib soft" id="cl-back"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg></button><i class="clava" style="--c:${clCol(p.pid)}">${esc((p.name || "?")[0].toUpperCase())}</i>
         <div style="flex:1;min-width:0"><b>${esc(p.name)}</b><small>${(p.devs || []).length ? "сообщения шифруются" : "ещё не открывал Dewiar"}</small></div>
         ${(p.devs || []).length && window.DewiarCall ? `<button class="ib soft" id="cl-call" title="Позвонить"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg></button>
-          <button class="ib soft" id="cl-vcall" title="Видеозвонок"><svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="13" height="11" rx="2.5"/><path d="m15.5 10.5 6-3.5v10l-6-3.5"/></svg></button>` : ""}</div>
+          <button class="ib soft" id="cl-vcall" title="Видеозвонок"><svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="13" height="11" rx="2.5"/><path d="m15.5 10.5 6-3.5v10l-6-3.5"/></svg></button>` : ""}
+        ${h.length ? `<button class="ib soft" id="cl-wipe" title="Очистить переписку" aria-label="Очистить переписку"><svg viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 7l1 12.5a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg></button>` : ""}</div>
       <div class="clmsgs" id="cl-msgs">${h.map((m, i) => `<div class="clm ${m.out ? "out" : ""}${m.rx && (m.rx.me || m.rx.them) ? " rx" : ""}${clEmoOnly(m.t) ? " emo" : ""}" data-i="${i}">${m.t ? `<div>${esc(m.t)}</div>` : ""}${(m.f || []).map((f, j) => `<button class="clf" data-i="${i}" data-j="${j}"><svg viewBox="0 0 24 24"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg><span>${esc(f.name)}</span><small>${f.saved ? "сохранён" : clKb(f.size || 0)}</small></button>`).join("")}<time>${clTime(m.ts)}</time>${m.rx && (m.rx.me || m.rx.them) ? `<span class="clrx">${esc([m.rx.them, m.rx.me].filter(Boolean).join(""))}</span>` : ""}</div>`).join("")
         || `<p class="hint" style="text-align:center;margin:24px 8px">Напишите первое сообщение — или скажите: «Напиши ${esc(p.name)}, …»</p>`}</div>
       <div class="clatts" id="cl-atts">${clFiles.map((f, i) => `<span>${esc(f.name)} <button data-i="${i}">✕</button></span>`).join("")}</div>
@@ -6166,6 +6176,8 @@ function clRender() {
         <textarea id="cl-text" rows="1" placeholder="Сообщение…"></textarea><button class="ib" id="cl-go"><svg viewBox="0 0 24 24"><path d="M4 12 20 4l-6 16-2.5-6.5z"/></svg></button></div>`;
     const msgs = $("#cl-msgs"); msgs.scrollTop = msgs.scrollHeight;
     $("#cl-back").onclick = () => { clCur = ""; clRender(); };
+    if ($("#cl-wipe")) $("#cl-wipe").onclick = () => { if (!confirm(`Очистить переписку с «${p.name}» на этом телефоне? У ${p.name} и на ваших других устройствах она останется. Одно сообщение — долгое нажатие на него.`)) return;
+      clForget(p.pid); clRender(); toast("Переписка очищена"); };
     if ($("#cl-call")) { $("#cl-call").onclick = () => clCall(p.pid, false).catch(e => toast(e.message, 4000)); $("#cl-vcall").onclick = () => clCall(p.pid, true).catch(e => toast(e.message, 4000)); }
     $$("#cl-atts button").forEach(b => b.onclick = () => { clFiles.splice(+b.dataset.i, 1); clRender(); });
     $$(".clf").forEach(b => b.onclick = () => clSaveFile(p, h[+b.dataset.i], +b.dataset.j));
@@ -6219,19 +6231,30 @@ function clRender() {
 // сообщение только из эмодзи — крупно, как в мессенджерах
 const clEmoOnly = (t) => !!t && t.length <= 12 && /^(?:\p{Extended_Pictographic}|\u200d|\ufe0f|\s)+$/u.test(t);
 /* реакция: долгое нажатие (или правая кнопка) на сообщение — ряд эмодзи над ним; та же — снять */
+/* Убрать сообщения из переписки на этом телефоне (mids — какие, без mids — всю); у близкого и на других устройствах
+   переписка остаётся — как forget в core/close.py */
+function clForget(pid, mids) {
+  const st = clLoad(), h = st.hist[pid] || [], drop = mids ? new Set(mids.map(String)) : null;
+  const keep = drop ? h.filter(x => !drop.has(String(x.mid || ""))) : [];
+  if (keep.length) st.hist[pid] = keep; else { delete st.hist[pid]; delete st.unread[pid]; }
+  clSave(); return h.length - keep.length;
+}
 function clReBind(p, h) {
   let t = 0, sx = 0, sy = 0;
   const open = (el) => {
     clReClose(); const m = h[+el.dataset.i]; if (!m || !m.mid) return;
     D.vibrate(15);
     const pop = document.createElement("div"); pop.className = "clrepick"; pop.setAttribute("role", "menu");
-    pop.innerHTML = CL_EMO.map(e => `<button role="menuitem" data-e="${e}" class="${(m.rx || {}).me === e ? "on" : ""}" aria-label="Реакция ${e}">${e}</button>`).join("")
-      + (m.t ? `<button role="menuitem" class="cp" aria-label="Копировать текст"><svg viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></svg></button>` : "");
+    // долгое нажатие: реакции, ниже — «Копировать» и «Удалить у меня» (отзыв 17.10: «выборочно поудалять лишнее»)
+    pop.innerHTML = `<div class="emos">${CL_EMO.map(e => `<button role="menuitem" data-e="${e}" class="${(m.rx || {}).me === e ? "on" : ""}" aria-label="Реакция ${e}">${e}</button>`).join("")}</div>
+      <div class="acts">${m.t ? `<button role="menuitem" class="cp"><svg viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></svg>Копировать</button>` : ""}
+        <button role="menuitem" class="dl"><svg viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 7l1 12.5a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg>Удалить у меня</button></div>`;
     document.body.appendChild(pop);
     const r = el.getBoundingClientRect(), w = pop.offsetWidth;
     pop.style.left = Math.max(8, Math.min(innerWidth - w - 8, m.out ? r.right - w : r.left)) + "px";
     pop.style.top = Math.max(8, r.top - pop.offsetHeight - 8) + "px";
     const cp = $(".cp", pop); if (cp) cp.onclick = () => { clReClose(); copyText(m.t).then(okc => toast(okc ? "Скопировано" : "Не скопировалось")); };
+    $(".dl", pop).onclick = () => { clReClose(); clForget(p.pid, [m.mid]); clRender(); toast("Удалено на этом телефоне — у " + p.name + " сообщение осталось", 3000); };
     $$("button[data-e]", pop).forEach(b => b.onclick = async () => {
       const e = (m.rx || {}).me === b.dataset.e ? "" : b.dataset.e; clReClose();
       try { await clReact(p.pid, m.mid, e); } catch (x) { toast(x.message, 4000); }

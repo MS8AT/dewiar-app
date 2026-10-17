@@ -84,7 +84,11 @@ function bindFields() {
       clearTimeout(saveT[k]); saveT[k] = setTimeout(() => save(patchOf(k, v), inp.type === "range"), inp.type === "text" || inp.type === "url" || inp.type === "password" ? 600 : 50);
     };
   });
-  $$("[data-eng]").forEach(o => $("input", o).onchange = () => save({ stt: { engine: o.dataset.eng } }));
+  $$("[data-eng]").forEach(o => $("input", o).onchange = () => {
+    if (o.dataset.eng === "dewiar") return dwStt(true);             // «Сервер Dewiar» — облако или аккаунт (links.js)
+    if (dwSttOn()) return dwStt(false, o.dataset.eng);              // уходим с сервера Dewiar — сразу на выбранное
+    save({ stt: { engine: o.dataset.eng } });
+  });
   $$("[data-tts]").forEach(o => $("input", o).onchange = () => {
     if (o.dataset.tts === "dewiar") return dwVoice(true);           // «Голос Dewiar» — облако или аккаунт (links.js)
     if (dwVoiceOn()) return dwVoice(false, o.dataset.tts);           // уходим с голоса Dewiar — сразу на выбранный
@@ -105,8 +109,12 @@ function refreshStatic() {
   const pl = $("#pause-learn"), px = +get("audio.end_silence_extra") || 0;          // подстройка паузы: сколько уже добавлено
   if (pl) pl.textContent = "Если вы продолжаете говорить сразу после того, как ассистент решил, что фраза закончена, — он начнёт ждать дольше; со временем вернётся к обычной паузе."
     + (px > 0 && get("audio.end_silence_auto") !== false ? ` Сейчас жду ${(+get("audio.end_silence_ms") || 650) + px} мс (+${px} под вашу речь).` : "");
-  $$("[data-eng]").forEach(o => { const on = S.stt.engine === o.dataset.eng; o.classList.toggle("on", on); $("input", o).checked = on; });
-  $$('#p-ears .sub').forEach(s => s.style.display = S.stt.engine === s.dataset.for ? "" : "none");
+  // «Сервер Dewiar» — отдельный вариант: адрес и ключ подставлены из аккаунта, поля «своего сервера» человеку не показываем
+  // (отзыв 17.10: «зачем пользователю эти данные? Он должен их вносить руками?»)
+  const dws = typeof dwSttOn === "function" && dwSttOn(), eng = dws ? "dewiar" : S.stt.engine;
+  $$("[data-eng]").forEach(o => { const on = eng === o.dataset.eng; o.classList.toggle("on", on); $("input", o).checked = on; });
+  $$('#p-ears .sub').forEach(s => s.style.display = eng === s.dataset.for ? "" : "none");
+  if (typeof renderSrvSttOpt === "function") renderSrvSttOpt();
   const dw = typeof dwVoiceOn === "function" && dwVoiceOn();
   $$("[data-tts]").forEach(o => { const on = dw ? o.dataset.tts === "dewiar" : S.tts.engine === o.dataset.tts; o.classList.toggle("on", on); $("input", o).checked = on; });
   $$('#p-voice .sub').forEach(s => s.style.display = !dw && S.tts.engine === s.dataset.for ? "" : "none");

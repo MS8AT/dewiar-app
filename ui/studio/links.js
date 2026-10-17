@@ -380,6 +380,36 @@ $("#srv-stt-go").onclick = async (ev) => {
   try { await core.call("account_stt", { on }); S.stt.engine = on ? "remote" : "gigaam"; S.stt.remote = Object.assign({}, S.stt.remote, { from_account: on }); renderSrvStt(); toast(on ? "Распознавание — на сервере" : "Распознавание — на этом компьютере"); }
   catch (e) { toast(e.message); } finally { ev.target.disabled = false; }
 };
+/* «Слух» → «Сервер Dewiar»: распознавание через облако (ключ Dewiar или вход аккаунтом — device.cloud_stt) или сайт по
+   аккаунту (services.stt). Адрес и ключ ядро подставляет само (cloud.set_stt / account_stt) — в поля «своего сервера»
+   они не попадают на глаза. -> "cloud" | "account" | "" */
+const dwSttOn = () => !!(S && S.stt && S.stt.engine === "remote" && S.stt.remote && (S.stt.remote.cloud || S.stt.remote.from_account));
+function srvSttHow() {
+  const a = lastAccount, d = typeof DW !== "undefined" && DW.dev;
+  if (d && d.cloud_stt) return "cloud";
+  if (a && a.logged_in && a.services && a.services.stt) return "account";
+  return "";
+}
+function renderSrvSttOpt() { const o = $("#srv-stt-opt"); if (o) o.style.display = srvSttHow() || dwSttOn() ? "" : "none"; }
+async function dwStt(on, then) {
+  const how = on ? srvSttHow() : (S.stt.remote || {}).cloud ? "cloud" : "account";
+  if (on && !how) { toast("Сервер Dewiar сейчас недоступен — войдите аккаунтом dewiar.pro или подключите ключ"); refreshStatic(); return; }
+  try {
+    const r = await core.call(how === "cloud" ? "cloud_stt" : "account_stt", { on });
+    if (r && r.engine) S.stt = Object.assign({}, S.stt, r);
+    else { S.stt.engine = on ? "remote" : "gigaam"; S.stt.remote = Object.assign({}, S.stt.remote, { from_account: on, cloud: false }); }
+    if (!on && then) {              // свой сервер — с чистыми полями: адрес и ключ Dewiar туда не переносим
+      const patch = { stt: { engine: then } };
+      if (then === "remote") patch.stt.remote = { base_url: "", api_key: "", model: "", cloud: false, from_account: false };
+      await save(patch, true);
+    }
+    toast(on ? "Речь распознаёт сервер Dewiar" : "Речь распознаёт " + (then === "remote" ? "ваш сервер — впишите его адрес" : "этот компьютер"));
+  } catch (e) { toast(e.message, 4000); }
+  refreshStatic();
+}
+$('nav button[data-p="ears"]') && $('nav button[data-p="ears"]').addEventListener("click", () => {
+  core.call("device", { fresh: true }).then(x => { if (typeof DW !== "undefined") DW.dev = x; renderSrvSttOpt(); }).catch(() => {});
+});
 /* «Голос Dewiar» — как на телефоне: синтез сайта по аккаунту (services.tts) или облако Dewiar (ключ или вход аккаунтом,
    облако умеет озвучку — device.cloud_tts). -> "account" | "cloud" | "" */
 function srvTtsHow() {
@@ -417,7 +447,7 @@ $('nav button[data-p="voice"]') && $('nav button[data-p="voice"]').addEventListe
 function renderAccount(a) {
   if (!a) return;
   lastAccount = a;
-  setTimeout(renderSrvStt, 0); setTimeout(renderSrvTts, 0); setTimeout(tgSharedVis, 0);
+  setTimeout(renderSrvStt, 0); setTimeout(renderSrvTts, 0); setTimeout(renderSrvSttOpt, 0); setTimeout(tgSharedVis, 0);
   $("#acc-out").style.display = a.logged_in ? "none" : ""; $("#acc-in").style.display = a.logged_in ? "" : "none";
   if (!$("#acc-server").value && a.server) $("#acc-server").placeholder = a.server;
   if (!a.logged_in && a.login && !$("#acc-login").value) $("#acc-login").value = a.login;
@@ -512,8 +542,15 @@ core.on("update", e => renderUpdate(e.update));
 $("#pr-open").onclick = () => { const a = api(); if (a && a.open_prompter) a.open_prompter(); else core.call("prompter_open").catch(e => toast(e.message)); };
 function loadMeetings() {
   core.call("prompter_meetings").then(l => {
-    $("#pr-list").innerHTML = l.length ? l.map(m => `<button class="pr-it" data-p="${escH(m.path)}"><b>${escH(m.name.replace(/^(\d{4})-(\d\d)-(\d\d) (\d\d)(\d\d) /, "$3.$2.$1 $4:$5 — "))}</b><span>Открыть итог</span></button>`).join("")
+    const nm = (m) => m.name.replace(/^(\d{4})-(\d\d)-(\d\d) (\d\d)(\d\d) /, "$3.$2.$1 $4:$5 — ");
+    $("#pr-list").innerHTML = l.length ? l.map(m => `<div class="pr-row"><button class="pr-it" data-p="${escH(m.path)}"><b>${escH(nm(m))}</b><span>Открыть итог</span></button>
+        <button class="pr-del" data-p="${escH(m.path)}" data-n="${escH(nm(m))}" title="Удалить итог встречи" aria-label="Удалить итог встречи ${escH(nm(m))}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 7l1 12.5a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg></button></div>`).join("")
       : `<p class="hint">Пока встреч не было. Итог каждой появится здесь.</p>`;
     $$("#pr-list .pr-it").forEach(b => b.onclick = () => core.call("ws_open", { path: b.dataset.p }).catch(e => toast(e.message)));
+    // удалить итог — в корзину, как всё удаление в Dewiar (отзыв 17.10: «как удалить прошлую встречу?»)
+    $$("#pr-list .pr-del").forEach(b => b.onclick = () => {
+      if (!confirm(`Удалить итог встречи «${b.dataset.n}»? Файл уйдёт в корзину — вернуть можно оттуда.`)) return;
+      core.call("prompter_meeting_remove", { path: b.dataset.p }).then(() => { toast("Итог встречи — в корзине"); loadMeetings(); }).catch(e => toast(e.message, 4000));
+    });
   }).catch(() => {});
 }

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Значок «Записать» на рабочем столе (CaptureWidget): одно нажатие — Dewiar слушает и записывает мысль в «Идеи»
+<!-- Значок «Записать» на рабочем столе (CaptureWidget), мозг Dewiar (стиль brain из entities.js, w_brain.png) на
+     матово-чёрном без обводки (отзыв 17.10: «некрасивая… может в неё мозг… чёрный, обводку убрать»). Одно нажатие — Dewiar слушает и записывает мысль в «Идеи»
      или ставит напоминание. Разметка RemoteViews: только простые виды. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/w_root"
@@ -8,19 +9,18 @@
     android:orientation="horizontal"
     android:gravity="center_vertical"
     android:background="@drawable/w_bg"
-    android:paddingLeft="10dp"
+    android:paddingLeft="8dp"
     android:paddingRight="18dp">
     <ImageView
-        android:layout_width="38dp"
-        android:layout_height="38dp"
-        android:padding="9dp"
-        android:background="@drawable/w_mic_bg"
-        android:src="@drawable/w_mic"
-        android:contentDescription="Микрофон"/>
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/w_brain"
+        android:contentDescription="Dewiar слушает"/>
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginLeft="10dp"
+        android:layout_marginLeft="6dp"
         android:orientation="vertical">
         <TextView
             android:layout_width="wrap_content"
@@ -33,8 +33,8 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="идея или «напомни…»"
-            android:textColor="#B9B5D6"
+            android:text="идея или напоминание"
+            android:textColor="#C8C2EE"
             android:textSize="11.5sp"
             android:maxLines="1"/>
     </LinearLayout>

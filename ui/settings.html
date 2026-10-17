@@ -10,8 +10,7 @@
 <head>
 <meta charset="utf-8">
 <title>Dewiar — студия</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600&family=Manrope:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link href="assets/fonts.css" rel="stylesheet">
 <link rel="stylesheet" href="studio/studio.css">
 <link rel="stylesheet" href="assets/skins.css">
 <link rel="stylesheet" href="studio/theme.css">
@@ -240,7 +239,7 @@
         </div>
         <div class="cl-chat" id="cl-chat">
           <div class="cl-empty" id="cl-empty"><b>Здесь будет переписка</b><span>Пригласите близкого — когда он примет приглашение, можно писать прямо отсюда или голосом.</span></div>
-          <div class="cl-head" id="cl-head" style="display:none"><i class="cl-ava" id="cl-ava"></i><div><b id="cl-who"></b><span id="cl-devs"></span></div><span style="flex:1"></span><button class="btn small" id="cl-call" title="Позвонить — окно звонка откроется в браузере">Позвонить</button><button class="btn small" id="cl-vcall" title="Видеозвонок">Видео</button><button class="btn small danger" id="cl-del">Убрать из близких</button></div>
+          <div class="cl-head" id="cl-head" style="display:none"><i class="cl-ava" id="cl-ava"></i><div><b id="cl-who"></b><span id="cl-devs"></span></div><span style="flex:1"></span><button class="btn small" id="cl-call" title="Позвонить — окно звонка откроется в браузере">Позвонить</button><button class="btn small" id="cl-vcall" title="Видеозвонок">Видео</button><button class="btn small" id="cl-pick" title="Отметить сообщения и удалить их у себя">Выбрать</button><button class="btn small danger" id="cl-del">Убрать из близких</button></div>
           <div class="cl-msgs" id="cl-msgs"></div>
           <div class="cl-emo" id="cl-emo" hidden></div>
           <div class="cl-send" id="cl-send" style="display:none">
@@ -250,6 +249,12 @@
             <button class="btn primary" id="cl-go">Отправить</button>
           </div>
           <div class="cl-files" id="cl-files"></div>
+          <div class="cl-selbar" id="cl-selbar" hidden>
+            <span id="cl-selnum">Нажмите на сообщения, которые убрать</span><span style="flex:1"></span>
+            <button class="btn small" id="cl-selall">Отметить все</button>
+            <button class="btn small danger" id="cl-seldel" disabled>Удалить у меня</button>
+            <button class="btn small" id="cl-selx">Отмена</button>
+          </div>
         </div>
       </div>
     </div>
@@ -980,12 +985,13 @@
     <p class="hint" style="margin-bottom:8px">Каждая фраза вокруг — и нашёл ли я в ней имя. Если зовёте, а я молчу, — загляните сюда.</p>
     <div id="hear" style="font-size:13.5px;background:rgba(255,255,255,.05);border-radius:14px;padding:6px 12px;min-height:44px;max-height:230px;overflow:auto;margin-bottom:22px"><p class="hint" id="hear-empty" style="padding:8px 0">Пока тихо. Скажите что-нибудь.</p></div>
     <h2>Распознавание фраз</h2>
+    <label class="opt" data-eng="dewiar" id="srv-stt-opt" style="display:none"><input type="radio" name="stt"><div><b>Сервер Dewiar</b><span>Быстро и точно даже на слабом компьютере, немного расходует заряд. Настраивать ничего не нужно — работает по вашему аккаунту dewiar.pro или ключу Dewiar. Пропала связь — ассистент сам перейдёт на распознавание этого компьютера.</span></div></label>
     <label class="opt" data-eng="gigaam"><input type="radio" name="stt"><div><b>GigaAM v3 на этом компьютере</b><span>Лучшее качество для русского, работает на процессоре, без интернета. Скачивается один раз, около 250 МБ.</span></div></label>
     <div class="sub" data-for="gigaam"><label class="f">Вариант модели<select data-k="stt.gigaam_model">
       <option value="gigaam-v3-e2e-rnnt">v3 e2e RNNT — с пунктуацией, точнее</option>
       <option value="gigaam-v3-e2e-ctc">v3 e2e CTC — с пунктуацией, быстрее</option>
       <option value="gigaam-v3-rnnt">v3 RNNT — без пунктуации</option></select></label></div>
-    <label class="opt" data-eng="remote"><input type="radio" name="stt"><div><b>Сервер распознавания</b><span>Любой OpenAI-совместимый <kbd>/v1/audio/transcriptions</kbd> — например, GigaAM на вашем сервере из комплекта Dewiar Server.</span></div></label>
+    <label class="opt" data-eng="remote"><input type="radio" name="stt"><div><b>Свой сервер распознавания</b><span>Для тех, у кого свой сервер: любой OpenAI-совместимый <kbd>/v1/audio/transcriptions</kbd> — например, GigaAM из комплекта Dewiar Server. Адрес и ключ вписываете сами.</span></div></label>
     <div class="sub row" data-for="remote">
       <label class="f">Адрес<input type="url" placeholder="http://server:8090/v1" data-k="stt.remote.base_url"></label>
       <label class="f">Ключ, если нужен<input type="password" data-k="stt.remote.api_key"></label>

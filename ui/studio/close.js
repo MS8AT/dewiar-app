@@ -1,7 +1,7 @@
 /* Студия → «Близкие» (core/close.py): список близких, переписка, приглашение QR-кодом и ссылкой, принять ссылку.
    Данные — core.call("close_*"); новое приходит событиями close (состояние) и close_msg (входящее). Точка у пункта
    меню — есть непрочитанные. Отправка файла: файл из окна читается здесь и уходит base64 (files_b64), ядро шифрует его. */
-const CL = { st: null, cur: "", hist: [], files: [] };
+const CL = { st: null, cur: "", hist: [], files: [], pick: null };          // pick — отмеченные mid в режиме «Выбрать», null — режим выключен
 const clEsc = (t) => String(t == null ? "" : t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const CL_COLORS = ["#9BD4FF", "#FFB547", "#3DF5C8", "#FF7AB6", "#B78CFF", "#9BE15D", "#7C8CFF", "#FF6B5A"];
 const clColor = (pid) => CL_COLORS[[...String(pid)].reduce((a, c) => a + c.charCodeAt(0), 0) % CL_COLORS.length];
@@ -50,14 +50,16 @@ function clOffers(list) {
 }
 function clHead() {
   const p = ((CL.st && CL.st.people) || []).find(x => x.pid === CL.cur);
-  $("#cl-empty").style.display = p ? "none" : ""; $("#cl-head").style.display = p ? "" : "none"; $("#cl-send").style.display = p ? "" : "none";
+  $("#cl-empty").style.display = p ? "none" : ""; $("#cl-head").style.display = p ? "" : "none"; $("#cl-send").style.display = p && !CL.pick ? "" : "none";
   if (!p) { $("#cl-msgs").innerHTML = ""; return; }
   $("#cl-ava").textContent = (p.name || "?").slice(0, 1).toUpperCase(); $("#cl-ava").style.setProperty("--c", clColor(p.pid));
   $("#cl-who").textContent = p.name;
   $("#cl-devs").textContent = (p.devs || []).length ? "устройств: " + p.devs.length + " · сообщения шифруются" : "ещё не открывал Dewiar после приглашения";
   $("#cl-call").style.display = $("#cl-vcall").style.display = (p.devs || []).length ? "" : "none";
+  $("#cl-pick").textContent = CL.pick ? "Готово" : "Выбрать";
 }
 async function clOpen(pid) {
+  if (CL.cur !== pid) clPickOff();
   CL.cur = pid; $("#cl-invite").style.display = "none";
   $$("#cl-people .cl-p").forEach(b => b.classList.toggle("cur", b.dataset.pid === pid));
   clHead();
@@ -94,6 +96,7 @@ function clMsgs() {
     const path = b.dataset.path, i = path.indexOf("/Близкие/"), rel = i >= 0 ? path.slice(path.lastIndexOf("Близкие/")) : "";
     if (rel) core.call("ws_open", { path: rel }).catch(e => toast(e.message));
   });
+  if (CL.pick) { clPickWire(); return; }
   $$("#cl-msgs .cl-m").forEach(el => {
     const m = CL.hist[+el.dataset.i]; if (!m || !m.mid) return;
     const rb = $(".cl-reb", el); if (rb) rb.onclick = (e) => { e.stopPropagation(); clRePick(el, m); };
@@ -101,6 +104,56 @@ function clMsgs() {
   });
   box.scrollTop = box.scrollHeight;
 }
+/* «Выбрать» (отзыв 17.10: «очистить диалоги с близкими нельзя, или выборочно поудалять лишнее»): нажатием отмечают
+   сообщения, «Удалить у меня» убирает их из переписки на этом компьютере (core/close.py forget). У близкого и на ваших
+   других устройствах переписка остаётся — так и написано в подтверждении. «Отметить все» — очистить всю переписку. */
+function clPickOn() {
+  if (!CL.cur) return;
+  CL.pick = new Set(); clReClose();
+  $("#cl-chat").classList.add("picking"); $("#cl-selbar").hidden = false; $("#cl-send").style.display = "none"; $("#cl-emo").hidden = true;
+  clMsgs(); clPickCount();
+}
+function clPickOff() {
+  if (!CL.pick) return;
+  CL.pick = null; $("#cl-chat").classList.remove("picking"); $("#cl-selbar").hidden = true;
+  if (CL.cur) $("#cl-send").style.display = "";
+  clMsgs();
+}
+function clPickCount() {
+  const n = CL.pick ? CL.pick.size : 0, all = CL.hist.filter(m => m.mid).length;
+  $("#cl-selnum").textContent = n ? `Отмечено: ${n}` : "Нажмите на сообщения, которые убрать";
+  $("#cl-seldel").disabled = !n;
+  $("#cl-seldel").textContent = n && n === all ? "Очистить переписку" : "Удалить у меня";
+  $("#cl-selall").textContent = n && n === all ? "Снять отметки" : "Отметить все";
+}
+function clPickWire() {
+  $$("#cl-msgs .cl-m").forEach(el => {
+    const m = CL.hist[+el.dataset.i]; if (!m || !m.mid) return;
+    el.tabIndex = 0; el.setAttribute("role", "checkbox");
+    const set = () => { const on = CL.pick.has(m.mid); el.classList.toggle("sel", on); el.setAttribute("aria-checked", String(on)); };
+    const flip = () => { if (CL.pick.has(m.mid)) CL.pick.delete(m.mid); else CL.pick.add(m.mid); set(); clPickCount(); };
+    set();
+    el.onclick = (e) => { e.preventDefault(); flip(); };
+    el.onkeydown = (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); flip(); } };
+  });
+}
+async function clPickDel() {
+  const p = ((CL.st && CL.st.people) || []).find(x => x.pid === CL.cur); if (!p || !CL.pick || !CL.pick.size) return;
+  const all = CL.pick.size === CL.hist.filter(m => m.mid).length, n = CL.pick.size;
+  const what = all ? `всю переписку с «${p.name}»` : `${n} ${n % 10 === 1 && n % 100 !== 11 ? "сообщение" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "сообщения" : "сообщений"}`;
+  if (!confirm(`Удалить ${what} на этом компьютере? У ${p.name} и на ваших других устройствах переписка останется.`)) return;
+  try {
+    const r = await core.call("close_forget", all ? { pid: p.pid } : { pid: p.pid, mids: [...CL.pick] });
+    CL.st = r.state || CL.st; CL.hist = await core.call("close_history", { pid: p.pid });
+    clPickOff(); clRender(); toast(all ? "Переписка очищена" : "Удалено");
+  } catch (e) { toast(e.message, 4000); }
+}
+$("#cl-pick").onclick = () => { if (CL.pick) clPickOff(); else clPickOn(); clHead(); };
+$("#cl-selx").onclick = () => { clPickOff(); clHead(); };
+$("#cl-seldel").onclick = clPickDel;
+$("#cl-selall").onclick = () => { const ids = CL.hist.filter(m => m.mid).map(m => m.mid);
+  CL.pick = new Set(CL.pick && CL.pick.size === ids.length ? [] : ids); clPickWire(); clPickCount(); };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && CL.pick && $("#p-close").classList.contains("cur")) clPickOff(); });
 async function clSend() {
   const text = $("#cl-text").value.trim(), pid = CL.cur;
   if (!pid || (!text && !CL.files.length)) return;

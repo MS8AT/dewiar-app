@@ -222,6 +222,11 @@ class CommandsMixin:
                 d = self.workspace.ensure() / "Встречи"
                 fs = sorted(d.glob("*.md"), reverse=True)[:40] if d.is_dir() else []
                 return [{"name": f.stem, "path": f"Встречи/{f.name}", "size": f.stat().st_size} for f in fs]
+            if cmd == "prompter_meeting_remove":           # студия, «Прошлые встречи» → корзина (отзыв 17.10: «как удалить прошлую встречу?»)
+                rel = str(a.get("path") or "")
+                if not rel.startswith("Встречи/") or "/" in rel[len("Встречи/"):] or not rel.endswith(".md"):
+                    raise ValueError("это не итог встречи")
+                return self.workspace.remove(rel)
             if cmd == "prompter_open":
                 self.emit("prompter", kind="open")
                 return True
@@ -830,6 +835,9 @@ class CommandsMixin:
                     return c.offer(a.get("pid", ""), a.get("yes"))
                 if cmd == "close_remove":
                     return c.remove(a.get("pid", ""))
+                if cmd == "close_forget":           # убрать сообщения у себя: mids — выбранные, без mids — всю переписку
+                    mids = a.get("mids")
+                    return c.forget(a.get("pid", ""), None if mids is None else list(mids))
                 if cmd == "close_history":
                     return c.history(a.get("pid", ""))
                 if cmd == "close_send":

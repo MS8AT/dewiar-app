@@ -425,6 +425,28 @@ class Close:
         self._people(self._req("POST", "/close/remove", {"pid": pid}).json())
         return self.state()
 
+    def forget(self, pid, mids=None):
+        """Убрать сообщения из переписки на этом устройстве (отзыв 17.10: «очистить диалоги с близкими нельзя, или
+        выборочно поудалять лишнее» — перед съёмкой). mids — какие (mid), None — всю переписку. У близкого и на других
+        ваших устройствах всё остаётся: история хранится на каждом устройстве своя. -> {removed, state}."""
+        with self._lock:
+            h = self.st["hist"].get(pid) or []
+            if mids is None:
+                keep = []
+            else:
+                drop = {str(m) for m in mids}
+                keep = [x for x in h if str(x.get("mid") or "") not in drop]
+            n = len(h) - len(keep)
+            if keep:
+                self.st["hist"][pid] = keep
+            else:
+                self.st["hist"].pop(pid, None)
+            if not keep:
+                self.st["unread"].pop(pid, None)
+            self._save()
+        self.host.emit("close", state=self.state())
+        return {"removed": n, "state": self.state()}
+
     def person(self, who):
         """pid или имя («Андрею», «маме») -> запись человека; нет — CloseError с подсказкой."""
         with self._lock:

@@ -117,6 +117,7 @@ def card_r():
 ALARM_TITLE = "Dewiar — напоминание"
 CAPTURE_TITLE = "Dewiar — закинуть идею"
 CAPTURE_RADIUS = 24
+CAPTURE_BAR, CAPTURE_BTNS = 58, 60       # заголовок окна идеи (capture.html, header): высота и место под крестик справа
 ALARM_RADIUS = 26
 PROMPTER_TITLE = "Dewiar — суфлёр"
 PROMPTER_RADIUS = 24
@@ -1498,6 +1499,8 @@ class Api:
                     gw.set_skip_taskbar_hint(True)
                     gw.realize()
                     shape_window(gw, "alarm", (w, h), CAPTURE_RADIUS)
+                    # заголовок двигает оконный менеджер, как у суфлёра: на трёх мониторах окно не прыгает на другой экран
+                    self._wm_drag(gw, lambda px, py, ww: py < CAPTURE_BAR and px < ww - CAPTURE_BTNS)
                     gw.show_all()
                     if x is not None:
                         gw.get_window().move(x, y)
