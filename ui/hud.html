@@ -47,6 +47,7 @@
   /* неоморфизм: портрет — выпуклая «таблетка» из того же материала (две тени вокруг круга под обликом) */
   body.neu #orb::before { content: ""; position: absolute; left: 50%; top: 50%; width: 63%; height: 63%; transform: translate(-50%, -50%);
                          border-radius: 50%; background: var(--glass); box-shadow: 9px 9px 18px var(--neu-dark), -9px -9px 18px var(--neu-light); }
+  body.neu.light #orb::before { width: 72%; height: 72%; }      /* светлый неоморфизм: поле материала вокруг портрета, без рамки */
   body.neu #orb canvas { position: relative; }
   body.neu .btn:hover, body.neu .ab:hover { background: transparent; box-shadow: inset 3px 3px 6px var(--neu-dark), inset -3px -3px 6px var(--neu-light); }
   body.neu #bar { opacity: .9; }

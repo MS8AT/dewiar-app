@@ -478,6 +478,8 @@ body.neu {
 }
 body.neu #orbwrap::before { content: ""; position: absolute; left: 50%; top: 50%; width: 63%; height: 63%; transform: translate(-50%, -50%);
   border-radius: 50%; background: var(--glass); box-shadow: 10px 10px 22px var(--neu-dark), -10px -10px 22px var(--neu-light); }
+/* светлый неоморфизм: диск шире портрета — вокруг лица поле того же материала, портрет без рамки (отзыв 18.10) */
+body.neu.light #orbwrap::before { width: 72%; height: 72%; }
 body.neu #orb { position: relative; }
 body.neu :is(.card, .tile, .it, .dday, details.brainalt > summary, #bot.framed) { background: var(--glass); box-shadow: var(--raise); }
 body.neu :is(.who, .ib.soft, .pill, #rchip) { background: var(--glass); box-shadow: var(--raise-s); }

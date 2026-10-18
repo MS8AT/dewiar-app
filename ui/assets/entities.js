@@ -885,6 +885,7 @@
     const smileGoal = !talking && A.smileTill && (e.state === "idle" || e.state === "listening") ? 1 : 0;
     A.smile += (smileGoal - A.smile) * Math.min(1, dt * 3);
 
+    const neu = e.tone === "neu";
     ctx.save(); ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.clip();
     const G = L.geo, [cx0, cy0, cs] = G.crop;             // портрет целиком: видно причёску (хвостики Лиры), лицо не огромное
     // к зрителю — лёгкий сдвиг без увеличения: портрет целиком, кадр крупнее исходного (отзыв 14.10: «лицо стало крупнее,
@@ -892,8 +893,13 @@
     const gk = e.lookGain, z = 1, ox = e._lx * R * 0.03 * gk, oy = e._ly * R * 0.025 * gk;
     const sc = (2 * R) / cs * z, X = (x) => -R * z + ox + (x - cx0) * sc, Y = (y) => -R * z + oy + (y - cy0) * sc;
     ctx.imageSmoothingQuality = "high";
-    const mono = e.tone === "mono" || e.tone === "ink";
-    if (mono) {                                   // сдержанно: портрет на стекле — сквозь круг виден фон окна
+    const mono = e.tone === "mono" || e.tone === "ink" || e.tone === "neu";
+    if (neu) {                                    // светлый неоморфизм (отзыв 18.10: «серо-грязно»): мягкий свет студии за
+      // портретом — лицо светлее материала, без тени внутрь и без рамки; снизу портрет растворяется в выпуклом диске
+      const lt = neuColors().light, sl = ctx.createRadialGradient(0, -R * 0.18, R * 0.05, 0, -R * 0.05, R * 1.02);
+      sl.addColorStop(0, lt); sl.addColorStop(0.55, lt + "aa"); sl.addColorStop(1, lt + "00");
+      ctx.fillStyle = sl; ctx.fillRect(-R, -R, 2 * R, 2 * R);
+    } else if (mono) {                            // сдержанно: портрет на стекле — сквозь круг виден фон окна
       ctx.fillStyle = "rgba(255,255,255,.04)"; ctx.fillRect(-R, -R, 2 * R, 2 * R);
     } else {
       const bgr = ctx.createRadialGradient(0, -R * 0.2, R * 0.1, 0, 0, R);   // портрет на прозрачном фоне — подкладываем тёмный
@@ -923,8 +929,16 @@
     // нет связи — притушить ВЕСЬ портрет ровно одним слоем (раньше тускнело лицо, а губы и глаза, нарисованные поверх,
     // оставались яркими — выглядело жутковато). Микрофон выключен — не тушим: это и так видно по значку и подписи,
     // а тусклый виджет некрасив (отзыв 14.10: «микрофон часто выключаю, чтобы не слушала фон»)
-    if (e.state === "offline") { ctx.fillStyle = "rgba(6,6,10,.45)"; ctx.fillRect(-R, -R, 2 * R, 2 * R); }
+    // светлый неоморфизм — не темним, а «уводим в материал»: тёмная пелена на светлом и делала облик серо-грязным
+    if (e.state === "offline") { ctx.fillStyle = neu ? neuColors().glass + "8c" : "rgba(6,6,10,.45)"; ctx.fillRect(-R, -R, 2 * R, 2 * R); }
     const fade = ctx.createLinearGradient(0, R * 0.55, 0, R);   // низ портрета (обрез туловища) растворяется в фоне
+    if (neu) {                                    // край без среза: плечи и низ мягко уходят в материал диска
+      ctx.globalCompositeOperation = "destination-in";
+      const m = ctx.createRadialGradient(0, -R * 0.12, R * 0.7, 0, -R * 0.12, R * 1.08);
+      m.addColorStop(0, "rgba(0,0,0,1)"); m.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = m; ctx.fillRect(-R, -R, 2 * R, 2 * R);
+      ctx.globalCompositeOperation = "source-over";
+    }
     if (mono) {                                   // в прозрачность: внизу проступает фон окна, а не чёрное пятно
       fade.addColorStop(0, "rgba(0,0,0,0)"); fade.addColorStop(0.75, "rgba(0,0,0,.85)"); fade.addColorStop(1, "rgba(0,0,0,1)");
       ctx.globalCompositeOperation = "destination-out"; ctx.fillStyle = fade; ctx.fillRect(-R, R * 0.55, 2 * R, R * 0.45);
@@ -947,11 +961,23 @@
     portraitRim(g, e, R);
   }
 
+  // цвета неоморфной темы (skins.css: --neu-light, --glass) — читаем раз в секунду, а не каждый кадр
+  let neuC = null, neuAt = 0;
+  function neuColors() {
+    const now = performance.now();
+    if (!neuC || now - neuAt > 1000) {
+      const cs = getComputedStyle(document.body), hx = (v, d) => (/^#[0-9a-f]{6}$/i.test(v.trim()) ? v.trim() : d);
+      neuC = { light: hx(cs.getPropertyValue("--neu-light"), "#ffffff"), glass: hx(cs.getPropertyValue("--glass"), "#e4e9f0") }; neuAt = now;
+    }
+    return neuC;
+  }
+
   /* Край портрета. Цветной (по умолчанию): кольцо цвета персонажа со свечением и пунктир. Сдержанный (tone "mono",
      виджет и телефон): портрет «утоплен» в стекло — внутренняя тень по краю и тонкий светлый край, как у фото на сайте;
      пока говорит — край чуть светлеет. */
   function portraitRim(g, e, R) {
     const { ctx, r, c, t, lv, k } = g;
+    if (e.tone === "neu") return;                 // неоморфизм: ни тени внутрь, ни рамки — форму даёт сам материал
     if (e.tone === "ink") {                       // светлая тема: белая рамка и мягкая тень наружу, как у фото в Material
       const v = ctx.createRadialGradient(0, 0, R * 0.82, 0, 0, R);
       v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,.22)");
@@ -1248,16 +1274,16 @@
         this.state === "listening" ? Math.max(this.level, 0.08 + 0.05 * Math.sin(this.t * 1.7)) : this.level;
       const g = { ctx, r: PR * 0.8, c, t: this.t, lv: lvE, k: st.glow };
       // сдержанный тон: портрет, его край и лучи — холодный белый; абстрактные облики сохраняют цвет персонажа
-      const gm = this.tone === "mono" || this.tone === "ink"
-        ? Object.assign({}, g, { c: this.tone === "ink" ? (st.sat ? [52, 58, 82] : [120, 126, 140]) : st.sat ? [226, 232, 244] : [150, 156, 168] }) : g;
+      const gm = this.tone === "mono" || this.tone === "ink" || this.tone === "neu"
+        ? Object.assign({}, g, { c: this.tone !== "mono" ? (st.sat ? [52, 58, 82] : [120, 126, 140]) : st.sat ? [226, 232, 244] : [150, 156, 168] }) : g;
       // Непрозрачный тёмный диск. Всё свечение рисуется ПО НЕМУ, а не по прозрачному окну:
       // иначе на рабочем столе с аппаратным ускорением свечение «пересвечивается» пятнами.
       // сдержанный портрет — без диска-подложки: портрет «на стекле», как в окне вокруг
-      const plate = this.plate && this.style !== "aura" && !((this.tone === "mono" || this.tone === "ink") && this.style === "photo"), ringOn = this.ring && this.style !== "aura";
+      const plate = this.plate && this.style !== "aura" && !((this.tone === "mono" || this.tone === "ink" || this.tone === "neu") && this.style === "photo"), ringOn = this.ring && this.style !== "aura";
       this._dt = dt;
       if (plate) {
         const pg = ctx.createRadialGradient(0, -PR * 0.25, PR * 0.1, 0, 0, PR);
-        if (this.tone === "mono" || this.tone === "ink") { pg.addColorStop(0, "#1f2029"); pg.addColorStop(0.75, "#14141b"); pg.addColorStop(1, "#0c0c11"); }
+        if (this.tone === "mono" || this.tone === "ink" || this.tone === "neu") { pg.addColorStop(0, "#1f2029"); pg.addColorStop(0.75, "#14141b"); pg.addColorStop(1, "#0c0c11"); }
         else { pg.addColorStop(0, "#26264A"); pg.addColorStop(0.75, "#17172E"); pg.addColorStop(1, "#0D0D1A"); }
         ctx.fillStyle = pg; ctx.beginPath(); ctx.arc(0, 0, PR, 0, TAU); ctx.fill();
         ctx.save(); ctx.beginPath(); ctx.arc(0, 0, PR - 0.5, 0, TAU); ctx.clip();

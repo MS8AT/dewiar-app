@@ -60,7 +60,7 @@ for (const fx of ["bars", "pulse", "wave"]) for (const tone of ["mono", "color"]
     ok("skin-brand" in w0[0] and w0[1] == "mono" and w0[2] == "bars", f"виджет по умолчанию: {w0}")
     pg.evaluate("() => core.emit('settings', { settings: { ui: { skin: 'neu' } } })")
     wl = pg.evaluate("() => [document.body.className, entity.tone, getComputedStyle(document.getElementById('bubble')).color, getComputedStyle(document.getElementById('bubble')).boxShadow]")
-    ok("light" in wl[0] and "neu" in wl[0] and wl[1] == "ink" and wl[2] != "rgb(255, 255, 255)" and wl[3].count("rgb") >= 2,
+    ok("light" in wl[0] and "neu" in wl[0] and wl[1] == "neu" and wl[2] != "rgb(255, 255, 255)" and wl[3].count("rgb") >= 2,
        f"неоморфизм: светлая тема, тёмный текст, двойные тени, тёмные лучи: {wl[:3]}")
     pg.evaluate("() => core.emit('settings', { settings: { ui: { skin: 'neon', voice_fx: 'pulse' } } })")
     w1 = pg.evaluate("() => [document.body.className, entity.tone, entity.fx, getComputedStyle(document.getElementById('card')).backgroundImage.includes('51, 32, 58')]")

@@ -35,9 +35,10 @@ def portrait():
     big = np.asarray(src.resize((1080, 1080), Image.LANCZOS)).astype(np.float32)
     # фон: тёмное, связанное с краем — прозрачное (заливка от углов по маске «почти чёрное»)
     dark = (big.max(2) < 26).astype(np.uint8) * 255
-    m = Image.fromarray(dark, "L")
+    m = Image.fromarray(dark, "L").copy()       # копия: картинка поверх массива numpy только для чтения — floodfill молча не красил (Pillow 12)
     for xy in [(0, 0), (1079, 0), (0, 1079), (1079, 1079), (540, 0), (0, 540), (1079, 540)]:
-        ImageDraw.floodfill(m, xy, 128)
+        if m.getpixel(xy) == 255:                                  # только с тёмной точки фона (не с макушки)
+            ImageDraw.floodfill(m, xy, 128)
     bg = (np.asarray(m) == 128)
     alpha = Image.fromarray(np.where(bg, 0, 255).astype(np.uint8), "L").filter(ImageFilter.GaussianBlur(1.6))
     rgba = Image.fromarray(big.clip(0, 255).astype(np.uint8), "RGB").convert("RGBA")
