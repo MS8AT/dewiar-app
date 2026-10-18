@@ -146,5 +146,6 @@ with sync_playwright() as pw:
        and "новое достижение «Тройка»" in r["c"] and r["card"], f"телефон: три отметки — дела закрыты, «Тройка» с карточкой: {r}")
     ok(not errs, f"без ошибок на странице: {errs[:2]}")
     b.close()
+shutil.rmtree(tmp, ignore_errors=True)                # не оставлять копии страниц в /tmp
 print("\nИТОГ:", "всё прошло" if not fails else f"не прошло {len(fails)}")
 sys.exit(1 if fails else 0)

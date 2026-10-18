@@ -54,6 +54,11 @@ const D = window.Dewiar || (() => {
     copy: (t) => { window._copied = t; return true; }, bars: (c, l) => { window._bars = [c, l]; },
     closeWatch: (j) => { window._closeWatch = j; },
     closeLive: (on) => { window._closeLive = on; }, batteryOk: () => true, askBattery() {},
+    deviceClass: () => JSON.stringify(window._dev || { ram_mb: 8192, low_ram: false, cores: 8, power_save: false }),
+    updateGet(url, sha) { window._upd = [url, sha]; setTimeout(() => { ev({ type: "upd_progress", pct: 50 }); ev({ type: "upd_ready", size: 1 }); }, 50); },
+    updateInstall: () => (window._updPerm ? "perm" : (window._updInst = (window._updInst || 0) + 1, "ok")), updateCanInstall: () => !window._updPerm,
+    updateReady: () => true, openDownloads: () => { window._dls = (window._dls || 0) + 1; return true; },
+    appSize: () => JSON.stringify({ cache: 48e6, data: 12e6 }), clearOwnCache: () => (window._cleared = (window._cleared || 0) + 1, 47e6), openStorage: () => { window._storage = (window._storage || 0) + 1; return true; },
     alarmSound: () => JSON.stringify({ id: store.alarm_sound || "signature", custom: store.alarm_custom_name || "" }),
     alarmSoundSet: (id) => { if (id === "custom" && !store.alarm_custom_name) return false; store.alarm_sound = id; return true; },
     alarmSoundTry: (id) => { const on = window._trying !== id; window._trying = on ? id : ""; return on; },
@@ -789,7 +794,7 @@ function applyPersona() {
   $("#who-img").src = p.avatar || miniOrb(p);
   const style = p.avatar && p.style !== "aura" ? "photo" : p.style;
   // портрет сдержанно (белый край вместо цветного кольца), голос — лучами, как на компьютере; тема — «Ещё» → «Оформление»
-  if (!orb) { orb = new DewiarEntity($("#orb"), { style, color: p.color, image: p.avatar || null, plate: true, live: p.live || "" }); orb.set({ audible: false }); applyLook(true); tiltSync(); }
+  if (!orb) { orb = new DewiarEntity($("#orb"), { style, color: p.color, image: p.avatar || null, plate: true, live: p.live || "" }); orb.set({ audible: false }); applyLook(true); liteApply(); tiltSync(); }
   else orb.configure({ style, color: p.color, image: p.avatar || null, live: p.live || "" });
   orb.set({ state: state === "idle" ? "idle" : state });
   faceFor(p);
@@ -803,7 +808,7 @@ function applyPersona() {
 const TILT = { on: false, b0: null, g0: null, t: 0, x: 0, y: 0, raf: 0 };
 function tiltWanted() {
   const angle = (screen.orientation && screen.orientation.angle) || 0;
-  return S.tilt === true && "DeviceOrientationEvent" in window && !document.hidden && angle === 0
+  return S.tilt === true && !liteOn() && "DeviceOrientationEvent" in window && !document.hidden && angle === 0
     && !matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 function tiltOn(e) {
@@ -832,6 +837,44 @@ function tiltSync() {
   if (orb) orb.look(null);
   const c = $("#orb"); if (c) c.style.transform = "";
 }
+/* Лёгкий режим (18.10: «последние дни подтормаживает телефон… на компьютере работает даже на слабом — так и на
+   Android?»). Сам включается на слабом телефоне (Android считает его маломощным или памяти ≤ 3 ГБ), при экономии
+   батареи и если портрет рисуется медленно; «Ещё → Оформление → Лёгкий режим»: авто, всегда, никогда.
+   Что делает: портрет в покое неподвижен, в разговоре — не чаще ~20 кадров/с; наклон не следим; синхронизация и
+   проверки — втрое реже; «Близкие» без постоянной связи — проверка раз в 15 минут (CloseWatch), а не служба CloseLive. */
+const LITE_RAM = 3072;
+let liteSlow = false, liteHits = 0, liteState = null, liteWhyNow = "";
+function liteDev() { try { return JSON.parse(D.deviceClass ? D.deviceClass() : "{}") || {}; } catch (e) { return {}; } }
+function liteWhy() {
+  const m = S.lite || "auto";
+  if (m === "on") return "включён вручную";
+  if (m === "off") return "";
+  const d = liteDev();
+  if (d.power_save) return "включена экономия батареи";
+  if (d.low_ram || (d.ram_mb && d.ram_mb <= LITE_RAM)) return d.ram_mb ? `памяти ${(d.ram_mb / 1024).toFixed(d.ram_mb < 1536 ? 1 : 0).replace(".", ",")} ГБ` : "Android считает телефон маломощным";
+  if (liteSlow) return "портрет рисовался медленно";
+  return "";
+}
+const liteOn = () => liteState === true;
+function liteApply() {
+  liteWhyNow = liteWhy();
+  const on = !!liteWhyNow, was = liteState;
+  liteState = on;
+  if (orb) { orb.still = on; orb.lite = on; }
+  if (on !== was) {
+    if (was !== null || on) plog("info", on ? "🪶 лёгкий режим: " + liteWhyNow : "🪶 лёгкий режим выключен");
+    try { tiltSync(); } catch (e) { }
+    try { clWatch(); } catch (e) { }
+  }
+}
+// медленные кадры: облик сам считает, сколько рисуется кадр (_cost, мс); долго больше 14 мс — телефону тяжело
+setInterval(() => {
+  if (document.hidden || !orb || liteSlow || (S.lite || "auto") !== "auto") return;
+  liteHits = (orb._cost || 0) > 14 ? liteHits + 1 : 0;     // три проверки подряд (полминуты) — не случайный всплеск
+  if (liteHits >= 3) liteSlow = true;
+  liteApply();
+}, 10000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) liteApply(); });
 document.addEventListener("visibilitychange", () => tiltSync());
 if (screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener("change", () => tiltSync());
 
@@ -2323,6 +2366,7 @@ async function quick(text) {
   }
   { const sw = stopPhrase(t); if (sw) { const rq = await radioQuick(sw); if (rq) return rq; return { say: "Хорошо.", silent: true, stop: true }; } }
   const rq = await radioQuick(t); if (rq) return rq;
+  { const fs = freeSpaceQuick(t); if (fs) return fs; }
   if (/^(который час|сколько времени|сколько сейчас времени)$/.test(t)) { const d = new Date(); return { say: `Сейчас ${d.getHours()}:${pad(d.getMinutes())}.` }; }
   if (/^(какое (сегодня )?число|какой сегодня день)$/.test(t)) { const d = new Date(); return { say: `Сегодня ${WD[d.getDay()]}, ${d.getDate()} ${MON[d.getMonth()]}.` }; }
   let m;
@@ -3967,6 +4011,22 @@ function doneQuick(text) {
   if ($("#sh-day.on") && dayTab === "rem") renderDay();
   return { say: doneSpeak(r) };
 }
+/* «Освободи место», «почисти телефон», «сколько места занимает Dewiar» (18.10) — без модели и без подсказки ей: чистить
+   чужие приложения Android никому не даёт (с Android 6), поэтому честно: свой кэш чистим сами, а для остального
+   открываем системное «Хранилище» — там Android показывает, что занимает место, и сам предлагает очистку.
+   «Очисти память» сюда не входит — это про память помощницы. */
+const FREE_RX = /^(?:(?:освободи|освободить|почисти|почистить|очисти|очистить|разгреби)\s+(?:мне\s+)?(?:место|телефон|хранилище|мусор|кэш|кеш)(?:\s+(?:на\s+)?телефон[еа]?)?|(?:мало|не\s+хватает|кончается|закончилось|заканчивается)\s+(?:места|память)(?:\s+(?:на\s+)?телефон[еа]?)?|сколько\s+(?:места\s+)?(?:занимает|весит)\s+(?:dewiar|девиар|приложение|ты)(?:\s+места)?)$/;
+const mbRu = (b) => b >= 1e9 ? (b / 1e9).toFixed(1).replace(".", ",") + " ГБ" : Math.max(1, Math.round(b / 1e6)) + " МБ";
+function freeSpaceQuick(t) {
+  if (!FREE_RX.test(t) || !D.appSize) return null;
+  let z = {}; try { z = JSON.parse(D.appSize() || "{}"); } catch (e) { }
+  const asks = /^сколько/.test(t), total = (+z.cache || 0) + (+z.data || 0);
+  if (asks) return { say: `Dewiar занимает около ${mbRu(total)}: ${mbRu(+z.data || 0)} — ваши заметки, настройки и журнал, ${mbRu(+z.cache || 0)} — временные файлы. Скажите «освободи место» — почищу временные.` };
+  const freed = D.clearOwnCache ? +D.clearOwnCache() || 0 : 0;
+  setTimeout(() => D.openStorage && D.openStorage(), 2500);
+  plog("info", `🧹 освободи место: свой кэш −${mbRu(freed)}, открываю «Хранилище»`);
+  return { say: `Почистил свои временные файлы — ${freed >= 1e6 ? "освободилось " + mbRu(freed) : "их почти не было"}. Открываю «Хранилище»: там Android покажет, что занимает место, и предложит очистку. Чужие приложения я чистить не могу — так устроен Android.` };
+}
 /* Праздник: короткий тост на каждое дело; рубеж дня и новый значок — конфетти, вибрация и карточка. */
 function celebrate(r) {
   if (!r.items.length) return;
@@ -4544,6 +4604,9 @@ function renderSettings() {
       <label class="f" style="margin-top:6px"><span>Когда говорит</span><select id="ap-fx">${opt([["bars", "Лучи"], ["pulse", "Пульс"], ["wave", "Волна"]], lookFx())}</select></label>
       <div class="sw" style="margin-top:10px"><div>Портрет следит за наклоном<small class="hint" style="display:block;margin:2px 0 0">Наклоните телефон — персонаж чуть повернётся и посмотрит на вас. Камера не нужна.</small></div>
         <label class="tg"><input type="checkbox" id="ap-tilt" ${S.tilt === true ? "checked" : ""}><i></i></label></div></div>`);
+    liteApply();
+    h.push(`<h3>Лёгкий режим</h3><div class="card"><label class="f" style="margin-top:0"><span>Для слабых телефонов и экономии батареи</span><select id="ap-lite">${opt([["auto", "Сам, когда нужно"], ["on", "Всегда"], ["off", "Никогда"]], S.lite || "auto")}</select></label>
+      <p class="hint" id="lite-now" style="margin:6px 2px 0">${liteOn() ? `Сейчас включён: ${esc(liteWhyNow)}.` : "Сейчас выключен."} Портрет в покое неподвижен, проверки реже, «Близкие» без постоянной связи — раз в 15 минут.</p></div>`);
     // звук напоминаний: свои мягкие мелодии (Sounds.java, res/raw), системный или свой файл; ▶ — послушать
     const snd = (() => { try { return JSON.parse(D.alarmSound ? D.alarmSound() : "{}"); } catch (e) { return {}; } })();
     h.push(`<h3>Звук напоминаний</h3><div class="card"><p class="hint" style="margin-top:0">Мягко и сначала тихо — громкость прибавляется за 20 секунд.</p>
@@ -4605,6 +4668,8 @@ function wireSettings(info) {
   $$(".skm").forEach(b => b.onclick = () => { S.skin = b.dataset.skin; saveS(); applyLook(); $$(".skm").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", String(x === b)); }); });
   if (g("ap-fx")) g("ap-fx").onchange = () => { S.voice_fx = g("ap-fx").value; saveS(); applyLook(); };
   if (g("ap-tilt")) g("ap-tilt").onchange = () => { S.tilt = g("ap-tilt").checked; saveS(); tiltSync(); };
+  if (g("ap-lite")) g("ap-lite").onchange = () => { S.lite = g("ap-lite").value; saveS(); liteApply();
+    g("lite-now").textContent = (liteOn() ? `Сейчас включён: ${liteWhyNow}.` : "Сейчас выключен.") + " Портрет в покое неподвижен, проверки реже, «Близкие» без постоянной связи — раз в 15 минут."; };
   // звук напоминаний: нажатие — выбрать и послушать (ещё раз — стоп); «Свой звук» без файла — сразу выбор файла
   const sndPlaying = (id) => $$(".snd").forEach(x => x.classList.toggle("play", x.dataset.snd === id));
   $$(".snd").forEach(b => b.onclick = () => {
@@ -5052,7 +5117,8 @@ function syncCard() {
     <div class="res ${s.ok === false ? "bad" : s.ok ? "ok" : ""}" id="sy-res">${s.ok === false ? esc(s.error) : t ? `Синхронизировано в ${pad(t.getHours())}:${pad(t.getMinutes())}` + (devs.length ? ` · ещё устройства: ${devs.join(", ")}` : "") : S.sync.on ? "первая синхронизация — в течение минуты" : "выключено"}</div>
     <button class="btn w" id="sy-now" style="margin-top:6px">Синхронизировать сейчас</button>`;
 }
-setInterval(() => { if (!document.hidden) syncRun(false); }, 60000);
+let syncTick = 0;
+setInterval(() => { if (!document.hidden && (!liteOn() || ++syncTick % 3 === 0)) syncRun(false); }, 60000);   // лёгкий режим — раз в 3 минуты
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { syncSoon(); doneInbox(); } });
 
 /* ---------- Dewiar Облако (server/dwrapp/cloud.php): ключ dw-… или вход аккаунтом, заряд в талерах ----------
@@ -5096,7 +5162,8 @@ async function pairClaim(code) {
   if (r.status >= 400 || !d.key) throw new Error((d.error && d.error.message) || ("сервер ответил " + r.status));
   return d.key;
 }
-setInterval(() => { if (S.join && !document.hidden && !busy) joinPoll(false).catch(() => {}); }, 60000);
+let joinTick = 0;
+setInterval(() => { if (S.join && !document.hidden && !busy && (!liteOn() || ++joinTick % 3 === 0)) joinPoll(false).catch(() => {}); }, 60000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && S.join) setTimeout(() => joinPoll(false).catch(() => {}), 1500); });
 async function cloudGet(base, key, path) {
   const r = await http("GET", base.split("?")[0] + "?p=" + path, { headers: { Authorization: "Bearer " + key }, timeout: 10000 });
@@ -5716,6 +5783,29 @@ function cmpVer(a, b) {
   for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); }
   return 0;
 }
+/* Обновление внутри приложения (18.10: «в Загрузках копятся версии, не каждый разберётся, где удалить»): «Обновить» —
+   Dewiar сам качает новую версию в свою папку (Update.java, с проверкой sha256), открывает установщик Android, а
+   после установки файл удаляет. Старые Dewiar-….apk, скачанные браузером раньше, — «Открыть Загрузки». Нет моста
+   (старая сборка) — как раньше: ссылка для браузера. */
+let updInfo = null, updWantInstall = false;
+function updRender(html, cls) { const r = $("#upd-res"); if (r) { r.className = "res " + (cls || "ok"); r.innerHTML = html; updWire(); } }
+function updWire() {
+  const go = $("#upd-go"), inst = $("#upd-inst"), dl = $("#upd-dl");
+  if (go) go.onclick = () => { if (!updInfo) return; updRender(`Скачиваю Dewiar ${esc(updInfo.version)}… <b id="upd-pct"></b>`); D.updateGet(updInfo.url, updInfo.sha || ""); };
+  if (inst) inst.onclick = () => updInstall();
+  if (dl) dl.onclick = () => { if (!D.openDownloads()) toast("Откройте «Файлы» → «Загрузки» и удалите Dewiar-….apk"); };
+}
+function updInstall() {
+  const r = D.updateInstall();
+  if (r === "perm") { updWantInstall = true; updRender(`Разрешите Dewiar устанавливать обновления (один раз) — вернитесь, и установка начнётся сама.<button class="btn w" id="upd-inst" style="margin-top:8px">Установить</button>`); }
+  else if (r === "ok") updRender(`Открылась установка — нажмите «Обновить». Скачанный файл Dewiar потом удалит сам.`);
+  else updRender(`Файл обновления пропал — нажмите «Обновить» ещё раз.<button class="btn w" id="upd-go" style="margin-top:8px">Обновить</button>`, "bad");
+}
+N.on("upd_progress", e => { const p = $("#upd-pct"); if (p) p.textContent = e.pct >= 0 ? e.pct + "%" : ""; });
+N.on("upd_ready", () => { plog("info", "⬇️ обновление скачано — открываю установку"); updInstall(); });
+N.on("upd_error", e => updRender(`Не скачалось: ${esc(e.error || "ошибка связи")}.<button class="btn w" id="upd-go" style="margin-top:8px">Попробовать ещё раз</button>`, "bad"));
+document.addEventListener("visibilitychange", () => { if (!document.hidden && updWantInstall && D.updateCanInstall && D.updateCanInstall()) { updWantInstall = false; updInstall(); } });
+const UPD_OLD = `<p class="hint" style="margin:8px 2px 0">Раньше обновления скачивал браузер — в «Загрузках» могли остаться старые Dewiar-….apk, их можно удалить.</p><button class="btn w" id="upd-dl" style="margin-top:6px">Открыть Загрузки</button>`;
 async function checkUpdate(manual) {
   const r = $("#upd-res");
   try {
@@ -5724,9 +5814,12 @@ async function checkUpdate(manual) {
     if (newer) {
       const hands = typeof D.handsState === "function" && D.handsState() !== "none";     // стоит версия с «руками» — и обновляем её
       const url = UPD_URL.replace(/latest\.json$/, hands && a.hands_apk ? a.hands_apk : a.apk);
-      if (r) { r.className = "res ok"; r.innerHTML = `Есть Dewiar ${esc(a.version)}. <a href="${esc(url)}">Скачать</a> — откройте файл и нажмите «Обновить».`; }
-      else D.notify("Новая версия Dewiar " + a.version, "Настройки → Ещё → О приложении → Скачать");
-    } else if (manual && r) { r.className = "res ok"; r.textContent = "У вас последняя версия."; }
+      updInfo = { version: a.version, url, sha: hands && a.hands_apk ? a.hands_sha256 : a.sha256 };
+      if (r) {
+        if (D.updateGet) updRender(`Есть Dewiar ${esc(a.version)}.<button class="btn w p" id="upd-go" style="margin-top:8px">Обновить</button>`);
+        else { r.className = "res ok"; r.innerHTML = `Есть Dewiar ${esc(a.version)}. <a href="${esc(url)}">Скачать</a> — откройте файл и нажмите «Обновить».`; }
+      } else D.notify("Новая версия Dewiar " + a.version, "Ещё → О приложении → Обновить");
+    } else if (manual && r) updRender("У вас последняя версия." + (D.openDownloads ? UPD_OLD : ""));
   } catch (e) { if (manual && r) { r.className = "res bad"; r.textContent = "Не проверилось: " + e.message; } }
 }
 
@@ -6423,12 +6516,14 @@ function clReBind(p, h) {
 function clReOut(e) { if (!e.target.closest(".clrepick")) clReClose(); }
 function clReClose() { $$(".clrepick").forEach(x => x.remove()); document.removeEventListener("pointerdown", clReOut, true); }
 let clInvOpen = false;
-const clLiveOn = () => !(S.close && S.close.live === false);
+const clLiveWanted = () => !(S.close && S.close.live === false);
+const clLiveOn = () => clLiveWanted() && !liteOn();      // лёгкий режим — без постоянной связи: проверка раз в 15 минут
 function clLiveCard() {
   if (!D.closeLive || !clLoad().people.length) return "";
   const batt = clLiveOn() && D.batteryOk && !D.batteryOk();
   return `<h3>Когда приложение закрыто</h3><div class="card"><div class="sw"><div>Сообщения и звонки — сразу<small>В шторке — тихий значок «Dewiar на связи»; звонок близкого — на весь экран, даже на заблокированном</small></div>
-    <label class="tg"><input type="checkbox" id="cl-live" ${clLiveOn() ? "checked" : ""}><i></i></label></div>
+    <label class="tg"><input type="checkbox" id="cl-live" ${clLiveWanted() ? "checked" : ""}><i></i></label></div>
+    ${clLiveWanted() && liteOn() ? `<p class="hint" style="margin:8px 2px 0">Сейчас лёгкий режим (${esc(liteWhyNow)}): новые сообщения — проверка раз в 15 минут, без постоянной связи.</p>` : ""}
     ${batt ? `<button class="btn w" id="cl-batt" style="margin-top:10px">Разрешить работу в фоне</button><p class="hint" style="margin:6px 2px 0">Иначе телефон может усыплять Dewiar, и звонки будут доходить с опозданием.</p>` : ""}</div>`;
 }
 function clLiveBind() {

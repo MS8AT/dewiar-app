@@ -66,5 +66,6 @@ with sync_playwright() as pw:
     ok(face_off > face_on, f"«Небесный», нет связи: облик бледнеет, а не темнеет ({face_off} против {face_on})")
     ok(not errs, f"без ошибок на странице: {errs[:2]}")
     b.close()
+shutil.rmtree(tmp, ignore_errors=True)                # не оставлять копии страниц в /tmp
 print("\nИТОГ:", "всё прошло" if not fails else f"не прошло {len(fails)}")
 sys.exit(1 if fails else 0)

@@ -903,6 +903,8 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .lk-prev .pl::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #fff; margin-right: 7px; vertical-align: 2px; box-shadow: 0 0 8px rgba(255,255,255,.8); }
 .lk-prev { background: var(--skin-bg, #111); }                 /* фон образца — та же тема, что в виджете (assets/skins.css) */
 .lk-prev canvas.pc { width: 100px; height: 100px; margin-bottom: -10px; }
+/* образец темы — в цветах самой темы: у тёмных своего --ink нет, и подпись брала тёмный текст светлой студии (18.10) */
+:where(.lk-prev) { --ink: #fff; --glass: rgb(255 255 255 / 8%); --glass-shadow: 0 0 20px rgba(0,0,0,.45); }
 .lk-prev .pl { background: var(--glass, rgb(255 255 255 / 6%)); box-shadow: var(--glass-shadow, 0 0 20px rgba(0,0,0,.5)); color: var(--ink, #fff); }
 .lk-prev .pl::before { background: var(--ink, #fff); }
 .lk-prev.skin-neon .pl { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
@@ -958,7 +960,7 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .rf-sky { min-height: 420px; border-radius: 28px; box-shadow: 0 30px 60px -36px rgba(0,0,0,.9); }
 .rf-wait { min-height: 420px; border-radius: 28px; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; text-align: center; padding: 30px;
   color: var(--muted); background: radial-gradient(90% 70% at 50% 46%, #2a2160 0%, #151233 46%, #0a0917 78%, #07060d 100%); }
-.rf-wait b { font: 600 16px "Unbounded", sans-serif; color: var(--ink); } .rf-wait span { max-width: 360px; font-size: 13.5px; }
+.rf-wait b { font: 600 16px "Unbounded", sans-serif; color: #F4F4F6; } .rf-wait span { max-width: 360px; font-size: 13.5px; color: rgba(255,255,255,.7); }   /* ночное небо — в любой теме светлый текст */
 .rf-side { display: flex; flex-direction: column; gap: 12px; }
 .rf-card { background: var(--glass); border-radius: 22px; padding: 16px 18px; }
 .rf-code { display: block; font: 600 26px "Unbounded", sans-serif; letter-spacing: .14em; margin: 2px 0 12px; }

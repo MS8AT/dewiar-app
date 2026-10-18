@@ -42,6 +42,67 @@ public final class Bridge {
         } catch (Exception e) { return "{}"; }
     }
 
+    // ---------- обновление внутри приложения (Update.java) ----------
+    @JavascriptInterface public void updateGet(String url, String sha256) { Update.download(a, url, sha256); }
+    @JavascriptInterface public String updateInstall() { return Update.install(a); }
+    @JavascriptInterface public boolean updateCanInstall() { return Update.canInstall(a); }
+    @JavascriptInterface public boolean updateReady() { return Update.apk(a).isFile(); }
+    /** «Загрузки» системы — убрать старые Dewiar-….apk, скачанные раньше браузером. */
+    @JavascriptInterface public boolean openDownloads() {
+        try { a.startActivity(new Intent("android.intent.action.VIEW_DOWNLOADS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return true; }
+        catch (Exception e) { return false; }
+    }
+
+    // ---------- «освободи место» (18.10): системное «Хранилище», размер Dewiar и свой кэш ----------
+    private static long du(File f) {
+        if (f == null || !f.exists()) return 0;
+        if (f.isFile()) return f.length();
+        long n = 0; File[] l = f.listFiles();
+        if (l != null) for (File x : l) n += du(x);
+        return n;
+    }
+    /** Сколько занимает Dewiar: {cache, data} в байтах (кэш — голоса, страницы, скачанное обновление; данные — заметки,
+     *  настройки, журнал). */
+    @JavascriptInterface public String appSize() {
+        try {
+            long cache = du(a.getCacheDir()) + du(a.getExternalCacheDir());
+            long data = du(a.getFilesDir()) + du(new File(a.getApplicationInfo().dataDir, "app_webview")) + du(a.getExternalFilesDir(null));
+            return new JSONObject().put("cache", cache).put("data", data).toString();
+        } catch (Exception e) { return "{}"; }
+    }
+    private static void wipe(File d) {
+        File[] l = d == null ? null : d.listFiles();
+        if (l != null) for (File x : l) { if (x.isDirectory()) wipe(x); //noinspection ResultOfMethodCallIgnored
+            x.delete(); }
+    }
+    /** Почистить свой кэш (голоса заново скачаются при надобности). -> сколько байт освобождено. */
+    @JavascriptInterface public long clearOwnCache() {
+        long before = du(a.getCacheDir()) + du(a.getExternalCacheDir());
+        wipe(a.getCacheDir()); wipe(a.getExternalCacheDir());
+        a.runOnUiThread(new Runnable() { @Override public void run() { try { a.clearWebCache(); } catch (Throwable ignored) { } } });
+        return Math.max(0, before - du(a.getCacheDir()) - du(a.getExternalCacheDir()));
+    }
+    /** Системное «Хранилище»: Android сам покажет, что занимает место, и предложит очистку. */
+    @JavascriptInterface public boolean openStorage() {
+        try { a.startActivity(new Intent("android.settings.INTERNAL_STORAGE_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return true; }
+        catch (Exception e) {
+            try { a.startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return true; }
+            catch (Exception x) { return false; }
+        }
+    }
+
+    /** Сила телефона для «лёгкого режима» (app.js liteWhy): память, «маломощный» по мнению Android, ядра, экономия батареи. */
+    @JavascriptInterface public String deviceClass() {
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager) a.getSystemService(Context.ACTIVITY_SERVICE);
+            android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+            am.getMemoryInfo(mi);
+            android.os.PowerManager pm = (android.os.PowerManager) a.getSystemService(Context.POWER_SERVICE);
+            return new JSONObject().put("ram_mb", mi.totalMem / (1024 * 1024)).put("low_ram", am.isLowRamDevice())
+                    .put("cores", Runtime.getRuntime().availableProcessors()).put("power_save", pm != null && pm.isPowerSaveMode()).toString();
+        } catch (Exception e) { return "{}"; }
+    }
+
     @JavascriptInterface public void clearCrash() {
         //noinspection ResultOfMethodCallIgnored
         new File(a.getFilesDir(), "crash.txt").delete();

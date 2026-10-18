@@ -2,6 +2,7 @@ package pro.dewiar.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -38,6 +39,8 @@ public class MainActivity extends Activity implements Net.Sink {
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         live = new java.lang.ref.WeakReference<>(this);
+        final Context app = getApplicationContext();
+        new Thread(new Runnable() { @Override public void run() { Update.cleanup(app); } }).start();   // обновление уже стоит — файл не нужен
         Window w = getWindow();
         w.setStatusBarColor(Color.parseColor("#0B0B10"));
         w.setNavigationBarColor(Color.parseColor("#0B0B10"));
@@ -225,6 +228,9 @@ public class MainActivity extends Activity implements Net.Sink {
         pending = null;
         return p == null ? "" : p.toString();
     }
+
+    /** Кэш страниц WebView («освободи место», Bridge.clearOwnCache) — только в главном потоке. */
+    void clearWebCache() { if (web != null) web.clearCache(true); }
 
     /** Событие в интерфейс: window.N.ev("{type, ...}") — JSON строкой, разбирает app.js. Зовётся из любого потока
      *  (сеть, слух, голос) — evaluateJavascript только в главном. */

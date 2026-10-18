@@ -2,7 +2,7 @@
    (idle/listening/thinking/speaking/muted/offline) и громкость 0…1 (микрофон или собственный голос).
    new DewiarEntity(canvas, {style, color, image, ring, plate}) → .set({state, level}), .configure(...), .destroy();
    снаружи можно выставить .paused (не рисовать), .vinyl = название станции (в покое — пластинка),
-   .calm (реже кадры: созвон, мало памяти), .still (в покое — неподвижный кадр, для страниц со многими обликами),
+   .calm (реже кадры: созвон, мало памяти), .lite (лёгкий режим телефона: ~20 кадров/с), .still (в покое — неподвижный кадр, для страниц со многими обликами),
    .bold/.thick (плотнее линии — для иконки приложения).
    Стили — STYLES ниже; имена совпадают со style персонажей в core/personas.py и STYLE_NAMES в ui/studio/core.js.
    Используют виджет (ui/hud.html), студия и телефон: android/tools/build_apk.sh копирует этот файл в приложение.
@@ -1250,6 +1250,7 @@
       // слабый компьютер (или WebKit без ускорения): кадр рисуется долго — рисуем реже, чтобы кнопки не «залипали»
       if (this._cost > 6) minDt = Math.max(minDt, Math.min(120, this._cost * 6));
       if (this.calm) minDt = Math.max(minDt, this.state === "idle" ? 160 : 60);   // созвон: облик почти неподвижен, не мешаем
+      if (this.lite) minDt = Math.max(minDt, 50);         // лёгкий режим телефона: не чаще ~20 кадров/с и в разговоре
       if (now - this._last < minDt) return;
       const t0 = performance.now();
       const dt = Math.min(0.1, (now - this._last) / 1000); this._last = now;

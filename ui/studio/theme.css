@@ -36,7 +36,10 @@ html.st-light {
   --frost-on: var(--frost-hi);
   --soft: color-mix(in srgb, var(--ink) 6%, transparent);          /* лёгкая подложка: чипы, наведение */
   --soft2: color-mix(in srgb, var(--ink) 10%, transparent);
+  --bad: #b8284c; --good: #1d7f55;                                 /* красный и зелёный тёмной темы на светлом не читались */
 }
+/* роль персонажа (отзыв 18.10: «Главная помощница», «Здоровье» в «Небесном» почти не видно) — цвет персонажа темнее, к тексту */
+html.st-light .card .role { color: color-mix(in srgb, var(--c) 42%, var(--ink)); background: color-mix(in srgb, var(--c) 22%, transparent); }
 html.st-light body { background-color: transparent; }
 html.st-light nav { box-shadow: 10px 0 34px -12px rgba(20,30,60,.16); }
 html.st-light :is(.dwc, .card, .jcard, .tidea, .wtile, .cloudc, .prof, .opt, .ritem, .lk, .mstat, .ftree, .fview, .ddays, .calgrid, .calside, .mocard, .mopanel, .wpanel, .ph-q, .rempty, .pr-it, .dpage, .wst) {
@@ -153,7 +156,7 @@ html.st-light .msplit::after { background: var(--soft2); }
 
 /* ---------- неоморфизм: один материал, форма от двух теней ---------- */
 html.st-neu {
-  --brand: linear-gradient(135deg, #6a8dff 0%, #4f6cf0 100%); --accent: #5b7cff;
+  --brand: linear-gradient(135deg, #6a8dff 0%, #4f6cf0 100%); --accent: #4560ea;      /* акцент-текст (вкладки, ссылки) — читаемый на материале */
   --nd: var(--sk-nd, #c2c9d4); --nl: var(--sk-nl, #fff);
   --raise: 6px 6px 14px var(--nd), -6px -6px 14px var(--nl);
   --raise-s: 3px 3px 7px var(--nd), -3px -3px 7px var(--nl);

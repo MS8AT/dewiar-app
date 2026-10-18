@@ -44,6 +44,22 @@
   body.light .sep { background: rgba(20,20,40,.12); }
   body.light #ask textarea { color: var(--ink); }
   body.light #ask textarea::placeholder { color: var(--muted); }
+  /* карточки напоминания, заметки, расхода и таймера (отзыв 18.10: в «Небесном» белые цифры и янтарная строка на светлом
+     почти не читались) — на светлом: свой тон фона, тёмный текст, акценты темнее, кнопки — как остальные светлые */
+  body.light #rem { background: linear-gradient(135deg, rgba(255,181,71,.2), rgba(255,106,136,.12)); box-shadow: 0 8px 22px rgba(20,30,60,.10); color: var(--ink); }
+  body.light #rem.note { background: linear-gradient(135deg, rgba(138,155,255,.2), rgba(75,227,161,.12)); }
+  body.light #rem .rt b { color: #9a5a00; }
+  body.light #rem.note .rt b { color: #3d4bb8; }
+  body.light #rem.money .rt b { color: #1f7a55; }
+  body.light #rem button, body.light #tmr button { background: rgba(20,20,40,.08); color: var(--ink); }
+  body.light #rem button:hover, body.light #tmr button:hover { background: rgba(20,20,40,.14); }
+  body.light #tmr .tr { background: linear-gradient(135deg, rgba(126,232,250,.22), rgba(138,155,255,.16)); box-shadow: 0 8px 22px rgba(20,30,60,.10); }
+  body.light #tmr .tr.end { background: linear-gradient(135deg, rgba(255,181,71,.28), rgba(255,106,136,.18)); }
+  body.light #tmr .tt b { color: var(--ink); }
+  body.light #tmr .tt span { color: var(--muted); }
+  body.light #tmr svg.pg .bg { stroke: rgba(20,20,40,.10); }
+  body.light #tmr svg.pg .fg { stroke: #2aa7c9; }
+  body.light #tmr .tr.end svg.pg .fg { stroke: #e08a00; }
   /* неоморфизм: портрет — выпуклая «таблетка» из того же материала (две тени вокруг круга под обликом) */
   body.neu #orb::before { content: ""; position: absolute; left: 50%; top: 50%; width: 63%; height: 63%; transform: translate(-50%, -50%);
                          border-radius: 50%; background: var(--glass); box-shadow: 9px 9px 18px var(--neu-dark), -9px -9px 18px var(--neu-light); }
