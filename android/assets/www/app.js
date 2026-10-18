@@ -3002,6 +3002,13 @@ async function runTool(name, a) {
         if (!m) return "Ошибка: не пришёл адрес страницы — возьми его из слов пользователя и вызови read_webpage с url.";
         url = (m[1] || m[2]).replace(/[.,;:!?)]+$/, "");
       }
+      // видео по ссылке (18.10): текст ролика — в субтитрах, их достаёт компьютер (core/video.py, yt-dlp); здесь — только
+      // описание. Не выдумывать содержание: честно сказать и, если компьютер подключён, предложить передать задачу ему
+      if (/^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?|shorts\/|live\/)|youtu\.be\/|rutube\.ru\/(?:video|shorts)\/|vk\.com\/video|vkvideo\.ru\/video)/i.test(url)) {
+        const desc = await readPage(url, a.find || "");
+        return desc + "\n\n(Это только страница видео — описание, без текста ролика. Скажи об этом честно и не выдумывай содержание. "
+          + (S.sync.on && syncCred() && pcSeen() ? "Конспект по самому ролику сделает компьютер: предложи передать ему задачу (start_task: конспект видео по ссылке, сохранить заметкой со ссылкой)." : "Конспект по самому ролику умеет Dewiar на компьютере.") + ")";
+      }
       return await readPage(url, a.find || "");
     }
     case "weather": return await weather(a.city || "", a.days || 3);

@@ -362,6 +362,14 @@ def t_read_webpage(a, ctx):
     url = (a.get("url") or "").strip()
     if not re.match(r"^https?://", url):
         raise ToolError("нужен полный адрес страницы")
+    import video                                 # YouTube, Rutube, VK: текст ролика — из субтитров (video.py), а не описание
+    if video.is_video(url):
+        try:
+            return video.for_model(url, video.transcript(url))
+        except video.NoTranscript as e:
+            return video.no_transcript_text(url, e)
+        except Exception as e:  # noqa: BLE001 — сеть, yt-dlp: читаем страницу как обычно
+            log.info("Субтитры видео не получены: %s", e)
     try:
         r = httpx.get(url, headers=UA, timeout=15, follow_redirects=True)
         r.raise_for_status()
