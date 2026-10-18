@@ -31,6 +31,7 @@ if WIN:
 
 log = logging.getLogger("dewiar.tools")
 DRY = os.environ.get("DEWIAR_DRY_TOOLS")          # тесты: путь к файлу, куда пишутся команды вместо запуска программ
+EXAM_LAUNCH = os.environ.get("DEWIAR_EXAM_LAUNCH")   # экзамен: программы и браузер не запускаем, а записываем (core/exam.py)
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Dewiar/0.12" if WIN else "Mozilla/5.0 (X11; Linux x86_64) Dewiar/0.8"}
 
 
@@ -69,8 +70,8 @@ def launch(cmd):
     """Запустить программу отсоединённо (она переживёт ассистента). Команды — в терминах Linux (xdg-open, gio launch,
     gtk-launch); на Windows из них берётся последний аргумент и открывается «как двойным щелчком», прочее — ToolError.
     В тестах (DRY) команда только записывается в файл."""
-    if DRY:
-        with open(DRY, "a", encoding="utf-8") as f:
+    if DRY or EXAM_LAUNCH:
+        with open(DRY or EXAM_LAUNCH, "a", encoding="utf-8") as f:
             f.write(json.dumps(cmd, ensure_ascii=False) + "\n")
         return
     if WIN:

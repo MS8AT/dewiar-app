@@ -1197,6 +1197,8 @@ class CommandsMixin:
         if cmd == "config_pending":
             m = self.pending_import
             return provision.preview(m, self.s.snapshot()) if m else None
+        if cmd == "tricks":                       # «Что я умею» в студии — data/tricks.json (тот же список, что на телефоне)
+            return json.loads((Path(__file__).resolve().parent.parent / "data/tricks.json").read_text(encoding="utf-8"))
         if cmd == "skills":
             return self.skills.catalog()
         if cmd == "skill_install":

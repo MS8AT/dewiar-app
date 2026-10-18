@@ -372,6 +372,8 @@ class ToolsMixin:
         for x in p["items"]:
             item = self.reminders.add(x["at"], x["text"], None, "reminder")
             self.emit("reminder_set", item=self._reminder_public(item), text="")
+            self.emit("tool", name="set_reminder", title="Напоминание", status="done", args={"text": x["text"], "at": f"{x['at']:%Y-%m-%dT%H:%M}"},
+                      detail=x["text"], result=f"{x['at']:%d.%m %H:%M} — {x['text']}")
             acts.append("set_reminder")
         log.info("🗓 План дня (без модели): %s", "; ".join(f"{x['at']:%d.%m %H:%M} {x['text']}" for x in p["items"]))
         self._say_quick(dayplan.plan_say(p), text, via, acts=acts)
@@ -399,6 +401,8 @@ class ToolsMixin:
             else:
                 lst.append({"title": t})
         r = self.done.add(lst, "voice")
+        self.emit("tool", name="mark_done", title="Дела: сделано", status="done", args={"items": [x["title"] for x in lst]},
+                  detail=", ".join(x["title"] for x in lst), result=f"сегодня сделано {r['stats']['today']}")
         self.emit("done", **self.done.public(), fresh=[{"icon": x[3], "name": x[4], "what": x[5]} for x in r["fresh"]], mile=r["mile"],
                   added=[x["title"] for x in r["items"]])
         log.info("✓ Сделано (без модели): %s", "; ".join(x["title"] for x in r["items"]))
@@ -448,6 +452,7 @@ class ToolsMixin:
         if not m:
             return False
         q = re.sub(r"\b(?:какое-нибудь|какой-нибудь|какую-нибудь|что-нибудь|какое-то|какой-то|мне|нам)\b", " ", m.group("q"))
+        q = re.sub(r"^\s*(?:еще|ещё)\s+(?:одно|один|одну|какое|какой|какую)?\s*|^\s*(?:другое|другой|другую|новое|новый|новую)\s+", "", q)   # «ещё одно смешное видео» — ищем «смешное видео»
         q = re.sub(r"\s+", " ", q).strip()
         if not q or len(q) > 120:
             return False
@@ -475,18 +480,20 @@ class ToolsMixin:
         повторяла «Отправила …» из разговора, не вызывая отправку). Каждое слово адресата должно указывать на этого
         человека (иначе «письмо Андрею» ушло бы в «Близкие»); почта, Telegram, WhatsApp, SMS — решает модель."""
         m = self._SEND_RX.match(text or "")
+        if not m and getattr(self, "close", None) is not None:
+            m = self._send_loose(text or "")             # как пишет распознавание: без двоеточия, имя впереди
         if not m or getattr(self, "close", None) is None or re.search(r"почт|письм|e-?mail|телеграм|telegram|whatsapp|вотсап|ватсап|"
                                                                       r"вайбер|viber|смс|sms|эсэмэс|max\b|макс\b", text or "", re.I):
             return False
         from close import CloseError, match_name
-        who = m.group("who").strip()
+        who = (m.group("who") if hasattr(m, "group") else m["who"]).strip()
         try:
             p = self.close.person(who)
         except CloseError:
             return False
         if any(match_name(w, [p]) is not p for w in who.split()):
             return False
-        msg = m.group("msg").strip().strip("«»\"„“ ").strip()
+        msg = (m.group("msg") if hasattr(m, "group") else m["msg"]).strip().strip("«»\"„“ ").strip()
         msg = re.sub(r"[»\"“]\s*\.?$", "", msg).strip()
         if not msg or len(msg) > 2000:
             return False
@@ -502,8 +509,32 @@ class ToolsMixin:
             self._say_quick(f"Не получилось отправить: {e}", text, via)
             return True
         tool_ev("tool", name="close_send", title="Близкие: написать", status="done", detail=p["name"], result=f"отправлено {p['name']}")
-        self._say_quick(f"Отправила {who}.", text, via, acts=["close_send"])
+        self._say_quick(f"Отправил {who}.", text, via, acts=["close_send"])        # в роде персонажа — _g
         return True
+
+    def _send_loose(self, text):
+        """«отправь сообщение андрею привет как дела», «а теперь лёхе напиши во сколько встречаемся» — распознавание речи
+        не ставит двоеточий (экзамен «как в жизни», 18.10). Адресат — первые 1–3 слова, если это человек из «Близких»
+        (каждое слово — про него); остальное — текст. -> {"who", "msg"} или None."""
+        from close import CloseError, match_name
+        t = re.sub(r"\s+", " ", text).strip()
+        cand = []
+        m = re.match(r"^(?:[А-ЯЁа-яё]+\s*,\s*)?(?:(?:а|и)\s+)?(?:теперь\s+)?(?:пожалуйста\s+)?(?:отправь|напиши|передай|скинь)(?:\s+пожалуйста)?"
+                     r"(?:\s+сообщение)?\s+(?P<rest>.+)$", t, re.I)
+        if m:
+            w = m.group("rest").split(" ")
+            cand += [(" ".join(w[:k]), " ".join(w[k:])) for k in (3, 2, 1) if len(w) > k]
+        m = re.match(r"^(?:(?:а|и)\s+)?(?:теперь\s+)?(?P<who>[А-ЯЁа-яё-]+(?:\s+[А-ЯЁа-яё-]+)?)\s+(?:напиши|отправь|передай)\s+(?P<msg>.+)$", t, re.I)
+        if m and re.search(r"[еюиу]$", m.group("who").lower()):       # «лёхе напиши» — кому (дательный), а не «Андрей, напиши стих»
+            cand.append((m.group("who"), m.group("msg")))
+        for who, msg in cand:
+            try:
+                p = self.close.person(who)
+            except CloseError:
+                continue
+            if all(match_name(x, [p]) is p for x in who.split()) and msg.strip():
+                return {"who": who, "msg": msg}
+        return None
 
     def _timer_cmd(self, text, via=None):
         """Таймеры голосом, без модели: «сколько осталось (на таймере)?», «добавь минуту / ещё 5 минут к таймеру»,

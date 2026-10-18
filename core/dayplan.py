@@ -33,7 +33,33 @@ EVENING = 20
 def _segments(body):
     """Дела по одному: через запятую, «;», перенос строки, «и / потом / затем» перед временем."""
     parts = re.split(r"\s*(?:[,;\n]|\.\s+|\s—\s)\s*|\s+(?:и|а\s+потом|потом|затем|а)\s+(?=(?:в|к)\s+\d)", body)
-    return [p.strip(" .:—-") for p in parts if p and p.strip(" .:—-")]
+    out = []
+    for p in parts:
+        p = (p or "").strip(" .:—-")
+        if p:
+            out += _by_time(p)
+    return out
+
+
+_T = r"(?:в|к)\s+\d{1,2}(?:[:.]\d{2})?(?:\s+(?:часов|часа|час))?(?:\s+(?:утра|дня|вечера|ночи))?"
+
+
+def _by_time(p):
+    """Распознавание речи запятых не ставит: «в 13 позвонить в банк в 16 тренировка в 19 купить подарок маме» — делим по
+    времени. Время впереди дела — режем перед каждым «в N»; время после дела («позвонить в банк в 13 тренировка
+    в 16») — после каждого «в N»."""
+    marks = list(re.finditer(r"(?<![а-яё])" + _T + r"(?![\d:])", p))
+    if len(marks) < 2:
+        return [p]
+    if marks[0].start() == 0:
+        cuts = [m.start() for m in marks[1:]]
+    else:
+        cuts = [m.end() for m in marks[:-1]]
+    pieces, last = [], 0
+    for c in cuts:
+        pieces.append(p[last:c]); last = c
+    pieces.append(p[last:])
+    return [x.strip(" .:—-,") for x in pieces if x.strip(" .:—-,")]
 
 
 def parse_plan(text, now=None):

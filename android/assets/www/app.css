@@ -756,3 +756,12 @@ body.light .donewhy p { color: var(--ink); }
 .bugpick .bpk img { display: block; width: 100%; max-height: 240px; object-fit: cover; object-position: top; border-radius: 12px; box-shadow: 0 6px 20px -10px #000; }
 .bugpick .bpk .x { position: absolute; top: 6px; right: 6px; }
 .bugpick label.btn { display: block; text-align: center; }
+
+/* «Что я умею»: фразы карточками-кнопками — сама фраза крупно, что делает — мельче */
+#tricks-body .trg h3 { margin: 16px 4px 8px; }
+#tricks-body .trl { display: flex; flex-direction: column; gap: 2px; padding: 6px; }
+#tricks-body .trk { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; width: 100%; border: 0; background: none;
+  color: var(--ink); font: inherit; padding: 10px 12px; border-radius: 14px; cursor: pointer; }
+#tricks-body .trk:active { background: var(--glass, rgba(255,255,255,.08)); }
+#tricks-body .trk b { font-weight: 600; font-size: 15px; }
+#tricks-body .trk small { color: var(--muted); font-size: 12.5px; line-height: 1.35; }

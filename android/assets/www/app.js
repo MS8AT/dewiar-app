@@ -2429,18 +2429,29 @@ async function quick(text) {
     if (r.final) return { say: r.text };
   }
   // «отправь Людмиле Исаевой — привет, как дела», «напиши маме: задержусь» — близкому через Dewiar, сразу
-  if ((m = t.match(/^(?:напиши|отправь|передай|скажи|сообщи)\s+(.+)$/)) && clLoad().people.length) {
+  // как пишет распознавание (18.10, экзамен «как в жизни»): «отправь сообщение андрею привет как дела» — без двоеточия;
+  // «а теперь лёхе напиши во сколько встречаемся» — имя впереди
+  if (clLoad().people.length && (m = t.match(/^(?:(?:а|и)\s+)?(?:теперь\s+)?(\S+(?:\s+\S+)?)\s+(?:напиши|отправь|передай|скажи)\s+(?!сообщение\b)(.+)$/))
+      && !/^(?:напиши|отправь|передай|скажи|сообщи|мне|ему|ей|им)$/.test(m[1]) && /[еюиу]$/.test(m[1])) {   // «лёхе напиши» — кому, а не «Андрей, напиши стих»
+    const p = clMatch(m[1], clLoad().people, true), body = text.replace(/^.*?\s(?:напиши|отправь|передай|скажи)\s+/i, "").replace(/^[\s,:;—–-]+/, "").replace(/^(?:что|чтобы)\s+/i, "").trim();
+    if (p && body) {
+      try { const it = await clSend(p.pid, body.charAt(0).toUpperCase() + body.slice(1)); return { say: `${persona().gender === "female" ? "Отправила" : "Отправил"} через Dewiar. ${it.to} услышит: «${body}».` }; }
+      catch (e) { return { say: e.message }; }
+    }
+  }
+  if ((m = t.match(/^(?:(?:а|и)\s+)?(?:теперь\s+)?(?:напиши|отправь|передай|скажи|сообщи)(?:\s+сообщение)?\s+(.+)$/)) && clLoad().people.length) {
     const ws = m[1].split(" ");
     for (let k = Math.min(3, ws.length - 1); k >= 1; k--) {
       const p = clMatch(ws.slice(0, k).join(" "), clLoad().people, true); if (!p) continue;
-      const orig = text.replace(/^.*?(?:^|[\s,])(?:напиши|отправь|передай|скажи|сообщи)\s+/i, "").split(/\s+/).slice(k).join(" ");
+      const orig = text.replace(/^.*?(?:^|[\s,])(?:напиши|отправь|передай|скажи|сообщи)(?:\s+сообщение)?\s+/i, "").split(/\s+/).slice(k).join(" ");
       const body = orig.replace(/^[\s,:;—–-]+/, "").replace(/^(?:что|чтобы)\s+/i, "").trim();
       if (!body) break;
       try { const it = await clSend(p.pid, body.charAt(0).toUpperCase() + body.slice(1)); return { say: `${persona().gender === "female" ? "Отправила" : "Отправил"} через Dewiar. ${it.to} услышит: «${body}».` }; }
       catch (e) { return { say: e.message }; }
     }
   }
-  if (/^(?:перезвони|повтори звонок|набери ещ[её] раз|позвони ещ[её] раз|позвони снова)(?:\s+пожалуйста)?$/.test(t)) return { say: (await doCall("ещё раз")).text };
+  // «перезвони», «позвони ей ещё раз», «набери снова» — тому же, кому звонили (и через Dewiar — тоже через Dewiar)
+  if (/^(?:перезвони|повтори звонок|(?:набери|позвони|звони)(?:\s+(?:ей|ему|им|ей же|ему же))?\s+(?:ещ[её] раз|снова|опять))(?:\s+пожалуйста)?$/.test(t)) return { say: (await doCall("ещё раз")).text };
   if (/^(?:(?:можешь|можно|пожалуйста|давай)\s+)?(?:позвони(?:ть)?|набери|набрать|звони|звякни)(?:\s+(?:пожалуйста|мне|кому-нибудь|кое-кому))?$/.test(t)) return { say: "Кому позвонить?" };
   // «видеозвонок Люде», «сделай видеозвонок маме» — близкому по видео (doCall понимает «по видео»)
   if ((m = t.match(/^(?:(?:сделай|набери|начни)\s+)?видеозвонок\s+(.+)$/))) { const r = await doCall(m[1] + " по видео"); if (r.ok || r.final) return { say: r.text }; }
@@ -2522,11 +2533,19 @@ function dial(number, name) {
 }
 /* человек из «Близких» — звоним через Dewiar (аудио или видео), а не ищем в контактах и мессенджерах (отзыв 11.10).
    -> ответ doCall или null — не близкий (тогда телефонная книга) */
+let lastClose = null;                                // последний звонок близкому через Dewiar: «перезвони» — снова ему
 async function closeCallFirst(who) {
-  const VRX = /\s(?:по\s+)?видео(?:звонком|связи)?$|^по\s+видео(?:связи)?\s+/i, video = VRX.test(who), name = who.replace(VRX, "").trim();
-  const p = clLoad().people.length && name && !/^(?:ещ[её]\s+раз|снова|опять|обратно)$/.test(name) ? clMatch(name, clLoad().people, true) : null;
+  const VRX = /\s(?:по\s+)?видео(?:звонком|связи)?$|^по\s+видео(?:связи)?\s+/i, video = VRX.test(who);
+  let name = who.replace(VRX, "").trim().replace(/\s+(?:ещ[её]\s+раз|снова|опять)$/, "").trim();   // «набери людмилу снова»
+  let again = null;
+  if (/^(?:ещ[её]\s+раз|снова|опять|обратно)$/.test(name)) {
+    if (!lastClose || (lastCall && lastCall.at > lastClose.at) || Date.now() - lastClose.at > 3 * 3600e3) return null;
+    again = clLoad().people.find(x => x.pid === lastClose.pid) || null;
+  }
+  const p = again || (clLoad().people.length && name && !/^(?:ещ[её]\s+раз|снова|опять|обратно)$/.test(name) ? clMatch(name, clLoad().people, true) : null);
   if (!p || !(p.devs || []).length || !window.DewiarCall) return null;
-  try { await clCall(p.pid, video); return { ok: true, final: true, text: `${video ? "Видеозвонок" : "Звоню"} через Dewiar: ${p.name}.` }; }
+  const vid = video || (again ? lastClose.video : false);
+  try { await clCall(p.pid, vid); lastClose = { pid: p.pid, video: vid, at: Date.now() }; return { ok: true, final: true, text: `${vid ? "Видеозвонок" : "Звоню"} через Dewiar: ${p.name}.` }; }
   catch (e) { return { ok: false, final: true, text: e.message }; }
 }
 async function doCall(who) {
@@ -3905,6 +3924,17 @@ function restoreCase(what, raw) {
   return String(what).split(" ").map(w => /^\d+$/.test(w) ? w : (o[w] || w)).join(" ");
 }
 const capFirst = (t) => t ? t[0].toUpperCase() + t.slice(1) : t;
+// распознавание речи запятых не ставит: «в 13 позвонить в банк в 16 тренировка» — делим по времени, как dayplan._by_time
+const PLAN_T = /(?:^|[^а-я])((?:в|к)\s+\d{1,2}(?:[:.]\d{2})?(?:\s+(?:часов|часа|час))?(?:\s+(?:утра|дня|вечера|ночи))?)(?![\d:])/g;
+function planByTime(p) {
+  const marks = [...p.matchAll(PLAN_T)].map(m => ({ start: m.index + m[0].length - m[1].length, end: m.index + m[0].length }));
+  if (marks.length < 2) return [p];
+  const cuts = marks[0].start === 0 ? marks.slice(1).map(m => m.start) : marks.slice(0, -1).map(m => m.end);
+  const out = []; let last = 0;
+  for (const c of cuts) { out.push(p.slice(last, c)); last = c; }
+  out.push(p.slice(last));
+  return out.map(x => x.replace(/^[\s.:—,-]+|[\s.:—,-]+$/g, "")).filter(Boolean);
+}
 function planParse(text, now = new Date()) {
   const raw = String(text || "").replace(/\s+/g, " ").trim();
   if (!raw || /\?\s*$/.test(raw) || raw.includes("\n\nВложения:")) return null;
@@ -3917,7 +3947,7 @@ function planParse(text, now = new Date()) {
   const dm = rest.slice(0, 40).match(/(?:^|[^а-я])(?:на\s+)?(сегодня|завтра|послезавтра|день)(?![а-я])/);
   if (dm) { day = dm[1] === "день" ? "" : dm[1]; rest = rest.slice(0, dm.index) + " " + rest.slice(dm.index + dm[0].length); }
   rest = rest.replace(/^\s*(?:мне|нам|такие|следующие|вот|дела|задачи)\s+/, " ").replace(/^[\s:—,.-]+|[\s:—,.-]+$/g, "");
-  const segs = rest.split(/\s*(?:[,;\n]|\.\s+|\s—\s)\s*|\s+(?:и|а\s+потом|потом|затем|а)\s+(?=(?:в|к)\s+\d)/).map(x => (x || "").replace(/^[\s.:—-]+|[\s.:—-]+$/g, "")).filter(Boolean);
+  const segs = rest.split(/\s*(?:[,;\n]|\.\s+|\s—\s)\s*|\s+(?:и|а\s+потом|потом|затем|а)\s+(?=(?:в|к)\s+\d)/).map(x => (x || "").replace(/^[\s.:—-]+|[\s.:—-]+$/g, "")).filter(Boolean).flatMap(planByTime);
   if (!segs.length || segs.length > 12) return null;
   const timed = segs.filter(x => PLAN_TIME.test(x));
   if (remind && timed.length < 2) return null;              // одно «напомни…» — обычное напоминание (модель)
@@ -3963,8 +3993,7 @@ function planSay(p, now = new Date()) {
   if (loose.length) out += ` ${loose.length > 1 ? "Дела" : "Дело"} без времени — напомню в ${PLAN_EVENING}:00.`;
   return out + " Сделаете — скажите, и я отмечу.";
 }
-function planQuick(text) {
-  if (examOn()) return null;
+function planQuick(text) {                          // и в экзамене: экзамен идёт тем же путём, что человек (addAlarm — в песочницу)
   const p = planParse(text); if (!p) return null;
   const made = p.items.map(x => addAlarm(x.text, x.at, "reminder", ""));
   plog("info", "🗓 план дня (без модели): " + made.map(x => `${whenText(new Date(x.at))} ${x.title}`).join("; "));
@@ -4003,7 +4032,6 @@ function doneSpeak(r) {
   return out;
 }
 function doneQuick(text) {
-  if (examOn()) return null;
   const d = doneParse(text); if (!d) return null;
   if (!d.explicit && !d.items.every(t => remMatch(t))) return null;   // «я позвонил в банк» — только если это дело из плана
   const r = markDone(d.items, "voice");
@@ -4018,7 +4046,7 @@ function doneQuick(text) {
 const FREE_RX = /^(?:(?:освободи|освободить|почисти|почистить|очисти|очистить|разгреби)\s+(?:мне\s+)?(?:место|телефон|хранилище|мусор|кэш|кеш)(?:\s+(?:на\s+)?телефон[еа]?)?|(?:мало|не\s+хватает|кончается|закончилось|заканчивается)\s+(?:места|память)(?:\s+(?:на\s+)?телефон[еа]?)?|сколько\s+(?:места\s+)?(?:занимает|весит)\s+(?:dewiar|девиар|приложение|ты)(?:\s+места)?)$/;
 const mbRu = (b) => b >= 1e9 ? (b / 1e9).toFixed(1).replace(".", ",") + " ГБ" : Math.max(1, Math.round(b / 1e6)) + " МБ";
 function freeSpaceQuick(t) {
-  if (!FREE_RX.test(t) || !D.appSize) return null;
+  if (!FREE_RX.test(t) || !D.appSize || examOn()) return null;       // в экзамене настоящий кэш не трогаем
   let z = {}; try { z = JSON.parse(D.appSize() || "{}"); } catch (e) { }
   const asks = /^сколько/.test(t), total = (+z.cache || 0) + (+z.data || 0);
   if (asks) return { say: `Dewiar занимает около ${mbRu(total)}: ${mbRu(+z.data || 0)} — ваши заметки, настройки и журнал, ${mbRu(+z.cache || 0)} — временные файлы. Скажите «освободи место» — почищу временные.` };
@@ -4026,6 +4054,23 @@ function freeSpaceQuick(t) {
   setTimeout(() => D.openStorage && D.openStorage(), 2500);
   plog("info", `🧹 освободи место: свой кэш −${mbRu(freed)}, открываю «Хранилище»`);
   return { say: `Почистил свои временные файлы — ${freed >= 1e6 ? "освободилось " + mbRu(freed) : "их почти не было"}. Открываю «Хранилище»: там Android покажет, что занимает место, и предложит очистку. Чужие приложения я чистить не могу — так устроен Android.` };
+}
+/* «Что я умею» (18.10: «у нас есть функции, про которые никто не знает») — data/tricks.json (tricks.js при сборке), те же
+   фразы, что в студии. Нажатие — сказать фразу; фраза с «…» (дописать своё) — в поле ввода. Только то, что есть на телефоне. */
+function openTricks() { renderTricks(); setTimeout(() => openSheet("#sh-tricks"), 30); }   // после клика: иначе тот же клик закрыл бы лист
+function renderTricks() {
+  const T = window.DEWIAR_TRICKS || { groups: [] }, box = $("#tricks-body");
+  box.innerHTML = `<p class="hint" style="margin:0 2px 12px">Скажите или нажмите — так работает и голосом. Где «…» — допишите своё.</p>` + T.groups.map(g => {
+    const it = g.items.filter(x => (x.where || []).includes("phone") && !x.key);
+    return it.length ? `<div class="trg"><h3>${g.icon || ""} ${esc(g.name)}</h3><div class="card trl">${it.map(x =>
+      `<button class="trk" ${x.fill ? `data-fill="1" data-say="${esc(x.say)}"` : `data-say="${esc(x.say)}"`}><b>«${esc(x.say)}»</b><small>${esc(x.what)}</small></button>`).join("")}</div></div>` : "";
+  }).join("");
+  $$(".trk", box).forEach(b => b.onclick = () => {
+    const say = b.dataset.say;
+    closeSheets();
+    if (b.dataset.fill) { $("#typebox").classList.add("on"); $("#typed").value = say.replace(/…$/, " ").replace(/:\s*…?$/, ": "); setTimeout(() => $("#typed").focus(), 250); return; }
+    setTimeout(() => ask(say), 200);
+  });
 }
 /* Праздник: короткий тост на каждое дело; рубеж дня и новый значок — конфетти, вибрация и карточка. */
 function celebrate(r) {
@@ -4646,6 +4691,8 @@ function renderSettings() {
       <h3>Синхронизация</h3><div class="card">${syncCard()}</div>
       <h3>Разрешения</h3><div class="card">${perms.map(([p, n]) => `<div class="sw"><div>${n}</div>${D.has(p) ? `<span class="res ok" style="margin:0">есть</span>` : `<button class="btn" data-perm="${p}">Разрешить</button>`}</div>`).join("")}
       <div class="sw"><div>Точные будильники</div>${D.exactAlarms() ? `<span class="res ok" style="margin:0">есть</span>` : `<button class="btn" onclick="Dewiar.openSettings('alarms')">Разрешить</button>`}</div></div>
+      <h3>Что я умею</h3><div class="card"><p class="hint" style="margin:0 0 10px">Короткие фразы, которые я понимаю сразу: фонарик, радио, сканер кодов, таймер, план дня, «освободи место»… Нажмите любую — и я сделаю.</p>
+        <button class="btn w p" id="tricks-open">Посмотреть</button></div>
       <h3>Руководство</h3><div class="card"><p class="hint" style="margin:0 0 10px">Всё, что умеет Dewiar на телефоне и компьютере: примеры фраз, настройки, «Близкие», сканер, стили. Или просто спросите Лиру: «как…»</p>
         <button class="btn w" id="guide-open">Открыть руководство</button></div>
       <h3>О приложении</h3><div class="card"><div>Dewiar ${esc(info.version || "")} · Android ${esc(info.android || "")}</div><small class="hint" style="margin:2px 0 0;display:block">${esc(info.device || "")}</small>
@@ -4793,6 +4840,7 @@ function wireSettings(info) {
     g("upd-check").onclick = () => checkUpdate(true);
     if (g("news-open")) g("news-open").onclick = () => { closeSheets(); setTimeout(() => newsShow(newsList("", JSON.parse(D.info() || "{}").version || "9")), 250); };
     if (g("guide-open")) g("guide-open").onclick = () => D.openUrl(GUIDE_URL);
+    if (g("tricks-open")) g("tricks-open").onclick = () => openTricks();
     if (g("cr-send")) g("cr-send").onclick = () => reportSend("Падение приложения", false, String(info.crash).split("\n")[0]).then(d => toast(`Отчёт №${d.id} отправлен — спасибо!`))
       .catch(e => { toast(e.message); D.share("Dewiar — ошибка:\n" + info.crash); });
     // отзыв 17.10: «непонятно, как добавить фото к жалобе» — кнопка «Добавить фото или скриншот» (галерея: свежие — первыми)

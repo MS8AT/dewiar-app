@@ -111,14 +111,21 @@ sent, said2 = [], []
 PEOPLE += [{"pid": "p3", "name": "Андрей", "devs": [{"dev": "d"}]}, {"pid": "p4", "name": "Лёха", "devs": [{"dev": "d"}]}]
 FakeClose.send = lambda self, pid, msg: sent.append((pid, msg))
 e2 = types.SimpleNamespace(emit=lambda *a, **k: None, close=FakeClose(), _say_quick=lambda msg, text, via=None, **k: said2.append(msg), _SEND_RX=ET.ToolsMixin._SEND_RX)
+e2._send_loose = lambda t: ET.ToolsMixin._send_loose(e2, t)
 qs = ["Отправь Людмиле сообщение: «Привет, как твои дела?»", "Напиши Андрею: «Привет. Как твои дела?»",
       "Отправь сообщение Лёхе. Лёха, привет! Как твои дела?", "Лира, напиши маме, что я задержусь",
       "Напиши письмо Андрею о встрече", "Напиши Андрею в телеграм: привет", "Напиши стих про осень"]
 r = [ET.ToolsMixin._send_cmd(e2, q) for q in qs]
 ok(r == [True, True, True, True, False, False, False]
    and sent == [("p1", "Привет, как твои дела?"), ("p3", "Привет. Как твои дела?"), ("p4", "Лёха, привет! Как твои дела?"), ("p2", "Я задержусь")]
-   and said2[0] == "Отправила Людмиле.",
+   and said2[0] == "Отправил Людмиле.",                         # в роде персонажа — engine._g («Отправила» у Лиры)
    f"сообщение близкому — сразу, без модели; письмо, Telegram, стих — модели: {r}, {sent}")
+# как пишет распознавание речи (экзамен «как в жизни», 18.10): без двоеточия, имя впереди
+sent.clear()
+r = [ET.ToolsMixin._send_cmd(e2, q) for q in ("отправь сообщение андрею привет как дела", "а теперь лёхе напиши во сколько встречаемся завтра",
+                                               "напиши андрею письмо", "андрей напиши стих")]
+ok(r == [True, True, False, False] and sent == [("p3", "Привет как дела"), ("p4", "Во сколько встречаемся завтра")],
+   f"без запятых и двоеточий — тоже отправка близкому: {r}, {sent}")
 ok("self._send_cmd(text, via)" in (ROOT / "core/engine_answer.py").read_text(encoding="utf-8"), "быстрая отправка стоит перед моделью")
 # «Включи смешное видео на YouTube» — сразу play_youtube, без модели (съёмка 17.10: «говорит, что включает, — и ничего»)
 import tools as TT  # noqa: E402

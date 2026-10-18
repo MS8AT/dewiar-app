@@ -59,6 +59,7 @@
   <button class="cchip" id="nav-cloud" style="display:none" title="ИИ-баланс: на сколько хватит моделей Dewiar. Нажмите — подробности и пополнение"><span>ИИ-баланс</span><em></em><i><b></b></i></button>
   <button data-p="personas" class="cur">Персонажи</button>
   <button data-p="chat" title="Вся переписка с персонажами — голосом и текстом">Чат</button>
+  <button data-p="tricks" title="Короткие фразы, которые помощник понимает сразу">Что я умею</button>
   <div class="ng">Мой день</div>
   <button data-p="calendar">Календарь</button>
   <button data-p="reminders">Дела и напоминания</button>
@@ -196,6 +197,11 @@
       <p class="hint" style="max-width:62ch;margin-top:12px">Переписываться и созваниваться можно с теми, кого пригласили вы, и с тем, кто пригласил вас, — когда оба согласны:
         «Позвать в Близкие» — друг увидит приглашение и примет его или откажется.</p>
     </div>
+  </section>
+  <section id="p-tricks" class="wide">
+    <h1>Что я умею</h1>
+    <p class="lead">Короткие фразы, которые я понимаю сразу. Скажите голосом — или нажмите ▶, и фраза уйдёт мне. Где «…» — допишите своё в «Чате».</p>
+    <div id="tr-box" class="tr-box"></div>
   </section>
   <section id="p-chat" class="wide">
     <h1>Чат</h1>
@@ -1418,6 +1424,7 @@
 <script src="studio/capture.js"></script>
 <script src="assets/rich.js"></script>
 <script src="studio/chat.js"></script>
+<script src="studio/tricks.js"></script>
 <script src="studio/news.js"></script>
 </body>
 </html>

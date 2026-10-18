@@ -495,6 +495,7 @@ class Core:
         # и никаких настроек из пакета: provision.json рядом с программой (у владельца — личный, с его ключом и именем)
         # ядро экзамена применяло само («apply_on_upgrade») — и писало память экзамена в настоящий аккаунт
         env["DEWIAR_PROVISION"] = str(self.tmp / "нет-provision.json")
+        env["DEWIAR_EXAM_LAUNCH"] = str(self.tmp / "launch.jsonl")   # «включи видео» в экзамене — записано, а не браузер на сервере
         self.proc = subprocess.Popen([sys.executable, str(ROOT / "core/main.py"), "--server"], env=env,
                                      stdout=open(self.tmp / "core.log", "w"), stderr=subprocess.STDOUT)
         for _ in range(240):
@@ -988,6 +989,17 @@ async def _run_scenario(core, sc, judge_prof, work, log, t0):
                 used = [x["name"] for s in res["steps"] for x in s.get("tools") or []]
                 res["checks"].append({"name": f"действие {name} выполнено", "ok": any(x["name"] == name and x["ok"] for s in res["steps"]
                                                                                    for x in s.get("tools") or []), "detail": ", ".join(used)})
+            # «как в жизни» (18.10: на съёмке «позвони», «включи видео» срабатывали раз, а потом — одни слова; «Я Лира.»
+            # повторялось слово в слово): действие — на каждую просьбу, а не только на первую; ответы — не копия прошлых
+            real = [s_ for s_ in res["steps"] if s_["say"] != "[новый разговор]"]
+            for name, n in (sc.get("tool_count") or {}).items():
+                k = sum(1 for s_ in real if any(x["name"] == name and x["ok"] for x in s_.get("tools") or []))
+                res["checks"].append({"name": f"действие {name} — на каждую просьбу ({n})", "ok": k >= int(n),
+                                      "detail": f"шагов с действием: {k} из {len(real)}"})
+            if sc.get("distinct"):
+                norm = [re.sub(r"[^a-zа-яё0-9]+", " ", s_["answer"].lower().replace("ё", "е")).strip() for s_ in real]
+                res["checks"].append({"name": "ответы не повторяются слово в слово", "ok": len(set(norm)) == len(norm) and all(norm),
+                                      "detail": " | ".join(x[:60] for x in norm)})
             if (sc.get("expect") or {}).get("sleep"):       # «стоп» (и ослышанное «Ctop.») — замолчать, а не «Хорошо, я слушаю»
                 res["checks"].append({"name": "замолчала до имени, без ответа", "ok": any(e.get("type") == "sleep" for e in ev) and not last.strip(),
                                       "detail": last[:120]})

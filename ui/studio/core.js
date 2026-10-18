@@ -58,6 +58,7 @@ $$("nav button[data-p]").forEach(b => b.onclick = () => {
   if (b.dataset.p === "skills") { core.call("skills").then(renderSkills).catch(() => {}); core.call("mcp_status").then(renderMcp).catch(() => {});
     if (S.skills && S.skills.catalog_url) { $("#cat-url").value = S.skills.catalog_url; openCatalog(); } }
   if (b.dataset.p === "me") loadMe();
+  if (b.dataset.p === "tricks") loadTricks();       // «Что я умею» — data/tricks.json через ядро
   clearInterval(mTimer);
   if (b.dataset.p === "memory") { loadNotes(); loadMemory(!!mNet); setTimeout(mPanes, 0); mTimer = setInterval(() => { if (!document.hidden) loadMemory(true); }, 30000); }
   if (b.dataset.p === "voice") core.call("voices_warm").catch(() => {});
