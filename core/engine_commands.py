@@ -1173,6 +1173,14 @@ class CommandsMixin:
             llm = snap.get("llm") or {}
             prof = (llm.get("profiles") or {}).get(llm.get("active")) or {}
             keep = {k: prof[k] for k in ("name", "kind", "base_url", "api_key", "model", "disable_thinking", "temperature", "cloud", "title") if prof.get(k) not in (None, "")}
+            import net as _net
+            keep["base_url"], was_local = _net.lan_url(keep.get("base_url", ""))   # 127.0.0.1 на телефоне — сам телефон (19.10)
+            local_note = ""
+            if was_local:
+                local_note = ("Модель на этом компьютере. Чтобы телефон до неё дотянулся: в LM Studio — Developer → «Serve on Local "
+                              "Network», в Ollama — переменная OLLAMA_HOST=0.0.0.0; телефон — в той же сети Wi-Fi."
+                              if not re.search(r"//(127\.|localhost|0\.0\.0\.0)", keep["base_url"]) else
+                              "Модель на этом компьютере, а адреса в домашней сети у него нет — телефон до неё не дотянется. Подключите в приложении облако или сервер.")
             out = {"dewiar": 1, "llm": {"active": "p", "profiles": {"p": keep}}, "persona": snap.get("persona", "lira")}
             if snap.get("user_name"):
                 out["user_name"] = snap["user_name"]
@@ -1186,7 +1194,7 @@ class CommandsMixin:
             raw = json.dumps(out, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             return {"url": "dewiar://import?c=" + base64.urlsafe_b64encode(raw).decode().rstrip("="),
                     "apk": (self.s.get("updates", "url") or "https://dewiar.pro/dwrapp/latest.json").rsplit("/", 1)[0] + "/Dewiar.apk",
-                    "brain": keep.get("name") or keep.get("base_url", ""), "lan": bool(re.match(r"https?://(192\.168|10\.|172\.(1[6-9]|2\d|3[01])|localhost|127\.)", keep.get("base_url", "")))}
+                    "brain": keep.get("name") or keep.get("base_url", ""), "local_note": local_note, "lan": was_local or bool(re.match(r"https?://(192\.168|10\.|172\.(1[6-9]|2\d|3[01])|localhost|127\.)", keep.get("base_url", "")))}
         if cmd == "config_export":
             return provision.export_settings(self.s.snapshot(), bool(a.get("secrets")),
                                              {"skills_note": [s["name"] for s in self.skills.catalog() if not s["builtin"]]})

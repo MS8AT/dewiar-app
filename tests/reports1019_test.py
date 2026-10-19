@@ -86,6 +86,13 @@ except RuntimeError as e:
     wv = str(e)
 ok("выключен" in wv, f"компьютер: запасной путь через сервер Dewiar выключается настройкой net.web_via: {wv}")
 
+import net as _net  # noqa: E402
+ok(_net.lan_url("http://127.0.0.1:1234/v1", "192.168.1.5") == ("http://192.168.1.5:1234/v1", True)
+   and _net.lan_url("https://api.openai.com/v1", "192.168.1.5") == ("https://api.openai.com/v1", False),
+   "QR для телефона: модель «127.0.0.1:1234» компьютера → адрес компьютера в домашней сети (19.10: 16 сбоев «Failed to connect to 127.0.0.1»)")
+src = (ROOT / "core/engine_commands.py").read_text(encoding="utf-8")
+ok("_net.lan_url(" in src and "Serve on Local" in src, "phone_config: адрес модели переписывается и есть подсказка про LM Studio / Ollama")
+
 # ---------- 6. рабочая папка, Obsidian, контекст ----------
 bad = TMP / "file.txt"; bad.write_text("x")
 code = ("import os,sys; sys.path.insert(0, sys.argv[1]); import workspace; print(workspace.Workspace(None).root)")
@@ -318,6 +325,8 @@ try:
         ok("set_reminder" in an["r"] and an["added"] == 0, f"телефон: встреча со временем — не заметка, а напоминание (№94): {an}")
         wv = pg.evaluate("""async () => { S.net.web_via = false; let e = ""; try { await dewiarWeb("search", "x"); } catch (x) { e = x.message; } S.net.web_via = true; return e; }""")
         ok("выключен" in wv, f"телефон: запасной путь через сервер Dewiar выключается (письмо 19.10): {wv}")
+        lh = pg.evaluate("""async () => { let e = ""; try { await probeServer("127.0.0.1:1234"); } catch (x) { e = x.message; } return e; }""")
+        ok("сам телефон" in lh, f"телефон: адрес 127.0.0.1 — объясняет, что это сам телефон, и как найти адрес компьютера: {lh[:90]}")
         pv = pg.evaluate("() => Object.keys(CLOUD)")
         ok("custom" in pv and "deepseek" in pv, f"телефон: «Другой — по адресу» и DeepSeek: {pv}")
         ok(not errs, f"телефон без ошибок: {errs[:2]}")

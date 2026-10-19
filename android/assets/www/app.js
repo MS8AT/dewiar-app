@@ -2097,6 +2097,7 @@ async function ask(text, opts = {}) {
     }
     if (e.net) netIncident(e);                          // повторы — уже в round1 (по кругу, без повторных действий)
     if (e.human) { plog("warn", "облако: " + e.message); showBot(e.message, "err"); say(e.message); }       // облако Dewiar объясняет само: «заряд закончился…»
+    else if (SELF_HOST_RX.test(llmBase() + "/")) { const m = "Не получилось связаться с мозгом: " + SELF_HOST_TEXT; console.warn(m); showBot(m, "err"); say("Не получилось связаться с мозгом: адрес модели указывает на сам телефон. Как поправить — на экране."); }
     else { const m = "Не получилось связаться с мозгом: " + e.message; console.warn(m); showBot(m, "err"); say("Не получилось связаться с мозгом."); }
   } finally {
     if (turnAbort === ctl) { busy = false; turnAbort = null; }
@@ -5889,8 +5890,12 @@ async function fetchManifest(addr) {
   }
   throw new Error("по этому адресу нет сервера Dewiar (нужен файл /.well-known/dewiar.json)");
 }
+// 127.0.0.1 / localhost на телефоне — это сам телефон (19.10: QR с компьютера дал адрес LM Studio 127.0.0.1:1234 — 16 сбоев)
+const SELF_HOST_RX = /^https?:\/\/(?:127\.\d+\.\d+\.\d+|localhost|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/|$)/i;
+const SELF_HOST_TEXT = "адрес 127.0.0.1 (localhost) на телефоне — это сам телефон, а не компьютер. Впишите адрес компьютера в домашней сети (например, 192.168.1.10:1234 — он виден в LM Studio или в «ipconfig»), а в LM Studio включите «Serve on Local Network» (в Ollama — OLLAMA_HOST=0.0.0.0).";
 async function probeServer(addr) {
   let a = normAddr(addr).replace(/\/v1$/, "");
+  if (SELF_HOST_RX.test(a + "/")) throw new Error(SELF_HOST_TEXT[0].toUpperCase() + SELF_HOST_TEXT.slice(1));
   const hasPort = /:\d+$/.test(a), cands = hasPort ? [a] : [a + ":11434", a + ":8000", a + ":8080", a + ":1234", a];
   for (const b of cands) {
     try { const r = await http("GET", b + "/api/tags", { timeout: 4000 }); if (r.status === 200) { const m = (JSON.parse(r.body).models || []).map(x => x.name); if (m.length) return { kind: "ollama", base: b + "/v1", models: m }; } } catch (e) { }

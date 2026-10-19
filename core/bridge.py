@@ -27,12 +27,13 @@ log = logging.getLogger("dewiar.bridge")
 def _probe_noise(rec):
     """Окно проверяет, живо ли ядро, простым подключением к порту (ui/app.py core_alive) и сразу закрывает его —
     websockets пишет на это ERROR «opening handshake failed» (19.10: 22 «сбоя» за ночь в отчётах). Это не сбой:
-    такие записи не пропускаем. Остальные ошибки рукопожатия остаются."""
+    такие записи не пропускаем; и обычный HTTP-запрос на порт (InvalidUpgrade — открыли адрес в браузере). Остальные
+    ошибки рукопожатия остаются."""
     if rec.getMessage() != "opening handshake failed" or not rec.exc_info:
         return True
     e = rec.exc_info[1]
     chain = [e, getattr(e, "__cause__", None), getattr(e, "__context__", None)]
-    return not any(type(x).__name__ in ("InvalidMessage", "EOFError", "ConnectionResetError", "IncompleteReadError") for x in chain if x)
+    return not any(type(x).__name__ in ("InvalidMessage", "InvalidUpgrade", "EOFError", "ConnectionResetError", "IncompleteReadError") for x in chain if x)
 
 
 logging.getLogger("websockets.server").addFilter(_probe_noise)

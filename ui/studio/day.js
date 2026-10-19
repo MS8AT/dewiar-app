@@ -260,7 +260,7 @@ async function phFill() {
   try {
     const c = await core.call("phone_config");
     $("#ph-qr1").innerHTML = qrSvg(c.apk);
-    $("#ph-note").textContent = c.lan ? `Мозг «${c.brain}» — в домашней сети: телефон будет думать, пока он в этой же сети Wi-Fi. Вне дома — подключите в приложении облако по ключу.` : "";
+    $("#ph-note").textContent = (c.local_note ? c.local_note + " " : "") + (c.lan ? `Мозг «${c.brain}» — в домашней сети: телефон будет думать, пока он в этой же сети Wi-Fi. Вне дома — подключите в приложении облако по ключу.` : "");
     $("#ph-show").onclick = () => { const box = $("#ph-qr2"); box.classList.remove("ph-hide"); box.innerHTML = qrSvg(c.url);
       $("#ph-note").textContent = "В этом коде ключи доступа — не показывайте его посторонним. " + ($("#ph-note").textContent || ""); };
   } catch (e) { $("#ph-note").textContent = e.message; }

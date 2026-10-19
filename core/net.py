@@ -387,3 +387,32 @@ def blocked_hint():
         return f" Сейчас Dewiar ходит туда через прокси {hide(px)} — проверьте, что он работает (студия → «Dewiar.pro» → «Компьютер, сеть…» → «Сеть»)."
     return " Если dewiar.pro у вас блокирует провайдер — укажите прокси: студия → «Dewiar.pro» → «Компьютер, сеть…» → «Сеть»."
 
+
+
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "::1")
+
+
+def my_lan_ip():
+    """Адрес этого компьютера в домашней сети (192.168…, 10.…) или "" — без отправки пакетов."""
+    import ipaddress
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.0.2.1", 9))                  # пакет не уходит: так система называет адрес основной сети
+            ip = s.getsockname()[0]
+        return ip if ipaddress.ip_address(ip).is_private and not ip.startswith(("127.", "172.17.")) else ""
+    except (OSError, ValueError):
+        return ""
+
+
+def lan_url(url, ip=None):
+    """Адрес модели «на этом компьютере» (http://127.0.0.1:1234/v1) — для другого устройства в той же сети:
+    http://192.168.1.5:1234/v1. 19.10: телефон по QR получил 127.0.0.1 — это он сам, и 16 раз «Failed to connect».
+    -> (адрес, был ли локальный). Не локальный — как есть; локальный, а адреса сети нет — как есть, True."""
+    u = urlparse(url or "")
+    if (u.hostname or "") not in LOCAL_HOSTS:
+        return url, False
+    ip = my_lan_ip() if ip is None else ip
+    if not ip:
+        return url, True
+    return u._replace(netloc=ip + (f":{u.port}" if u.port else "")).geturl(), True
