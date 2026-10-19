@@ -15,7 +15,9 @@ const MIC = "android.permission.RECORD_AUDIO", CONTACTS = "android.permission.RE
 
 /* ---------- мост к телефону: window.Dewiar — методы Bridge.java (в браузере для проверки — заглушка) ----------
    Новый метод моста добавляй в обе стороны: в Bridge.java и в заглушку ниже. Ответы — строки (JSON строкой). */
-const D = window.Dewiar || (() => {
+/* Веб-версия (dewiar.pro/dwrapp/web/, android/web/webbridge.js) получает эту же заглушку и заменяет её методы
+   возможностями браузера (window.DewiarWeb): D.web — правда, D.mock — нет. */
+const D = window.Dewiar || (window.DewiarWeb || (s => s))((() => {
   const store = {}, files = {}, alarms = [];
   const ev = (o) => setTimeout(() => N.ev(JSON.stringify(o)), 0);
   return {
@@ -81,7 +83,7 @@ const D = window.Dewiar || (() => {
     handsState: () => "", handsScreen: () => "OFF", handsTap: () => "OFF", handsTapText: () => "OFF", handsType: () => "OFF",
     handsScroll: () => "OFF", handsNav: () => "OFF", toFront() {},
   };
-})();
+})());
 /* Песочница экзамена (exam.js): пока она включена, настройки и файлы пишутся в память, а не на телефон; после экзамена
    приложение перезагружается и видит всё как было. Все записи и чтения настроек и файлов — только через эти четыре. */
 let SANDBOX = null;
@@ -1428,20 +1430,38 @@ function privacyRule() {
     + P.items.map(([t, x]) => `${t}: ${x}`).join(" ") + ` Сейчас у этого пользователя ты думаешь ${privacyWhere()}; синхронизация ${S.sync.on && syncCred() ? "включена" : "выключена"}.`
     + " Подробно — в настройках («Ещё» → «Ваши данные»). Не выдумывай того, чего здесь нет: сертификатов, законов, сроков хранения.";
 }
+/* Веб-версия (браузер на iPhone, Mac, любом компьютере): чего браузер не умеет — инструментов у модели нет (WEB_NO_TOOLS),
+   и она честно говорит, где это есть, а не «звоню» в пустоту. */
+const WEB_NO_TOOLS = new Set(["call", "send_sms", "open_app", "calendar_list", "calendar_add", "flashlight", "set_volume", "battery", "send_message"]);
+const WEB_DEVICE_RULE = "Ты работаешь в браузере пользователя (веб-версия Dewiar — iPhone, Mac или любой компьютер). Напоминания и будильники "
+  + "здесь срабатывают, пока страница Dewiar открыта (уведомлением и звуком). Звонить, отправлять SMS и сообщения в мессенджерах, открывать "
+  + "приложения, включать фонарик, менять громкость и смотреть календарь телефона браузер не умеет — на такую просьбу честно скажи об этом "
+  + "одной фразой и подскажи, что это умеет приложение Dewiar для Android и программа для компьютера; не делай вид, что сделал. ";
+/* Настройки в браузере: карточки, которые есть только у Android (звук будильника, кнопка помощника, «руки», значок
+   на рабочем столе, точные будильники, контакты), — прячем после отрисовки (элементы остаются: обработчики не ломаются). */
+const WEB_HIDE_CARDS = /^(Звук напоминаний|Кнопка помощника|Управлять приложениями|Значок «Записать»|Умный дом Яндекса)$/;
+function webTrimSettings() {
+  const hide = (el) => { if (el) el.style.display = "none"; };
+  $$("#set-body h3").forEach(h => { if (WEB_HIDE_CARDS.test(h.textContent.trim())) { hide(h); hide(h.nextElementSibling); } });
+  const bt = $("#bt-mic"); if (bt) hide(bt.closest(".sw"));
+  const tilt = $("#ap-tilt"); if (tilt) hide(tilt.closest(".sw"));          // наклон телефона браузер без отдельного разрешения не отдаёт
+  $$("#set-body .sw").forEach(r => { if (/^(Контакты|Звонки без|Точные будильники)/.test((r.firstElementChild || r).textContent.trim())) hide(r); });
+  hide($("#upd-check"));
+}
 function systemPrompt() {
   const p = persona(), others = PERSONAS.filter(x => x.id !== p.id).map(x => `${x.name} — ${(x.role || "").toLowerCase()}`).join("; ");
   const parts = [p.character, window.DEWIAR_TALK_RULES || "", (window.DEWIAR_GENDER_RULES || {})[p.gender] || "", p.focus, window.DEWIAR_VOICE_RULES || "Отвечай коротко, живой речью, по-русски.",
     `Ты — один из команды помощников: ${others}. Позвать коллегу — инструмент call_persona. Разговор пользователя с коллегой приходит тебе справкой «[До этого пользователь говорил не с тобой…]»: это их разговор — не продолжай его и не отвечай за коллегу, пока пользователь сам об этом не попросит; отвечай на то, что он говорит тебе.`,
-    "Ты работаешь на телефоне пользователя (Android). СЛОВА НЕ ДЕЙСТВУЮТ: «включаю», «звоню», «отправила», «ставлю» ничего не делают — "
+    (D.web ? WEB_DEVICE_RULE : "Ты работаешь на телефоне пользователя (Android). ") + "СЛОВА НЕ ДЕЙСТВУЮТ: «включаю», «звоню», «отправила», «ставлю» ничего не делают — "
     + "делает только вызов инструмента. Просят действие снова — вызывай инструмент снова, каждый раз; не копируй свой прошлый ответ из разговора. "
     + "Когда просят что-то сделать — вызывай инструмент, а не объясняй, как это сделать: "
-    + "напоминания, будильники и таймеры (set_reminder; когда — словами пользователя в when, время посчитает телефон), звонки (call), SMS (send_sms — откроется сообщение, отправит пользователь), "
+    + "напоминания, будильники и таймеры (set_reminder; когда — словами пользователя в when, время посчитает телефон)" + (D.web ? ", " : ", звонки (call), SMS (send_sms — откроется сообщение, отправит пользователь), ")
     + "радио прямо здесь, в приложении (play_radio, radio_control — на любую просьбу про радио или «включи музыку», не сайты и не приложения; просят ПОДОБРАТЬ или посоветовать песни, плейлист — назови конкретные известные песни списком в ответе, радио сам не включай, если не просили включить), "
     + "маршрут на карте — «как дойти», «проложи пешком», геоточка или ссылка на карту (route: карта сама ведёт кратчайшим путём, дворами), "
-    + "календарь телефона — «что у меня завтра», «какие встречи на неделе» (calendar_list), «запиши в календарь», «назначь встречу» (calendar_add: сначала спроси «записать?», запиши после «да»), "
-    + "приложения (open_app), сайты (open_url), поиск в интернете (web_search, read_webpage), погода (weather), фонарик, громкость, заметки (save_note, find_notes), "
-    + "память о пользователе (remember), деньги (money_add, money_report), сообщения в MAX, Telegram, WhatsApp (send_message), "
-    + "мини-программы, страницы и презентации — калькулятор, игра, конвертер, таймер, слайды (make_app: сделай сам, она сразу откроется здесь; код программы не сохраняй заметкой; никогда не говори «готово», не вызвав make_app)" + (S.home.token ? ", умный дом Яндекса (smart_home)" : "")
+    + (D.web ? "" : "календарь телефона — «что у меня завтра», «какие встречи на неделе» (calendar_list), «запиши в календарь», «назначь встречу» (calendar_add: сначала спроси «записать?», запиши после «да»), ")
+    + (D.web ? "" : "приложения (open_app), ") + "сайты (open_url), поиск в интернете (web_search, read_webpage), погода (weather), " + (D.web ? "" : "фонарик, громкость, ") + "заметки (save_note, find_notes), "
+    + "память о пользователе (remember), деньги (money_add, money_report), " + (D.web ? "" : "сообщения в MAX, Telegram, WhatsApp (send_message), ")
+    + "мини-программы, страницы и презентации — калькулятор, игра, конвертер, таймер, слайды (make_app: сделай сам, она сразу откроется здесь; код программы не сохраняй заметкой; никогда не говори «готово», не вызвав make_app)" + (S.home.token && !D.web ? ", умный дом Яндекса (smart_home)" : "")
     + (loggedIn() ? ", документы и базы пользователя на сайте Dewiar (ask_knowledge)" : "") + ". После действия скажи итог одной фразой.",
     "СЧЁТ: любые вычисления — проценты, суммы, скидки, даты, «сколько дней до…» — только инструментом calc, никогда в уме. Просят объяснить расчёт — покажи его с числами («2 350 × 17 / 100 = 399,5»), а не «использовал калькулятор». "
     + "Просьба с условием («если завтра дождь — напомни…») — сначала узнай нужное (погоду — weather или web_search), потом сделай только подходящее. "
@@ -1461,7 +1481,7 @@ function systemPrompt() {
     "Ближайшие дни: " + [1, 2, 3, 4, 5, 6, 7].map(i => { const d = new Date(Date.now() + i * 864e5); return `${WD[d.getDay()]} — ${d.getDate()} ${MON[d.getMonth()]}`; }).join("; ")
       + ". Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой и сравни."];
   const hands = typeof D.handsState === "function" ? D.handsState() : "";
-  parts.push(hands === "on"
+  if (!D.web) parts.push(hands === "on"
     ? "Ты умеешь работать в других приложениях телефона, как человек пальцем: open_app, затем phone_screen (что на экране), phone_tap, phone_type, phone_scroll, phone_nav. "
       + "Просьбы вроде «напиши маме в Telegram, что я задержусь», «найди в YouTube…», «включи Bluetooth», «закажи такси» выполняй сам по шагам, глядя на экран после каждого действия; "
       + "send_message — только если пользователь хочет сам выбрать получателя. Перед отправкой, оплатой, покупкой, удалением — спроси подтверждение, если об этом прямо не просили. "
@@ -2513,7 +2533,7 @@ async function quick(text) {
   if ((m = t.match(/^(?:открой|запусти)\s+(.+)$/)) && !/сайт|страниц|ссылк/.test(m[1])) {
     const name = openAppSmart(m[1]); if (name) return { say: `Открываю ${name}.`, silent: true };
   }
-  if (S.home.token) { const r = await homeQuick(t); if (r) return r; }
+  if (S.home.token && !D.web) { const r = await homeQuick(t); if (r) return r; }
   return null;
 }
 
@@ -2956,9 +2976,9 @@ function toolSpecs() {
     parameters: O({ question: STR, base: STR }, ["question"]) });
   if (S.sync.on && syncCred() && pcSeen()) t.push({ name: "start_task", description: "Передать большую задачу компьютеру пользователя: исследование с отчётом, документ, презентация, работа с файлами или кодом. title — коротко, goal — что сделать и какой нужен результат, подробно. Ход и итог появятся в «Мой день» → «Сделанное».",
     parameters: O({ title: STR, goal: STR }, ["goal"]) });
-  if (S.home.token) t.push({ name: "smart_home", description: "Умный дом Яндекса: action list|on|off|brightness|brighter|dimmer|temperature|scenario; target — устройство и/или комната словами («свет в спальне», «весь свет», «кондиционер»), value — число.",
+  if (S.home.token && !D.web) t.push({ name: "smart_home", description: "Умный дом Яндекса: action list|on|off|brightness|brighter|dimmer|temperature|scenario; target — устройство и/или комната словами («свет в спальне», «весь свет», «кондиционер»), value — число.",
     parameters: O({ action: { type: "string", enum: ["list", "on", "off", "brightness", "brighter", "dimmer", "temperature", "scenario"] }, target: STR, value: NUM }, ["action"]) });
-  return t;
+  return D.web ? t.filter(x => !WEB_NO_TOOLS.has(x.name)) : t;
 }
 
 /* Аргументы — к описанию инструмента: модели присылают список вместо строки, «5» вместо 5, {"q": …} вместо {"query": …}. */
@@ -4528,7 +4548,7 @@ async function taskFileSave(id, name, got) {
 let htmlViewSave = null;
 function openHtmlView(title, html, onSave) {
   // на телефоне — отдельное окно без моста Dewiar (HtmlView.java): мост виден во всех фреймах, iframe sandbox не защищает;
-  // iframe ниже — только для проверки в браузере, где моста нет
+  // iframe ниже — в браузере (проверки и веб-версия): sandbox без allow-same-origin — у программы чужое происхождение, ключей сайта она не видит
   if (D.viewHtml && !D.mock) { htmlViewSave = onSave; if (D.viewHtml(String(title || ""), String(html || ""))) return; }
   let v = $("#appview");
   if (!v) { v = document.createElement("div"); v.id = "appview"; document.body.appendChild(v); }
@@ -4721,24 +4741,24 @@ function renderSettings() {
   } else if (setTab === "voice") {
     const voices = JSON.parse(D.voices() || "[]");
     h.push(`<h3>Слух</h3><div class="card">
-      <label class="f"><span>Кто распознаёт речь</span><select id="stt-eng"><option value="system">Это устройство${info.recognizer ? "" : " (не найдено)"}</option>${cloudEars() ? `<option value="dewiar">Сервер Dewiar (GigaAM)</option>` : ""}<option value="server">Мой сервер распознавания</option></select></label>
+      <label class="f"><span>Кто распознаёт речь</span><select id="stt-eng"><option value="system">${D.web ? "Этот браузер" : "Это устройство"}${info.recognizer ? "" : " (не найдено)"}</option>${cloudEars() ? `<option value="dewiar">Сервер Dewiar (GigaAM)</option>` : ""}<option value="server">Мой сервер распознавания</option></select></label>
       <div id="stt-srv"><label class="f"><span>Адрес (OpenAI-совместимый, …/v1)</span><input id="stt-url" placeholder="http://192.168.1.10:8090/v1" value="${esc(S.stt.url)}"></label>
       <div class="row2"><label class="f" style="flex:1"><span>Ключ</span><input id="stt-key" type="password" value="${esc(S.stt.key)}"></label><label class="f" style="flex:1"><span>Модель</span><input id="stt-model" placeholder="whisper-1" value="${esc(S.stt.model)}"></label></div></div>
       <div class="sw"><div>Микрофон Bluetooth-наушников<small>Наушники с микрофоном подключены — слушаю ими, а не телефоном: можно отойти от телефона.${D.btMicAvailable && D.btMicAvailable() ? " Сейчас подключены." : ""}</small></div>
       <label class="tg"><input type="checkbox" id="bt-mic" ${S.btMic !== false ? "checked" : ""}><i></i></label></div>
-      <p class="hint">${S.stt.auto ? "Распознавание этого устройства не отвечало — слушает сервер Dewiar. " : ""}${info.recognizer ? "Распознавание устройства работает и без интернета, если скачан русский язык (Google → Распознавание речи офлайн)." : cloudEars() ? "В устройстве нет распознавания речи — слушает сервер Dewiar." : "В устройстве нет распознавания речи — войдите аккаунтом dewiar.pro (слушать будет сервер Dewiar) или укажите свой сервер."}</p></div>
+      <p class="hint">${S.stt.auto ? "Распознавание этого устройства не отвечало — слушает сервер Dewiar. " : ""}${info.recognizer ? (D.web ? "Распознаёт сам браузер (Chrome, Edge) — через интернет. В Safari и на iPhone слушает сервер Dewiar — войдите аккаунтом или кодом." : "Распознавание устройства работает и без интернета, если скачан русский язык (Google → Распознавание речи офлайн).") : D.web && cloudEars() ? "В этом браузере нет распознавания речи — слушает сервер Dewiar." : D.web ? "В этом браузере нет распознавания речи — войдите аккаунтом dewiar.pro (слушать будет сервер Dewiar) или откройте Dewiar в Chrome или Safari." : cloudEars() ? "В устройстве нет распознавания речи — слушает сервер Dewiar." : "В устройстве нет распознавания речи — войдите аккаунтом dewiar.pro (слушать будет сервер Dewiar) или укажите свой сервер."}</p></div>
       <h3>Голос</h3><div class="card">
-      <label class="f"><span>Кто говорит</span><select id="tts-eng"><option value="system">Голос устройства</option>${cloudVoice() ? `<option value="cloud">Голос Dewiar — у каждого персонажа свой</option>` : ""}<option value="eleven">ElevenLabs — своим ключом</option><option value="server">Голос моего сервера</option></select></label>
+      <label class="f"><span>Кто говорит</span><select id="tts-eng"><option value="system">${D.web ? "Голос браузера" : "Голос устройства"}</option>${cloudVoice() ? `<option value="cloud">Голос Dewiar — у каждого персонажа свой</option>` : ""}<option value="eleven">ElevenLabs — своим ключом</option><option value="server">Голос моего сервера</option></select></label>
       <div id="tts-sys"><div class="row2"><label class="f" style="flex:1"><span>Голос героинь</span><select id="tts-voice"><option value="">Сам подберу</option>${voiceOpts(voices, S.tts.sys_voice)}</select></label>
         <label class="f" style="flex:1"><span>Голос героев</span><select id="tts-voice-m"><option value="">Сам подберу</option>${voiceOpts(voices, S.tts.sys_voice_m)}</select></label></div>
-        <p class="hint" style="margin-top:0">Голосов устройства бывает несколько: у «Синтеза речи Google» есть и мужские — героям (Патрику, Джарвису, Агенту) достаётся мужской.</p></div>
+        <p class="hint" style="margin-top:0">${D.web ? "Голоса браузера — это голоса системы: в Windows, macOS и iOS есть русские женские и мужские — героям (Патрику, Джарвису, Агенту) достаётся мужской." : "Голосов устройства бывает несколько: у «Синтеза речи Google» есть и мужские — героям (Патрику, Джарвису, Агенту) достаётся мужской."}</p></div>
       <div id="tts-el"><label class="f"><span>Ключ ElevenLabs</span><input id="el-key" type="password" placeholder="sk_…" value="${esc(S.tts.el_key)}"></label>
         <div class="row2"><label class="f" style="flex:1"><span>Голос героинь (ID)</span><input id="el-vf" placeholder="${EL_VOICES.f} (Sarah)" value="${esc(S.tts.el_voice_f)}"></label>
           <label class="f" style="flex:1"><span>Голос героев (ID)</span><input id="el-vm" placeholder="${EL_VOICES.m} (George)" value="${esc(S.tts.el_voice_m)}"></label></div>
         <label class="f"><span>Модель</span><select id="el-model"><option value="eleven_flash_v2_5">Быстрая (Flash v2.5)</option><option value="eleven_multilingual_v2">Лучшее качество (Multilingual v2)</option></select></label>
         <p class="hint" style="margin-top:0">Ключ — на elevenlabs.io → Профиль → API Keys. Платите вы сами по тарифу ElevenLabs; ключ хранится только в этом телефоне. ID голоса — в «Voices» на сайте (кнопка «ID»).</p></div>
       <label class="f"><span>Скорость речи: <b id="rate-v">${(+S.tts.rate || 1).toFixed(2)}</b></span><input id="tts-rate" type="range" min="0.7" max="2" step="0.05" value="${+S.tts.rate || 1}"></label>
-      ${info.tts || D.mock ? "" : cloudVoice() ? `<p class="hint">В устройстве нет русского голоса — говорит голос Dewiar.</p>`
+      ${(info.tts && !D.web) || D.mock || (D.web && D.ttsReady()) ? "" : cloudVoice() ? `<p class="hint">В ${D.web ? "этом браузере" : "устройстве"} нет русского голоса — говорит голос Dewiar.</p>` : D.web ? `<p class="hint">В этом браузере нет русского голоса — ответы текстом. Войдите аккаунтом dewiar.pro — заговорит голос Dewiar.</p>`
         : `<p class="hint">В устройстве нет русского голоса, поэтому ответы только текстом. Установите голос: «Синтез речи Google» из Play Маркета или бесплатный RHVoice (есть и для устройств без Google — в AppGallery и F-Droid), затем выберите его в настройках Android → «Синтез речи». <a href="#" id="tts-get">Открыть</a></p>`}</div>
       <div id="tts-srv"><label class="f"><span>Адрес (OpenAI-совместимый, …/v1)</span><input id="tts-url" placeholder="http://192.168.1.10:8091/v1" value="${esc(S.tts.url)}"></label>
       <div class="row2"><label class="f" style="flex:1"><span>Ключ</span><input id="tts-key" type="password" value="${esc(S.tts.key)}"></label><label class="f" style="flex:1"><span>Модель</span><input id="tts-model" placeholder="tts-1" value="${esc(S.tts.model)}"></label></div>
@@ -4767,7 +4787,7 @@ function renderSettings() {
         <button class="snd ${snd.id === "custom" ? "on" : ""} ${snd.custom ? "" : "nofile"}" data-snd="custom"><i>${PLAY_SVG}</i><span><b>Свой звук</b><small id="snd-name">${snd.custom ? esc(snd.custom) : "Любая мелодия с телефона"}</small></span></button></div>
       <label class="btn w" id="snd-pick"><input type="file" id="snd-file" accept="audio/*" hidden>${snd.custom ? "Выбрать другой файл" : "Выбрать файл…"}</label><div class="res" id="snd-res"></div></div>`);
     if (window.DEWIAR_PRIVACY) h.push(`<h3>${esc(DEWIAR_PRIVACY.title)}</h3><div class="card priv">${DEWIAR_PRIVACY.items.map(([t, x]) => `<p><b>${esc(t)}.</b> ${esc(x)}</p>`).join("")}</div>`);
-    h.push(`<h3>Этот телефон в кабинете</h3><div class="card"><p class="hint" style="margin-top:0">В кабинете облака (экзамен, здоровье) этот телефон —
+    h.push(`<h3>${D.web ? "Этот браузер" : "Этот телефон"} в кабинете</h3><div class="card"><p class="hint" style="margin-top:0">В кабинете облака (экзамен, здоровье) ${D.web ? "этот браузер" : "этот телефон"} —
       <b>${esc((info.device || "Телефон") + " · " + (info.version || "") + " · №" + devId().slice(-4))}</b>. Нет в списке — нажмите «Отметиться в кабинете»: появится через минуту.</p>
       <button class="btn w" id="dev-ping">Отметиться в кабинете</button><div class="res" id="dev-res"></div></div>`);
     const perms = [[MIC, "Микрофон"], [NOTIF, "Уведомления (напоминания)"], [CONTACTS, "Контакты (звонки по имени)"], [CALLP, "Звонки без лишнего нажатия"]];
@@ -4803,7 +4823,7 @@ function renderSettings() {
         <button class="btn w p" id="tricks-open">Посмотреть</button></div>
       <h3>Руководство</h3><div class="card"><p class="hint" style="margin:0 0 10px">Всё, что умеет Dewiar на телефоне и компьютере: примеры фраз, настройки, «Близкие», сканер, стили. Или просто спросите Лиру: «как…»</p>
         <button class="btn w" id="guide-open">Открыть руководство</button></div>
-      <h3>О приложении</h3><div class="card"><div>Dewiar ${esc(info.version || "")} · Android ${esc(info.android || "")}</div><small class="hint" style="margin:2px 0 0;display:block">${esc(info.device || "")}</small>
+      <h3>О приложении</h3><div class="card"><div>Dewiar ${esc(info.version || "")} · ${D.web ? "в браузере" : "Android " + esc(info.android || "")}</div><small class="hint" style="margin:2px 0 0;display:block">${esc(info.device || "")}</small>
       <div class="res" id="upd-res"></div><button class="btn w" id="upd-check" style="margin-top:6px">Проверить обновление</button>
       <button class="btn w" id="news-open" style="margin-top:8px">Что нового</button></div>
       <details class="danger"><summary>Начать с чистого листа</summary><p class="hint">Ассистент забудет разговор и всё, что запомнил о вас: имя, привычки, просьбы. Дневник, душа персонажей, напоминания и заметки останутся. Отменить нельзя.</p>
@@ -4811,6 +4831,7 @@ function renderSettings() {
       ${info.crash ? `<h3>Последняя ошибка</h3><div class="card"><div class="crash">${esc(info.crash)}</div><div class="row2" style="margin-top:8px"><button class="btn" id="cr-send" style="flex:1">Отправить</button><button class="btn" id="cr-clear" style="flex:1">Очистить</button></div></div>` : ""}`);
   }
   $("#set-body").innerHTML = h.join("");
+  if (D.web) webTrimSettings();
   $$("[data-st]").forEach(b => b.onclick = () => { setTab = b.dataset.st; renderSettings(); });
   wireSettings(info);
 }
@@ -5541,7 +5562,7 @@ async function refPendingUse() {
 /* ---------- аккаунт dewiar.pro: вход логином сайта, модели по аккаунту, Знания ----------
    Вход — dwrapp/login.php (выдаёт токен и список услуг services: cloud, stt…; приложение называет себя X-App-Id),
    Знания — synapbase/api_rag и api_scope. Пароль не хранится — только токен; 401 — вход устарел (accountExpired). */
-const SITE = "https://dewiar.pro", APP_ID = "dewiar-app";
+const SITE = window.DEWIAR_SITE || "https://dewiar.pro", APP_ID = "dewiar-app";
 const YANDEX_CID = "bd46169129964deea1f608cf45f7122a";   // приложение «Dewiar» на oauth.yandex.ru (iot:view, iot:control) — как в core/smarthome.py
 const loggedIn = () => !!(S.account && S.account.token);
 const siteHost = () => (S.account.server || SITE).replace(/^https?:\/\//, "");
@@ -6266,7 +6287,7 @@ function clPeople(d) {
   const st = clLoad(); st.me = d.me || {}; st.people = d.people || []; st.offers = d.offers || [];
   const k = clKeys(), mine = (st.me.devs || []).map(x => x.dev).filter(x => x && x !== k.dev).sort(), fresh = mine.some(x => !(st.ownDevs || []).includes(x));
   st.ownDevs = mine; clSave(); clBadge();
-  if (fresh) setTimeout(() => ownShare(!(S.home.at || S.home.token)).catch(() => { }), 0);   // ещё одно своё устройство — передать ему дом (или попросить)
+  if (fresh) setTimeout(() => ownShare(!D.web && !(S.home.at || S.home.token)).catch(() => { }), 0);   // ещё одно своё устройство — передать ему дом (или попросить)
 }
 /* Общее своих устройств, которое не должно лежать на сервере открытым, — ключ умного дома Яндекса. Настроили (или
    отключили) здесь — уходит конвертом на свои устройства (cloud.php ?p=/close/self), зашифрованным их ключами, как
@@ -6318,7 +6339,7 @@ async function nattIn() {
 function ownApply(body) {
   if (body && body.natt) nattTake(body.natt);
   if (body && body.want && (S.home.at || S.home.token)) setTimeout(() => ownShare().catch(() => { }), 0);   // другое моё устройство просит
-  const h = body && body.home; if (!h || typeof h !== "object") return;
+  const h = !D.web && body && body.home; if (!h || typeof h !== "object") return;   // браузеру ключ дома ни к чему: Яндекс не пускает запросы со страниц (CORS)
   const tok = String(h.token || ""), at = +h.at || 0;
   if (at <= (+S.home.at || 0) || (tok && !/^[\w.-]{20,}$/.test(tok)) || tok === (S.home.token || "")) return;
   S.home.token = tok; S.home.at = at; homeInfo = null; saveS();
@@ -6908,7 +6929,7 @@ setInterval(() => { if (!document.hidden) welcomeSeen(); }, 60000);     // по�
   setTimeout(() => { try { doneInbox(); } catch (e) { } }, 300);   // «Сделано ✓» из уведомлений, пока приложение было закрыто
   setTimeout(() => { try { newsCheck(); } catch (e) { } }, 1200);  // обновились — «Что нового»
   setTimeout(() => { try { if (!document.querySelector(".sheet.on") && window.examCleanCheck) examCleanCheck(); } catch (e) { } }, 4000);   // следы старых экзаменов
-  setTimeout(() => checkUpdate(false), 8000);
+  if (!D.web) setTimeout(() => checkUpdate(false), 8000);   // веб-версия всегда свежая: её отдаёт сайт
   setTimeout(() => accountCheck().then(ensureBrain).then(cloudCaps).then(tgSync), 3000);
   setTimeout(() => syncRun(false), 4000);
   setTimeout(() => radio.refresh(), 10000);

@@ -19,30 +19,7 @@ CODE=$(echo "$VER" | awk -F. '{print $1*10000+$2*100+$3}')
 B=$(mktemp -d); trap 'rm -rf "$B"' EXIT
 mkdir -p "$B/gen" "$B/classes" "$B/assets/www"
 # интерфейс: свои файлы + облики персонажей из настольного Dewiar
-cp -r "$HERE/assets/www/." "$B/assets/www/"
-cp "$ROOT/ui/assets/entities.js" "$B/assets/www/entities.js"
-cp "$ROOT/ui/assets/skins.css" "$ROOT/ui/assets/skins.js" "$B/assets/www/"     # темы оформления — те же, что у виджета
-cp "$ROOT/ui/assets/privacy.js" "$B/assets/www/"                    # «Ваши данные» — тот же текст, что в студии
-cp "$ROOT/ui/assets/closecrypto.js" "$B/assets/www/"                # «Близкие»: шифрование — то же, что у компьютера (core/closecrypto.py)
-cp "$ROOT/ui/assets/qrcode.js" "$B/assets/www/"                     # QR-код приглашения в «Близкие»
-cp "$ROOT/ui/assets/call.js" "$B/assets/www/"                       # звонки «Близким» (WebRTC) — тот же код, что у компьютера
-cp "$ROOT/ui/assets/codes.js" "$ROOT/ui/assets/vendor/zxing.min.js" "$B/assets/www/"   # печать Dewiar (Aztec) и сканер кодов
-cp "$ROOT/ui/assets/refnet.js" "$B/assets/www/"                     # «Моё созвездие» — приглашённые друзья картиной
-cp "$ROOT/ui/assets/speechnorm.js" "$B/assets/www/"                 # числа словами для голоса сервера — как core/speechnorm.py
-cp "$ROOT/ui/assets/rich.js" "$B/assets/www/"                       # схемы Mermaid и картинки к рассказу — тот же код, что у компьютера
-mkdir -p "$B/assets/www/vendor" && cp "$ROOT/ui/assets/vendor/mermaid.min.js" "$ROOT/ui/assets/vendor/mermaid.LICENSE-MIT" "$B/assets/www/vendor/"
-cp "$ROOT/ui/assets/vendor/zxing.LICENSE-APACHE-2.0" "$B/assets/www/"
-cp -r "$ROOT/ui/assets/skins" "$B/assets/www/skins"
-cp -r "$ROOT/ui/assets/live" "$B/assets/www/live"                # слои живого лица Эвы (entities.js берёт их из live/)
-python3 "$HERE/tools/personas_json.py" "$ROOT" > "$B/assets/www/personas.js"
-python3 -c 'import json,sys; print("window.RADIO_LIST = " + json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), ensure_ascii=False) + ";")' \
-    "$ROOT/data/radio.json" > "$B/assets/www/radio.js"         # свой список радиостанций (тот же, что у компьютера)
-python3 -c 'import json,sys; print("window.DEWIAR_GUIDE = " + json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), ensure_ascii=False) + ";")' \
-    "$ROOT/data/guide.json" > "$B/assets/www/guide.js"         # руководство — Лира отвечает «как…» по нему (app_help), как на компьютере
-python3 -c 'import json,sys; print("window.DEWIAR_TRICKS = " + json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), ensure_ascii=False) + ";")' \
-    "$ROOT/data/tricks.json" > "$B/assets/www/tricks.js"       # «Что я умею» — те же фразы, что в студии
-python3 -c 'import json,sys; print("window.DEWIAR_NEWS = " + json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), ensure_ascii=False) + ";")' \
-    "$ROOT/data/whatsnew.json" > "$B/assets/www/whatsnew.js"   # «Что нового» после обновления — тот же текст, что у компьютера
+bash "$HERE/tools/www_assemble.sh" "$B/assets/www"             # интерфейс: тот же набор, что у веб-версии (tools/build_web.sh)
 
 "$BT/aapt2" compile --dir "$HERE/res" -o "$B/res.zip"
 # Две сборки из одного кода, одной подписью (ставятся друг поверх друга, данные сохраняются):

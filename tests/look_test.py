@@ -22,7 +22,7 @@ import re as _re
 ids = _re.findall(r'id: "([a-z]+)"', sk)
 ok(ids and all(f".skin-{i} " in css or f".skin-{i}," in css for i in ids) and all((ROOT / "ui/assets/skins" / f).exists() for f in _re.findall(r'skins/([a-z]+\.webp)', css)),
    f"у каждого фона из skins.js есть стиль, текстуры на месте: {ids}")
-bs = (ROOT / "android/tools/build_apk.sh").read_text(encoding="utf-8")
+bs = (ROOT / "android/tools/www_assemble.sh").read_text(encoding="utf-8")
 ok("skins.css" in bs and "ui/assets/skins\"" in bs, "сборка телефона берёт те же темы")
 IMG = (ROOT / "data/avatars/lira.webp").as_uri()
 FAKE = "window.pywebview = { api: new Proxy({}, { get: () => () => Promise.resolve(true) }) };"

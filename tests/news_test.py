@@ -42,7 +42,7 @@ f = news.say_fact(news.releases("0.38.20", VERSION, "pc", 3))
 p = presence.plan(3600, __import__("datetime").datetime.now().replace(hour=12) - __import__("datetime").timedelta(hours=1), [], [], None,
                   now=__import__("datetime").datetime.now().replace(hour=12), news=f)
 ok(p and f in p["facts"] and f.startswith(f"Dewiar обновился до {PC_RELS[0]}") and "Что нового" not in f.split("Скажи")[0], f"приветствие: скажет, что нового: {f[:80]}")
-ok("whatsnew.json" in (ROOT / "android/tools/build_apk.sh").read_text() and 'src="whatsnew.js"' in (ROOT / "android/assets/www/index.html").read_text(),
+ok("whatsnew.json" in (ROOT / "android/tools/www_assemble.sh").read_text(encoding="utf-8") and 'src="whatsnew.js"' in (ROOT / "android/assets/www/index.html").read_text(),
    "телефон: сборка кладёт whatsnew.js")
 
 # студия с настоящим ядром: обновились с 0.38.20

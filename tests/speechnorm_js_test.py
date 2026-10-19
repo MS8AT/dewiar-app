@@ -42,7 +42,7 @@ ok(speech_norm("Сейчас 14:10.") == "Сейчас четырнадцать 
    "время и дата — словами")
 app = (ROOT / "android/assets/www/app.js").read_text(encoding="utf-8")
 ok("DewiarSpeech" in app and "speechnorm.js" in (ROOT / "android/assets/www/index.html").read_text(encoding="utf-8")
-   and "speechnorm.js" in (ROOT / "android/tools/build_apk.sh").read_text(encoding="utf-8"), "телефон: голосу сервера — уже словами")
+   and "speechnorm.js" in (ROOT / "android/tools/www_assemble.sh").read_text(encoding="utf-8"), "телефон: голосу сервера — уже словами")
 import tts as TT  # noqa: E402 — компьютер: ответ из одних цифр («14:10») тоже словами перед голосом сервера
 seen = {}
 
