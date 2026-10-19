@@ -5012,6 +5012,10 @@ function wireSettings(info) {
       const r = g("wg-res"); r.className = "res" + (ok ? " ok" : ""); r.textContent = ok ? "Подтвердите на экране — и значок появится на рабочем столе" : "Добавьте вручную: долгое нажатие на рабочем столе → «Виджеты» → Dewiar"; };
     if (g("sy-now")) g("sy-now").onclick = async () => { const r = g("sy-res"); r.className = "res"; r.textContent = "синхронизирую…"; await syncRun(true); renderSettings(); };
     if (g("sy-on")) g("sy-on").onchange = () => { S.sync.on = g("sy-on").checked; saveS(); if (S.sync.on) syncSoon(); renderSettings(); };
+    if (g("sy-e2e")) g("sy-e2e").onchange = () => {
+      const on = g("sy-e2e").checked;
+      if (!on && !confirm("Выключить шифрование на этом устройстве? Свои изменения оно снова будет отправлять открытыми. На других устройствах выключите отдельно.")) { g("sy-e2e").checked = true; return; }
+      e2eEnable(on); renderSettings(); };
   }
 }
 
@@ -5025,6 +5029,31 @@ function wireSettings(info) {
 const MIND_MAX = 8000, MIND_CTRL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g;
 const mindText = (d) => (d && typeof d.text === "string" && d.text.trim() && d.text.length <= MIND_MAX) ? d.text.replace(MIND_CTRL, "") : "";
 const SYNC_KINDS = ["reminder", "note", "money", "memory", "soul", "mind", "diary", "dayturn", "taskreq", "task", "done", "persona"];
+/* Сквозное шифрование синхронизации (S.sync.e2e, как core/sync.py и core/synckey.py): ключ 32 байта знают только свои
+   устройства (pref sync_key; другим своим — конвертом ownShare), личные записи уходят {e2e: 1, c: seal(K, JSON)}.
+   Открытыми — метка mind:e2e, задачи для облака (taskreq с cloud) и удаления. */
+const E2E_KINDS = ["reminder", "note", "money", "memory", "soul", "mind", "diary", "dayturn", "done", "persona", "vault", "task", "taskreq"];
+function syncKeyGet() { try { const d = JSON.parse(prefGet("sync_key") || "null"); return d && d.k && DC() && DC().b64d(d.k).length === 32 ? d : null; } catch (e) { return null; } }
+function syncKeyAdopt(kb64, at) {
+  let k; try { k = DC().b64d(String(kb64 || "")); } catch (e) { return false; }
+  if (!k || k.length !== 32) return false;
+  const cur = syncKeyGet(); if (cur && (cur.k === kb64 || (+at || 0) <= cur.at)) return false;
+  prefSet("sync_key", JSON.stringify({ k: DC().b64e(k), at: +at || Date.now() })); return true;
+}
+const e2eKey = () => { const c = S.sync && S.sync.e2e ? syncKeyGet() : null; return c ? DC().b64d(c.k) : null; };
+const anyKey = () => { const c = syncKeyGet(); return c ? DC().b64d(c.k) : null; };
+const e2eWaiting = () => { const st = syncSt(); return !!(st && st.e2eRemote) && !syncKeyGet(); };
+const e2eSealable = (kind, id, data) => kind + ":" + id !== "mind:e2e" && E2E_KINDS.includes(kind) && data && typeof data === "object" && Object.keys(data).length > 0 && !(kind === "taskreq" && data.cloud);
+const e2eSeal = (k, data) => ({ e2e: 1, c: DC().b64e(DC().seal(k, DC().utf8(JSON.stringify(data)))) });
+const e2eOpen = (k, d) => JSON.parse(DC().fromUtf8(DC().unseal(k, DC().b64d(d.c || ""))));
+const e2eSealed = (d) => !!(d && d.e2e && typeof d.c === "string");
+function e2eEnable(on) {
+  if (on && !syncKeyGet()) prefSet("sync_key", JSON.stringify({ k: DC().b64e(DC().randomBytes(32)), at: Date.now() }));
+  S.sync.e2e = !!on; saveS();
+  const st = syncSt() || {}; st.resealAll = true; st.e2eOffHere = !on; prefSet("sync", JSON.stringify(st));
+  if (on) ownShare().catch(() => { });
+  syncSoon();
+}
 let syncTimer = null, syncBusy = false, syncStatus = { ok: null, at: 0, error: "", devices: [], counts: {} };
 /* Чьи данные: аккаунт dewiar.pro (если вошли) или ключ Dewiar (dw-…). Есть и то и другое — ключ уходит в link
    (X-Sync-Link): сервер связывает их в одно пространство. -> {token, link, base, via} или null — синхронизировать нечем. */
@@ -5253,10 +5282,14 @@ async function syncRun(manual) {
     const who = syncHash(c.token);
     let st = syncSt();
     if (!st || st.who !== who) st = { rev: 0, idx: {}, who, device: (st && st.device) || "phone-" + Math.random().toString(36).slice(2, 12) };
-    const snap = syncSnapshot(), now = Date.now(), changes = [];
-    for (const k in snap) { const h = syncHash(snap[k]), e = st.idx[k];
-      if (e && e.h === h && !e.del) continue;
-      const [kind, id] = [k.slice(0, k.indexOf(":")), k.slice(k.indexOf(":") + 1)]; changes.push({ kind, id, data: snap[k], updated: (!e && snap[k].t) ? Math.min(now, snap[k].t) : now, _h: h }); }
+    const snap = syncSnapshot(), now = Date.now(), changes = [], ek = e2eKey();
+    if (ek) snap["mind:e2e"] = { on: true };                          // другим устройствам: шифрование включено — попросите ключ
+    for (const k in snap) { const h = syncHash(snap[k]), e = st.idx[k], again = !!ek && (st.resealAll || (e && e.reseal));
+      if (e && e.h === h && !e.del && !again) continue;
+      const [kind, id] = [k.slice(0, k.indexOf(":")), k.slice(k.indexOf(":") + 1)];
+      const data = ek && e2eSealable(kind, id, snap[k]) ? e2eSeal(ek, snap[k]) : snap[k];
+      if (data.e2e && data.c.length > 290000) continue;               // зашифрованная больше, чем возьмёт сервер
+      changes.push({ kind, id, data, updated: again ? now : (!e && snap[k].t) ? Math.min(now, snap[k].t) : now, _h: h }); }
     for (const k in st.idx) { const e = st.idx[k];
       if (!(k in snap) && !e.del && !e.skip) changes.push({ kind: k.slice(0, k.indexOf(":")), id: k.slice(k.indexOf(":") + 1), data: {}, updated: now, deleted: true, _h: null }); }
     const info = JSON.parse(D.info() || "{}");
@@ -5277,19 +5310,34 @@ async function syncRun(manual) {
       if (qdone.taskreq.length) qSet("taskq", qGet("taskq").filter(x => !qdone.taskreq.includes(x.id)));
       body.changes = [];
       if (srv.some(k => !(st.kinds || []).includes(k))) { st.kinds = srv; st.rev = 0; body.since = 0; prefSet("sync", JSON.stringify(st)); continue; }   // сервер узнал новое — история с начала
-      for (const it of d.items || []) {
+      for (let it of d.items || []) {
         const k = it.kind + ":" + it.id, e = st.idx[k] || {};
         if (it.dev === st.device && e.u === it.updated) continue;     // наша же правка вернулась — уже применена
+        if (k === "mind:e2e") {                                         // метка: шифрование включено на другом устройстве
+          if (!it.deleted && it.data && it.data.on) {
+            if (syncKeyGet()) { if (!S.sync.e2e && !st.e2eOffHere) { S.sync.e2e = true; saveS(); st.resealAll = true; plog("info", "🔐 синхронизация зашифрована на другом устройстве — шифрую и здесь"); } }
+            else st.e2eRemote = true;
+          }
+          st.idx[k] = { h: null, u: it.updated, skip: true }; continue;
+        }
+        let plainIn = false;
+        if (e2eSealed(it.data)) {                                       // зашифровано на устройстве
+          const kk = ek || anyKey();
+          if (!kk) { st.locked = (st.locked || 0) + 1; st.e2eRemote = true; continue; }   // ключа нет — ждём его со своего устройства
+          try { it = Object.assign({}, it, { data: e2eOpen(kk, it.data) }); } catch (x) { console.warn("sync: не расшифровалось", k); continue; }
+        } else if (ek && !it.deleted && e2eSealable(it.kind, it.id, it.data || {})) plainIn = true;   // пришло открытым — перешифруем
         let okApply; try { okApply = syncApply(it); } catch (e2) { console.error("sync", it.kind, it.id, e2); continue; }
         if (okApply === false) { st.idx[k] = { h: null, u: it.updated, skip: true }; continue; }
-        got++; st.idx[k] = it.deleted ? { h: null, u: it.updated, del: true } : { h: null, u: it.updated };
+        got++; st.idx[k] = it.deleted ? { h: null, u: it.updated, del: true } : Object.assign({ h: null, u: it.updated }, plainIn ? { reseal: true } : {});
       }
       st.rev = d.rev || st.rev; body.since = st.rev;
       if (!d.more) break;
     }
     // полученное запоминаем отпечатком «как оно легло у нас» — иначе следующий обмен отправил бы его обратно как своё
     if (got) { const s2 = syncSnapshot(); for (const k in st.idx) { const e = st.idx[k]; if (e.h === null && !e.del && !e.skip && k in s2) e.h = syncHash(s2[k]); } }
+    if (ek) { delete st.resealAll; changes.forEach(x => { const e = st.idx[x.kind + ":" + x.id]; if (e) delete e.reseal; }); }
     prefSet("sync", JSON.stringify(st));
+    if (st.e2eRemote && !syncKeyGet() && Date.now() - (window._keyAsk || 0) > 600000) { window._keyAsk = Date.now(); ownShare(["sync_key"]).catch(() => { }); }   // в облаке зашифрованное, а ключа нет — просим у своих (раз в 10 мин)
     syncStatus = { ok: true, at: Date.now(), error: "", devices: d.devices || [], counts: { sent: changes.length, got }, via: c.via };
     if (got && qGet("natt_in").length) setTimeout(() => nattIn().catch(() => { }), 0);    // пришла заметка, которую ждали фото с компьютера
     if (got && $("#sh-day") && $("#sh-day").classList.contains("on") && document.activeElement !== $("#tk-goal")) renderDay();
@@ -5317,6 +5365,8 @@ function syncCard() {
   return `<div class="sw"><div>Телефон и компьютер — одно и то же<small class="hint" style="display:block;margin:2px 0 0">напоминания, заметки, расходы, память · ${esc(c.via)}</small></div>
     <label class="tg"><input type="checkbox" id="sy-on" ${S.sync.on ? "checked" : ""}><i></i></label></div>
     <div class="res ${s.ok === false ? "bad" : s.ok ? "ok" : ""}" id="sy-res">${s.ok === false ? esc(s.error) : t ? `Синхронизировано в ${pad(t.getHours())}:${pad(t.getMinutes())}` + (devs.length ? ` · ещё устройства: ${devs.join(", ")}` : "") : S.sync.on ? "первая синхронизация — в течение минуты" : "выключено"}</div>
+    <div class="sw" style="margin-top:8px"><div>Шифровать на устройстве<small class="hint" style="display:block;margin:2px 0 0">${S.sync.e2e && syncKeyGet() ? "Включено: в облаке — только шифротекст, ключ — у ваших устройств." : e2eWaiting() ? "Ваши данные зашифрованы на другом устройстве — жду ключ от него (оно должно быть на связи)." : "Заметки, дела, деньги и память уходят в облако зашифрованными — сервер их не прочитает. Включите на одном устройстве — остальные получат ключ сами."}</small></div>
+    <label class="tg"><input type="checkbox" id="sy-e2e" ${S.sync.e2e && syncKeyGet() ? "checked" : ""} ${S.sync.on ? "" : "disabled"}><i></i></label></div>
     <button class="btn w" id="sy-now" style="margin-top:6px">Синхронизировать сейчас</button>`;
 }
 let syncTick = 0;
@@ -6300,20 +6350,23 @@ function clPeople(d) {
   const st = clLoad(); st.me = d.me || {}; st.people = d.people || []; st.offers = d.offers || [];
   const k = clKeys(), mine = (st.me.devs || []).map(x => x.dev).filter(x => x && x !== k.dev).sort(), fresh = mine.some(x => !(st.ownDevs || []).includes(x));
   st.ownDevs = mine; clSave(); clBadge();
-  if (fresh) setTimeout(() => ownShare(!D.web && !(S.home.at || S.home.token)).catch(() => { }), 0);   // ещё одно своё устройство — передать ему дом (или попросить)
+  if (fresh) setTimeout(() => ownShare([...(!D.web && !(S.home.at || S.home.token) ? ["home"] : []), ...(e2eWaiting() ? ["sync_key"] : [])]).catch(() => { }), 0);   // ещё одно своё устройство — передать ему дом и ключ (или попросить)
 }
 /* Общее своих устройств, которое не должно лежать на сервере открытым, — ключ умного дома Яндекса. Настроили (или
    отключили) здесь — уходит конвертом на свои устройства (cloud.php ?p=/close/self), зашифрованным их ключами, как
    сообщения «Близких»; там берётся, если поменяли позже (at). Компьютер делает то же (core/close.py own_send). */
 function homeSet(tok) { S.home.token = tok; S.home.at = Date.now(); homeInfo = null; saveS(); ownShare().catch(e => plog("info", "умный дом на свои устройства: " + e.message)); }
 async function ownShare(want) {
-  const at = +S.home.at || (S.home.token ? 1 : 0);                 // подключили до 0.6.10 — «давно»: свежее с компьютера важнее
-  if (!syncCred() || !DC() || (!at && !want)) return false;
+  const at = D.web ? 0 : +S.home.at || (S.home.token ? 1 : 0);      // подключили до 0.6.10 — «давно»: свежее с компьютера важнее
+  const sk = syncKeyGet();                                          // ключ шифрования синхронизации — тоже только своим
+  const wants = (Array.isArray(want) ? want : want ? ["home"] : []).filter(w => !(w === "home" && at) && !(w === "sync_key" && sk));
+  if (!syncCred() || !DC() || (!at && !sk && !wants.length)) return false;
   const k = clKeys(); if (!clLoad().me.pid || Date.now() - (CLS.hello || 0) > 600000) await clHello();
   const t = {}; ((CLS.me || {}).devs || []).forEach(d => { if (d.pub && d.dev && d.dev !== k.dev) t[d.dev] = DC().b64d(d.pub); });
   if (!Object.keys(t).length) return false;                         // других своих устройств пока нет
   t[k.dev] = DC().b64d(k.pub);
-  const env = DC().encryptFor(Object.assign(at ? { home: { token: S.home.token || "", at } } : { want: ["home"] }, { ts: Date.now() }), DC().b64d(k.priv), k.dev, t);
+  const body = Object.assign(at ? { home: { token: S.home.token || "", at } } : {}, sk ? { sync_key: { k: sk.k, at: sk.at } } : {}, wants.length ? { want: wants } : {}, { ts: Date.now() });
+  const env = DC().encryptFor(body, DC().b64d(k.priv), k.dev, t);
   await clReq("POST", "/close/self", { env }); return true;
 }
 /* Фото и файлы заметок с компьютера (core/close.py natt_share): конверт own {natt: {note, title, files: [{id, key, name,
@@ -6351,7 +6404,14 @@ async function nattIn() {
 }
 function ownApply(body) {
   if (body && body.natt) nattTake(body.natt);
-  if (body && body.want && (S.home.at || S.home.token)) setTimeout(() => ownShare().catch(() => { }), 0);   // другое моё устройство просит
+  if (body && body.want && (S.home.at || S.home.token || syncKeyGet())) setTimeout(() => ownShare().catch(() => { }), 0);   // другое моё устройство просит
+  const skb = body && body.sync_key;
+  if (skb && typeof skb === "object" && syncKeyAdopt(skb.k, skb.at)) {
+    plog("info", "🔐 ключ шифрования синхронизации получен со своего устройства");
+    const st = syncSt(); if (st && !st.e2eOffHere) { S.sync.e2e = true; saveS(); }
+    if (st) { st.rev = 0; st.resealAll = true; st.locked = 0; prefSet("sync", JSON.stringify(st)); }
+    syncSoon();
+  }
   const h = !D.web && body && body.home; if (!h || typeof h !== "object") return;   // браузеру ключ дома ни к чему: Яндекс не пускает запросы со страниц (CORS)
   const tok = String(h.token || ""), at = +h.at || 0;
   if (at <= (+S.home.at || 0) || (tok && !/^[\w.-]{20,}$/.test(tok)) || tok === (S.home.token || "")) return;

@@ -184,6 +184,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.toolbox.hooks["power"] = self.power
         from vault import Vault
         self.vault = Vault(_CFG / "vault.bin", _CFG / "vault.key")
+        from synckey import SyncKey
+        self.sync_key = SyncKey(_CFG / "sync.key", _CFG / "vault.key")     # сквозное шифрование синхронизации (sync.e2e)
         from smarthome import CLIENT_ID as _YCID, Home
         self.home = Home(_CFG / "smarthome.json", lambda: (self.s.get("smarthome", "client_id") or _YCID).strip())
         self.toolbox.hooks["home"] = self.home
@@ -269,6 +271,12 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         from vosk import Model, SetLogLevel
         SetLogLevel(-1)
         self._load("hear", "Готовлю слух")
+        from listen import VOSK_NAME
+        if not ((MODELS_DIR / VOSK_NAME / "am").exists() or (DATA_DIR / f"{VOSK_NAME}.zip").exists()):
+            # модель имён ещё качать (первый запуск, 45 МБ): микрофон по кнопке — сразу, имя — когда докачается
+            # (на медленном интернете ждать её, чтобы просто нажать на микрофон, — минуты; CI 19.10)
+            self.names_off = True
+            self._hearing_up()
         while not self.stopping.is_set():
             try:
                 vosk_dir = ensure_vosk(DATA_DIR, MODELS_DIR, on_status=self.note, mirror=self._mirror_url("vosk_small"))

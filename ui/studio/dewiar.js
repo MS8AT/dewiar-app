@@ -19,7 +19,19 @@ function dwSyncRender() {
   $("#dw-sync-st").textContent = !s.available ? "" : !s.on ? "выключено" : s.ok === false ? s.error
     : t ? `в ${t.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}` + (devs.length ? ` · ещё: ${devs.join(", ")}` : " · других устройств пока нет") : "первая — в течение минуты";
   dwSet("sync", !s.available || !s.on ? "" : s.ok === false ? "bad" : s.ok ? "ok" : "", !s.available ? "нет входа" : !s.on ? "выключена" : s.ok === false ? "ошибка" : s.ok ? "работает" : "—");
+  // шифрование на устройстве: включено, ждём ключ от своего устройства или выключено
+  const e = s.e2e || {};
+  $("#dw-e2e").checked = !!e.on; $("#dw-e2e").disabled = !s.available || !s.on;
+  $("#dw-e2e-why").textContent = e.on ? "Включено: в облаке — только шифротекст; ключ — у ваших устройств. Новое устройство получит его само, когда эти будут на связи."
+    : e.remote && !e.key ? `Ваши данные зашифрованы на другом устройстве — жду ключ от него (оно должно быть включено и на связи)${e.locked ? `; пока не открыто записей: ${e.locked}` : ""}.`
+    : "Заметки, дела, деньги и память уходят в облако уже зашифрованными — ключ знают только ваши устройства, сервер dewiar.pro их не прочитает. Включите на одном — остальные получат ключ сами.";
 }
+$("#dw-e2e").onchange = async (ev) => {
+  const on = ev.target.checked;
+  if (!on && !confirm("Выключить шифрование на этом компьютере? Свои изменения он снова будет отправлять открытыми. На других устройствах выключите отдельно.")) { ev.target.checked = true; return; }
+  ev.target.disabled = true;
+  DW.sync = await core.call("sync_e2e", { on }).catch(x => (toast(x.message), DW.sync)); dwSyncRender();
+};
 $("#dw-sync-on").onchange = async (e) => { DW.sync = await core.call("sync_set", { on: e.target.checked }).catch(x => (toast(x.message), DW.sync)); dwSyncRender(); };
 $("#dw-sync-now").onclick = async (e) => { e.target.disabled = true; $("#dw-sync-st").textContent = "синхронизирую…";
   DW.sync = await core.call("sync_now").catch(x => (toast(x.message), DW.sync)); dwSyncRender(); };

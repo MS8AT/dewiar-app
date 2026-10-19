@@ -53,6 +53,11 @@ MIND_MAX = 8000
 DIARY_MAX = 60_000                                  # день дневника — текст, не архив
 _CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2066-\u2069]")   # управляющие и «невидимые» знаки
 CONST_PREV = "Память/Конституция — прежняя.md"
+# Сквозное шифрование (sync.e2e, core/synckey.py): что шифруется на устройстве — всё личное. Открытыми остаются только
+# метка «шифрование включено» (mind:e2e), задачи для облака (taskreq с cloud — их выполняет сервер) и удаления (пустые).
+E2E_KINDS = ("reminder", "note", "money", "memory", "soul", "mind", "diary", "dayturn", "done", "persona", "vault", "task", "taskreq")
+E2E_MARK = "mind:e2e"
+SEALED_MAX = 290_000                              # сервер не берёт запись больше 300 КБ — зашифрованная на треть длиннее
 
 
 def _mind_text(d, limit):
@@ -63,6 +68,20 @@ def _mind_text(d, limit):
         return None
     return _CTRL.sub("", t)
 _FACT = re.compile(r"^- (.+?)(?: _\(\d\d\.\d\d\.\d{4}\)_)?\s*$")
+
+
+def _seal(k, data):
+    from synckey import seal_data
+    return seal_data(k, data)
+
+
+def _open(k, data):
+    from synckey import open_data
+    return open_data(k, data)
+
+
+def _is_sealed(d):
+    return isinstance(d, dict) and bool(d.get("e2e")) and isinstance(d.get("c"), str)
 
 
 def _now_ms():
@@ -119,6 +138,60 @@ class Sync:
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.state, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.path)
+
+    # ---------- сквозное шифрование (sync.e2e) ----------
+
+    def e2e_key(self):
+        """Ключ, если шифрование включено на этом устройстве и ключ есть. -> 32 байта или None."""
+        ks = getattr(self.host, "sync_key", None)
+        s = getattr(self.host, "s", None)
+        try:
+            on = bool(s.get("sync", "e2e")) if s is not None else False
+        except Exception:  # noqa: BLE001
+            on = False
+        cur = ks.get() if ks is not None and on else None
+        return cur["k"] if cur else None
+
+    def _sealable(self, kind, iid, data):
+        key = kind + ":" + iid
+        if key == E2E_MARK or kind not in E2E_KINDS or not isinstance(data, dict) or not data:
+            return False
+        if kind == "taskreq" and data.get("cloud"):     # задачу просили выполнить в облаке — серверу её надо прочитать
+            return False
+        return True
+
+    def e2e_status(self):
+        ks = getattr(self.host, "sync_key", None)
+        return {"on": self.e2e_key() is not None, "key": bool(ks is not None and ks.get()),
+                "remote": bool(self.state.get("e2e_remote")), "locked": int(self.state.get("e2e_locked") or 0)}
+
+    def e2e_enable(self, on):
+        """Включить или выключить шифрование на этом устройстве. Включили — ключ (свой или уже полученный), всё своё
+        уходит заново зашифрованным, ключ — своим устройствам конвертом. Выключили — только здесь (шифрование другие
+        устройства не выключает: метку в облаке мог бы снять и чужой, завладевший аккаунтом)."""
+        ks = getattr(self.host, "sync_key", None)
+        if on and ks is not None and not ks.get():
+            ks.create()
+        self.host.s.update({"sync": {"e2e": bool(on)}})
+        with self._lock:
+            self.state["reseal_all"] = True
+            self.state["e2e_off_here"] = not on       # выключили здесь — метка других устройств сама не включит
+            self._save()
+        share = getattr(self.host, "own_share", None)
+        if on and callable(share):
+            share()
+        self.soon.set()
+        return self.e2e_status()
+
+    def key_arrived(self):
+        """Ключ пришёл с другого устройства: включить шифрование и забрать историю заново (зашифрованное, что не
+        открылось, — откроется теперь)."""
+        if not self.state.get("e2e_off_here"):
+            self.host.s.update({"sync": {"e2e": True}})
+        with self._lock:
+            self.state.update(rev=0, reseal_all=True, e2e_locked=0)
+            self._save()
+        self.soon.set()
 
     # ---------- снимок данных этого устройства: ключ → (data, hash) ----------
 
@@ -491,6 +564,31 @@ class Sync:
         log.info("🔄 Персонаж «%s» — с другого устройства", name)
         return None
 
+    def _any_key(self):
+        """Ключ есть, а шифрование здесь выключено (выключили только здесь) — открыть пришедшее всё равно можно."""
+        ks = getattr(self.host, "sync_key", None)
+        cur = ks.get() if ks is not None else None
+        return cur["k"] if cur else None
+
+    def _apply_mark(self, d, deleted):
+        """Метка «шифрование включено» с другого устройства: ключ есть — включаем и здесь; нет — просим его у своих
+        устройств (конверт close). Снятую метку не слушаем: выключают шифрование только на самом устройстве."""
+        if deleted or not (d or {}).get("on"):
+            return False
+        ks = getattr(self.host, "sync_key", None)
+        s = getattr(self.host, "s", None)
+        if ks is not None and ks.get():
+            if s is not None and not s.get("sync", "e2e") and not self.state.get("e2e_off_here"):
+                s.update({"sync": {"e2e": True}})
+                self.state["reseal_all"] = True
+                log.info("🔐 Синхронизация зашифрована на другом устройстве — шифрую и здесь")
+            return False
+        self.state["e2e_remote"] = True
+        want = getattr(self.host, "sync_key_wanted", None)
+        if callable(want):
+            want()
+        return False
+
     def _apply_extra(self, kind, iid, d, deleted, it_updated=0):
         """Душа, конституция, выводы, дневник — удалением не стираются: у другого устройства запись могла просто
         выпасть из снимка (дневник там — за DIARY_DAYS дней), а написанное терять нельзя. Разговор (dayturn) и задачу (taskreq)
@@ -499,6 +597,8 @@ class Sync:
         h = self.host
         if kind == "persona":
             return self._apply_persona(iid, d, deleted)
+        if kind == "mind" and iid == "e2e":
+            return self._apply_mark(d, deleted)
         if kind in ("soul", "mind", "diary", "task") and deleted:
             return False
         if kind == "soul":
@@ -736,6 +836,10 @@ class Sync:
             self.status["enabled"] = True
             self._upload_outputs(url, token)
             snap = self.snapshot()
+            ek = self.e2e_key()
+            if ek is not None:
+                snap[E2E_MARK] = {"on": True}               # другим устройствам: шифрование включено — попросите ключ
+            reseal_all = ek is not None and self.state.get("reseal_all")
             idx = self.state["idx"]
             now = _now_ms()
             changes = []
@@ -743,7 +847,8 @@ class Sync:
             for key in keys:
                 h = self._hash_of(snap, key)
                 st = idx.get(key)
-                if st and st.get("h") == h and not st.get("del"):
+                again = (reseal_all or (st or {}).get("reseal")) and ek is not None
+                if st and st.get("h") == h and not st.get("del") and not again:
                     continue
                 data = snap[key]
                 if data is None and key.startswith("vault:"):
@@ -760,7 +865,13 @@ class Sync:
                     folder = str(Path(rel).parent.as_posix())
                     data = {"title": Path(rel).stem, "text": text, "folder": "" if folder == "." else folder}
                 kind, iid = key.split(":", 1)
-                changes.append({"kind": kind, "id": iid, "data": data, "updated": min(now, int(snap.get(key + "#t") or now)), "_h": h})
+                upd = now if again else min(now, int(snap.get(key + "#t") or now))   # перешифровка — новее открытой копии в облаке
+                if ek is not None and self._sealable(kind, iid, data):
+                    data = sealed = _seal(ek, data)
+                    if len(sealed["c"]) > SEALED_MAX:
+                        log.info("Синхронизация: %s слишком большая для зашифрованной отправки — пропускаю", key)
+                        continue
+                changes.append({"kind": kind, "id": iid, "data": data, "updated": upd, "_h": h})
                 if kind == "vault" and st and st.get("u") is not None:
                     changes[-1]["prev"] = st["u"]       # от какой версии облака правили (облако отклонит правку поверх устаревшей)
             present = set(keys)
@@ -826,6 +937,20 @@ class Sync:
                     st = idx.get(key) or {}
                     if it.get("dev") == self.state["device"] and st.get("u") == it.get("updated"):
                         continue                          # своё же изменение вернулось — уже на месте
+                    plain_in = False
+                    if _is_sealed(it.get("data")):
+                        k = ek or self._any_key()
+                        if k is None:                     # зашифровано, а ключа нет: ждём его со своего устройства
+                            self.state["e2e_locked"] = int(self.state.get("e2e_locked") or 0) + 1
+                            self.state["e2e_remote"] = True
+                            continue
+                        try:
+                            it = dict(it, data=_open(k, it["data"]))
+                        except Exception as e:  # noqa: BLE001 — другой ключ (сменили) или испорчено
+                            log.warning("Синхронизация: %s не расшифровалась (%s) — пропускаю", key, e)
+                            continue
+                    elif ek is not None and not it.get("deleted") and self._sealable(it["kind"], it["id"], it.get("data") or {}):
+                        plain_in = True                   # пришло открытым (Telegram на сервере, старое устройство) — перешифруем
                     try:
                         if self._apply(it) is False:
                             idx[key] = {"h": None, "u": it.get("updated"), "skip": True}
@@ -838,12 +963,19 @@ class Sync:
                         idx[key] = {"h": None, "u": it.get("updated"), "del": True}
                     else:
                         idx[key] = {"h": None, "u": it.get("updated")}
+                        if plain_in:
+                            idx[key]["reseal"] = True
                         if it["kind"] == "vault":
                             idx[key]["b"] = _h(it.get("data") or {})
                 self.state["rev"] = int(d.get("rev") or self.state.get("rev") or 0)
                 body["since"] = self.state["rev"]
                 if not d.get("more") and not body["changes"]:
                     break
+            if ek is not None:                            # перешифровали — флаги больше не нужны
+                self.state.pop("reseal_all", None)
+                for key in sent:
+                    if key in idx:
+                        idx[key].pop("reseal", None)
             self._claim_tasks(url, headers, idx)
             if got:                                       # отпечатки принятого — по тому, как оно легло у нас, иначе ушло бы обратно
                 snap2 = self.snapshot()
@@ -852,7 +984,7 @@ class Sync:
                         st["h"] = self._hash_of(snap2, key)
             self._save()
             self.status.update(ok=True, at=int(time.time()), error="", devices=d.get("devices") or [], space=d.get("space", ""),
-                               counts={"sent": len(changes), "got": got})
+                               counts={"sent": len(changes), "got": got}, e2e=self.e2e_status())
             if changes or got:
                 log.info("🔄 Синхронизация: отправлено %d, получено %d", len(changes), got)
             return True

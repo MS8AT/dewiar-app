@@ -647,13 +647,32 @@ class ToolsMixin:
 
     # ---------- общее для своих устройств (close.own_send, сквозное шифрование): ключ умного дома ----------
     def own_snapshot(self):
+        out = {}
         h = self.home.share()
-        return {"home": h} if h else None
+        if h:
+            out["home"] = h
+        k = self.sync_key.share() if getattr(self, "sync_key", None) else None
+        if k:
+            out["sync_key"] = k                    # ключ шифрования синхронизации — только своим устройствам, конвертом
+        return out or None
 
     def own_apply(self, body):
         h = (body or {}).get("home")
         if isinstance(h, dict) and self.home.adopt(h.get("token"), h.get("at")):
             self.emit("tools", tools=self.toolbox.catalog())
+        k = (body or {}).get("sync_key")
+        if isinstance(k, dict) and getattr(self, "sync_key", None) and self.sync_key.adopt(k.get("k"), k.get("at")):
+            log.info("🔐 Ключ шифрования синхронизации получен со своего устройства")
+            self.sync.key_arrived()
+
+    def sync_key_wanted(self):
+        """В облаке зашифрованное, а ключа здесь нет — попросить у своих устройств (не чаще раза в 10 минут)."""
+        import time as _t
+        if _t.time() - getattr(self, "_key_asked", 0) < 600 or not getattr(self, "close", None):
+            return
+        self._key_asked = _t.time()
+        import threading
+        threading.Thread(target=self.close._own_quiet, args=({"want": ["sync_key"]},), daemon=True).start()
 
     def note_rel_of(self, nid):
         """Заметка, пришедшая синхронизацией с id другого устройства, -> её путь в папке ассистента («Заметки/…») или None."""
@@ -679,6 +698,7 @@ class ToolsMixin:
         tok, _, _ = self.credentials()
         st["available"] = bool(tok)
         st["on"] = self.s.get("sync", "enabled") is not False
+        st["e2e"] = self.sync.e2e_status()
         st["via"] = "аккаунту dewiar.pro" if self.account.logged_in() else ("ключу Dewiar …" + (self.s.get("cloud", "key") or "")[-4:] if tok else "")
         return st
 

@@ -133,6 +133,9 @@ class CommandsMixin:
             if on and not any(t.name == "sync" for t in threading.enumerate()):     # поток синхронизации — один на ядро
                 threading.Thread(target=self.sync.loop, args=(self.stopping,), name="sync", daemon=True).start()
             return self.sync_public()
+        if cmd == "sync_e2e":                     # шифрование синхронизации на устройстве (core/synckey.py)
+            self.sync.e2e_enable(bool(a.get("on")))
+            return self.sync_public()
         if cmd.startswith("knowledge_"):         # «Знания» на этом компьютере
             kn = self.knowledge
             if cmd == "knowledge_add":

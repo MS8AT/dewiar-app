@@ -21,7 +21,7 @@ def ok(c, m):
 
 
 def show(bad):
-    return "; ".join(f"{x['sel']} «{x['text'][:30]}» {x['ratio']}" for x in bad[:4])
+    return "; ".join(f"{x['sel']} «{x['text'][:30]}» {x['ratio']} (текст {x['fg']}, фон {x['bg']})" for x in bad[:4])
 
 
 LIGHT = ["neusky", "neu", "neumint", "snow", "glass"]
