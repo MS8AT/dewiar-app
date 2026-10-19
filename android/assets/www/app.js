@@ -758,7 +758,7 @@ let conv = (() => { try { return Object.assign({ summary: "", turns: 0, started:
 let convBusy = false;
 const saveConv = () => prefSet("conv", JSON.stringify(conv));
 const liveHistory = () => history.filter(m => !m.f);
-function convReset() { history.forEach(m => { m.f = 1; }); saveH(); conv = { summary: "", turns: 0, started: 0, last: 0 }; saveConv(); }
+function convReset() { history.forEach(m => { m.f = 1; }); saveH(); conv = { summary: "", turns: 0, started: 0, last: 0 }; saveConv(); lastPics = null; }
 function convCheck() { if (conv.last && Date.now() - conv.last > CONV_KEEP) convReset(); }
 function convAfter() {
   const now = Date.now(); if (!conv.started) conv.started = now;
@@ -1504,6 +1504,8 @@ const llmBase = () => (S.llm.base_url || "").replace(/\/+$/, "");
 const isOllama = () => S.llm.kind === "ollama";
 const ollamaRoot = () => llmBase().replace(/\/v1$/, "");
 function llmHeaders() { const h = { "Content-Type": "application/json" }; if (S.llm.api_key) h.Authorization = "Bearer " + S.llm.api_key; if (/openrouter/.test(llmBase())) { h["HTTP-Referer"] = "https://dewiar.pro"; h["X-Title"] = "Dewiar"; } return h; }
+var lastPics = null;                               // последние присланные фото: {urls, at} — только в памяти
+const PIC_KEEP_MS = 20 * 60e3, PIC_REF_RX = /(картинк|скрин|фото|снимк|снимок|изображени|рисун|прикреп|вложени|на нём|на нем|на ней|на экране|файл)/i;
 let modelOnce = "";                               // модель на один запрос (снимок — модели со зрением)
 async function resolveModel() {
   if (modelOnce) return modelOnce;
@@ -1961,8 +1963,16 @@ async function ask(text, opts = {}) {
     const last = msgs[msgs.length - 1];
     const body = String(last.content) + docs.map(d => `\n\n[Файл «${d.name}»${d.cut ? ", начало" : ""}]\n${d.text}`).join("");
     last.content = pics.length ? [{ type: "text", text: body + (pics.length > 1 ? `\n(фото: ${pics.length})` : "") }, ...pics.map(a => ({ type: "image_url", image_url: { url: a.url } }))] : body;
-    if (pics.length) modelOnce = await visionModel();
+    if (pics.length) { modelOnce = await visionModel(); lastPics = { urls: pics.map(a => a.url), at: Date.now() }; }
     plog("info", `📎 вложения: ${att.map(a => a.kind === "image" ? "фото" : a.name).join(", ")}`);
+  } else if (!opts.hidden && lastPics && Date.now() - lastPics.at < PIC_KEEP_MS && PIC_REF_RX.test(text)) {
+    // отчёт №110 (19.10): прислал скриншот, спросил — потом «посмотри внимательно, я прикрепил» — а в истории картинки
+    // нет (там только текст), и модель честно её не видела. Говорят о присланном фото — прикладываем его снова
+    const last = msgs[msgs.length - 1];
+    last.content = [{ type: "text", text: String(last.content) + "\n(Фото из прошлого сообщения пользователя — прикладываю снова.)" },
+      ...lastPics.urls.map(u => ({ type: "image_url", image_url: { url: u } }))];
+    modelOnce = await visionModel(); lastPics.at = Date.now();
+    plog("info", "📎 говорят о присланном фото — прикладываю его снова");
   }
   const deep = !opts.hidden && wantsThink(text);
   creativeTurn = !opts.hidden && CREATIVE_ASK.test(text);
@@ -5012,6 +5022,8 @@ function wireSettings(info) {
    Запись, которой больше нет в syncSnapshot(), уходит как удаление — и другие устройства её тоже удалят.
    Формат записей, виды (SYNC_KINDS) и порядок обмена — общие с core/sync.py (компьютер) и ?p=/sync в cloud.php:
    меняешь здесь — меняй и там. Дополнительные виды (soul, mind, diary, dayturn, taskreq, task, done) шлём, только если их знает сервер. */
+const MIND_MAX = 8000, MIND_CTRL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g;
+const mindText = (d) => (d && typeof d.text === "string" && d.text.trim() && d.text.length <= MIND_MAX) ? d.text.replace(MIND_CTRL, "") : "";
 const SYNC_KINDS = ["reminder", "note", "money", "memory", "soul", "mind", "diary", "dayturn", "taskreq", "task", "done", "persona"];
 let syncTimer = null, syncBusy = false, syncStatus = { ok: null, at: 0, error: "", devices: [], counts: {} };
 /* Чьи данные: аккаунт dewiar.pro (если вошли) или ключ Dewiar (dw-…). Есть и то и другое — ключ уходит в link
@@ -5195,8 +5207,9 @@ function syncApply(it) {
   } else if (["soul", "mind", "diary", "task"].includes(it.kind)) {
     if (del) return false;                                   // душа, дневник и задачи удалением не стираются
     const m = mind();
-    if (it.kind === "soul") { if (!d.text) return false; m.souls[it.id] = { text: String(d.text), u: it.updated }; }
-    else if (it.kind === "mind" && it.id === "constitution") { if (!d.text) return false; m.constitution = String(d.text); }
+    // душа и конституция идут в подсказку модели: из облака — только текст разумной длины без невидимых знаков (как sync._mind_text)
+    if (it.kind === "soul") { const t = mindText(d); if (!t) return false; m.souls[it.id] = { text: t, u: it.updated }; }
+    else if (it.kind === "mind" && it.id === "constitution") { const t = mindText(d); if (!t) return false; m.constitution = t; }
     else if (it.kind === "mind" && it.id === "insights") { m.insights = { day: d.day || "", title: d.title || "", lines: d.lines || [] }; saveMind(m); return false; }
     else if (it.kind === "mind" && it.id.startsWith("jobs")) {        // дела по расписанию компьютеров (jobs-<устройство>) — только показать
       m.jobs_by = Object.assign({}, m.jobs_by || {}, { [it.id]: del ? [] : (Array.isArray(d.items) ? d.items : []) });

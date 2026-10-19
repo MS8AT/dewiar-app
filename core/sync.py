@@ -46,6 +46,22 @@ TASKS_SHOWN = 15
 NOTES = "Заметки"
 MEMORY = Path("Память") / "Обо мне.md"
 NOTE_MAX = 300_000
+# Душа и конституция идут в системную подсказку каждого разговора: с другого устройства принимаем только похожее на них
+# (аудит 19.10: кто завладел ключом аккаунта, мог бы подменить поведение помощника). В подсказку и так уходит
+# не больше 1800/1400 знаков (soul.MAX_CONST / MAX_SOUL) — длиннее этого предела запись из облака не принимаем вовсе.
+MIND_MAX = 8000
+DIARY_MAX = 60_000                                  # день дневника — текст, не архив
+_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2066-\u2069]")   # управляющие и «невидимые» знаки
+CONST_PREV = "Память/Конституция — прежняя.md"
+
+
+def _mind_text(d, limit):
+    """Текст души, конституции или дня дневника из облака: строка, без управляющих и невидимых знаков (ими прячут
+    команды от глаз человека), не длиннее limit. Не подходит — None (запись не применяется)."""
+    t = d.get("text") if isinstance(d, dict) else None
+    if not isinstance(t, str) or len(t) > limit:
+        return None
+    return _CTRL.sub("", t)
 _FACT = re.compile(r"^- (.+?)(?: _\(\d\d\.\d\d\.\d{4}\)_)?\s*$")
 
 
@@ -486,15 +502,41 @@ class Sync:
         if kind in ("soul", "mind", "diary", "task") and deleted:
             return False
         if kind == "soul":
-            text = str(d.get("text") or "")
+            text = _mind_text(d, MIND_MAX)
+            if text is None:
+                log.warning("🔄 Душа «%s» с другого устройства не принята: не похожа на душу (длиннее %d знаков или не текст)", iid, MIND_MAX)
+                return False
             if text.strip() and text.strip() != h.soul.soul(iid).strip():
                 h.soul.save_soul(iid, text)
                 log.info("🔄 Душа «%s» — правка с другого устройства", iid)
         elif kind == "mind" and iid == "constitution":
-            text = str(d.get("text") or "")
-            if text.strip() and text.strip() != h.soul.constitution().strip():
-                h.soul.save_constitution(text)
-                log.info("🔄 Конституция — правка с другого устройства")
+            text = _mind_text(d, MIND_MAX)
+            if text is None:
+                log.warning("🔄 Конституция с другого устройства не принята: длиннее %d знаков или не текст", MIND_MAX)
+                return False
+            old = h.soul.constitution()
+            if text.strip() and text.strip() != old.strip():
+                try:
+                    h.soul.save_constitution(text)
+                except ValueError as e:
+                    log.warning("🔄 Конституция с другого устройства не принята: %s", e)
+                    return False
+                # принципы помощника поменялись не здесь — прежние сохраняем рядом и говорим человеку: если это не он,
+                # вернуть их можно одним копированием, а ключ аккаунта — сменить
+                try:
+                    prev = h.workspace.ensure() / CONST_PREV
+                    prev.parent.mkdir(parents=True, exist_ok=True)
+                    prev.write_text(old, encoding="utf-8")
+                except Exception as e:  # noqa: BLE001
+                    log.warning("прежняя конституция не сохранилась: %s", e)
+                log.info("🔄 Конституция — правка с другого устройства (прежняя — %s)", CONST_PREV)
+                if callable(getattr(h, "push", None)):
+                    try:
+                        h.push("Конституция изменена на другом устройстве",
+                               f"Принципы помощника пришли синхронизацией. Прежние сохранены: «{CONST_PREV}». "
+                               "Если меняли не вы — верните их в «Душе» и перевыпустите ключ Dewiar в кабинете.")
+                    except Exception:  # noqa: BLE001
+                        pass
         elif kind == "mind" and iid == "insights":
             cur = h.diary.data.get("insights") or {}
             if d.get("lines") and str(d.get("day", "")) > str(cur.get("day", "")):
@@ -506,7 +548,9 @@ class Sync:
             except ValueError:
                 return False
             p = h.workspace.ensure() / "Дневник" / f"{iid}.md"
-            text = str(d.get("text") or "")
+            text = _mind_text(d, DIARY_MAX)
+            if text is None:
+                return False
             if text.strip() and (not p.exists() or p.read_text(encoding="utf-8").strip() != text.strip()):
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text(text, encoding="utf-8")

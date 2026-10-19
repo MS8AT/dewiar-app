@@ -252,6 +252,14 @@ def main():
         m = re.search(r"(\d+(?:\.\d+)+)", exe.name)
         if not m:
             sys.exit("не понял версию из имени установщика (ожидается Dewiar-Setup-X.Y.Z.exe)")
+        onl = exe.with_name(f"Dewiar-Setup-{m.group(1)}-online.exe")
+        if not exe.name.endswith("-online.exe"):
+            # обновление из программы — компактным: полный (~155 МБ) тихо не вставал (отчёты 19.10) — как upd_publish в cloud.php
+            if onl.is_file():
+                say(f"Windows: для обновления беру компактный {onl.name} (полный тихо не встаёт)")
+                exe = onl
+            else:
+                say(f"⚠ Windows: {exe.name} — полный установщик; обновление из программы им не встаёт — опубликуйте {onl.name}")
         if exe.resolve() != (target / exe.name).resolve():
             shutil.copy2(exe, target / exe.name)
         data["windows"] = {"version": m.group(1), "date": dt.date.today().isoformat(), "exe": exe.name,
