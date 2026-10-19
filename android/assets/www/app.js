@@ -344,7 +344,7 @@ const DEF = {
   llm: { kind: "openai", name: "", base_url: "", api_key: "", model: "", disable_thinking: true, temperature: 0.7, cloud: false, title: "", account: false },
   stt: { engine: "system", url: "", key: "", model: "" },
   account: { server: "", login: "", token: "", user: {}, rag_url: "", services: {}, problem: "" },
-  net: { proxy: "", dewiar: false, dewiar_secret: "", dewiar_at: 0 },   // прокси для серверов Dewiar: свой или «прокси Dewiar»
+  net: { proxy: "", dewiar: false, dewiar_secret: "", dewiar_at: 0, web_via: true },   // прокси для серверов Dewiar: свой или «прокси Dewiar»
   kb: {}, accCloud: null, tg: { linked: false },
   // голос: system — устройства (sys_voice — героинь и по умолчанию, sys_voice_m — героев; пусто — подберём сами), cloud — Dewiar,
   // server — свой OpenAI-совместимый сервер (voice / voice_m), eleven — ElevenLabs своим ключом (el_*)
@@ -629,17 +629,30 @@ function complaintsHtml() {
 }
 // «сообщи об ошибке: радио молчит», «передай разработчику, что…», «пожалуйся разработчику…»
 const BUG_RX = /^(?:(?:сообщи|передай|напиши|отправь|скажи)\s+(?:разработчик\S*\s+)?(?:об?\s+)?(?:ошибк\S*|проблем\S*|баг\S*|сбо\S*)|отправь\s+жалобу(?:\s+разработчик\S*)?|пожалуйся(?:\s+разработчик\S*)?|(?:передай|скажи|напиши)\s+разработчик\S*)(?:\s*[:,.—-]\s*|\s+)?(?:что\s+)?([\s\S]*)$/i;
+/* Жалоба оборвалась на паузе (отчёт №90, 19.10: «передай разработчику приложения что» ушло как есть — «меня до конца
+   дослушай»): хвост — служебное слово или пусто — переспросить и дописать следующую фразу к началу (как core/health.py). */
+const BUG_LEAD = /^(?:(?:этого\s+|этой\s+)?(?:приложени\S*|программ\S*|dewiar\S*|девиар\S*|лиры|ассистент\S*)\s*[,:]?\s*)?(?:что\s+|о\s+том,?\s+что\s+)?/i;
+const BUG_TAIL = new Set("что чтобы и а но или в во на про о об у с со к ко по за для из от до когда если потому как где это вот ну типа не очень приложения программы мне меня там тут так".split(" "));
+function bugNote(raw) {
+  const s = String(raw || "").trim().replace(/^[\s.,:;—-]+|[\s.,:;—-]+$/g, "").replace(BUG_LEAD, "").replace(/^[\s.,:;—-]+|[\s.,:;—-]+$/g, "");
+  const w = s.toLowerCase().replace(/ё/g, "е").match(/[\p{L}\d-]+/gu) || [];
+  if (s.length < 4 || !w.length) return ["", true];
+  if (BUG_TAIL.has(w[w.length - 1])) return [w.length > 2 ? s : "", true];
+  return [s, false];
+}
+let bugPrefix = "";
 async function bugQuick(text) {
   const t = text.trim();
   let note;
   if (bugWait && Date.now() - bugWait < 40000) {
     bugWait = 0;
-    if (/^(отмена|отмени|не надо|ничего|передумал\S*|забудь)\W*$/i.test(t)) return { say: "Хорошо, не отправляю." };
-    note = t;
+    if (/^(отмена|отмени|не надо|ничего|передумал\S*|забудь)\W*$/i.test(t)) { bugPrefix = ""; return { say: "Хорошо, не отправляю." }; }
+    note = (bugPrefix + " " + t).trim(); bugPrefix = "";
   } else {
     const m = t.match(BUG_RX); if (!m) return null;
-    note = m[1].replace(/^[\s.,:]+|[\s.,:]+$/g, "");
-    if (note.length < 4) { bugWait = Date.now(); return { say: "Что случилось? Расскажите одной-двумя фразами — передам разработчику." }; }
+    const [n, cut] = bugNote(m[1]);
+    if (cut) { bugWait = Date.now(); bugPrefix = n; return { say: n ? "Слушаю — договорите, что передать разработчику." : "Что случилось? Расскажите одной-двумя фразами — передам разработчику." }; }
+    note = n;
   }
   try { const r = await complaintSend(note, S.who, false, "голосом"); return { say: gfix(`Передал разработчику — жалоба №${r.id}. Когда ответят или исправят, скажу. Спасибо, что помогаете!`) }; }
   catch (e) { return { say: `Не получилось отправить: ${e.message}. Можно в настройках: «Ещё» → «Сообщить о проблеме».` }; }
@@ -1305,7 +1318,15 @@ function say(text) {
     const u = cv ? cv.url : S.tts.url, url = u.replace(/\/+$/, "") + (/speech$/.test(u) ? "" : "/audio/speech");
     const body = cv ? { model: "tts-1", input: said, voice: persona().voice_remote || (persona().gender === "female" ? "serena" : "aiden"), persona: persona().id || "", response_format: "wav", speed: +S.tts.rate || 1 }
       : { model: S.tts.model || "tts-1", input: said, voice: (fem ? S.tts.voice : (S.tts.voice_m || S.tts.voice)) || "alloy", persona: persona().id || "", response_format: "mp3" };
-    D.speakRemote(id, url, cv ? cv.key : (S.tts.key || ""), JSON.stringify(body));
+    const sv0 = sysVoiceFor(persona().gender);
+    if (D.speakRemoteFb && D.ttsReady())     // запасной голос — в той же очереди, по порядку (отчёт №93: два голоса разом)
+      D.speakRemoteFb(id, url, cv ? cv.key : (S.tts.key || ""), JSON.stringify(body), JSON.stringify({ text: t, rate: +S.tts.rate || 1.0, pitch: sv0.pitch, voice: sv0.name || "" }));
+    else D.speakRemote(id, url, cv ? cv.key : (S.tts.key || ""), JSON.stringify(body));
+  } else if (srvDown && sayTexts.size && D.speakRemoteFb) {
+    // сервер голоса только что подвёл, а его фразы ещё звучат — эту голосом телефона, но в той же очереди, после них
+    sayLeft++;                                               // придут два «готово»: запасной фразы и самой
+    const sv = sysVoiceFor(persona().gender);
+    D.speakRemoteFb(id, "", "", "", JSON.stringify({ text: t, rate: +S.tts.rate || 1.0, pitch: sv.pitch, voice: sv.name || "" }));
   } else {
     if (!D.ttsReady()) {
       sayLeft--; vCount("tts_none");
@@ -1334,8 +1355,10 @@ N.on("tts_error", e => {
   const t = sayTexts.get(e.id); sayTexts.delete(e.id);
   if (t && D.ttsReady()) {                                   // эта фраза — голосом телефона, а не тишина
     srvVoiceDownAt = Date.now(); sayLeft++;
-    const sv = sysVoiceFor(persona().gender);
-    D.speak("f" + e.id, t, S.tts.rate || 1.0, sv.pitch, sv.name, true);
+    if (!e.fallback) {                                       // старое приложение: запасной голос говорим сами
+      const sv = sysVoiceFor(persona().gender);
+      D.speak("f" + e.id, t, S.tts.rate || 1.0, sv.pitch, sv.name, true);
+    }
     if (Date.now() - srvVoiceWarnAt > 600e3) { srvVoiceWarnAt = Date.now(); toast("Голос сервера сейчас недоступен — говорю голосом телефона", 5000); }
   } else if (t) toast("Голос сервера: " + e.error);      // своего голоса нет — честно говорим, почему тихо
 });
@@ -1940,6 +1963,7 @@ async function ask(text, opts = {}) {
       }
     };
     const doneCalls = []; let numChecked = false, drew = false;   // вызовы с результатами — сверить числа ответа (numberMismatch); схема
+    let remindAsked = false;                         // пообещала напомнить без set_reminder — попросили поставить (19.10)
     for (let round = 0; round < maxRounds; round++) {
       let r;
       try {
@@ -1976,6 +2000,8 @@ async function ask(text, opts = {}) {
       }
       const fix = !r.calls.length && !numChecked ? numberMismatch(r.text || "", doneCalls) : "";
       if (fix) { numChecked = true; msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: fix }); sink.push(" "); continue; }   // «на 79 минут», а поставлено 59
+      const rfix = !r.calls.length && !remindAsked && round < maxRounds - 1 ? remindClaim(r.text || "", called) : "";
+      if (rfix) { remindAsked = true; plog("info", "✋ пообещала напомнить без напоминания — прошу поставить"); msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: rfix }); sink.push(" "); continue; }
       const sfix = !r.calls.length && !nudged && round < maxRounds - 1 ? (remindMissing(text, called) || (!called.size ? savedClaim(text, r.text || "") : "")) : "";
       if (sfix) { nudged = true; msgs.push({ role: "assistant", content: r.text || "" }, { role: "user", content: sfix }); sink.push(" "); continue; }   // «Готово», а ничего не сделано (№66)
       const dfix = !r.calls.length && !drew && round < maxRounds - 1 ? diagramMissing(text, sink.text() + (r.text || ""), called) : "";
@@ -2021,6 +2047,10 @@ async function ask(text, opts = {}) {
       spoke = true;
       msgs.push({ role: "user", content: "Скажи пользователю одной-двумя фразами, что получилось по результатам действий выше (или что не получилось и почему). Без вызовов функций." });
       try { const r = await round1(null); final += r.text; } catch (e) { if (turnAbort !== ctl) return; }
+    }
+    if (remindAsked && !called.has("set_reminder") && turnAbort === ctl && !/\?\s*$/.test(sink.text())) {   // и после просьбы нет — честно, а не тишина утром
+      plog("warn", "обещала напомнить, но напоминание так и не поставлено — сказала об этом");
+      sink.push(" " + REMIND_NOT_SET);
     }
     sink.flush();
     // модель сделала дело и ничего не сказала: говорим, что сделано (а не «Готово») — и пишем это в историю. Пустой ответ из
@@ -2581,6 +2611,8 @@ async function doCall(who) {
 }
 
 /* просьба про камеру: «посмотри на меня», «как я выгляжу», «покажи фото», «с фронтальной камеры», «что это» с камерой */
+// просьба, где снимок уместен: камера, фото, «посмотри / что передо мной / что это / прочитай этикетку / сколько стоит…»
+const PHOTO_ASK_RX = /камер|фот|снимок|снимк|сним(?:и|ай|ешь)|сфоткай|посмотри|глянь|взгляни|видишь|увидь|покажи|передо мной|что (?:это|тут|здесь|там) |что это[?!.\s]*$|как я выгляжу|(?<![а-яё])лиц[оеау]|прочитай|прочти|прочесть|написано|этикетк|упаковк|(?<![а-яё])состав(?:е|ом)?(?![а-яё])|(?<![а-яё])чек|вывеск|ценник|сколько стоит|переведи|определи|узнай|распознай|что за (?:растени|цвет|предмет|вещ|модел|марк|порода|гриб|птиц)|где я/i;
 const CAM_ASK_RX = /камер|фото|снимок|снимк|сфотограф|сним(?:и|ай)|посмотри на меня|как я выгляжу|мо[её] лицо|изображени|покажи (?:мне )?(?:меня|это|его|е[её])|что (?:ты )?видишь|где я нахожусь/i;
 /* ---------- границы помощника (как core/boundaries.py — менять вместе) ----------
    Правило — в systemPrompt; грубость в адрес помощника — спокойная граница в этом ходе и счётчик rude в пульс;
@@ -2672,6 +2704,23 @@ function remindMissing(ask, called) {
   if (!SET_ASK.test(String(ask || "")) || (called && called.has && called.has("set_reminder")) || /\?\s*$/.test(String(ask || ""))) return "";
   return "ПРОВЕРКА: пользователь прямо попросил поставить напоминание (таймер, будильник), а ты его не поставил(а). Поставь сейчас — set_reminder (через N минут — in_minutes; время — at), не переспрашивай; если правда не сказано, когда, — спроси одной фразой. Уже сказанное не повторяй.";
 }
+/* 19.10 (скриншот: «задач ему накидала, но не вижу их… должен был утром напомнить, но не напомнил»): «Исправляю: встреча —
+   на вторник, 12:00. Напомню тебе в понедельник утром в 9:00» — а set_reminder не вызван, в «Делах» пусто. Пообещала напомнить
+   (или «поставила будильник») без напоминания — просим поставить; не вышло — честно дописываем REMIND_NOT_SET (как core/quality.py). */
+const REMIND_CLAIM = /(?<![а-яё])(?:напомн(?:ю|им)(?!\s+(?:тебе|вам)?\s*,?\s*что)(?=\s+(?:тебе|вам|в|во|завтра|сегодня|послезавтра|утром|дн[её]м|вечером|ночью|через|за|об?|про|как|когда|ровно|каждый|каждое|каждую|по)(?![а-яё]))|разбужу|(?:поставил[аи]?|установил[аи]?|завел[аи]?|завёл|создал[аи]?|добавил[аи]?)\s+(?:тебе\s+|вам\s+)?(?:\S+\s+)?(?:напоминани|будильник|таймер)|(?:напоминани[а-яё]*|будильник[а-яё]*|таймер[а-яё]*)\s+(?:уже\s+)?(?:поставлен|установлен|создан|заведён|заведен|стоит|сработает))/i;
+// «Запиши встречу на вторник в 12», «завтра в 13 у меня массаж» — дело со временем (как core/quality.py appt_ask)
+const APPT_TIME = /(?<![а-яё\d])(?:(?:в|к|на|с)\s+\d{1,2}(?:[:.]\d{2})?(?=\s|$|[,.!])|\d{1,2}:\d{2}|завтра|послезавтра|(?:в|во|на|к)\s+(?:следующ[а-яё]+\s+|ближайш[а-яё]+\s+|это[тй]?\s+)?(?:понедельник|вторник|среду|четверг|пятницу|субботу|воскресенье)|\d{1,2}(?:-?го|\.\d{1,2})?\s*(?:числ|январ|феврал|март|апрел|ма[яй]|июн|июл|август|сентябр|октябр|ноябр|декабр)|(?:двадцат|тридцат|перв|втор|трет|четвёрт|четверт|пят|шест|седьм|восьм|девят|десят)[а-яё]*\s+числ)/i;
+const APPT_WHAT = /встреч|запис[ьи] к|к (?:врач|юле|мастер|стоматолог|парикмахер)|массаж|маникюр|педикюр|стрижк|тренировк|танц|созвон|звонок|позвонить|приём|прием|урок|занят|экзамен|собеседован|вебинар|дедлайн|сдать|оплатить|забрать/i;
+function apptAsk(t) { t = String(t || ""); return APPT_TIME.test(t) && APPT_WHAT.test(t) && !/заметк|конспект|список|в\s+файл/i.test(t); }
+const APPT_NOTE = "Не записано в заметки: это дело со временем — поставь его в «Дела» напоминанием set_reminder на это время (текст — что за дело: «Встреча с Ирой»). Просили напомнить заранее («за день», «за час») — ещё один set_reminder на то время. Потом коротко подтверди, что и когда.";
+const REMIND_TOOLS = ["set_reminder", "plan_day"];        // поставлено; отменить старое — ещё не значит поставить новое
+const REMIND_DID = /напомн(?:ю|им)|разбужу|поставил|установил|завел|завёл|создал|добавил/i;
+const REMIND_NOT_SET = "Напоминание при этом не поставлено — скажите ещё раз: «напомни …», и я поставлю.";
+function remindClaim(answer, called) {
+  if ((called && REMIND_TOOLS.some(n => called.has(n))) || !REMIND_CLAIM.test(String(answer || ""))) return "";
+  if (called && called.has("list_reminders") && !REMIND_DID.test(String(answer || ""))) return "";   // «уже стоит» после списка — правда
+  return "ПРОВЕРКА: ты пообещал(а) напомнить (или сказал(а), что напоминание стоит), но set_reminder за этот ход не вызван — напоминания НЕТ, в нужное время ничего не случится. Поставь его сейчас: set_reminder со временем и текстом (о чём напомнить). Переносишь встречу — найди старое (list_reminders), отмени его (cancel_reminder) и поставь новое. Непонятно, когда напомнить, — спроси одной фразой. Уже сказанное не повторяй.";
+}
 function numberMismatch(text, calls) {
   const actual = [];
   for (const c of calls || []) {
@@ -2715,7 +2764,8 @@ const STR = { type: "string" }, NUM = { type: "number" };
    Служба выключена — инструмент отвечает, как её включить (Настройки → Ещё → «Управлять приложениями»). */
 let handsAsked = 0;
 const HANDS_OFF = "Управление другими приложениями выключено. Скажи пользователю одной-двумя фразами: чтобы я мог(ла) нажимать в других приложениях, "
-  + "включите это один раз — Настройки Dewiar → Ещё → «Управлять приложениями» → в списке «Специальные возможности» выберите Dewiar и включите. "
+  + "включите это один раз — Настройки Dewiar → Ещё → «Управлять приложениями» → в списке «Специальные возможности» выберите Dewiar и включите; "
+  + "если Dewiar там серый — сначала Настройки → Приложения → Dewiar → ⋮ → «Разрешить ограниченные настройки». "
   + "Не выполняй просьбу другим способом и не притворяйся, что сделал(а).";
 const HANDS_TOOLS = [
   { name: "phone_screen", description: "Прочитать, что сейчас на экране телефона (в любом приложении): название приложения и пронумерованные элементы — кнопки, поля ввода, тексты, списки. "
@@ -2740,15 +2790,24 @@ function handsCard() {
     <button class="btn p w" id="hands-dl">Скачать версию с «руками»</button>`;
   if (st === "on") return `<div class="row2"><span class="res ok" style="flex:1;margin:0">Включено</span><button class="btn" id="hands-go">Настройки</button></div>
     <p class="hint" style="margin:8px 0 0">Просите голосом: «напиши маме в Telegram, что я задержусь», «найди в YouTube новости», «включи вайфай». Перед отправкой, оплатой и удалением ассистент спросит. Пароли не читаются и не вводятся.</p>`;
-  return `<p class="hint" style="margin:0 0 10px">${st === "pending" ? "Включено в настройках Android — подключается…" : "Ассистент сможет сам нажимать кнопки, вводить текст и листать в других приложениях — по вашей просьбе голосом: «напиши маме в Telegram…», «найди в YouTube…»."}
-    Включается один раз: «Специальные возможности» → Dewiar → включить. Если Android пишет «Ограниченная настройка» — Настройки → Приложения → Dewiar → ⋮ → «Разрешить ограниченные настройки», и снова сюда.</p>
-    <button class="btn p w" id="hands-go">Включить</button>`;
+  if (st === "pending") return `<p class="hint" style="margin:0 0 10px">Включено в настройках Android — подключается…</p><button class="btn p w" id="hands-go">Настройки</button>`;
+  // Android 13+: приложения не из магазина в «Специальных возможностях» серые («Ограниченная настройка») — сначала
+  // разрешить их на странице Dewiar (отчёт №87, 18.10: «почему нельзя выбрать помощника» — Dewiar серый в списке)
+  const back = handsAsked && Date.now() - handsAsked < 10 * 60000;
+  return `<p class="hint" style="margin:0 0 10px">Ассистент сможет сам нажимать кнопки, вводить текст и листать в других приложениях — по вашей просьбе голосом: «напиши маме в Telegram…», «найди в YouTube…». Включается один раз:</p>
+    ${back ? `<p class="res bad" style="margin:0 0 10px">Не включилось? Если Dewiar в списке серый — это защита Android 13+ для приложений не из магазина: сделайте шаг 2.</p>` : ""}
+    <ol class="steps hsteps"><li><b>«Специальные возможности»</b> → Dewiar → включить.</li>
+      ${androidSdk() >= 33 ? `<li><b>Dewiar серый</b> или Android пишет «Ограниченная настройка»? Нажмите на него один раз, затем «Страница Dewiar» → ⋮ (вверху справа) → «Разрешить ограниченные настройки» — и снова шаг 1.</li>` : ""}</ol>
+    <div class="row2"><button class="btn p" id="hands-go" style="flex:1">Включить</button>${androidSdk() >= 33 ? `<button class="btn" id="hands-app" style="flex:1">Страница Dewiar</button>` : ""}</div>`;
 }
+function androidSdk() { try { return +JSON.parse(D.info() || "{}").sdk || 0; } catch (e) { return 0; } }
 function wireHands() {
   const dl = $("#hands-dl");
   if (dl) dl.onclick = () => { D.openUrl(HANDS_APK); };
   const b = $("#hands-go");
   if (b) b.onclick = () => { handsAsked = Date.now(); if (!D.openSettings("accessibility")) toast("Откройте Настройки Android → Специальные возможности → Dewiar"); };
+  const ap = $("#hands-app");
+  if (ap) ap.onclick = () => { handsAsked = Date.now(); if (!D.openSettings("app")) toast("Настройки → Приложения → Dewiar → ⋮ → «Разрешить ограниченные настройки»"); };
 }
 async function handsAfter(res) {
   // действие сделано — экран меняется не сразу: ждём и прикладываем свежий экран (модели не нужен лишний круг)
@@ -3014,6 +3073,11 @@ async function runTool(name, a) {
     case "weather": return await weather(a.city || "", a.days || 3);
     case "flashlight": return devTorch(!!a.on) ? (a.on ? "Фонарик включён." : "Фонарик выключен.") : "Фонарика нет.";
     case "take_photo": {
+      // камера — только по просьбе (отчёт №92, 19.10: на «ты сказала, что на айфоне можно веб-версией?» сама сфотографировала)
+      if (turnAsk && !PHOTO_ASK_RX.test(String(turnAsk))) {
+        plog("warn", "take_photo без просьбы — не снимаю");
+        return "Снимок не сделан: пользователь не просил камеру. Без прямой просьбы не фотографируй — ответь словами на его вопрос.";
+      }
       const shot = await takePhoto(a.camera === "back" ? "environment" : "user");
       if (!shot.ok) return "Ошибка: " + shot.error;
       if (shot.dark) return { text: `Снимок сделан ${a.camera === "back" ? "основной (задней)" : "фронтальной"} камерой, но кадр почти чёрный — камера ничего не видит. `
@@ -3024,6 +3088,9 @@ async function runTool(name, a) {
     case "set_volume": return `Громкость ${devVolume(a.action, a.percent || (a.action === "set" ? 0 : 20))}%.`;
     case "battery": { const b = JSON.parse(D.battery() || "{}"); return `Заряд ${b.percent}%${b.charging ? ", заряжается" : ""}.`; }
     case "save_note": {
+      // дело со временем — в «Дела», а не в заметки (отчёт №94, 19.10: «запиши встречу с Ирой на вторник в 12 и напомни за
+      // день» — заметка с ответом Патрика, в «Делах» пусто, утром тишина)
+      if (turnAsk && apptAsk(turnAsk)) { plog("info", "📝 дело со временем — не в заметки, а напоминанием"); return APPT_NOTE; }
       // стихи, список идей, ответ на вопрос — в чат, а не в заметки без спроса (экзамен 11.10)
       // «что я записывал про ремонт?» — вопрос, а не просьба записать (экзамен 13.10: найденную заметку сохраняла второй раз)
       if (turnAsk && !/запиш|записать|сохран|запомн|занеси|зафиксир|в\s+файл|конспект|(?:в|во)\s+заметк|заметк[уа](?![а-яё])|созда\w*\s+заметк|нов\w+\s+заметк|допиши|добавь\s+в/i.test(turnAsk))
@@ -3179,6 +3246,7 @@ async function takePhoto(facing) {
    Провайдер режет поисковик или сайт («Connection reset») — ищем и читаем через сервер Dewiar (cloud.php ?p=/search, /fetch),
    как агент на сайте. Нужен вход в аккаунт dewiar.pro или ключ Dewiar. */
 async function dewiarWeb(kind, value) {
+  if (S.net.web_via === false) throw new Error("запасной путь через сервер Dewiar выключен в настройках");
   const c = syncCred();
   if (!c) throw new Error("нет входа в аккаунт dewiar.pro и ключа Dewiar");
   const r = await http("GET", c.base + "?p=/" + kind + "&" + (kind === "search" || kind === "images" ? "q=" : "url=") + encodeURIComponent(value), { headers: { Authorization: "Bearer " + c.token }, timeout: 40000 });
@@ -4140,7 +4208,7 @@ function doneReport(days) {
 }
 function donePrompt() {
   const s = doneStats();
-  return "ДЕЛА И ДОСТИЖЕНИЯ. «Запланируй на сегодня…», «план на день», «мои дела на завтра» — это дела, не календарь: на каждое дело — свой set_reminder с его временем (в календарь — только если сказано «в календарь» или это встреча). Пользователь говорит, что сделал дело («я позвонила Игорю и сделала тренировку», «отметь как исполненное», «готово, купил хлеб») — "
+  return "ДЕЛА И ДОСТИЖЕНИЯ. «Запланируй на сегодня…», «план на день», «мои дела на завтра» — это дела, не календарь: на каждое дело — свой set_reminder с его временем. Встреча, запись к мастеру, дело со временем («запиши встречу с Ирой на вторник в 12», «завтра в 13 у меня массаж», «в 8:10 встреча с Максимом») — тоже дело: set_reminder на это время, не заметка; «напомни за день / за час» — ещё один set_reminder на то время. В календарь — только если прямо сказано «в календарь». Поставил(а) или отметил(а) дело — подтверди одной фразой только его; остальные дела и планы вслух не перечисляй, пока не спросят: рядом могут быть чужие люди (19.10: «перед клиентами начал вслух перечислять то, что касается только меня»). Пользователь говорит, что сделал дело («я позвонила Игорю и сделала тренировку», «отметь как исполненное», «готово, купил хлеб») — "
     + "вызови mark_done (каждое дело — отдельной строкой, коротко: «Позвонить Игорю», «Тренировка»), подходящее напоминание закроется само; потом похвали коротко, одной фразой. "
     + "Отметил по ошибке — mark_done с undo. «Что я сегодня сделал», «мои достижения» — done_report. "
     + `Сейчас: сегодня сделано ${s.today} ${delaRu(s.today)}` + (s.items.length ? ` (${s.items.slice(-6).map(x => x.title).join("; ")})` : "")
@@ -4527,7 +4595,13 @@ const CLOUD = {
   openai: { name: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-4.1-mini", key: "https://platform.openai.com/api-keys" },
   deepseek: { name: "DeepSeek", url: "https://api.deepseek.com/v1", model: "deepseek-chat", key: "https://platform.deepseek.com/api_keys" },
   anthropic: { name: "Claude (Anthropic)", url: "https://api.anthropic.com/v1", model: "claude-sonnet-5-5", key: "https://platform.claude.com/settings/keys" },
+  custom: { name: "Другой — по адресу", url: "", model: "", key: "" },      // любой OpenAI-совместимый: LiteLLM, Kimi, агрегаторы (комментарии 19.10)
 };
+/* Вписанный адрес сервиса: без хвоста /chat/completions, с https:// */
+function svcUrl(raw) {
+  let u = String(raw || "").trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "").replace(/\/models$/, "");
+  return !u ? "" : /^https?:\/\//i.test(u) ? u : "https://" + u;
+}
 const ICON = {
   dewiar: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v5M12 15.5v5M3.5 12h5M15.5 12h5"/></svg>',
   server: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01"/></svg>',
@@ -4608,7 +4682,7 @@ function renderSettings() {
       ${loggedIn() ? "" : `<button class="tile" data-w="account">${ICON.user}<b>Аккаунт dewiar.pro</b><small>Есть логин на сайте — всё настроится само</small></button>`}</div>
       <details class="more pro"><summary>Для опытных: своя модель или ключ сервиса</summary><div class="tiles">
       <button class="tile" data-w="server">${ICON.server}<b>Своя модель</b><small>Ollama, LM Studio, vLLM — на вашем компьютере или сервере дома</small></button>
-      <button class="tile" data-w="cloud">${ICON.cloud}<b>Ключ любимого сервиса</b><small>OpenAI, Claude (Anthropic), OpenRouter, DeepSeek — своим ключом</small></button>
+      <button class="tile" data-w="cloud">${ICON.cloud}<b>Ключ любимого сервиса</b><small>OpenAI, Claude, OpenRouter, DeepSeek или любой сервис по адресу — своим ключом</small></button>
       <button class="tile" data-w="pc">${ICON.pc}<b>Как на компьютере</b><small>Файл настроек из студии или адрес от администратора</small></button></div></details><div id="wz"></div>`;
     // мозг уже есть — другие способы свёрнуты: видно, что подключено, и не тянет нажать лишнее
     h.push(on || loggedIn() ? `<details class="more brainalt"><summary>Подключить другой мозг</summary>${tiles}</details>` : tiles);
@@ -4616,6 +4690,8 @@ function renderSettings() {
       <div class="row2" style="align-items:flex-end"><label class="f" style="flex:1;min-width:0;margin:0"><span>Прокси</span><input id="px-in" placeholder="socks5://адрес:порт" autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(hideProxy(S.net.proxy))}"></label><button class="btn p" id="px-save">Сохранить</button></div>
       <div class="sw" style="margin-top:8px"><div>Использовать прокси Dewiar<small>Свой прокси не нужен — его выдаёт dewiar.pro, если вы вошли аккаунтом или подключили ключ. Только для серверов Dewiar.</small></div>
       <label class="tg"><input type="checkbox" id="px-dw" ${S.net.dewiar ? "checked" : ""}><i></i></label></div>
+      <div class="sw" style="margin-top:8px"><div>Поиск и страницы через сервер Dewiar<small>Если провайдер режет поисковик или сайт — через сервер Dewiar (нужен вход или ключ). Выключите — только напрямую.</small></div>
+      <label class="tg"><input type="checkbox" id="px-web" ${S.net.web_via !== false ? "checked" : ""}><i></i></label></div>
       <div class="res" id="px-res">${S.net.proxy ? "Запросы к Dewiar идут через ваш прокси." : S.net.dewiar && S.net.dewiar_secret ? "Запросы к Dewiar идут через прокси Dewiar." : ""}</div></div>`);
   } else if (setTab === "voice") {
     const voices = JSON.parse(D.voices() || "[]");
@@ -4764,6 +4840,7 @@ function wireSettings(info) {
       catch (e) { r.className = "res bad"; r.textContent = e.message; } };
     if (g("jn-cancel")) g("jn-cancel").onclick = () => { S.join = null; saveS(); renderSettings(); };
     if (g("px-save")) g("px-save").onclick = () => saveProxy(g("px-in").value, g("px-res"), g("px-save"));
+    if (g("px-web")) g("px-web").onchange = () => { S.net.web_via = g("px-web").checked; saveS(); toast(S.net.web_via ? "Запасной путь через Dewiar включён" : "Поиск и страницы — только напрямую"); };
     if (g("px-dw")) g("px-dw").onchange = async () => { const on = g("px-dw").checked, r = g("px-res"); S.net.dewiar = on; saveS();
       r.className = "res"; r.textContent = on ? "получаю прокси с dewiar.pro…" : "";
       const err = on ? await dwProxyFetch(true) : ""; applyProxy();
@@ -5372,8 +5449,9 @@ function refDraw(calm) {
   const rules = (d.bonus > 0 ? `Вам +${talers(d.bonus)} тал. за каждого друга, который попользуется Dewiar ${d.days} дн.` : "Поделитесь Dewiar с друзьями.")
     + (d.bonus_new > 0 ? ` Другу — +${talers(d.bonus_new)} тал. сразу.` : "");
   box.innerHTML = `<div id="rf-net" class="rfnet"></div>
-    <div class="card rfinv"><div class="row2"><div style="flex:1;min-width:0"><small class="hint" style="margin:0">Ваш код</small><b class="rfcode">${esc(d.code)}</b></div>
-      <button class="btn p" id="rf-share">Пригласить</button><button class="ib soft" id="rf-copy" title="Скопировать ссылку"><svg viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></svg></button></div>
+    <div class="card rfinv"><div class="row2 rfcb"><div style="flex:1;min-width:0"><small class="hint" style="margin:0">Ваш код</small><b class="rfcode">${esc(d.code)}</b></div>
+      <button class="ib soft" id="rf-copy" title="Скопировать ссылку"><svg viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></svg></button></div>
+      <button class="btn p w" id="rf-share" style="margin-top:10px">Пригласить</button>
       <p class="hint" style="margin:8px 0 0">${esc(rules)}</p></div>
     ${d.by ? `<h3>Вас пригласил</h3>${refRow(d.by, "by", "с этого приглашения вы в Dewiar")}` : ""}
     <h3>Приглашённые${list.length ? ` · ${list.length}` : ""}</h3>
@@ -5751,7 +5829,7 @@ function wizard(kind) {
   } else if (kind === "dwkey") {
     w.innerHTML = `<div class="card"><label class="f"><span>Ключ Dewiar или код с другого устройства</span><input id="w-key" placeholder="dw-xxxxxx-… или 6 цифр" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
       <button class="btn p w" id="w-go">Подключить</button><div class="res" id="w-res"></div>
-      <p class="hint">Код из 6 цифр покажет ваше другое устройство, где Dewiar уже подключён: «Мозг» → «Добавить устройство». Данные и заряд будут общими. Думает сервер Dewiar — телефону не нужно ничего мощного.</p></div>`;
+      <p class="hint">Код из 6 цифр покажет ваше другое устройство, где Dewiar уже подключён: на компьютере — студия → «Мозг» → карточка «ИИ-баланс» → «Добавить устройство»; на телефоне — Настройки → «Мозг» → «Добавить устройство». Код живёт 10 минут. Данные и заряд будут общими. Думает сервер Dewiar — телефону не нужно ничего мощного.</p></div>`;
     $("#w-go").onclick = async () => { const r = $("#w-res"); r.className = "res"; r.textContent = "проверяю…";
       try { let k = $("#w-key").value.trim();
         if (/^\d[\d\s-]{4,8}\d$/.test(k)) { k = await pairClaim(k); }
@@ -5768,14 +5846,25 @@ function wizard(kind) {
       catch (e) { r.className = "res bad"; r.textContent = e.message; } };
   } else if (kind === "cloud") {
     w.innerHTML = `<div class="card"><label class="f"><span>Сервис</span><select id="w-prov">${Object.entries(CLOUD).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join("")}</select></label>
-      <label class="f"><span>Ключ</span><input id="w-key" type="password" placeholder="sk-…"></label><label class="f"><span>Модель</span><input id="w-model"></label>
+      <label class="f" id="w-url-f" style="display:none"><span>Адрес (OpenAI-совместимый)</span><input id="w-url" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://api.example.ru/v1"></label>
+      <label class="f"><span>Ключ</span><input id="w-key" type="password" placeholder="sk-…"></label><label class="f"><span>Модель</span><input id="w-model" autocapitalize="off" spellcheck="false"></label>
       <p class="hint" id="w-hint"></p><button class="btn p w" id="w-go">Подключить</button><div class="res" id="w-res"></div></div>`;
-    const fill = () => { const c = CLOUD[$("#w-prov").value]; $("#w-model").value = c.model; $("#w-hint").innerHTML = `Ключ — на <a href="${c.key}">${c.key.replace("https://", "")}</a>.`; };
+    const fill = () => { const k = $("#w-prov").value, c = CLOUD[k]; $("#w-model").value = c.model; $("#w-url-f").style.display = k === "custom" ? "" : "none";
+      $("#w-hint").innerHTML = k === "custom" ? "Любой сервис, который говорит «как OpenAI»: LiteLLM, Kimi, агрегаторы. Адрес (обычно оканчивается на /v1) и имя модели — в документации сервиса."
+        : `Ключ — на <a href="${c.key}">${c.key.replace("https://", "")}</a>.`; };
     $("#w-prov").onchange = fill; fill();
-    $("#w-go").onclick = async () => { const c = CLOUD[$("#w-prov").value], r = $("#w-res"); const old = S.llm;
-      S.llm = Object.assign({}, DEF.llm, { kind: "openai", name: c.name, base_url: c.url, api_key: $("#w-key").value.trim(), model: $("#w-model").value.trim(), disable_thinking: false });
-      r.className = "res"; r.textContent = "проверяю ключ…";
-      try { await llmStream([{ role: "user", content: "Ответь одним словом: готово" }], null, null); saveS(); r.className = "res ok"; r.textContent = "Готово — мозг подключён."; setTimeout(renderSettings, 1400); }
+    $("#w-go").onclick = async () => { const k = $("#w-prov").value, c = CLOUD[k], r = $("#w-res"); const old = S.llm;
+      const url = k === "custom" ? svcUrl($("#w-url").value) : c.url, model = $("#w-model").value.trim();
+      if (!url) { r.className = "res bad"; r.textContent = "Впишите адрес сервиса"; return; }
+      if (!model) { r.className = "res bad"; r.textContent = "Впишите имя модели"; return; }
+      let name = c.name; if (k === "custom") { try { name = new URL(url).host; } catch (e) { name = "Свой сервис"; } }
+      const mk = (base) => Object.assign({}, DEF.llm, { kind: "openai", name, base_url: base, api_key: $("#w-key").value.trim(), model, disable_thinking: false });
+      const ping = () => llmStream([{ role: "user", content: "Ответь одним словом: готово" }], null, null);
+      S.llm = mk(url); r.className = "res"; r.textContent = "проверяю ключ…";
+      try {
+        try { await ping(); }
+        catch (e) { if (k !== "custom" || /\/v1$/.test(url)) throw e; S.llm = mk(url + "/v1"); await ping(); }      // забыли /v1 — частая ошибка
+        saveS(); r.className = "res ok"; r.textContent = "Готово — мозг подключён."; setTimeout(renderSettings, 1400); }
       catch (e) { S.llm = old; r.className = "res bad"; r.textContent = e.message; } };
   } else {
     w.innerHTML = `<div class="card"><b>Адрес от администратора</b><p class="hint" style="margin:4px 0 8px">Если администратор дал адрес своего сервера Dewiar — модель, слух и голос подключатся по нему сразу.</p>

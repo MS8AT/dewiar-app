@@ -115,8 +115,12 @@ Function InstallLibs
   retry:
   nsExec::ExecToLog '"$INSTDIR\python\python.exe" -X utf8 -m pip install --disable-pip-version-check --no-warn-script-location --no-cache-dir --progress-bar off --only-binary=:all: --find-links "$INSTDIR\app\wheels" -r "$INSTDIR\app\requirements-win.lock"'
   Pop $0
-  ${If} $0 != "0"
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Не удалось скачать библиотеки Dewiar (код $0).$\r$\n$\r$\nПроверьте интернет и нажмите «Повторить». Если интернет через прокси — подойдёт полный установщик (он ничего не скачивает)." /SD IDCANCEL IDRETRY retry
+  ${If} $0 == "error"
+    ; python.exe не запустился вовсе (19.10: «код error» — интернет тут ни при чём): обычно его убрал антивирус
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Не запустился Python в папке Dewiar — скорее всего, антивирус убрал или блокирует его файлы (это ложная тревога).$\r$\n$\r$\nДобавьте папку в исключения антивируса и нажмите «Повторить»:$\r$\n$INSTDIR$\r$\n$\r$\nИли возьмите полный установщик — он ничего не скачивает: github.com/dwr-git/dewiar-app/releases/latest → Dewiar-Setup.exe" /SD IDCANCEL IDRETRY retry
+    Abort "Python не запустился — установка не завершена."
+  ${ElseIf} $0 != "0"
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Не удалось скачать библиотеки Dewiar (код $0).$\r$\n$\r$\nПроверьте интернет и нажмите «Повторить». Не выходит (прокси, блокировки) — полный установщик ничего не скачивает: github.com/dwr-git/dewiar-app/releases/latest → Dewiar-Setup.exe" /SD IDCANCEL IDRETRY retry
     Abort "Библиотеки не скачались — установка не завершена."
   ${EndIf}
   DetailPrint "Библиотеки готовы."

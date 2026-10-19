@@ -1184,7 +1184,7 @@ class AnswerMixin:
                 sentences.put(s_)
             blind_key = f"{prof.get('base_url')}|{prof.get('model')}"
             t_start = time.monotonic()
-            from quality import DELIVERABLE, REFUSAL_NUDGE, action_claim, diagram_missing, reminder_missing, saved_claim, looks_like_promise, looks_like_refusal, number_mismatch, promise_nudge
+            from quality import DELIVERABLE, REFUSAL_NUDGE, REMIND_NOT_SET, action_claim, diagram_missing, reminder_missing, remind_claim, saved_claim, looks_like_promise, looks_like_refusal, number_mismatch, promise_nudge
             called, nudged = set(), 0                    # какие действия уже были; сколько раз просили «сделай, а не обещай»
             deliver = bool(DELIVERABLE.search(text)) and any(x.get("name") == "start_task" for x in specs or [])
             # отговорку «нет доступа к интернету» на шаге 0 (когда есть поиск) просим переделать (ниже) — значит, первую
@@ -1202,6 +1202,7 @@ class AnswerMixin:
             done_calls, checked = [], False                  # что вызвано с результатами — сверить числа ответа (number_mismatch)
             drew = 0                                         # просили схему, а её нет — попросили нарисовать (до двух раз за ход)
             saved_checked = False                            # «записала» без единого действия — попросили записать (раз за ход)
+            remind_asked = False                             # пообещала напомнить без set_reminder — попросили поставить (раз за ход)
             repeat_checked = False                           # ответ слово в слово как недавний — попросили ответить по существу (раз за ход)
             prev_said = {_norm_answer(m.get("content")) for m in self.history[-8:] if m.get("role") == "assistant" and m.get("content")}
             for step in range(6):                       # модель → действия → результаты → модель…
@@ -1235,6 +1236,13 @@ class AnswerMixin:
                                 and "без текста" not in str(e):
                             # с инструментами модель не отвечает — ответим хотя бы без них
                             log.warning("Модель не справилась с инструментами (%s) — отвечаю без действий", e)
+                            from llm import CTX_TEXT, _ctx_cut, ctx_full
+                            if ctx_full(e) or CTX_TEXT in str(e):  # окно контекста мало (LM Studio 4096): короче и без функций
+                                msgs = _ctx_cut(msgs)
+                                if not getattr(self, "_ctx_noted", False):
+                                    self._ctx_noted = True
+                                    self.note("У модели маленькое окно контекста — отвечаю без действий и почти без памяти "
+                                              "разговора. В LM Studio или Ollama поставьте длину контекста 8192 или больше.")
                             specs = []
                             system = self._system(False) + ("\n\nСейчас действия (музыка, скриншоты, программы) "
                                                             "недоступны: эта модель не умеет вызывать инструменты. Если "
@@ -1292,6 +1300,16 @@ class AnswerMixin:
                     if fix:                                 # «таймер на 79 минут», а поставлено 59 (экзамен 14.10)
                         checked = True
                         log.info("✋ Число в ответе не совпадает с поставленным — прошу исправить")
+                        msgs = msgs + [{"role": "assistant", "content": step_text or "…"}, {"role": "user", "content": fix}]
+                        if turn.full.strip() and not turn.full.endswith(" "):
+                            turn.full += " "
+                        self.set_state("thinking")
+                        continue
+                if not calls and not turn.cancel.is_set() and step < 5 and specs and not remind_asked:
+                    fix = remind_claim(step_text, called)
+                    if fix:                                  # «напомню тебе в понедельник в 9» — а напоминания нет (19.10)
+                        remind_asked = True
+                        log.info("✋ Пообещала напомнить, а напоминание не поставлено — прошу поставить")
                         msgs = msgs + [{"role": "assistant", "content": step_text or "…"}, {"role": "user", "content": fix}]
                         if turn.full.strip() and not turn.full.endswith(" "):
                             turn.full += " "
@@ -1383,6 +1401,11 @@ class AnswerMixin:
                                  + ", но ответ не сложился. Спросите точнее — например, какой раздел разобрать или что именно собрать.")
                     turn.full = self._g(turn.full) if hasattr(self, "_g") else turn.full
                     sentences.put(turn.full)
+            if remind_asked and "set_reminder" not in called and not turn.cancel.is_set() and not turn.full.rstrip().endswith("?"):
+                # попросили поставить — и всё равно нет: человек должен знать, что напоминания нет (а не ждать утром)
+                log.warning("Обещала напомнить, но напоминание так и не поставлено — говорю об этом прямо")
+                turn.full = (turn.full.rstrip() + " " + REMIND_NOT_SET).strip()
+                sentences.put(REMIND_NOT_SET)
             if not turn.cancel.is_set():
                 if not turn.full.strip() and getattr(turn, "tools_ok", None) and not (set(turn.tools_ok) & INFO_TOOLS):
                     # действие сделано, а слов модель не добавила; фоновая задача только началась — не «Готово» (отзыв 13.10)

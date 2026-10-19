@@ -27,6 +27,20 @@ class LLMError(Exception):
     """Ошибка с понятным человеку текстом."""
 
 
+# Модели не хватило окна контекста: LM Studio «Context size has been exceeded», llama.cpp «exceeds the available context
+# size», vLLM «maximum context length», OpenAI «context_length_exceeded» (19.10: LM Studio с окном 4096 — три сбоя за ночь)
+CTX_RX = re.compile(r"context (?:size|length|window)[^.]{0,40}(?:exceed|too)|exceeds? (?:the )?(?:available |maximum )?context|"
+                    r"maximum context length|context_length_exceeded|n_ctx|prompt is too long|too many tokens|"
+                    r"превыш\w* (?:размер|длин)\w* контекст|не хватило окна контекста", re.I)
+CTX_TEXT = ("модели не хватило окна контекста — разговор и подсказка не помещаются. В LM Studio или Ollama увеличьте "
+            "длину контекста (Context Length) до 8192 или больше")
+
+
+def ctx_full(e):
+    """Ошибка — «не хватило контекста»?"""
+    return bool(CTX_RX.search(str(e) or ""))
+
+
 def _humanize(e, base_url):
     """Ошибка сети или HTTP → короткое объяснение по-русски для окна и голоса."""
     if isinstance(e, httpx.ConnectError):
@@ -52,6 +66,8 @@ def _humanize(e, base_url):
             return "сервер отклонил ключ доступа (проверьте API-ключ)"
         if code == 404:
             return "не найдено: проверьте адрес (обычно оканчивается на /v1) и имя модели"
+        if CTX_RX.search(body) or CTX_RX.search(msg):
+            return CTX_TEXT
         return f"сервер ответил ошибкой {code}: {body}"
     return str(e)
 
@@ -229,6 +245,25 @@ def list_models(p, timeout=6):
         raise
     except Exception as e:  # noqa: BLE001
         raise LLMError(_humanize(e, base)) from e
+
+
+def _ctx_cut(messages):
+    """Короткая история: только текущая просьба и то, что модель уже сделала по ней (вызовы и результаты)."""
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if m.get("role") == "user" and isinstance(m.get("content"), (str, list)) and not m.get("tool_call_id"):
+            return messages[i:]
+    return messages[-1:]
+
+
+def _ctx_retry(p, system, messages, cancel, tools, _retry, e):
+    """Не хватило окна контекста — один раз повторить с короткой историей; снова мало — понятная ошибка с советом."""
+    short = _ctx_cut(messages)
+    if p.get("_ctx") or len(short) >= len(messages):
+        raise LLMError(CTX_TEXT) from e
+    log.warning("Модели %s не хватило окна контекста (%s) — повторяю с короткой историей: %d → %d сообщений",
+                p.get("model"), str(e)[:120], len(messages), len(short))
+    yield from stream_events(dict(p, _ctx=True), system, short, cancel, tools, _retry)
 
 
 _model_cache = {}
@@ -1055,6 +1090,9 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
                 return
             raise LLMError(f"сервер вернул ответ без текста (модель «{model}»). Отчёт для разработчика: студия → «О программе» → «Сохранить отчёт»")
     except LLMError as e:
+        if not locals().get("got_text") and ctx_full(e):
+            yield from _ctx_retry(p, system, messages, cancel, tools, _retry, e)
+            return
         # Отказ пришёл строкой «error» уже внутри потока (HTTP 200): так отвечают Ollama с облачными моделями и шлюзы —
         # «upstream returned HTTP 400». Пока модель ничего не сказала, упрощаем запрос по шагам:
         # 1) история вызовов — текстом; 2) и сами функции — текстом; 3) короче: начало и последние шаги.
@@ -1081,7 +1119,11 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
                            "отчёт для разработчика: студия → «О программе» → «Сохранить отчёт»") from e
         raise
     except Exception as e:  # noqa: BLE001
-        raise LLMError(_humanize(e, base)) from e
+        msg = _humanize(e, base)
+        if msg == CTX_TEXT and not locals().get("got_text"):
+            yield from _ctx_retry(p, system, messages, cancel, tools, _retry, e)
+            return
+        raise LLMError(msg) from e
 
 
 def image_block(p, b64):

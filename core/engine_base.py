@@ -98,6 +98,43 @@ def find_name(text, aliases_by_pid, strict=False):
     return (best[1], best[2]) if best[0] >= need else (None, 0)
 
 
+def name_inside(text, aliases_by_pid):
+    """Имя не в начале, а внутри фразы: «Я так и начал. Лира, расскажи…» (отчёт 18.10 — длинную фразу с именем во
+    втором предложении приняли за разговор людей рядом). -> pid или None. Имя в начале каждого предложения (как
+    find_name) или само имя и его падежи отдельным словом где угодно («…спроси у Лиры…»)."""
+    for part in re.split(r"[.!?;:\n]+", text or "")[1:]:
+        pid, _ = find_name(part.strip(" ,—-"), aliases_by_pid)
+        if pid:
+            return pid
+    words = {_norm(w.group()) for w in _WORD.finditer(text or "")}
+    for pid, aliases in aliases_by_pid.items():
+        for a in aliases:
+            a = _norm(a).replace(" ", "").replace("-", "")
+            if len(a) < 3:
+                continue
+            forms = {a}
+            if a[-1] in "аяь":
+                forms |= {a[:-1] + e for e in ("у", "ы", "е", "ой", "ою", "и", "ю", "ей")}
+            elif a[-1] not in "аеёиоуыэюя":
+                forms |= {a + e for e in ("а", "у", "ом", "е")}
+            if words & forms:
+                return pid
+    return None
+
+
+# Просьба к ассистенту в начале фразы: «Хорошо, давай расскажи мне, что…» (отчёт 18.10: длинный вопрос сразу после
+# ответа без имени терялся — «засыпает на половине фразы»). Только повелительные формы, обращённые к помощнику.
+_TO_ME = re.compile(r"(?<![\w-])(?:расскажи|скажи|подскажи|объясни|покажи|найди|поищи|посмотри|проверь|включи|выключи|"
+                    r"поставь|напомни|запиши|запомни|сделай|создай|помоги|посоветуй|придумай|напиши|открой|посчитай|"
+                    r"переведи|составь|перескажи|прочитай|прочти|озвучь|сравни|опиши|предложи|подбери|набросай)(?![\w-])", re.I)
+
+
+def to_me(text):
+    """Похоже на просьбу ко мне: повелительный глагол среди первых восьми слов."""
+    head = " ".join(_WORD.findall(text or "")[:8]).lower().replace("ё", "е")
+    return bool(_TO_ME.search(head))
+
+
 _PW_PIPE = re.compile(r"((?:echo|printf)\s+)(['\"]?)([^'\"|;&\s]+)\2(\s*\|\s*sudo)")
 _PW_WORD = re.compile(r"(парол\w*|password|passwd|pass)([^.\n]{0,60})", re.I)
 

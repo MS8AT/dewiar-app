@@ -29,6 +29,7 @@ else:
     DEFAULT_DIR = Path.home() / "Dewiar"
 if os.environ.get("DEWIAR_WORKSPACE_DIR"):     # проверки и переносные установки — своя папка по умолчанию
     DEFAULT_DIR = Path(os.environ["DEWIAR_WORKSPACE_DIR"])
+FALLBACK_DIR = Path(os.environ.get("DEWIAR_WORKSPACE_FALLBACK") or (Path.home() / "Dewiar"))
 FOLDERS = ("Заметки", "Знания", "Навыки", "Лаборатория", "Дневник", "Память")
 MEMORY = Path("Память") / "Обо мне.md"
 TEXT_EXT = {".md", ".txt", ".py", ".sh", ".log", ".json", ".csv", ".yaml", ".yml", ".html", ".js", ".toml", ".ini", ".htm", ".svg",
@@ -72,6 +73,28 @@ def fact_parts(fact):
     return subj, m.group(2).strip()
 
 
+_DEFAULT_OK = []
+
+
+def default_dir():
+    """Папка по умолчанию, в которую правда можно писать. «Документы» бывают сломаны: перенесены на отключённый диск,
+    удалены чистильщиком, ссылка в никуда — тогда FileNotFoundError на каждом шаге (19.10: 342 сбоя синхронизации
+    за сутки у одного человека, дневник не пишется). Тогда — ~/Dewiar; один раз сказать в журнале."""
+    if _DEFAULT_OK:
+        return _DEFAULT_OK[0]
+    for i, cand in enumerate((DEFAULT_DIR, FALLBACK_DIR)):
+        try:
+            cand.mkdir(parents=True, exist_ok=True)
+            if cand.is_dir():
+                if i:
+                    log.warning("Папка «%s» недоступна — рабочая папка Dewiar: %s (сменить — студия → «Папка»)", DEFAULT_DIR, cand)
+                _DEFAULT_OK.append(cand)
+                return cand
+        except OSError as e:
+            log.debug("Рабочая папка %s: %s", cand, e)
+    return DEFAULT_DIR                                  # ничего не вышло — как раньше (ошибка покажется там, где пишут)
+
+
 class WorkspaceError(Exception):
     pass
 
@@ -102,7 +125,7 @@ class Workspace:
     def root(self) -> Path:
         # DEWIAR_WORKSPACE важнее настройки: так проверки не трогают настоящую папку
         p = os.environ.get("DEWIAR_WORKSPACE") or ((self.s.get("workspace", "path") or "").strip() if self.s else "")
-        return Path(os.path.expanduser(p)) if p else DEFAULT_DIR
+        return Path(os.path.expanduser(p)) if p else default_dir()
 
     def ensure(self):
         """Создаёт главные папки, README и «Обо мне», если их нет. -> корень."""

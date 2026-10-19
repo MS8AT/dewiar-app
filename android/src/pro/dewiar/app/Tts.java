@@ -41,13 +41,13 @@ public final class Tts {
                     ready = r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED;
                     tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                         @Override public void onStart(String id) { ev("tts_start", id); }
-                        @Override public void onDone(String id) { ev("tts_done", id); }
-                        @Override public void onError(String id) { ev("tts_done", id); }
+                        @Override public void onDone(String id) { ev("tts_done", id); release(id); }
+                        @Override public void onError(String id) { ev("tts_done", id); release(id); }
                         @Override public void onError(String id, int code) {      // в пульс: у кого голос устройства не говорит
                             try { sink.event("tts_fail", new JSONObject().put("id", id).put("code", code)); } catch (Exception ignored) { }
-                            ev("tts_done", id);
+                            ev("tts_done", id); release(id);
                         }
-                        @Override public void onStop(String id, boolean interrupted) { ev("tts_done", id); }
+                        @Override public void onStop(String id, boolean interrupted) { ev("tts_done", id); release(id); }
                     });
                 }
                 try { sink.event("tts_ready", new JSONObject().put("ok", ready)); } catch (Exception ignored) { }
@@ -96,6 +96,8 @@ public final class Tts {
 
     public void stop() {
         gen++;                                            // фразы, что ещё в очереди, — не играть
+        for (java.util.concurrent.CountDownLatch l : waits.values()) l.countDown();   // запасная фраза в очереди — не ждать
+        waits.clear();
         synchronized (pending) { for (java.util.concurrent.Future<File> x : pending) x.cancel(true); }   // и не скачивать
         try { if (tts != null) tts.stop(); } catch (Throwable ignored) { }
         synchronized (this) {
@@ -115,8 +117,23 @@ public final class Tts {
     private final java.util.concurrent.ExecutorService fetch = java.util.concurrent.Executors.newFixedThreadPool(2);
     private final java.util.List<java.util.concurrent.Future<File>> pending = new java.util.ArrayList<>();
 
-    public void speakRemote(final String id, final String url, final String key, final String body) {
+    /** Фразы голоса телефона, которых ждёт очередь сервера (запасной голос внутри очереди — см. speakRemote fb). */
+    private final java.util.Map<String, java.util.concurrent.CountDownLatch> waits = new java.util.concurrent.ConcurrentHashMap<>();
+    private void release(String id) { java.util.concurrent.CountDownLatch l = waits.remove(id); if (l != null) l.countDown(); }
+
+    public void speakRemote(final String id, final String url, final String key, final String body) { speakRemote(id, url, key, body, null); }
+
+    /** fb — запасной голос телефона для этой фразы ({text, rate, pitch, voice}): сервер голоса не ответил — фраза звучит
+     *  голосом телефона ЗДЕСЬ, в очереди, и следующая ждёт её конца. Раньше запасную фразу говорил app.js сам, а очередь
+     *  тем временем играла следующую фразу сервера — два голоса разом (отчёт №93, 19.10: «наложение 2 голосовых ответов»). */
+    public void speakRemote(final String id, final String url, final String key, final String body, final String fb) {
         final int my = gen;
+        if (url == null || url.isEmpty()) {              // сервер голоса только что подвёл — фраза сразу голосом телефона, но в
+            queue.execute(new Runnable() {                // той же очереди: после уже начатых фраз сервера, а не поверх них
+                @Override public void run() { if (fb != null && ready && my == gen) sayAndWait("f" + id, fb); ev("tts_done", id); }
+            });
+            return;
+        }
         final java.util.concurrent.Future<File> got = fetch.submit(new java.util.concurrent.Callable<File>() {
             @Override public File call() throws Exception { return my != gen ? null : VoiceCache.get(ctx.getCacheDir(), id, url, key, body); }
         });
@@ -134,13 +151,26 @@ public final class Tts {
                     ev("tts_done", id);
                 } catch (Throwable e) {
                     Throwable c = e instanceof java.util.concurrent.ExecutionException && e.getCause() != null ? e.getCause() : e;
-                    try { sink.event("tts_error", new JSONObject().put("id", id).put("error", String.valueOf(c.getMessage()))); } catch (Exception ignored) { }
+                    boolean own = fb != null && ready && my == gen;
+                    try { sink.event("tts_error", new JSONObject().put("id", id).put("error", String.valueOf(c.getMessage())).put("fallback", own)); } catch (Exception ignored) { }
+                    if (own) sayAndWait("f" + id, fb);
                     ev("tts_done", id);
                 } finally {
                     synchronized (pending) { pending.remove(got); }
                 }
             }
         });
+    }
+
+    /** Сказать фразу голосом телефона (fb — {text, rate, pitch, voice}) и дождаться её конца — в потоке очереди. */
+    private void sayAndWait(String fid, String fb) {
+        try {
+            JSONObject o = new JSONObject(fb);
+            java.util.concurrent.CountDownLatch l = new java.util.concurrent.CountDownLatch(1);
+            waits.put(fid, l);
+            speak(fid, o.optString("text"), (float) o.optDouble("rate", 1), (float) o.optDouble("pitch", 1), o.optString("voice"), true);
+            l.await(120, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Throwable ignored) { }
     }
 
     /** Проиграть файл и дождаться конца (не дольше 2 минут) в потоке очереди; temp — удалить после. Звук помечен как голос

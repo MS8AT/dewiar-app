@@ -773,15 +773,22 @@ class Sync:
     def loop(self, stopping, interval=60):
         """Фоновый поток: обмен раз в interval секунд или раньше — по self.soon.set() после своих правок."""
         time.sleep(5)
+        last = ""                                        # та же ошибка раз за разом — в журнал один раз (19.10: 342 одинаковых за сутки)
         while not stopping.is_set():
             try:
                 self.run_once()
+                last = ""
             except SyncError as e:
                 self.status.update(ok=False, error=str(e), at=int(time.time()))
-                log.info("Синхронизация: %s", e)
+                (log.debug if str(e) == last else log.info)("Синхронизация: %s", e)
+                last = str(e)
             except Exception as e:  # noqa: BLE001
                 self.status.update(ok=False, error=str(e), at=int(time.time()))
-                log.exception("Синхронизация")
+                if f"{type(e).__name__}: {e}" == last:
+                    log.debug("Синхронизация: та же ошибка — %s", e)
+                else:
+                    log.exception("Синхронизация")
+                last = f"{type(e).__name__}: {e}"
             self.soon.wait(interval)
             self.soon.clear()
             time.sleep(2)                                # несколько правок подряд — одним обменом

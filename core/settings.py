@@ -62,6 +62,7 @@ LLM_PRESETS = {
     "openrouter": {"name": "OpenRouter",       "kind": "openai", "base_url": "https://openrouter.ai/api/v1"},
     "openai":    {"name": "OpenAI",            "kind": "openai", "base_url": "https://api.openai.com/v1"},
     "anthropic": {"name": "Anthropic Claude",  "kind": "anthropic", "base_url": "https://api.anthropic.com"},
+    "deepseek":  {"name": "DeepSeek",          "kind": "openai", "base_url": "https://api.deepseek.com/v1"},
 }
 
 DEFAULTS = {
@@ -149,7 +150,7 @@ DEFAULTS = {
     "calendars": {"items": [], "remind_minutes": 10},   # календари по ссылке iCal (Google, Яндекс…), напомнить за N минут
     "cloud": {"key": "", "url": "", "account": False, "stt_ok": False, "tts_ok": False,
               "join": {}},      # заявка на Dewiar из программы: {id, secret, url} — ждём ключ (engine_brain._join_loop)   # ключ Dewiar Облака (dw-…): модели сервера Dewiar с зарядом в талерах
-    "net": {"proxy": "", "dewiar": False,   # прокси для серверов Dewiar, если провайдер блокирует dewiar.pro: свой (socks5://… или http://…) или «Использовать прокси Dewiar»
+    "net": {"proxy": "", "dewiar": False, "web_via": True,   # прокси для серверов Dewiar, если провайдер блокирует dewiar.pro: свой (socks5://… или http://…) или «Использовать прокси Dewiar»
             "dewiar_secret": "", "dewiar_at": 0,                # прокси, выданный dewiar.pro, и когда получен (обновляется раз в 6 часов, engine_brain.py)
             "lan": {}},         # дома — напрямую: {"public", "base", "id"} — папка сайта по имени и в домашней сети (engine_brain._lan_fetch)
     "music": {"service": "auto"},       # где включать музыку: auto (недавно открыта Яндекс Музыка — в ней, иначе радио) | radio | yandex | youtube

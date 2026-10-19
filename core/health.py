@@ -29,6 +29,27 @@ BUG_RX = re.compile(r"^(?:(?:сообщи|передай|напиши|отпра
                     r"(?:\s*[:,.—-]\s*|\s+)?(?:что\s+)?(.*)$", re.I | re.S)
 
 
+# Жалоба оборвалась на паузе (отчёт №90, 19.10: «передай разработчику приложения что» — распознавание закончило фразу
+# на вдохе, и «приложения что» ушло разработчику; человек: «меня до конца дослушай»). Хвост — служебное слово или
+# суть короче двух слов — не отправляем, а переспрашиваем и следующую фразу дописываем к началу.
+BUG_LEAD = re.compile(r"^(?:(?:этого\s+|этой\s+)?(?:приложени\w*|программ\w*|dewiar\w*|девиар\w*|деви\s+ар\w*|лиры|ассистент\w*)\s*[,:]?\s*)?(?:что\s+|о\s+том,?\s+что\s+)?", re.I)
+BUG_TAIL = {"что", "чтобы", "и", "а", "но", "или", "в", "во", "на", "про", "о", "об", "у", "с", "со", "к", "ко", "по", "за",
+            "для", "из", "от", "до", "когда", "если", "потому", "как", "где", "это", "вот", "ну", "типа", "не", "очень",
+            "приложения", "программы", "мне", "меня", "там", "тут", "так"}
+
+
+def bug_note(raw):
+    """-> (суть жалобы, оборвалась ли). «приложения что» → ("", True); «радио молчит» → ("радио молчит", False)."""
+    s = (raw or "").strip().strip(" .,:;—-")
+    s = BUG_LEAD.sub("", s, count=1).strip(" .,:;—-")
+    words = re.findall(r"[\w-]+", s.lower().replace("ё", "е"))
+    if len(s) < 4 or not words:
+        return "", True
+    if words[-1] in BUG_TAIL:
+        return (s if len(words) > 2 else ""), True
+    return s, False
+
+
 def _proc_start():
     """Когда запустился процесс (секунды эпохи): psutil, иначе /proc (Linux), иначе — сейчас."""
     try:
@@ -300,19 +321,22 @@ class HealthMixin:
             if re.fullmatch(r"(?i)\s*(отмена|отмени|не надо|ничего|передумал\w*|забудь)\W*", t):
                 self._say_quick("Хорошо, не отправляю.", text, via)
                 return True
-            note = t
+            note = (getattr(self, "_bug_prefix", "") + " " + t).strip()
+            self._bug_prefix = ""
         else:
             m = BUG_RX.match(t)
             if not m:
                 return False
-            note = m.group(1).strip(" .,:")
-            if len(note) < 4:
-                self._bug_wait = time.monotonic()
+            note, cut = bug_note(m.group(1))
+            if cut:
+                self._bug_wait, self._bug_prefix = time.monotonic(), note
 
                 def listen():
                     self.follow_up_until = time.monotonic() + 15
                     self.set_state("listening")
-                self._say_quick("Что случилось? Расскажите одной-двумя фразами — передам разработчику.", text, via, then=None if via else listen)
+                ask = "Слушаю — договорите, что передать разработчику." if note else \
+                    "Что случилось? Расскажите одной-двумя фразами — передам разработчику."
+                self._say_quick(ask, text, via, then=None if via else listen)
                 return True
 
         def send():

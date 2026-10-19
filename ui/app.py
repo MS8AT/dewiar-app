@@ -133,6 +133,26 @@ STUDIO_EDGE = 6                 # толщина края, за который �
 MARGIN = 24                     # отступ виджета от края экрана при первом запуске
 
 
+def blank_image(img):
+    """Снимок окна — ровная тёмная заливка без содержимого? (Windows: WebView2 не отрисовал страницу — комментарии 19.10:
+    «оба окна просто чёрные».) img — картинка PIL: почти один цвет (разброс яркости < 1,5) и тёмная."""
+    from PIL import ImageStat
+    st = ImageStat.Stat(img.convert("L"))
+    return st.stddev[0] < 1.5 and st.mean[0] < 60
+
+
+SOFT_ARGS = "--disable-gpu --disable-gpu-compositing"
+
+
+def soft_render_env(on):
+    """Простая отрисовка окон WebView2 (без видеокарты): чёрные окна на части видеодрайверов, удалённом столе,
+    гибридной графике. Включается флагом ui.soft_render — сам (виджет не отрисовался) или из меню значка у часов."""
+    cur = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "").replace(SOFT_ARGS, "").strip()
+    os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (cur + " " + SOFT_ARGS).strip() if on else cur
+    if not os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"]:
+        del os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"]
+
+
 def ui_settings():
     try:
         return json.loads(SETTINGS_PATH.read_text(encoding="utf-8")).get("ui", {})
@@ -1021,9 +1041,9 @@ class Api:
             self._tray.stop()
         os._exit(0)
 
-    def restart(self):
-        """Перезапустить интерфейс новой версией (после обновления)."""
-        _notify("Dewiar обновлён.")
+    def restart(self, note="Dewiar обновлён."):
+        """Перезапустить интерфейс новой версией (после обновления) или с другой отрисовкой окон (note — что сказать)."""
+        _notify(note)
         if WIN:
             subprocess.Popen([winshell.pythonw(), "-X", "utf8", str(Path(__file__).resolve()), "--autostart"],   # убранный в трей — остаётся в трее
                              creationflags=winshell.DETACHED, close_fds=True)
@@ -2207,9 +2227,26 @@ def main_win(args, extra):
 
     import threading
     started = threading.Event()
+    soft = bool(uis.get("soft_render"))
+    soft_render_env(soft)
+
+    def soft_switch(on, note):
+        """Включить / выключить простую отрисовку и перезапустить окна (ядро не трогаем — ассистент слушает дальше)."""
+        try:
+            winshell.core_call(WS_PORT, token, "settings_save", {"patch": {"ui": {"soft_render": on}}})
+        except Exception:  # noqa: BLE001 — ядро не отвечает: правим файл настроек сами
+            try:
+                d = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+                d.setdefault("ui", {})["soft_render"] = on
+                SETTINGS_PATH.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+            except (OSError, ValueError) as e:
+                print(f"Не сохранил отрисовку окон: {e}", file=sys.stderr)
+        api.restart(note)
+    fix = ("Вернуть обычную отрисовку окон", lambda: soft_switch(False, "Dewiar: обычная отрисовка окон.")) if soft else \
+        ("Окна чёрные? Перерисовать проще", lambda: soft_switch(True, "Dewiar: окна перерисовываются попроще — через секунду."))
     api._tray = winshell.Tray(icon, on_show=lambda: api.from_tray() if started.is_set() else studio_in_browser(),
                              on_studio=lambda: api.open_settings() if started.is_set() else studio_in_browser(),
-                             on_quit=api.quit_all, on_capture=lambda: api.show_capture() if started.is_set() else None)
+                             on_quit=api.quit_all, on_capture=lambda: api.show_capture() if started.is_set() else None, fix=fix)
     _TRAY.append(api._tray)
     try:
         if os.environ.get("DEWIAR_NO_WEBVIEW"):        # проверка запасного пути (как без WebView2)
@@ -2309,6 +2346,16 @@ def main_win(args, extra):
                 print(f"Виджет загружен: {res[3:].split('?')[0]}", file=sys.stderr)
                 if uis.get("widget_fail2"):
                     remember_fail(0)
+                if not soft:                           # страница на месте, а окно — ровная чёрная заливка: не отрисовалось
+                    time.sleep(1.5)
+                    img = winshell.window_shot(TITLES["card"])
+                    try:
+                        blank = img is not None and blank_image(img)
+                    except Exception:  # noqa: BLE001
+                        blank = False
+                    if blank:
+                        print("Виджет загружен, но окно пустое (чёрное) — включаю простую отрисовку", file=sys.stderr)
+                        soft_switch(True, "Окна Dewiar не отрисовались — перезапускаю их попроще. Ассистент слушает.")
                 return
             print(f"Проверка виджета: {res[:200]}", file=sys.stderr)
         if not res.startswith("bad "):

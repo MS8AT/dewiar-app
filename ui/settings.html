@@ -480,7 +480,7 @@
         <div class="dh"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/></svg><h3>Аккаунт dewiar.pro</h3><span class="dws" id="dws-acc">—</span></div>
         <div id="dw-acc-out">
           <p class="hint">Один вход — и всё настроится само: модели Dewiar с зарядом в талерах, Знания (ваши документы и публичная библиотека), распознавание речи на сервере для слабых компьютеров. Пароль не сохраняется.</p>
-          <ol class="dw-steps"><li>Нет аккаунта? Зарегистрируйтесь на <a href="https://dewiar.pro" target="_blank">dewiar.pro</a> — это бесплатно.</li><li>Введите здесь тот же логин и пароль.</li></ol>
+          <ol class="dw-steps"><li>Аккаунта нет — он и не нужен: <a href="#" data-free>«Подключить бесплатно»</a> — без регистрации, на счёте сразу подарок.</li><li>Аккаунт dewiar.pro вам выдали — введите здесь его логин и пароль.</li></ol>
           <div class="actions" style="margin:0;flex-wrap:wrap">
             <input type="text" id="dw-login" placeholder="логин" autocomplete="username" style="flex:1;min-width:130px">
             <input type="password" id="dw-pass" placeholder="пароль" autocomplete="current-password" style="flex:1;min-width:130px">
@@ -573,6 +573,8 @@
           <div class="actions" style="margin:0;flex-wrap:wrap"><input type="text" id="dw-px" placeholder="socks5://адрес:порт или http://адрес:порт" spellcheck="false" style="flex:1;min-width:200px"><button class="btn primary" id="dw-px-save">Сохранить</button></div>
           <div class="switch" style="border:0;padding:10px 0 0"><div>Использовать прокси Dewiar<span>Свой прокси не нужен: его выдаёт dewiar.pro тем, кто вошёл аккаунтом или подключил ключ. Только для серверов Dewiar — Telegram и остальной интернет идут напрямую. Свой прокси, если указан, главнее.</span></div>
             <label class="tg"><input type="checkbox" id="dw-px-dw"><i></i></label></div>
+          <div class="switch" style="border:0;padding:10px 0 0"><div>Поиск и страницы через сервер Dewiar<span>Если провайдер режет поисковик или сайт, ассистент ищет и читает через сервер Dewiar (нужен вход или ключ). Выключите — тогда только напрямую.</span></div>
+            <label class="tg"><input type="checkbox" id="dw-web"><i></i></label></div>
           <p class="res" id="dw-net-res"></p>
         </div>
         <div class="dwc" id="dwc-upd">
@@ -878,7 +880,7 @@
       <button class="wtile easy" data-w="dwkey"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><b>Подключить бесплатно</b><span>Проще всего: модели Dewiar без регистрации — или аккаунт dewiar.pro, ключ, код с телефона</span></button>
       <button class="wtile" data-w="local"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg><b>На этом компьютере</b><span>Ollama или LM Studio — бесплатно и без интернета</span></button>
       <button class="wtile" data-w="server"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01"/></svg><b>Сервер компании или дома</b><span>vLLM, Ollama, llama.cpp на другом компьютере — нужен только адрес</span></button>
-      <button class="wtile" data-w="cloud"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 9.5z"/></svg><b>Ключ любимого сервиса</b><span>OpenAI, Claude (Anthropic), OpenRouter — своим ключом API</span></button>
+      <button class="wtile" data-w="cloud"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 9.5z"/></svg><b>Ключ любимого сервиса</b><span>OpenAI, Claude, OpenRouter, DeepSeek или любой сервис по адресу — своим ключом</span></button>
     </div>
 
     <div class="wpanel" id="w-dwkey">
@@ -933,18 +935,19 @@
     </div>
 
     <div class="wpanel" id="w-cloud">
-      <h3>Облачная модель</h3>
+      <h3>Облачная модель по ключу</h3>
       <div class="actions" style="margin:0;align-items:flex-end;flex-wrap:wrap">
-        <label class="f" style="width:200px">Сервис<select id="cl-prov"><option value="openrouter">OpenRouter</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option></select></label>
-        <label class="f" style="flex:1;min-width:240px">Ключ API<input type="password" id="cl-key" placeholder="вставьте ключ" autocomplete="off"></label>
-        <button class="btn primary" id="cl-go">Подключить</button>
+        <label class="f" style="width:220px">Сервис<select id="ck-prov"><option value="openrouter">OpenRouter</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="deepseek">DeepSeek</option><option value="custom">Другой — по адресу</option></select></label>
+        <label class="f" id="ck-url-f" style="flex:1;min-width:240px;display:none">Адрес (OpenAI-совместимый)<input type="url" id="ck-url" placeholder="https://api.example.ru/v1" spellcheck="false" autocomplete="off"></label>
+        <label class="f" style="flex:1;min-width:240px">Ключ API<input type="password" id="ck-key" placeholder="вставьте ключ" autocomplete="off"></label>
+        <button class="btn primary" id="ck-go">Подключить</button>
       </div>
-      <p class="hint" style="margin-top:8px" id="cl-hint"></p>
-      <div id="cl-found" style="display:none;margin-top:10px;align-items:flex-end" class="actions">
-        <label class="f" style="min-width:280px">Модель<select id="cl-model"></select></label>
-        <button class="btn" id="cl-use">Выбрать эту</button>
+      <p class="hint" style="margin-top:8px" id="ck-hint"></p>
+      <div id="ck-found" style="display:none;margin-top:10px;align-items:flex-end" class="actions">
+        <label class="f" style="min-width:280px">Модель<select id="ck-model"></select></label>
+        <button class="btn" id="ck-use">Выбрать эту</button>
       </div>
-      <p class="res" id="cl-res" style="margin-top:6px"></p>
+      <p class="res" id="ck-res" style="margin-top:6px"></p>
     </div>
 
     <div class="wdone" id="w-done" style="display:none"></div>

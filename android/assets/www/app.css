@@ -544,7 +544,8 @@ body.neu .snd.on i, body.neu .snd.play i { background: var(--brand); }
 .rfnet .rn.big .coin { font-size: 21px; } .rfnet .rn.big .coin i { width: 23px; height: 23px; }
 .rfnet .rn.big svg { margin: -26px auto -10px; }
 .rfinv .row2 { align-items: center; gap: 8px; }
-.rfcode { display: block; font: 600 22px "Unbounded", sans-serif; letter-spacing: .12em; margin-top: 2px; }
+/* код — своей строкой, «Пригласить» — под ним во всю ширину (отчёт №91: на узком экране кнопка налезала на код) */
+.rfcode { display: block; font: 600 22px "Unbounded", sans-serif; letter-spacing: .12em; margin-top: 2px; overflow-wrap: anywhere; }
 .rfp { display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 12px; margin-bottom: 6px; border-radius: 16px; background: var(--frost); transition: background .2s; }
 .rfp.cur { background: var(--frost-hi); }
 .rfp span { flex: 1; min-width: 0; } .rfp b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -765,3 +766,6 @@ body.light .donewhy p { color: var(--ink); }
 #tricks-body .trk:active { background: var(--glass, rgba(255,255,255,.08)); }
 #tricks-body .trk b { font-weight: 600; font-size: 15px; }
 #tricks-body .trk small { color: var(--muted); font-size: 12.5px; line-height: 1.35; }
+/* «Управлять приложениями»: шаги включения (Android 13+ — сначала «Разрешить ограниченные настройки», отчёт №87) */
+.hsteps { margin: 0 0 12px; padding-left: 20px; font-size: 14px; line-height: 1.45; color: var(--muted); }
+.hsteps li { margin: 4px 0; } .hsteps b { color: var(--ink); font-weight: 600; }

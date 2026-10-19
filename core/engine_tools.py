@@ -55,6 +55,11 @@ class ToolsMixin:
             if name == "show_images":                  # «сгенерь картинку …» — искать само «…», без просьбы
                 args["query"] = GEN_IMG_RX.sub(" ", args["query"]).strip(" \t\"«»") or args["query"]
             log.info("🛠  %s без запроса — беру из просьбы: %s", name, redact(args["query"]))
+        if name == "save_note" and asked:
+            from quality import APPT_NOTE, appt_ask
+            if appt_ask(asked):                        # дело со временем — в «Дела», а не в заметки (отчёт №94, 19.10)
+                log.info("📝 дело со временем — не в заметки, а напоминанием")
+                return APPT_NOTE
         if name == "save_note" and asked is not None and not NOTE_ASK_RX.search(asked):
             # стихи, список идей, ответ на вопрос — в чат, а не в заметки без спроса (экзамен 11.10: «записала это в
             # заметку», хотя просили просто четверостишие)
@@ -625,6 +630,8 @@ class ToolsMixin:
         """Поиск (kind="search"), картинки (kind="images") или текст страницы (kind="fetch") через cloud.php — когда провайдер режет поисковик или сайт.
         Нужен вход в аккаунт dewiar.pro или ключ Dewiar, иначе RuntimeError. -> список результатов / текст."""
         import httpx
+        if self.s.get("net", "web_via") is False:      # человек выключил запасной путь (письмо 19.10: рабочие данные — только напрямую)
+            raise RuntimeError("запасной путь через сервер Dewiar выключен в настройках")
         token, _, url = self.credentials()
         if not token:
             raise RuntimeError("нет входа в аккаунт dewiar.pro и ключа Dewiar")

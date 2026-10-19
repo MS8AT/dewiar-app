@@ -431,12 +431,24 @@ class Obsidian:
         return extra
 
     def loop(self, stopping, every=20):
-        wait = 3                                             # первая сверка — вскоре после запуска (переименовать папку, оглавление)
+        """Сверка раз в every секунд. Хранилище на сетевом диске пропало (19.10: «Превышен таймаут семафора»,
+        «сетевое имя более недоступно» — 49 сбоев за ночь) — пробуем всё реже, до 10 минут, и пишем об этом один раз."""
+        wait, fails = 3, 0                                   # первая сверка — вскоре после запуска (переименовать папку, оглавление)
         while not stopping.wait(wait):
             wait = every
             if self.cfg()["vault"]:
                 try:
                     self.sync()
+                    if fails:
+                        log.info("Obsidian: хранилище снова доступно")
+                    fails = 0
+                except OSError as e:
+                    fails += 1
+                    wait = min(600, every * 2 ** min(fails, 5))
+                    if fails == 1:
+                        log.warning("Obsidian: хранилище недоступно (%s) — пробую реже, пока не появится", e)
+                    else:
+                        log.debug("Obsidian: хранилище всё ещё недоступно: %s", e)
                 except Exception:  # noqa: BLE001 — синхронизация не должна ронять ядро
                     log.exception("Obsidian: синхронизация")
 

@@ -81,6 +81,13 @@ class H(BaseHTTPRequestHandler):
             plan = None
             if any(t["function"]["name"] == "get_time" for t in body["tools"]):      # проверка: умеет ли инструменты
                 plan = ("get_time", {}, "")
+            elif "встреча с ирой переносится" in u:                  # 19.10: «напомню тебе…» словами, без set_reminder
+                txt = "Понял. Исправляю: встреча с Ирой — послезавтра в 12:00. Напомню тебе завтра утром в 9:00."
+                self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+                self.wfile.write(f"data: {json.dumps({'choices': [{'delta': {'content': txt}}]}, ensure_ascii=False)}\n\ndata: [DONE]\n\n".encode())
+                return
+            elif u.startswith("проверка: ты пообещал(а) напомнить"):              # после проверки — ставит по-настоящему
+                plan = ("set_reminder", {"text": "встреча с Ирой послезавтра в 12", "when": "завтра в 9:00"}, "")
             elif ("телеграм" in u or "в макс" in u) and any(t["function"]["name"] == "send_telegram" for t in body["tools"]):
                 plan = ("send_telegram", {"text": "Список покупок: хлеб, молоко", "files": ["Входящие/список.txt"]}, "")
             elif "радио" in u and any(t["function"]["name"] == "play_radio" for t in body["tools"]):

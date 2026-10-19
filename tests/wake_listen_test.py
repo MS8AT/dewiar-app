@@ -37,6 +37,7 @@ def stub():
     e.tones = []
     e.play_tone = lambda k: e.tones.append(k)
     e._media_stop_word = lambda *a, **k: None
+    e.note = lambda m: e.calls.append(("note",))
     return e
 
 
@@ -63,6 +64,16 @@ r = run("Я внутрь встроил ещё мессенджер безопа
 ok(("ask",) not in [c[:1] for c in r] and ("state", "idle") in r, f"продолжение разговора: 25 с чужой речи без имени — не вопрос: {r}")
 ok(run("То есть можно ещё пригласить людей? Так, думает. Вроде я её не вызывал. Пауза.", False, follow=True, dur=6.0) == [("sleep",)],
    "«…Вроде я её не вызывал. Пауза.» — это «стоп», а не вопрос")
+# «засыпает на половине фразы» (отчёт 18.10): длинный вопрос сразу после ответа — с просьбой ко мне или с именем внутри
+r = run("Хорошо, давай расскажи мне, что можно создать сейчас из приложений для Android и Apple, которые, допустим, "
+        "пригодились бы людям и которые сейчас в тренде", False, follow=True, dur=12.4)
+ok(r and r[-1][0] == "ask", f"длинная просьба ко мне («…расскажи мне…») в продолжении — вопрос, а не «разговор рядом»: {r}")
+r = run("Я так и начал. Лира, расскажи мне что-нибудь о новых трендах для создания приложений для Android и Apple. Что сейчас "
+        "в тренде? Что нужно людям, какие боли у людей?", True, follow=True, dur=15.3, phrase="лира")
+ok(r and r[-1][0] == "ask", f"имя во втором предложении длинной фразы — вопрос: {r}")
+r = run("Я внутрь встроил ещё мессенджер безопасный, то есть, собственно, переписываться можно файлами, и звонить, и это всё "
+        "работает через наш сервер, вот так", False, follow=True, dur=25.0)
+ok(("note",) in r, "чужую длинную фразу пропустила — один раз подсказала, как обратиться (не «уснула» молча)")
 ok(run("А какая завтра погода?", False, follow=True, dur=2.0) == [("ask", "А какая завтра погода?")], "короткое продолжение — как раньше, вопросом")
 # «…открылась для мира» из видео (отчёт 11.10): быстрый слух принял «мира» за «Лиру» — фраза не вопрос, «мира» не имя
 r = run("Платформа открылась для мира, и теперь каждый может попробовать", True, dur=4.5, phrase="лира")
@@ -121,6 +132,9 @@ e.spotter = SimpleNamespace(feed=lambda f: [("wake", "лира")] if state["i"] 
                             last_final=None)
 e.set_state = lambda st: setattr(e, "state", st)
 e.wav_input = None                 # не запись из файла — обычный микрофон
+e._mic_ring = collections.deque(maxlen=40)
+e._quiet_until = 0.0
+e.hold = None
 E.Engine._listen(e)
 ok(len(got) == 1 and got[0] < 3.0, f"имя под музыку: фраза начинается с имени, а не тянется 20 с ({got[0] if got else '—':.1f} с)")
 ok(e._wake_phrase == "лира" and e.state == "listening", "имя запомнено, ассистент слушает")
@@ -159,7 +173,7 @@ ok(r.volume == 0.1, "громкость радио не опускается д�
 import tools as _tools  # noqa: E402
 _tools.media_players = lambda: 0
 e3 = stub()
-e3.radio = SimpleNamespace(playing=False, paused=None, last={"name": "Радио Джаз", "url": "u1", "tags": "jazz"}, volume=0.8, station=None)
+e3.radio = SimpleNamespace(playing=False, paused=None, last={"name": "Радио Джаз", "url": "u1", "tags": "jazz"}, volume=0.8, station=None, sounding=True, last_at=0.0)
 e3.music = SimpleNamespace(stations=lambda: [{"name": "Джаз 2", "url": "u2", "tags": "jazz"}, {"name": "Рок", "url": "u3", "tags": "rock"}],
                            genres=lambda: ["джаз", "рок"])
 e3._music_service = lambda: "radio"
@@ -171,5 +185,5 @@ ok(E.Engine._music_cmd(e3, "Играй") is True and played and played[0][0] == 
    f"«Играй» без плеера — снова последняя станция (запасные — того же жанра): {played[:1]}")
 played.clear(); e3.radio.last = None
 ok(E.Engine._music_cmd(e3, "Играй") is True and "Что включить" in played[0], "ничего ещё не играло — спрашиваю, что включить")
-played.clear(); e3.radio = SimpleNamespace(playing=True, paused=None, last=None, volume=0.1, station={"name": "Медляк FM"})
+played.clear(); e3.radio = SimpleNamespace(playing=True, paused=None, last=None, volume=0.1, station={"name": "Медляк FM"}, sounding=True, last_at=0.0)
 ok(E.Engine._music_cmd(e3, "Играй") is True and "тихо" in played[0] and "10%" in played[0], f"радио играет на 10% — так и говорю: {played[0]}")

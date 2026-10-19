@@ -262,7 +262,10 @@ async function wizardCheck(id) {
 }
 
 /* Облачные сервисы: где взять ключ и какие модели советовать первыми (если они есть в списке сервиса).
-   После проверки ключа сразу создаётся и включается профиль с первой рекомендованной моделью. */
+   После проверки ключа сразу создаётся и включается профиль с первой рекомендованной моделью.
+   19.10: кнопка «Подключить» не работала вовсе — у неё был тот же id, что у «Отправить» в «Близких» (cl-go), и
+   обработчик доставался той кнопке; комментарии «почему нельзя подключить свой сервис». Теперь свои id (ck-…),
+   DeepSeek и «Другой — по адресу»: любой OpenAI-совместимый сервис (LiteLLM, Kimi, агрегаторы) — адрес + ключ. */
 const CLOUD = {
   openrouter: { hint: 'Ключ — на <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>. Один ключ — сотни моделей, оплата с баланса.',
                 rec: ["google/gemini-2.5-flash", "openai/gpt-4.1-mini", "anthropic/claude-haiku-4.5", "qwen/qwen3-235b-a22b-2507", "deepseek/deepseek-chat-v3.1"] },
@@ -270,34 +273,58 @@ const CLOUD = {
             rec: ["gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini", "gpt-5", "gpt-4.1"] },
   anthropic: { hint: 'Ключ — на <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>.',
                rec: ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-3-5-haiku-latest", "claude-sonnet-4-0"] },
+  deepseek: { hint: 'Ключ — на <a href="https://platform.deepseek.com/api_keys" target="_blank">platform.deepseek.com</a>. Напрямую — дешевле, чем через посредников.',
+              rec: ["deepseek-chat", "deepseek-reasoner"] },
+  custom: { hint: 'Любой сервис, который говорит «как OpenAI»: LiteLLM, Kimi, российские агрегаторы, свой прокси. Адрес обычно оканчивается на <code>/v1</code> — он есть в документации сервиса.',
+            rec: [] },
 };
-function clHint() { $("#cl-hint").innerHTML = CLOUD[$("#cl-prov").value].hint; }
-$("#cl-prov").onchange = clHint; clHint();
-let clId = null;
-$("#cl-go").onclick = async (ev) => {
-  const prov = $("#cl-prov").value, key = $("#cl-key").value.trim(), r = $("#cl-res");
+/* Адрес, который вписали: без пробелов и хвоста /chat/completions, с https:// — -> строка или "" */
+function ckUrl(raw) {
+  let u = String(raw || "").trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "").replace(/\/models$/, "");
+  if (!u) return "";
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+  return u;
+}
+function ckPreset(prov) {
+  if (prov !== "custom") return Object.assign({}, S_presets[prov] || {});
+  const url = ckUrl($("#ck-url").value);
+  let host = url; try { host = new URL(url).host; } catch (e) { }
+  return { name: host || "Свой сервис", kind: "openai", base_url: url };
+}
+function ckHint() { const prov = $("#ck-prov").value; $("#ck-hint").innerHTML = CLOUD[prov].hint; $("#ck-url-f").style.display = prov === "custom" ? "" : "none"; }
+$("#ck-prov").onchange = ckHint; ckHint();
+let ckId = null, ckSvc = "";
+$("#ck-go").onclick = async (ev) => {
+  const prov = $("#ck-prov").value, key = $("#ck-key").value.trim(), r = $("#ck-res"), btn = $("#ck-go");
+  if (prov === "custom" && !ckUrl($("#ck-url").value)) { r.className = "res bad"; r.textContent = "Впишите адрес сервиса"; return; }
   if (!key) { r.className = "res bad"; r.textContent = "Вставьте ключ API"; return; }
-  ev.target.disabled = true; r.className = "res"; r.textContent = "проверяю ключ…"; $("#cl-found").style.display = "none";
-  const prof = Object.assign({ api_key: key, model: "" }, S_presets[prov]); delete prof.models; delete prof.preset;
+  btn.disabled = true; r.className = "res"; r.textContent = "проверяю ключ…"; $("#ck-found").style.display = "none";
+  const prof = Object.assign({ api_key: key, model: "" }, ckPreset(prov)); delete prof.models; delete prof.preset;
   try {
-    const models = await core.call("llm_models", { profile: prof });
+    let models = [];
+    try { models = await core.call("llm_models", { profile: prof }); }
+    catch (e) {                                   // свой адрес без /v1 — частая ошибка: пробуем с /v1
+      if (prov !== "custom" || /\/v1$/.test(prof.base_url)) throw e;
+      const p2 = Object.assign({}, prof, { base_url: prof.base_url + "/v1" });
+      models = await core.call("llm_models", { profile: p2 }); prof.base_url = p2.base_url;
+    }
     if (!models.length) throw new Error("сервис не вернул список моделей");
     const rec = CLOUD[prov].rec.filter(m => models.includes(m));
     const ordered = rec.concat(models.filter(m => !rec.includes(m)).sort());
-    prof.model = ordered[0]; prof.name = `${S_presets[prov].name} — ${prof.model}`;
-    clId = uid(); S.llm.profiles[clId] = prof;
-    await save({ llm: { profiles: S.llm.profiles, active: clId } }); renderProfiles();
-    $("#cl-model").innerHTML = ordered.map(m => `<option value="${escH(m)}">${escH(m)}${rec.includes(m) ? " — рекомендую" : ""}</option>`).join("");
-    $("#cl-found").style.display = ""; r.textContent = ""; $("#cl-key").value = "";
-    await wizardCheck(clId);
+    prof.model = ordered[0]; ckSvc = prof.name; prof.name = `${prof.name} — ${prof.model}`;
+    ckId = uid(); S.llm.profiles[ckId] = prof;
+    await save({ llm: { profiles: S.llm.profiles, active: ckId } }); renderProfiles();
+    $("#ck-model").innerHTML = ordered.map(m => `<option value="${escH(m)}">${escH(m)}${rec.includes(m) ? " — рекомендую" : ""}</option>`).join("");
+    $("#ck-found").style.display = ""; r.textContent = ""; $("#ck-key").value = "";
+    await wizardCheck(ckId);
   } catch (e) { r.className = "res bad"; r.textContent = "Не получилось: " + e.message; }
-  ev.target.disabled = false;
+  btn.disabled = false;
 };
-$("#cl-key").onkeydown = (e) => { if (e.key === "Enter") $("#cl-go").click(); };
-$("#cl-use").onclick = async () => {
-  if (!clId || !S.llm.profiles[clId]) return;
-  const m = $("#cl-model").value, p = S.llm.profiles[clId]; p.model = m; p.name = `${S_presets[$("#cl-prov").value].name} — ${m}`;
-  await save({ llm: { profiles: S.llm.profiles, active: clId } }); renderProfiles(); await wizardCheck(clId);
+$("#ck-key").onkeydown = (e) => { if (e.key === "Enter") $("#ck-go").click(); };
+$("#ck-use").onclick = async () => {
+  if (!ckId || !S.llm.profiles[ckId]) return;
+  const m = $("#ck-model").value, p = S.llm.profiles[ckId]; p.model = m; p.name = `${ckSvc || ckPreset($("#ck-prov").value).name} — ${m}`;
+  await save({ llm: { profiles: S.llm.profiles, active: ckId } }); renderProfiles(); await wizardCheck(ckId);
 };
 
 /* ---------- «Проверить всё» ---------- */

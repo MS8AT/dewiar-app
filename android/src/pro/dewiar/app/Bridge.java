@@ -389,6 +389,8 @@ public final class Bridge {
     }
 
     @JavascriptInterface public void speakRemote(String id, String url, String key, String body) { a.tts.speakRemote(id, url, key, body); }
+    /** То же, но с запасным голосом телефона внутри очереди (fb — {text, rate, pitch, voice}): без двух голосов разом. */
+    @JavascriptInterface public void speakRemoteFb(String id, String url, String key, String body, String fb) { a.tts.speakRemote(id, url, key, body, fb); }
 
     @JavascriptInterface public void stopSpeak() { a.tts.stop(); }
 

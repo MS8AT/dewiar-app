@@ -1127,14 +1127,22 @@ class AudioMixin:
             if last and last not in {"всё", "все", "пока", "спасибо", "спасиб", "благодарю"}:
                 self.go_sleep(last, media=False)       # «…Вроде я её не вызывал. Пауза.» — это «стоп», а не вопрос
                 return
-            if (dur is not None and dur > FOLLOW_MAX_S) or len(ws) > FOLLOW_MAX_WORDS:
+            long_ = (dur is not None and dur > FOLLOW_MAX_S) or len(ws) > FOLLOW_MAX_WORDS
+            named = name_inside(text, self.aliases)
+            if long_ and not named and not to_me(text):
                 # без имени, долго и много слов — это разговор людей рядом, а не продолжение со мной (отчёт 11.10:
                 # «как только кто-то рядом — она сама вклинивается в беседу»). Слушаю дальше только по имени.
                 log.info("Продолжение разговора: длинная фраза без имени (%.1f с, %d слов) — похоже, говорят не со мной",
                          dur or 0.0, len(ws))
                 self.follow_up_until = 0.0
                 self.set_state("idle")
+                if not getattr(self, "_long_hint", False):     # человек думает, что ассистент «уснул» (отчёт 18.10)
+                    self._long_hint = True
+                    self.note("Длинную фразу без имени я приняла за разговор рядом и не ответила. Если это было мне — "
+                              "начните с имени или попросите: «расскажи…», «найди…».")
                 return
+            if long_:
+                log.info("Продолжение разговора: длинная фраза — %s", "имя внутри фразы" if named else "просьба ко мне")
             self.ask(text)
         else:
             if by_wake:

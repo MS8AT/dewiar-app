@@ -89,7 +89,7 @@ function dwRender() {
     if (tight) dwSet("pc", "warn", "мало свободной памяти");
     if (weak) $("#dw-weak").innerHTML = `<b>На этом компьютере мало мощности (${escH(d.why)})</b><p>${d.light ? "Включён лёгкий режим — ассистент работает, но распознаёт речь попроще." : "Ассистент может тормозить."}
       Чтобы стало быстро и точно, пусть думает и слушает сервер Dewiar:</p>
-      <ol>${a.logged_in || d.cloud ? `<li>Включите ниже «Распознавать речь на сервере» — и всё.</li>` : `<li>Зарегистрируйтесь на <a href="https://dewiar.pro" target="_blank">dewiar.pro</a> (если ещё нет аккаунта).</li><li>Введите логин и пароль в карточке «Аккаунт dewiar.pro» ниже и нажмите «Войти».</li><li>Готово: модели и распознавание речи включатся на сервере сами.</li>`}</ol>`;
+      <ol>${a.logged_in || d.cloud ? `<li>Включите ниже «Распознавать речь на сервере» — и всё.</li>` : `<li><a href="#" data-free>«Подключить бесплатно»</a> — без регистрации, за минуту (или войдите в аккаунт dewiar.pro ниже, если он у вас есть).</li><li>Готово: модели и распознавание речи включатся на сервере сами.</li>`}</ol>`;
     $("#dw-dot").classList.toggle("on", weak || tight);
   }
   // антивирус
@@ -110,6 +110,7 @@ function dwRender() {
     const px = $("#dw-px");
     if (document.activeElement !== px && !px.dataset.dirty) px.value = n.proxy || "";
     $("#dw-px-dw").checked = !!n.dewiar;
+    $("#dw-web").checked = !(S.net && S.net.web_via === false);
     const ck = n.check, viaOk = ck && ck.proxy && ck.proxy[0], dirOk = ck && ck.direct[0];
     if (ck) { $("#dw-net-res").className = "res " + (dirOk || viaOk ? "ok" : "bad"); $("#dw-net-res").textContent = ck.advice; }
     if (ck) dwSet("net", ck.proxy ? (viaOk ? "ok" : "bad") : (dirOk ? "ok" : "bad"), ck.proxy ? (viaOk ? "через прокси" : "прокси не работает") : (dirOk ? "напрямую" : "сайт не открывается"));
@@ -173,6 +174,7 @@ $("#dw-px-dw").onchange = async (ev) => {
   catch (e) { res.className = "res bad"; res.textContent = e.message; }
   ev.target.disabled = false;
 };
+$("#dw-web").onchange = (ev) => save({ net: { web_via: ev.target.checked } });
 core.on("account", e => { DW.acc = e.account; DW.kb = null; if ($("#p-dw").classList.contains("cur")) dwLoad(); });
 core.on("cloud", e => { DW.cloud = e; if ($("#p-dw").classList.contains("cur")) dwRender(); });
 core.on("telegram", e => { DW.tg = e; dwRender(); });
@@ -489,3 +491,13 @@ core.on("hello", d => {
 .on("mcp", e => { if ($("#p-skills").classList.contains("cur")) renderMcp(e.status); })
 .on("status", e => renderStatus(e.status));
 bindFields();
+
+/* «Подключить бесплатно» из текста (data-free): регистрации на dewiar.pro нет — там вход для тех, кому выдали аккаунт
+   (жалобы №88–89 и комментарии 19.10: «как пройти регистрацию? только окно входа»). Ведём в «Мозг» → плитка. */
+document.addEventListener("click", (e) => {
+  const a = e.target.closest && e.target.closest("[data-free]");
+  if (!a) return;
+  e.preventDefault();
+  $('nav button[data-p="brain"]').click();
+  setTimeout(() => { const t = $('#wz [data-w="dwkey"]'); if (t) { t.click(); t.scrollIntoView({ block: "center", behavior: "smooth" }); } }, 80);
+});
