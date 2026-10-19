@@ -28,7 +28,7 @@ from tasks import TaskManager
 from updater import Updater
 from version import VERSION
 from audio_io import AEC_SINK, AEC_SOURCE, AudioOutError, Capture, EchoCancel, FRAME, RATE, Player, ToneOut, list_devices, tone
-from listen import MEDIA_WORDS, STOP_WORDS, SileroVAD, WakeSpotter, ensure_vosk, missing_words
+from listen import MEDIA_WORDS, STOP_WORDS, SileroVAD, WakeSpotter, ensure_vosk, kaldi_path, missing_words
 from llm import (CodeFilter, LLMError, SentenceSplitter, discover_local, list_models, speakable, stream_chat, stream_events,
                  test_profile, tool_turn_messages, user_message, probe_tools)
 from personas import PIPER_VOICES, pronounce

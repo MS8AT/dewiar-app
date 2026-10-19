@@ -960,8 +960,8 @@ class CommandsMixin:
         if cmd == "probe_server":
             from llm import probe_server
             return probe_server(a.get("address", ""), a.get("port", ""))
-        if cmd == "discover":
-            return discover_local()
+        if cmd == "discover":                                   # «Найти Ollama или LM Studio»: выключенный сервер LM Studio — включить
+            return discover_local(start=True)
         if cmd == "ws_tree":
             t = self.workspace.tree()
             o = self.obsidian.public()

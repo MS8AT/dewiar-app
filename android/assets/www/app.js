@@ -362,7 +362,36 @@ const DEF = {
 let S = (() => { try { return Object.assign({}, DEF, JSON.parse(prefGet("settings") || "{}")); } catch (e) { return Object.assign({}, DEF); } })();
 for (const k of ["llm", "stt", "tts", "home", "account", "net", "tg"]) S[k] = Object.assign({}, DEF[k], S[k] || {});
 applyProxy();                                      // прокси для серверов Dewiar — с первого запроса
-function saveS() { prefSet("settings", JSON.stringify(S)); applyProxy(); setTimeout(startCardCheck, 0); }
+function saveS() { llmRemember(); prefSet("settings", JSON.stringify(S)); applyProxy(); setTimeout(startCardCheck, 0); }
+/* Прежние мозги (отчёт №117, 19.10: «отправил настройки с компьютера — телефон не подключается, и на Dewiar не вернуться; на
+   компьютере между моделями переключаюсь, на телефоне нет»). Подключили другой мозг — прежний запоминается (до 5) и в
+   «Мозге» его можно вернуть одной кнопкой. Забыли ключ или вышли из аккаунта — облачные из списка уходят. */
+function llmId(l) { return l && l.base_url ? (l.cloud ? "cloud|" + (l.account ? "acc" : l.api_key || "") : l.base_url.replace(/\/+$/, "") + "|" + (l.model || "")) : ""; }
+let llmSeen = JSON.parse(JSON.stringify(S.llm || {}));
+function llmRemember() {
+  const a = llmId(llmSeen), b = llmId(S.llm);
+  let list = Array.isArray(S.llmSaved) ? S.llmSaved : [];
+  if (a !== b && a) {
+    if (b || !llmSeen.cloud) list = [llmSeen].concat(list.filter(x => llmId(x) !== a));
+    else list = list.filter(x => !x.cloud);                 // облако «забыли» (ключ, выход) — не держим и прежние облачные
+  }
+  S.llmSaved = list.filter(x => llmId(x) && llmId(x) !== b).slice(0, 5);
+  llmSeen = JSON.parse(JSON.stringify(S.llm || {}));
+}
+/* Что можно вернуть: прежние мозги, а для тех, кто подключался до этого списка, — Dewiar Облако по ключу, что остался у слуха. */
+function llmBack() {
+  const out = (S.llmSaved || []).filter(x => !(x.cloud && x.account && !loggedIn()));
+  if (!S.llm.cloud && !out.some(x => x.cloud) && /^dw-/.test(S.stt.key || "") && /cloud\.php/.test(S.stt.url || ""))
+    out.push({ cloud: true, base_url: S.stt.url, api_key: S.stt.key, name: "Dewiar Облако", restore: "key" });
+  return out;
+}
+function brainNameOf(l) { return l.cloud ? "Dewiar Облако" + (l.account ? " · по аккаунту" : "") : `${l.name || l.base_url.replace(/^https?:\/\//, "")}${l.model ? " · " + l.model : ""}`; }
+async function llmRestore(i) {
+  const l = llmBack()[i]; if (!l) return;
+  if (l.cloud) await cloudConnect(l.account ? S.account.token : l.api_key, l.base_url.split("?")[0], { account: !!l.account });
+  else { S.llm = Object.assign({}, DEF.llm, l); delete S.llm.restore; saveS(); }
+  cloudInfo = l.cloud ? cloudInfo : null;
+}
 /* Первый запуск показывает «Подключить бесплатно» / «У меня есть код». Подключились любым путём (вход аккаунтом, ключ,
    код с другого устройства, одобренная заявка) — карточка уходит, Лира говорит, что готова (отчёт №50, 13.10: вошёл
    логином и паролем, а на экране всё ещё «Подключить бесплатно» — человек решил, что не подключился). */
@@ -1758,6 +1787,11 @@ async function llmStream(messages, tools, onText, signal, opt = {}) {
     if (S.llm.cloud && r.status === 401 && await fixDeadKey(msg)) return llmStream(messages, tools, onText, signal, opt);   // ключ удалили — думаем по аккаунту
     if (S.llm.cloud && [401, 402, 403, 429, 502, 503].includes(r.status)) { cloudInfo = null; throw Object.assign(new Error(String(msg)), { human: true }); }
     if (r.status === 401) msg = "ключ не подходит (401)";
+    // отчёт №117: Groq с компьютера (через VPN) работает, а с телефона — «403: Forbidden» и «413: Request too large»
+    if (r.status === 403) throw Object.assign(new Error(`${brainName()} не пускает (403): так бывает, когда сервис закрыт для вашей страны или у ключа нет доступа. `
+      + `Включите VPN или верните прежний мозг: Настройки → Мозг → «Прежние мозги».`), { human: true });
+    if (r.status === 413) throw Object.assign(new Error(`Запрос больше, чем разрешает ваш тариф у ${S.llm.name || "сервиса"} (413: лимит токенов в минуту) — `
+      + `на бесплатных тарифах подсказка с действиями не помещается. Возьмите платный тариф или верните прежний мозг: Настройки → Мозг.`), { human: true });
     if (r.status === 404 && !ollama) { const p = await http("GET", ollamaRoot() + "/api/tags", { timeout: 5000 }).catch(() => null); if (p && p.status === 200) { S.llm.kind = "ollama"; saveS(); return llmStream(messages, tools, onText, signal, opt); } }
     if (tools && /tool|function/i.test(String(msg)) && r.status < 500) return llmStream(messages, null, onText, signal, opt);   // модель без инструментов
     if (body.chat_template_kwargs && (r.status === 400 || r.status === 422)) { S.llm.no_kwargs = true; saveS(); return llmStream(messages, tools, onText, signal, opt); }
@@ -4728,6 +4762,9 @@ function renderSettings() {
       <div style="font-weight:600">${esc(on ? brainName() : loggedIn() ? "подключаю модели Dewiar…" : "не подключён")}</div>
       ${on && S.llm.title ? `<small class="hint" style="margin:2px 0 0;display:block">${esc(S.llm.title)}${S.llm.cloud ? " · " + esc(cloudWho()) : ""}</small>` : ""}</div>
       ${on || loggedIn() ? `<button class="btn" id="br-test">Проверить</button>` : ""}</div><div class="res" id="br-res"></div></div>`);
+    const back = llmBack();
+    if (back.length) h.push(`<div class="card" id="br-back"><small class="hint" style="margin:0">Прежние мозги — вернуть одной кнопкой</small>${back.map((l, i) =>
+      `<div class="row2" style="margin-top:8px"><div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(brainNameOf(l))}</div><button class="btn" data-back="${i}">Вернуть</button></div>`).join("")}<div class="res" id="br-back-res"></div></div>`);
     if (on) h.push(`<div class="card"><div class="sw" style="margin:0"><div>Думать над сложными просьбами<small>Стихи, задачи, анализ, планы — сначала обдумывает: дольше, зато лучше. Простые вопросы — сразу.</small></div>
       <label class="tg"><input type="checkbox" id="br-think" ${S.llm.think !== "off" ? "checked" : ""}><i></i></label></div></div>`);
     if (S.llm.cloud) h.push(`<div class="card cloudc" id="cl-card"><div class="row2"><div style="flex:1"><b>Баланс</b><small class="hint" style="margin:2px 0 0;display:block" id="cl-sub">${esc(cloudWho())}</small></div><div class="cl-pct" id="cl-pct">…</div></div>
@@ -4898,6 +4935,11 @@ function wireSettings(info) {
   };
   if (g("br-think")) g("br-think").addEventListener("change", () => { if (g("br-think").checked) delete S.llm.think; else S.llm.think = "off"; saveS(); });
   if (setTab === "brain") {
+    $$("#br-back [data-back]").forEach(b => b.onclick = async () => {
+      const r = g("br-back-res"); b.disabled = true; r.className = "res"; r.textContent = "подключаю…";
+      try { await llmRestore(+b.dataset.back); toast("Мозг: " + brainName()); renderSettings(); }
+      catch (e) { b.disabled = false; r.className = "res bad"; r.textContent = e.message; }
+    });
     if (g("br-test")) g("br-test").onclick = async () => { const b = g("br-test"), r = g("br-res"); b.disabled = true; r.className = "res"; r.textContent = "спрашиваю модель…";
       try {
         if (!S.llm.base_url && !(await ensureBrain())) throw new Error("модели Dewiar по аккаунту сейчас не отвечают — проверьте интернет");

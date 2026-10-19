@@ -9,6 +9,7 @@
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -65,7 +66,7 @@ def ensure_vosk(data_dir: Path, models_dir: Path, on_status=None, mirror=None) -
     if os.environ.get("DEWIAR_VOSK_OFF") == "1":   # проверки: как будто модель не скачалась (tests/hearing_nonames_test.py)
         raise RuntimeError("модель имён выключена для проверки (DEWIAR_VOSK_OFF)")
     model_dir = models_dir / VOSK_NAME
-    if (model_dir / "am").exists():
+    if vosk_complete(model_dir):
         return model_dir
     zip_path = data_dir / f"{VOSK_NAME}.zip"
     if not zip_path.exists():
@@ -99,15 +100,76 @@ def ensure_vosk(data_dir: Path, models_dir: Path, on_status=None, mirror=None) -
     return unpack_vosk(zip_path, models_dir)
 
 
+def vosk_complete(model_dir: Path) -> bool:
+    """Модель распакована целиком: отметка .complete (её ставит unpack_vosk) или главные файлы на месте (распакованные
+    прежними версиями). Обрыв посреди распаковки (выключили компьютер) оставлял папку без половины файлов — и слух не
+    поднимался никогда: папка есть, значит «готово»."""
+    return (model_dir / ".complete").exists() or ((model_dir / "am" / "final.mdl").is_file() and (model_dir / "conf").is_dir()
+                                                  and (model_dir / "graph").is_dir())
+
+
 def unpack_vosk(zip_path: Path, target_dir: Path) -> Path:
+    """Распаковка во временную папку рядом и переименование: папка модели либо целая, либо её нет."""
     name = zip_path.name[:-4]
     model_dir = target_dir / name
-    if not model_dir.exists():
+    if not vosk_complete(model_dir):
         import zipfile
         target_dir.mkdir(parents=True, exist_ok=True)
         log.info("Распаковываю %s ...", zip_path.name)
+        tmp = target_dir / f".{name}.unpack"
+        shutil.rmtree(tmp, ignore_errors=True)
         with zipfile.ZipFile(zip_path) as z:
-            z.extractall(target_dir)
+            z.extractall(tmp)
+        src = tmp / name if (tmp / name).is_dir() else tmp
+        shutil.rmtree(model_dir, ignore_errors=True)
+        src.rename(model_dir)
+        shutil.rmtree(tmp, ignore_errors=True)
+        (model_dir / ".complete").write_text("ok", encoding="utf-8")
+    return model_dir
+
+
+def _short_path(s: str) -> str:
+    """Короткое имя 8.3 (C:\\Users\\8D3F~1\\…) — только ASCII; на дисках, где короткие имена выключены, — ''."""
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(1024)
+        n = ctypes.windll.kernel32.GetShortPathNameW(s, buf, 1024)
+        return buf.value if 0 < n < 1024 else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def kaldi_path(model_dir: Path) -> Path:
+    """Путь к модели Vosk, который Kaldi откроет. В Windows он открывает файлы «узкими» путями: папка с русскими
+    буквами (C:\\Users\\Виталий\\AppData\\…) для него не существует — «Failed to create a model», и слух не поднимался
+    вовсе: ни имя, ни кнопка микрофона (отчёты №120–125, 19.10: «глухой», «по пробелу тоже не слышит»).
+    Путь не ASCII — короткое имя 8.3; его нет — копия модели (45 МБ, один раз) в ASCII-папку: %ProgramData%\\Dewiar,
+    %PUBLIC%\\Dewiar или C:\\DewiarData. DEWIAR_KALDI_NT=1 и DEWIAR_KALDI_BASE — для проверок не в Windows."""
+    s = str(model_dir)
+    nt = os.name == "nt" or os.environ.get("DEWIAR_KALDI_NT") == "1"
+    if not nt or s.isascii():
+        return model_dir
+    short = _short_path(s) if os.name == "nt" else ""
+    if short and short.isascii():
+        return Path(short)
+    bases = [os.environ.get("DEWIAR_KALDI_BASE")] if os.environ.get("DEWIAR_KALDI_BASE") else \
+        [os.environ.get("ProgramData"), os.environ.get("PUBLIC"), "C:\\DewiarData"]
+    for base in bases:
+        if not base or not str(base).isascii():
+            continue
+        dst = Path(base) / "Dewiar" / "models" / model_dir.name
+        try:
+            if not (dst / ".complete").exists():
+                tmp = dst.with_name(dst.name + ".copy")
+                shutil.rmtree(tmp, ignore_errors=True)
+                shutil.copytree(model_dir, tmp)
+                shutil.rmtree(dst, ignore_errors=True)
+                tmp.rename(dst)
+                (dst / ".complete").write_text("ok", encoding="utf-8")
+                log.info("Модель %s — в %s: в пути %s есть не латинские буквы, Kaldi его не откроет", model_dir.name, dst, s)
+            return dst
+        except OSError as e:
+            log.warning("Копия модели %s в %s не получилась: %s", model_dir.name, dst, e)
     return model_dir
 
 
@@ -117,7 +179,7 @@ def missing_words(model_dir: Path, words):
     code = ("import vosk,json,sys;vosk.SetLogLevel(0);m=vosk.Model(sys.argv[1]);"
             "vosk.KaldiRecognizer(m,16000,json.dumps(json.loads(sys.argv[2])+['[unk]'],ensure_ascii=False))")
     flat = sorted({w for phrase in words for w in phrase.split()})
-    r = subprocess.run([sys.executable, "-c", code, str(model_dir), json.dumps(flat, ensure_ascii=False)],
+    r = subprocess.run([sys.executable, "-c", code, str(kaldi_path(model_dir)), json.dumps(flat, ensure_ascii=False)],
                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
                        stdin=subprocess.DEVNULL,                 # Kaldi пишет в UTF-8; в Windows иначе cp1251
                        creationflags=0x08000000 if os.name == "nt" else 0)

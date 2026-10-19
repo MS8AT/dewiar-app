@@ -277,10 +277,10 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
             # (на медленном интернете ждать её, чтобы просто нажать на микрофон, — минуты; CI 19.10)
             self.names_off = True
             self._hearing_up()
+        repaired = False
         while not self.stopping.is_set():
             try:
                 vosk_dir = ensure_vosk(DATA_DIR, MODELS_DIR, on_status=self.note, mirror=self._mirror_url("vosk_small"))
-                break
             except Exception as e:  # noqa: BLE001
                 log.warning("Модель имён (Vosk) пока не скачалась: %s", e)
                 self._load("hear", "Модель имён не скачалась — имя пока не слышу, микрофон по кнопке работает")
@@ -292,10 +292,29 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
                 self.note("Имя пока не слышу — не скачалась модель распознавания имён (проверьте интернет). "
                           "Нажмите на микрофон и говорите — это работает. Повторю скачивание через минуту.")
                 self.stopping.wait(60)
+                continue
+            try:
+                self.vosk_model = Model(str(kaldi_path(vosk_dir)))
+                break
+            except Exception as e:  # noqa: BLE001
+                # модель на месте, а Kaldi её не открыл: распакована не до конца (раз — распакуем заново) или путь,
+                # который он не может прочесть. Раньше исключение убивало поток слуха без следа в журнале — «Готовлю
+                # слух» навсегда, не работала даже кнопка микрофона (отчёты №120–125, 19.10: «глухой»)
+                log.warning("Модель имён (Vosk) не загрузилась из %s: %s", vosk_dir, e)
+                if not repaired:
+                    repaired = True
+                    import shutil
+                    shutil.rmtree(vosk_dir, ignore_errors=True)
+                    continue
+                self._load("hear", "Модель имён не загрузилась — имя пока не слышу, микрофон по кнопке работает")
+                self.note("Имя пока не слышу — не загрузилась модель распознавания имён. Нажмите на микрофон и говорите — это работает.")
+                if not self.names_off:
+                    self.names_off = True
+                    self._hearing_up()
+                return
         else:
             return
         self.note("")
-        self.vosk_model = Model(str(vosk_dir))
         self.vosk_dir = vosk_dir
         self.vosk_stt = VoskSTT(self.vosk_model)
         if self.names_off:

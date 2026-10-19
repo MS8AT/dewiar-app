@@ -105,6 +105,18 @@ def _put_context(msgs, ctx):
 class AnswerMixin:
     # ---------- ответ ----------
 
+    def _slow_local(self, prof, sec):
+        """Своя модель на этом компьютере думает больше минуты до первого слова (отчёты №121–124, 19.10: llama3 8B на
+        4 ядрах без видеокарты — «думает по 600 секунд»): один раз за запуск сказать, что делать, а не молча ждать."""
+        url = str(prof.get("base_url") or "")
+        if sec < 60 or getattr(self, "_slow_said", False) or not re.search(r"//(127\.0\.0\.1|localhost|\[::1\])[:/]", url):
+            return
+        self._slow_said = True
+        log.warning("Своя модель %s отвечает медленно: первые слова через %.0f с", prof.get("model") or url, sec)
+        self.note(f"Модель на этом компьютере начала отвечать только через {round(sec)} с — ей не хватает мощности (нужна "
+                  "видеокарта или модель полегче). Возьмите лёгкую (в Ollama: qwen3:1.7b или qwen2.5:3b) или подключите облако "
+                  "Dewiar — студия → «Мозг».")
+
     def ask(self, text, images=None, quiet=False, via=None, raw=False, shown=None, report=None):
         """Вопрос → ответ. Сначала быстрые пути без модели (будильник, «спрячься»/«отключись», команды компьютера, сейф, умный дом, деньги,
         дела, заметки, напоминания, «замолчи», новый разговор, позвать персонажа, радио, музыка), затем, возможно,
@@ -1301,6 +1313,7 @@ class AnswerMixin:
                         continue
                     if not turn.full:
                         log.info("⏱ первые слова модели через %.1f с", time.monotonic() - t_start)
+                        self._slow_local(prof, time.monotonic() - t_start)
                     turn.full += val
                     step_text += val
                     if time.monotonic() - last > 0.08:     # текст в виджет — не чаще ~12 раз в секунду

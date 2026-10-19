@@ -1249,19 +1249,101 @@ def probe_server(address, port=""):
                    "проверьте адрес и порт, и что сервер доступен из этой сети")
 
 
-def discover_local():
+def _models_at(url, timeout=0.6):
+    """Список моделей сервера по адресу …/v1 или None, если там никто не отвечает."""
+    try:
+        r = httpx.get(url + "/models", timeout=timeout)
+        if r.status_code == 200:
+            return [m.get("id") for m in r.json().get("data", []) if m.get("id")]
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def lmstudio_cli():
+    """Командная строка LM Studio (lms) — она ставится вместе с программой: ~/.lmstudio/bin (новые версии) или
+    ~/.cache/lm-studio/bin (старые). -> путь или None."""
+    from pathlib import Path
+    import shutil
+    home = Path.home()
+    for d in (home / ".lmstudio" / "bin", home / ".cache" / "lm-studio" / "bin"):
+        for n in ("lms.exe", "lms"):
+            if (d / n).is_file():
+                return d / n
+    w = shutil.which("lms")
+    return Path(w) if w else None
+
+
+def lmstudio_installed():
+    """Стоит ли LM Studio на этом компьютере (запущен его сервер или нет)."""
+    from pathlib import Path
+    home = Path.home()
+    if lmstudio_cli() or (home / ".lmstudio").is_dir() or (home / ".cache" / "lm-studio").is_dir():
+        return True
+    la = os.environ.get("LOCALAPPDATA")
+    return bool(la) and any((Path(la) / "Programs" / d).is_dir() for d in ("LM Studio", "LM-Studio", "lm-studio"))
+
+
+def lmstudio_start():
+    """Сервер LM Studio выключен (по умолчанию он выключен — отчёт №118, 19.10: «Не видит LM Studio, хотя установлено»)
+    или слушает не обычный порт: узнать у `lms server status`, при нужде включить `lms server start`.
+    -> (адрес …/v1, включили ли сейчас) или (None, False)."""
+    import subprocess
+    cli = lmstudio_cli()
+    if not cli:
+        return None, False
+    kw = dict(capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+              creationflags=0x08000000 if os.name == "nt" else 0)
+
+    def status():
+        try:
+            st = subprocess.run([str(cli), "server", "status"], timeout=20, **kw)
+        except Exception as e:  # noqa: BLE001
+            log.info("LM Studio: lms server status: %s", e)
+            return None
+        out = (st.stdout or "") + (st.stderr or "")
+        m = re.search(r"port\D{0,12}(\d{2,5})", out, re.I)
+        if not m or re.search(r"not running", out, re.I):
+            return None
+        url = f"http://127.0.0.1:{m.group(1)}/v1"
+        for _ in range(16):
+            if _models_at(url, 1.0) is not None:
+                return url
+            time.sleep(0.5)
+        return None
+    url = status()
+    if url:
+        return url, False
+    try:
+        r = subprocess.run([str(cli), "server", "start"], timeout=40, **kw)
+        log.info("LM Studio: lms server start → %s", ((r.stdout or "") + (r.stderr or "")).strip()[-200:])
+    except Exception as e:  # noqa: BLE001
+        log.info("LM Studio: сервер не включился: %s", e)
+        return None, False
+    url = status()
+    return url, bool(url)
+
+
+LMSTUDIO_HOW = ("LM Studio установлен, но его сервер выключен. В LM Studio откройте слева «Developer» (значок </>) и включите "
+                "переключатель «Status: Running», там же загрузите модель — и снова нажмите «Найти».")
+
+
+def discover_local(start=False):
     """Какие локальные серверы моделей уже запущены на этом компьютере (обычные порты, /v1/models).
+    start — LM Studio стоит, а сервер выключен: включить его (lms server start); не вышло — LLMError с подсказкой.
     -> профили на основе LLM_PRESETS (settings.py) с base_url и списком моделей."""
     found = []
     for pid, port in (("vllm", 8000), ("ollama", 11434), ("llamacpp", 8080), ("lmstudio", 1234)):
         url = f"http://127.0.0.1:{port}/v1"
-        try:
-            r = httpx.get(url + "/models", timeout=0.6)
-            if r.status_code == 200:
-                ids = [m.get("id") for m in r.json().get("data", []) if m.get("id")]
-                found.append(dict(LLM_PRESETS[pid], preset=pid, base_url=url, models=ids))
-        except Exception:  # noqa: BLE001
-            pass
+        ids = _models_at(url)
+        if ids is not None:
+            found.append(dict(LLM_PRESETS[pid], preset=pid, base_url=url, models=ids))
+    if start and not any(f["preset"] == "lmstudio" for f in found) and lmstudio_installed():
+        url, started = lmstudio_start()
+        if url:
+            found.append(dict(LLM_PRESETS["lmstudio"], preset="lmstudio", base_url=url, models=_models_at(url, 3.0) or [], started=started))
+        elif not found:
+            raise LLMError(LMSTUDIO_HOW)
     return found
 
 
