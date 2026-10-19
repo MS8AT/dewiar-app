@@ -314,7 +314,8 @@ class VoskTTS:
                 import time as _t
                 t0 = _t.monotonic()
                 synth = VoskProc(path)
-                log.info("Vosk TTS загружен в отдельном процессе за %.1f с", _t.monotonic() - t0)
+                self.load_s = _t.monotonic() - t0          # движок решает: не слишком ли тяжёл голос для этого компьютера
+                log.info("Vosk TTS загружен в отдельном процессе за %.1f с", self.load_s)
         self.synth_, self.path = synth, path
         cache = path / "dewiar-speakers.json" if path else None
         if cache and cache.exists():

@@ -1489,6 +1489,7 @@ class AnswerMixin:
         except LLMError as e:
             log.warning("Модель: %s", e)
             self.health_count("net_fail")
+            self.health_why(prof, e)
             self.health_problem(f"Модель ({(prof or {}).get('kind') or 'openai'}): {e}")
             msg = f"{e}." if self._cloud_said(prof, e) else f"Не получилось: {e}."   # облако объясняет само
             from cloud import is_cloud, key_gone

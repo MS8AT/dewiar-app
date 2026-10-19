@@ -323,6 +323,27 @@ class RemoteMixin:
         while self._vosk_loading and not self.vosk_tts.ready and time.monotonic() < end:
             time.sleep(0.1)
 
+    def _vosk_slow(self, chars, sec):
+        """Vosk TTS не успевает за речью (отчёты №121–125, 20.10: 4 ядра и своя модель на процессоре — голоса грузились
+        7 минут, фраза из 40 знаков — 5 с, из 120 — 18 с; человек ждёт каждую фразу). Три такие фразы за запуск (или
+        одна, если и загрузка шла дольше 4 минут) — переключиться на Piper (он в несколько раз легче) и сказать об этом;
+        вернуть — студия → «Голос»."""
+        if sec < 4 or sec < 0.08 * chars or self.s.get("tts", "engine") != "vosk":
+            return
+        n = self._vosk_slow_n = getattr(self, "_vosk_slow_n", 0) + 1
+        if n < (1 if getattr(self.vosk_tts, "load_s", 0) > 240 else 3):
+            return
+        self.s.update({"tts": {"engine": "piper", "auto_piper": int(time.time())}})
+        log.warning("Vosk TTS не успевает за речью (фраза из %d симв. — %.1f с, загрузка %.0f с) — голос Piper", chars, sec,
+                    getattr(self.vosk_tts, "load_s", 0))
+        self.note("Голоса Vosk TTS на этом компьютере не успевают за речью — переключила на Piper: он легче и отвечает сразу. "
+                  "Вернуть — студия → «Голос».")
+        try:
+            self.apply_engines()
+            threading.Thread(target=self.ensure_voice, args=(self.s.get("persona"),), name="piper-voice", daemon=True).start()
+        except Exception as e:  # noqa: BLE001
+            log.info("Движки после смены голоса: %s", e)
+
     def _engines_for_speech(self, voice=None):
         """Цепочка синтезаторов по порядку попыток: выбранный → Piper (если голос скачан) → eSpeak. Готовый Vosk TTS —
         единственный: голос персонажа не подменяем. -> [] — речь выключена."""
@@ -466,6 +487,8 @@ class RemoteMixin:
                                 if not sent and time.monotonic() - t_syn > 3:   # синтез не успевает за речью (для отчётов)
                                     log.info("🗣 %s: фраза из %d симв. синтезировалась %.1f с", getattr(eng, "name", "голос"), len(text),
                                              time.monotonic() - t_syn)
+                                    if eng is self.vosk_tts:
+                                        self._vosk_slow(len(text), time.monotonic() - t_syn)
                                 sent = True
                                 chunks.put((rate, pcm))
                                 if turn.cancel.is_set() or done.is_set():

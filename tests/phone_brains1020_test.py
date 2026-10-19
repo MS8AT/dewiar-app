@@ -31,6 +31,41 @@ EA.AnswerMixin._slow_local(me2, {"base_url": "https://api.example.com/v1"}, 200)
 EA.AnswerMixin._slow_local(me2, {"base_url": "http://localhost:1234/v1"}, 20)
 ok(len(notes) == 1, "облачный сервис или быстрый ответ — без подсказки")
 
+# ── компьютер: голоса Vosk TTS не успевают за речью — Piper ──
+import engine_remote as ER  # noqa: E402
+
+
+class FakeS:
+    def __init__(self):
+        self.d = {"tts": {"engine": "vosk"}, "persona": "lira"}
+
+    def get(self, *k):
+        v = self.d
+        for x in k:
+            v = (v or {}).get(x)
+        return v
+
+    def update(self, p):
+        self.d["tts"].update(p["tts"])
+
+
+def vme(load):
+    return types.SimpleNamespace(s=FakeS(), vosk_tts=types.SimpleNamespace(load_s=load), note=notes.append, apply_engines=lambda: None,
+                                 ensure_voice=lambda p: None)
+
+
+notes.clear()
+m1 = vme(30)
+for ch, sec in ((40, 5.5), (40, 1.0), (70, 6.6)):
+    ER.RemoteMixin._vosk_slow(m1, ch, sec)
+ok(m1.s.d["tts"]["engine"] == "vosk", "две медленные фразы — ещё Vosk TTS")
+ER.RemoteMixin._vosk_slow(m1, 120, 17.7)
+ok(m1.s.d["tts"]["engine"] == "piper" and m1.s.d["tts"].get("auto_piper") and len(notes) == 1 and "Piper" in notes[0],
+   f"третья медленная — голос Piper и подсказка: {m1.s.d['tts']}")
+m2 = vme(465)
+ER.RemoteMixin._vosk_slow(m2, 38, 5.5)
+ok(m2.s.d["tts"]["engine"] == "piper", "голоса грузились 7 минут — хватает одной медленной фразы")
+
 # ── телефон ──
 tmp = Path(tempfile.mkdtemp()); www = tmp / "www"
 subprocess.run(["bash", str(ROOT / "android/tools/www_assemble.sh"), str(www)], check=True, capture_output=True)
@@ -74,6 +109,8 @@ with sync_playwright() as p:
     pg.evaluate("() => ask('Привет ещё раз')"); pg.wait_for_function("!busy", timeout=20000); pg.wait_for_timeout(300)
     t413 = pg.evaluate("() => document.getElementById('bot').textContent")
     ok("лимит токенов в минуту" in t413, f"413 — лимит тарифа: {t413[-200:]}")
+    why = pg.evaluate("() => hLoad().net_why || {}")
+    ok(why.get("cloud:key") == 1 and why.get("cloud:rejected") == 1, f"причины — в пульс «Здоровья» (ключ сервиса: доступ, отклонил): {why}")
     # «Мозг» → «Прежние мозги» → «Вернуть»
     pg.evaluate("() => openSettings('brain')"); pg.wait_for_timeout(500)
     card = pg.inner_text("#br-back")
@@ -88,7 +125,20 @@ with sync_playwright() as p:
     # «Забыть ключ» — облачные из прежних уходят
     r = pg.evaluate("""async () => { await llmRestore(0); S.llm.account = false; saveS(); await forgetKey(); return [S.llm.base_url, (S.llmSaved || []).filter(x => x.cloud).length]; }""")
     ok(r == ["", 0], f"«Забыть ключ» — прежних облачных не осталось: {r}")
+    # звук на нуле: кнопка «включить и прочитать» вместо незаметного тоста
+    r = pg.evaluate("""() => { const mock = D.mock; window.VOL = 0; D.mock = false; const vol = D.volume;
+        D.volume = (op, v) => op === "get" ? VOL : (VOL = v); S.textMode = false;
+        say("Завтра в Минске плюс двенадцать."); say("Возьмите зонт.");
+        return new Promise(res => setTimeout(() => { const b = document.getElementById("vol-up"); const had = !!b && b.textContent;
+            if (b) b.click(); const after = [VOL, !!document.getElementById("vol-up"), volMuted]; D.mock = mock; D.volume = vol; res([had, after]); }, 100)); }""")
+    ok(r[0] and "Звук на нуле" in r[0] and r[1] == [50, False, ""], f"звук на нуле — кнопка: прибавить и прочитать ответ: {r}")
     ok(not errs, f"без ошибок JavaScript: {errs[:2]}")
     b.close()
+# ── телефон: код 11 — один распознаватель на всё время, а не новый на каждую фразу ──
+sp = (ROOT / "android/src/pro/dewiar/app/Speech.java").read_text(encoding="utf-8")
+body = sp[sp.index("public void listenSystem"):sp.index("public void stop()")]
+ok("if (rec != null) { rec.destroy(); rec = null; }" not in body and "if (rec == null) { rec = SpeechRecognizer.createSpeechRecognizer(ctx)" in body
+   and "code == 11" in body and "rec.destroy()" not in sp[sp.index("public void cancel()"):sp.index("public void cancel()") + 600],
+   "код 11 (пакет 20.10, 50 телефонов): распознаватель не пересоздаётся на каждую фразу, отпускается только сломанный")
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)

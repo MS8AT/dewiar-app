@@ -98,6 +98,17 @@ def brain_kind(prof):
     return "cloud"
 
 
+WHY_RX = (("timeout", r"не ответил вовремя|timed? ?out|таймаут"), ("connect", r"подключ|connect|resolve|сеть|network|refused"),
+          ("context", r"окна контекста|context"), ("busy", r"много людей|занят|429|503|busy"), ("balance", r"заряд|талер|402|quota"),
+          ("key", r"ключ|401|403|forbidden"), ("rejected", r"отклонил|400|422|413"), ("server", r"\b5\d\d\b|недоступн"))
+
+
+def why_kind(err):
+    """Почему не ответила модель — одним словом для «Здоровья» (пакет 20.10: «запросов в сеть неудачных 10,7 %» — а каких?)."""
+    t = str(err).lower()
+    return next((k for k, rx in WHY_RX if re.search(rx, t)), "other")
+
+
 def clean_text(s, n=300):
     """Текст сбоя без личного: домашняя папка, адреса, ключи — заменены."""
     s = str(s)
@@ -168,6 +179,16 @@ class HealthMixin:
             return
         with self._health_lock:
             self._h[what] = int(self._h.get(what, 0)) + n
+
+    def health_why(self, prof, err):
+        """Сбой ответа модели — в разбивку «где думает : почему» (dewiar:timeout, local:connect…), только числа."""
+        if self._health_lock is None:
+            return
+        k = f"{brain_kind(prof)}:{why_kind(err)}"
+        with self._health_lock:
+            w = self._h.setdefault("net_why", {})
+            if k in w or len(w) < 40:
+                w[k] = int(w.get(k, 0)) + 1
 
     def health_problem(self, text, kind="error"):
         """Сбой в пульс: одна подпись (числа и пути — одинаковые) — один счётчик. И в журнал сбоев (incident) —
@@ -255,7 +276,7 @@ class HealthMixin:
                 "os": f"{OS_NAME} {platform.machine()}", "hw": hw, "brain": brain_kind(self.s.active_llm()),
                 "uptime_h": round((time.time() - self._h_t0) / 3600, 1), "starts": h.get("starts") or [],
                 "turns": h.get("turns", 0), "net_ok": h.get("net_ok", 0), "net_fail": h.get("net_fail", 0), "errors": h.get("errors", 0),
-                "rude": h.get("rude", 0), "refused": h.get("refused", 0),
+                "rude": h.get("rude", 0), "refused": h.get("refused", 0), "net_why": h.get("net_why") or {},
                 "problems": [{"sig": k, "text": v["text"], "n": v["n"]} for k, v in (h.get("problems") or {}).items()]}
 
     def pulse_send(self):
@@ -275,6 +296,12 @@ class HealthMixin:
         with self._health_lock:                          # вычесть отправленное (пока шёл запрос, могло прибавиться)
             for k in ("turns", "net_ok", "net_fail", "errors", "rude", "refused"):
                 self._h[k] = max(0, int(self._h.get(k, 0)) - int(body.get(k, 0)))
+            w = self._h.get("net_why") or {}
+            for k, n in body["net_why"].items():
+                if k in w:
+                    w[k] = int(w[k]) - int(n)
+                    if w[k] <= 0:
+                        del w[k]
             sent = {p["sig"]: p["n"] for p in body["problems"]}
             pr = self._h.get("problems") or {}
             for sig, n in sent.items():

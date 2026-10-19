@@ -84,13 +84,15 @@ with sync_playwright() as p:
     b = p.chromium.launch(); pg = b.new_page(viewport={"width": 400, "height": 820})
     pg.on("pageerror", lambda x: errs.append(str(x)))
     pg.goto((www / "index.html").as_uri()); pg.wait_for_timeout(1000)
-    R = pg.evaluate("""() => { D.mock = false; let vol = 0; D.volume = () => vol; S.textMode = false;
+    R = pg.evaluate("""async () => { D.mock = false; let vol = 0; D.volume = () => vol; S.textMode = false;
         const n0 = sayN; say('Привет, это проверка.'); say('И ещё одна фраза.'); const n1 = sayN;
-        const t = document.getElementById('toast') ? document.getElementById('toast').textContent : '';
-        vol = 50; say('Теперь со звуком.'); const n2 = sayN; stopVoice && stopVoice(); D.mock = true; return [n1 - n0, n2 - n1, t]; }""")
+        await new Promise(r => setTimeout(r, 50));
+        const t = (document.getElementById('vol-up') || {}).textContent || '';
+        vol = 50; say('Теперь со звуком.'); const n2 = sayN; const gone = !document.getElementById('vol-up');
+        stopVoice && stopVoice(); D.mock = true; return [n1 - n0, n2 - n1, t, gone]; }""")
     ok(R[0] == 0, f"громкость 0 — голос не синтезируется (ни одной фразы): {R[0]}")
-    ok("на нуле" in R[2] and "текстом" in R[2], f"подсказка: {R[2]!r}")
-    ok(R[1] == 1, f"прибавили громкость — снова голос: {R[1]}")
+    ok("Звук на нуле" in R[2] and "прочитать" in R[2], f"подсказка — кнопкой «включить и прочитать ответ» (0.6.75): {R[2]!r}")
+    ok(R[1] == 1 and R[3], f"прибавили громкость — снова голос, кнопка убрана: {R[1]}, {R[3]}")
     b.close()
 ok(not errs, "без ошибок JavaScript" + (f": {errs}" if errs else ""))
 shutil.rmtree(tmp, ignore_errors=True)

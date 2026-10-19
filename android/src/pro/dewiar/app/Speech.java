@@ -26,6 +26,8 @@ public final class Speech {
     private final Net.Sink sink;
     private final Handler main = new Handler(Looper.getMainLooper());
     private SpeechRecognizer rec;
+    private boolean renew = false;                   // распознаватель сломался (5, 8, 11) — в следующий раз создать новый
+    private boolean active = false;                  // идёт сеанс распознавания (startListening без итога)
     private volatile boolean recording;              // идёт запись для сервера; false — отменено (cancel): без распознавания
     private volatile boolean finish;                 // stop(): закончить запись и распознать то, что успели записать
     private volatile int gen;                        // номер сеанса слушания: события несут его в поле g, app.js отбрасывает чужие
@@ -100,7 +102,14 @@ public final class Speech {
         p.edit().putString("beep_muted", "").apply();
     }
 
-    public void release() { main.removeCallbacks(unmuteR); unmuteNow(); BtMic.offNow(ctx); }
+    public void release() {
+        main.removeCallbacks(unmuteR); unmuteNow(); BtMic.offNow(ctx);
+        main.post(new Runnable() {
+            @Override public void run() {
+                if (rec != null) { try { rec.destroy(); } catch (Throwable ignored) { } rec = null; }
+            }
+        });
+    }
 
     /** Слушать микрофоном Bluetooth-наушников, если они подключены (BtMic; настройка «Микрофон наушников», по умолчанию да). */
     volatile boolean btMic = true;
@@ -118,11 +127,20 @@ public final class Speech {
         final Runnable go = new Runnable() {
             @Override public void run() {
                 try {
-                    if (rec != null) { rec.destroy(); rec = null; }
                     if (g != gen) return;                      // пока ждали — начали новый сеанс
-                    rec = SpeechRecognizer.createSpeechRecognizer(ctx);
+                    // Один распознаватель на всё время работы, а не новый на каждую фразу. Раньше: destroy() прежнего и
+                    // сразу createSpeechRecognizer() — служба распознавания (Google) ещё отключалась от старого, и новый
+                    // получал ERROR_SERVER_DISCONNECTED (11): «распознавание ещё занято (11) — пробую снова» почти на
+                    // каждой фразе, у 50 телефонов из 178 (пакет здоровья 20.10), лишние полсекунды до «слушаю».
+                    // Пересоздаём, только если он сам сломался (ошибки 5, 8, 11 — отпускаем сразу; не запустился — флаг renew).
+                    if (rec != null && renew) { try { rec.destroy(); } catch (Throwable ignored) { } rec = null; }
+                    if (rec == null) { rec = SpeechRecognizer.createSpeechRecognizer(ctx); renew = false; }   // первый раз или после поломки
+                    else if (active) { try { rec.cancel(); } catch (Throwable ignored) { } }   // прежний сеанс ещё идёт — прервать
+                    final long t0 = android.os.SystemClock.elapsedRealtime();
+                    final boolean[] ready = {false};
+                    active = true;
                     rec.setRecognitionListener(new RecognitionListener() {
-                        @Override public void onReadyForSpeech(Bundle b) { ev(g, "stt_start", o()); }
+                        @Override public void onReadyForSpeech(Bundle b) { ready[0] = true; ev(g, "stt_start", o()); }
                         @Override public void onBeginningOfSpeech() { }
                         @Override public void onRmsChanged(float v) {
                             // v — дБ примерно от −2 до 10: переводим в 0..1 для анимации облика
@@ -131,10 +149,20 @@ public final class Speech {
                         @Override public void onBufferReceived(byte[] b) { }
                         @Override public void onEndOfSpeech() { ev(g, "stt_end", o()); }
                         @Override public void onError(int code) {
+                            // «прервано» от прерванного прежнего сеанса прилетает уже сюда, до готовности нового — не наше
+                            if (code == SpeechRecognizer.ERROR_CLIENT && !ready[0] && android.os.SystemClock.elapsedRealtime() - t0 < 600) return;
+                            active = false;
+                            if ((code == SpeechRecognizer.ERROR_CLIENT || code == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || code == 11) && rec != null) {
+                                // сломался — отпустить сразу, а не перед следующей фразой: к ней служба успеет отключиться
+                                final SpeechRecognizer old = rec;
+                                rec = null;
+                                main.post(new Runnable() { @Override public void run() { try { old.destroy(); } catch (Throwable ignored) { } } });
+                            }
                             BtMic.stopSoon();
                             try { ev(g, "stt_error", o().put("code", code).put("msg", errText(code))); } catch (Exception ignored) { }
                         }
                         @Override public void onResults(Bundle b) {
+                            active = false;
                             BtMic.stopSoon();
                             ArrayList<String> r = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                             try { ev(g, "stt_result", o().put("text", r != null && !r.isEmpty() ? r.get(0) : "")); } catch (Exception ignored) { }
@@ -158,6 +186,7 @@ public final class Speech {
                     i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.getPackageName());
                     rec.startListening(i);
                 } catch (Throwable e) {
+                    active = false; renew = true;
                     BtMic.stopSoon();
                     try { ev(g, "stt_error", o().put("code", -1).put("msg", "распознавание телефона не запустилось: " + e.getMessage())); } catch (Exception ignored) { }
                 }
@@ -190,10 +219,10 @@ public final class Speech {
         BtMic.stopSoon();
         main.post(new Runnable() {
             @Override public void run() {
-                if (rec != null) {
-                    try { rec.cancel(); rec.destroy(); } catch (Throwable ignored) { }
-                    rec = null;
+                if (rec != null && active) {                 // распознаватель остаётся — следующая фраза без переподключения
+                    try { rec.cancel(); } catch (Throwable ignored) { }
                 }
+                active = false;
             }
         });
     }
@@ -207,6 +236,7 @@ public final class Speech {
             case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS: return "нет разрешения на микрофон";
             case SpeechRecognizer.ERROR_RECOGNIZER_BUSY: return "распознавание занято";
             case SpeechRecognizer.ERROR_CLIENT: return "распознавание прервано";
+            case 11: return "служба распознавания переподключается";
             default: return "ошибка распознавания " + c;
         }
     }

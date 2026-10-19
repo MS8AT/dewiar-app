@@ -445,7 +445,7 @@ function netIncident(e) {
   l.push({ ts: Date.now(), host: String(e.url || "").replace(/^https?:\/\//, "").split(/[/?]/)[0], err: String(e.raw || e.message || "").slice(0, 200),
            online: navigator.onLine, type: c.type || c.effectiveType || "" });
   prefSet("net_inc", JSON.stringify(l.slice(-30)));
-  hCount("net_fail"); hProblem(`связь с мозгом: ${l[l.length - 1].err}`);
+  hCount("net_fail"); hWhy(l[l.length - 1].err); hProblem(`связь с мозгом: ${l[l.length - 1].err}`);
   plog("WARNING", `связь с мозгом: ${l[l.length - 1].host} — ${l[l.length - 1].err} (${l[l.length - 1].type || "сеть ?"})`);
 }
 function netRecovered() {
@@ -537,6 +537,16 @@ let bugSnap = null, thanksCache = null, bugWait = 0, bugPick = "";   // bugPick 
 function hLoad() { try { return JSON.parse(prefGet("health") || "{}") || {}; } catch (e) { return {}; } }
 function hSave(h) { try { prefSet("health", JSON.stringify(h)); } catch (e) { } }
 function hCount(k, n = 1) { const h = hLoad(); h[k] = (h[k] || 0) + n; hSave(h); }
+/* Почему не ответил мозг — «где думает : почему» (пакет 20.10: «неудачных 10,7 %» — а каких?). Как why_kind в core/health.py. */
+const WHY_RX = [["timeout", /не ответил вовремя|timed? ?out|таймаут|отменено|abort/i], ["connect", /подключ|connect|resolve|сеть|network|failed to fetch|refused/i],
+  ["context", /окна контекста|context/i], ["busy", /много людей|занят|429|503|busy/i], ["balance", /заряд|талер|402|quota/i],
+  ["key", /ключ|401|403|forbidden|не пускает/i], ["rejected", /отклонил|400|422|413|тариф/i], ["server", /\b5\d\d\b|недоступн/i]];
+function hWhy(err) {
+  const k = brainKind() + ":" + ((WHY_RX.find(([, rx]) => rx.test(String(err || ""))) || ["other"])[0]);
+  const h = hLoad(); h.net_why = h.net_why || {};
+  if (h.net_why[k] || Object.keys(h.net_why).length < 40) h.net_why[k] = (h.net_why[k] || 0) + 1;
+  hSave(h);
+}
 /* Голос по всем телефонам (отзыв 13.10: «у многих голосом не выходит, ответы только текстом», а объяснить не могут):
    счётчики слуха и голоса уходят в пульс (voice) — в «Здоровье» видно, у скольких и почему молчит. Только числа. */
 function vCount(k, n = 1) { const h = hLoad(); h.voice = h.voice || {}; h.voice[k] = (h.voice[k] || 0) + n; hSave(h); }
@@ -573,7 +583,7 @@ async function pulseSend() {
   const h = hLoad();
   const body = { dev: devId(), app: "phone", version: info.version || "", os: "Android " + (info.android || ""), hw: { device: info.device || "", webview: webviewVer().replace(/^ · /, "") },
     brain: brainKind(), uptime_h: Math.round((Date.now() - H_T0) / 36e4) / 10, starts: h.starts || [], turns: h.turns || 0, net_ok: h.net_ok || 0,
-    net_fail: h.net_fail || 0, errors: h.errors || 0, rude: h.rude || 0, refused: h.refused || 0, problems: Object.entries(h.problems || {}).map(([sig, p]) => ({ sig, text: p.text, n: p.n })),
+    net_fail: h.net_fail || 0, net_why: h.net_why || {}, errors: h.errors || 0, rude: h.rude || 0, refused: h.refused || 0, problems: Object.entries(h.problems || {}).map(([sig, p]) => ({ sig, text: p.text, n: p.n })),
     voice: Object.assign({}, h.voice || {}, { tts_engine: S.tts.engine || "", tts_ready: D.ttsReady() ? 1 : 0, text_mode: S.textMode ? 1 : 0,
       stt_engine: S.stt.engine || "", recognizer: D.recognizer() ? 1 : 0, vol: (() => { try { return D.volume("get", 0); } catch (e) { return -1; } })() }) };
   let r; try { r = await http("POST", healthBase() + "?p=/pulse", { headers: { "Content-Type": "application/json" }, body, timeout: 20000 }); }
@@ -581,6 +591,7 @@ async function pulseSend() {
   if (r.status >= 400) return false;
   const now = hLoad();                                        // вычесть отправленное: пока шёл запрос, могло прибавиться
   for (const k of ["turns", "net_ok", "net_fail", "errors", "rude", "refused"]) now[k] = Math.max(0, (now[k] || 0) - (body[k] || 0));
+  for (const k of Object.keys(body.net_why)) if (now.net_why && now.net_why[k]) { now.net_why[k] -= body.net_why[k]; if (now.net_why[k] <= 0) delete now.net_why[k]; }
   if (now.voice) { for (const k of Object.keys(body.voice)) if (typeof now.voice[k] === "number" && !/^(tts_ready|text_mode|recognizer|vol)$/.test(k)) now.voice[k] = Math.max(0, now.voice[k] - (body.voice[k] || 0)); }
   for (const p of body.problems) if (now.problems && now.problems[p.sig]) { now.problems[p.sig].n -= p.n; if (now.problems[p.sig].n <= 0) delete now.problems[p.sig]; }
   now.starts = (now.starts || []).slice(body.starts.length);
@@ -1355,7 +1366,16 @@ function sysVoiceFor(gender) {
   else if (!S.tts.sys_voice) { const v = pick(false); if (v) return { name: v.name, pitch: 1.0 }; }
   return { name: S.tts.sys_voice || "", pitch: male ? 0.92 : 1.12 };
 }
-let volWarned = false;
+let volWarned = false, volMuted = "", volMutedAt = 0;
+function volCard() {
+  if (!volMuted || $("#vol-up")) return;
+  showCard(`<div class="start"><button class="btn p w" id="vol-up">🔊 Звук на нуле — включить и прочитать ответ</button></div>`);
+  $("#vol-up").onclick = () => {
+    try { D.volume("set", 50); } catch (e) { }
+    const t = volMuted; volMuted = ""; volWarned = false; showCard("");
+    if (t) say(t);
+  };
+}
 function say(text) {
   const t = speechText(text); if (!t) return;
   if (S.textMode) { vCount("tts_text"); return; }            // текстовый режим — ответ только на экране
@@ -1363,10 +1383,16 @@ function say(text) {
     let v = -1; try { v = D.volume("get", 0); } catch (e) { }   // (сервер голосов не тратится впустую — идея 15.10), ответ на экране
     if (v === 0) {
       vCount("tts_vol0");
-      if (!volWarned) { volWarned = true; plog("warn", "голос: громкость звука на нуле — отвечаю текстом"); toast("Звук на телефоне на нуле — отвечаю текстом. Прибавьте громкость, чтобы слышать ответы", 6000); }
+      // звук на нуле (у 30 телефонов из 178, пакет 20.10): тихий тост проглядывали — ответы «пропадали». Теперь — кнопка на
+      // экране: прибавить громкость и прочитать этот ответ вслух
+      if (Date.now() - volMutedAt > 60000) volMuted = "";
+      volMuted = (volMuted + " " + t).trim().slice(-1500); volMutedAt = Date.now();
+      if (!volWarned) { volWarned = true; plog("warn", "голос: громкость звука на нуле — отвечаю текстом"); }
+      setTimeout(volCard, 0);
       return;
     }
     volWarned = false;                                        // прибавили — в следующий раз снова подскажем
+    if (volMuted) { volMuted = ""; if ($("#vol-up")) showCard(""); }     // и кнопка «включить звук» больше не нужна
   }
   const id = "s" + (++sayN); sayLeft++;
   turnTime("said");
@@ -2197,6 +2223,7 @@ async function ask(text, opts = {}) {
       if (moved) { busy = false; turnAbort = null; return ask(text, Object.assign({}, opts, { fallback: true })); }
     }
     if (e.net) netIncident(e);                          // повторы — уже в round1 (по кругу, без повторных действий)
+    else { hCount("net_fail"); hWhy(e.message); }       // не сеть, а отказ (ключ, заряд, тариф, «много людей») — тоже не ответил
     if (e.human) { plog("warn", "облако: " + e.message); showBot(e.message, "err"); say(e.message); }       // облако Dewiar объясняет само: «заряд закончился…»
     else if (!D.mock && SELF_HOST_RX.test(llmBase() + "/")) { const m = "Не получилось связаться с мозгом: " + SELF_HOST_TEXT; console.warn(m); showBot(m, "err"); say("Не получилось связаться с мозгом: адрес модели указывает на сам телефон. Как поправить — на экране."); }
     else { const m = "Не получилось связаться с мозгом: " + e.message; console.warn(m); showBot(m, "err"); say("Не получилось связаться с мозгом."); }
