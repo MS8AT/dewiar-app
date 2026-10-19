@@ -82,10 +82,11 @@ with sync_playwright() as p:
     P = pg.evaluate("""(raw) => [parseToolCall('{"function name="set_reminder"}'), parseToolCall(raw)]""", raw)
     ok(P == [{"name": "set_reminder", "args": {}}, {"name": "set_reminder", "args": {"text": "Взять зонт", "when": "завтра в 8:00"}}], f"телефон: те же вызовы текстом: {P}")
     # настоящее напоминание телефона и напоминание экзамена
-    A = pg.evaluate("""() => { const soon = new Date(Date.now() + 30 * 60e3);
+    A = pg.evaluate("""() => { const eod = new Date(); eod.setHours(23, 59, 59, 0);      // ближе к полуночи «через 30 минут» — уже завтра
+        const ahead = m => Date.now() + Math.min(m * 60e3, (eod - Date.now()) / 2), soon = new Date(ahead(30));
         D.alarmSet(JSON.stringify({ title: 'Выключить компьютер и бежать на автобус', at: soon.getTime(), kind: 'reminder', repeat: '' }));
         const real = agendaPlans('Что у нас по плану?');
-        EXAM = { alarms: [{ id: 'seedA0', title: 'полить цветы', at: Date.now() + 20 * 60e3, kind: 'reminder', repeat: '', made: 0 }] };
+        EXAM = { alarms: [{ id: 'seedA0', title: 'полить цветы', at: ahead(20), kind: 'reminder', repeat: '', made: 0 }] };
         const ex = agendaPlans('Что у нас по плану?'); EXAM = null; return [real, ex]; }""")
     ok("автобус" in A[0], f"«что у нас по плану?» — сегодняшние напоминания сразу: {A[0][:120]!r}")
     ok("полить цветы" in A[1] and "автобус" not in A[1], f"в экзамене — напоминания экзамена, не настоящие: {A[1][:120]!r}")
