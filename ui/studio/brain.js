@@ -171,6 +171,29 @@ async function loadDevices() {
     fill($("#devin"), "source"); fill($("#devout"), "sink");
   } catch (e) { toast(e.message); }
 }
+/* «Скачано на этом компьютере» (отзыв 19.10: непонятно, что скачано, а что будет качаться): models_status — строки по
+   моделям, models_get — скачать заранее; ход — по status.downloads («m:<ключ>»), итог — событием models. */
+let mdlData = null;
+const mdlEsc = (t) => String(t == null ? "" : t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function mdlRender(d) {
+  mdlData = d || mdlData; if (!mdlData) return;
+  const dl = (lastStatus && lastStatus.downloads) || {};
+  for (const g of ["ears", "voice"]) {
+    const box = $("#mdl-" + g); if (!box) continue;
+    box.innerHTML = mdlData.items.filter(x => x.group === g).map(x => {
+      const f = dl["m:" + x.key], pct = f != null && f < 1 ? Math.round(f * 100) : x.pct;
+      const st = pct != null ? `<span class="bar"><i style="width:${pct}%"></i></span><span>скачивается${pct ? " " + pct + "%" : "…"}</span>`
+        : x.installed ? `<span class="ok">✓ скачана</span><span>${x.mb} МБ</span>${x.used ? `<span class="use">· используется</span>` : ""}`
+        : `<span>не скачана · ~${x.mb} МБ</span><button class="btn small" data-mget="${mdlEsc(x.key)}">Скачать</button>`;
+      return `<div class="mdl-row"><b>${mdlEsc(x.title)}</b><small>${mdlEsc(x.about)}</small><div class="st">${st}</div></div>`;
+    }).join("");
+  }
+  $$("[data-mget]").forEach(b => b.onclick = () => { b.disabled = true; b.textContent = "Начинаю…";
+    core.call("models_get", { key: b.dataset.mget }).then(() => setTimeout(mdlLoad, 400)).catch(e => { toast(e.message); b.disabled = false; b.textContent = "Скачать"; }); });
+}
+function mdlLoad() { core.call("models_status").then(mdlRender).catch(() => {}); }
+core.on("models", d => mdlRender(d));
+["ears", "voice"].forEach(p => { const b = $(`nav button[data-p="${p}"]`); if (b) b.addEventListener("click", mdlLoad); });
 let lastStatus = {};
 function renderStatus(st) {
   lastStatus = st || lastStatus; st = lastStatus;
@@ -182,6 +205,7 @@ function renderStatus(st) {
   $$("#status dd").forEach((d, i) => d.textContent = rows[i][1]);
   $("#aecst").textContent = st.headphones ? "Не нужно: включён режим наушников." : st.aec ? "Работает: ассистент не слышит сам себя, и его можно перебить голосом." : "Сейчас не работает — пока ассистент говорит, микрофон приглушается. В наушниках включите режим ниже.";
   $("#sttstat").textContent = st.stt ? `Сейчас: ${st.stt}${st.stt_ready === false ? " — загружается, пока работает Vosk" : ""}` : "";
+  if (mdlData && Object.keys(st.downloads || {}).some(k => k.startsWith("m:"))) mdlRender();   // ход скачивания — сразу в строке
 }
 
 function renderTools(list) {

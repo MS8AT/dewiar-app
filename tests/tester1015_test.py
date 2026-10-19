@@ -148,6 +148,9 @@ def llm_route(route):
     if not req.url.endswith("/chat/completions"):
         return route.fulfill(status=200, body='{"data":[{"id":"m"}]}', headers={"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"})
     body = json.loads(req.post_data or "{}"); msgs = body.get("messages") or []
+    for m in msgs:                                    # справка к вопросу (putContext) — модель отвечает на сам вопрос после неё
+        if m.get("role") == "user" and isinstance(m.get("content"), str) and "(Сообщение пользователя)\n" in m["content"]:
+            m["content"] = m["content"].split("(Сообщение пользователя)\n", 1)[1]
     seen.append(msgs)
     last = msgs[-1] if msgs else {}
     users = [m.get("content") for m in msgs if m.get("role") == "user" and isinstance(m.get("content"), str)]

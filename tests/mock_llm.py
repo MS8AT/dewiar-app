@@ -29,6 +29,19 @@ class H(BaseHTTPRequestHandler):
             open(os.environ["MOCK_LOG_FULL"], "a", encoding="utf-8").write(json.dumps(
                 {"messages": body.get("messages", []), "tools": [t["function"]["name"] for t in body.get("tools") or []]}, ensure_ascii=False) + "\n")
         if self.path != "/v1/chat/completions": return self._json(404, {})
+        # справка к вопросу (время, найденное — engine_answer._put_context, app.js putContext) — модель её читает, а не
+        # отвечает на неё: заглушка, как и модель, реагирует на сам вопрос после «(Сообщение пользователя)»
+        MARK = "(Сообщение пользователя)\n"
+        for m in body.get("messages") or []:
+            if m.get("role") != "user":
+                continue
+            c = m.get("content")
+            if isinstance(c, str) and MARK in c:
+                m["content"] = c.split(MARK, 1)[1]
+            elif isinstance(c, list):
+                for x in c:
+                    if isinstance(x, dict) and isinstance(x.get("text"), str) and MARK in x["text"]:
+                        x["text"] = x["text"].split(MARK, 1)[1]
         if body.get("model") == "blind" and ("image_url" in json.dumps(body) or '"image"' in json.dumps(body)):
             self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
             self.wfile.write(b'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'); return

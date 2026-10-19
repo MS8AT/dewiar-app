@@ -68,7 +68,8 @@ with sync_playwright() as p:
         pg.wait_for_timeout(100)
         if pg.evaluate("window._done && state === 'idle'"):
             break
-    sysm = str(seen[-1][0].get("content")) if seen else ""
+    # 19.10: план дня — справкой в сообщении пользователя (подсказка модели не меняется — кэш своего сервера)
+    sysm = " ".join(str(m.get("content")) for m in (seen[-1] if seen else []) if m.get("role") in ("system", "user"))
     ok("ПЛАНЫ ПОЛЬЗОВАТЕЛЯ на этот день" in sysm and "подрядчик" in sysm, "«что у меня в среду?» — модель сразу видит запомненную встречу")
     # проверка «обещала программу»
     MOM = "Вот вариант — тёплый, без пафоса, можно отправить в мессенджер или написать на открытке: «Мам, с днём рождения!»"

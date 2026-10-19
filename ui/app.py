@@ -953,8 +953,13 @@ class Api:
             return {"ok": False, "error": "это не скачанное обновление Dewiar"}
         cmd = os.environ.get("DEWIAR_UPDATE_CMD")
         # APT::Status-Fd=1 — apt пишет в вывод строки «pmstatus:…:процент:…», по ним _run_update считает ход
-        cmd = cmd.split() + [str(p)] if cmd else ["pkexec", "apt-get", "install", "-y", "--allow-downgrades",
-                                                  "-o", "APT::Status-Fd=1", str(p)]
+        if cmd:
+            cmd = cmd.split() + [str(p)]
+        elif not shutil.which("dpkg") and Path("/opt/dewiar/install.sh").is_file():
+            # не Debian/Ubuntu (Arch, Fedora, openSUSE…): поставили install.sh — им же и обновляемся (файлы пакета без dpkg)
+            cmd = ["pkexec", "bash", "/opt/dewiar/install.sh", "--yes", "--no-deps", "--deb", str(p)]
+        else:
+            cmd = ["pkexec", "apt-get", "install", "-y", "--allow-downgrades", "-o", "APT::Status-Fd=1", str(p)]
         if getattr(self, "_upd", {}).get("stage") in ("auth", "install"):
             return {"ok": True, "started": True}                  # уже ставится — студия просто покажет ход
         self._upd = {"stage": "auth", "pct": 0, "line": "", "error": "", "t0": time.time()}

@@ -81,6 +81,27 @@ ATT_REF_RX = re.compile(r"^\s*(?:про|насч[её]т|о|об)\s+(?:это|э
 ATT_PATH_RX = re.compile(r"сохран[её]на?(?: в папке ассистента)?:\s*(Входящие/[^\]\n;]+?)\s*(?=\]|;)")
 
 
+
+def _put_context(msgs, ctx):
+    """Справку к вопросу (время, найденное в записях, план дня, знания персонажа) — в начало последнего сообщения
+    пользователя, а не в системную подсказку: подсказка и описание инструментов остаются теми же от вопроса к вопросу,
+    и свой сервер модели (llama.cpp, LM Studio, Ollama) берёт их из кэша, а не перечитывает (отзыв 19.10).
+    В историю разговора справка не попадает — меняется только копия сообщений для этого запроса."""
+    if not ctx or not msgs or msgs[-1].get("role") != "user":
+        return msgs
+    head = "(Справка к этому сообщению — для тебя, вслух её не упоминай)\n" + ctx + "\n\n(Сообщение пользователя)\n"
+    c = msgs[-1].get("content")
+    if isinstance(c, list):
+        c = [dict(x) for x in c]
+        i = next((i for i, x in enumerate(c) if x.get("type") == "text"), None)
+        if i is None:
+            c.insert(0, {"type": "text", "text": head.rstrip()})
+        else:
+            c[i]["text"] = head + str(c[i].get("text") or "")
+    else:
+        c = head + str(c or "")
+    return msgs[:-1] + [dict(msgs[-1], content=c)]
+
 class AnswerMixin:
     # ---------- ответ ----------
 
@@ -266,15 +287,14 @@ class AnswerMixin:
         self.emit("conversation", **self.conv.public(self.history))
 
     def _system(self, with_tools=False):
-        """Системная подсказка: персонаж с датой и временем, память о пользователе, душа, содержание разговора,
-        выводы из дневника; with_tools — ещё навыки и правила действий (инструменты, музыка, компьютер, серверы)."""
-        now = datetime.now()
-        now_str = f"{WEEKDAYS[now.weekday()]}, {now.day} {MONTHS[now.month - 1]} {now.year} года, {now:%H:%M}"
-        # ближайшая неделя по дням — чтобы «в среду», «через сколько дней» не считались в уме с ошибкой (экзамен 11.10)
-        week = "; ".join(f"{WEEKDAYS[(now + timedelta(days=i)).weekday()]} — {(now + timedelta(days=i)).day} {MONTHS[(now + timedelta(days=i)).month - 1]}"
-                         for i in range(1, 8))
-        now_str += ". Это время верное, а время и даты из прошлых реплик разговора устарели — не повторяй их" + f". Ближайшие дни: {week}. Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой"
-        base = self.personas.system_prompt(self.s.get("persona"), self.s.get("user_name") or "", now_str)
+        """Системная подсказка: персонаж, память о пользователе, душа, содержание разговора, выводы из дневника;
+        with_tools — ещё навыки и правила действий (инструменты, музыка, компьютер, серверы).
+        Она не меняется от вопроса к вопросу: время, найденное в записях, план дня — в справке к самому вопросу
+        (_turn_context, _put_context). Отзыв 19.10: время с минутами в подсказке не давало своему серверу модели
+        переиспользовать прочитанное (кэш начала запроса) — он перечитывал тысячи слов на каждый вопрос."""
+        base = self.personas.system_prompt(self.s.get("persona"), self.s.get("user_name") or "", "")
+        base += ("\n\nТекущие дата и время — в справке в начале последнего сообщения пользователя; они верные, а время и даты "
+                 "из прошлых реплик разговора устарели — не повторяй их.")
         mem = self.workspace.memory_text()
         if mem:
             base += ("\n\nЧто ты знаешь о пользователе (твоя память, файл «Память/Обо мне.md»; «вспомни, что я говорил…» — "
@@ -380,6 +400,20 @@ class AnswerMixin:
                          ". Сначала диагностика (место, память, службы, логи), потом исправление; объясняй простыми "
                          "словами, что нашёл и что сделал.")
         return base
+
+    def _turn_context(self):
+        """Справка к вопросу (меняется каждую минуту — поэтому не в системной подсказке): дата и время, ближайшая неделя
+        по дням (экзамен 11.10: «в среду», «через сколько дней» не считать в уме), сколько идёт разговор и перерыв."""
+        now = datetime.now()
+        week = "; ".join(f"{WEEKDAYS[(now + timedelta(days=i)).weekday()]} — {(now + timedelta(days=i)).day} {MONTHS[(now + timedelta(days=i)).month - 1]}"
+                         for i in range(1, 8))
+        out = (f"Сейчас {WEEKDAYS[now.weekday()]}, {now.day} {MONTHS[now.month - 1]} {now.year} года, {now:%H:%M}. "
+               f"Ближайшие дни: {week}. Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой.")
+        try:
+            note = self.conv.turn_note()
+        except Exception:  # noqa: BLE001
+            note = ""
+        return out + (" " + note if note else "")
 
     # ---------- для фоновых задач (TaskManager.host) ----------
 
@@ -1134,13 +1168,16 @@ class AnswerMixin:
                 recalled = self.recall.context(text.split("\n\nВложения:")[0])
             except Exception as e:  # noqa: BLE001
                 log.info("Поиск по записям: %s", e)
+            ctx = [self._turn_context()]               # меняющееся — в справку к вопросу, подсказка остаётся прежней
             if recalled:
                 log.info("📎 Вспомнил из записей: %s", ", ".join(re.findall(r"^\[([^\]]+)\]", recalled, re.M)))
-                system += ("\n\nИз записей пользователя в твоей папке (нашлось по словам вопроса). Если это отвечает на "
+                ctx.append("Из записей пользователя в твоей папке (нашлось по словам вопроса). Если это отвечает на "
                            "вопрос — ответь по ним и коротко скажи, откуда («в заметке …»). Если не относится — не "
                            "упоминай:\n" + recalled)
             try:
-                system += self.agenda_context(text)       # «что у нас по плану» — дела и календарь сразу перед моделью
+                ag = self.agenda_context(text)             # «что у нас по плану» — дела и календарь сразу перед моделью
+                if ag.strip():
+                    ctx.append(ag.strip())
                 from quality import DIAGRAM_ASK
                 if DIAGRAM_ASK.search(text):                  # экзамен 15.10: «Схема готова и уже на экране» — а схемы нет
                     system += ("\n\nСЕЙЧАС ПРОСЯТ СХЕМУ: в этом ответе обязательно блок ```mermaid (flowchart LR или TD, подписи "
@@ -1160,7 +1197,8 @@ class AnswerMixin:
                                                 "моделью действия недоступны, и предложи выбрать другую модель в «Мозге».")
             kb = self._persona_knowledge(text, turn)
             if kb:
-                system += kb
+                ctx.append(kb.strip())
+            msgs = _put_context(msgs, "\n\n".join(c for c in ctx if c))
             split, last, codef = SentenceSplitter(), 0.0, CodeFilter()
             # вслух — не больше ~900 символов (около минуты): длинный ответ дальше только на экране («Открыть целиком»);
             # сказки, истории и чтение вслух — целиком

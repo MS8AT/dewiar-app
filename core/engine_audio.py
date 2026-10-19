@@ -119,6 +119,105 @@ class AudioMixin:
         self.ensure_voice(self.s.get("persona"))
         self.health_mark("full")                               # загрузилось всё: распознавание и голос персонажа
 
+    # ---------- модели на этом компьютере: что скачано и кнопка «Скачать» (студия «Слух» и «Голос») ----------
+    # Отзыв 19.10: в «Слухе и голосе» непонятно, что уже скачано и что ещё будет качаться. Каждая модель — строкой:
+    # скачана (сколько занимает) / не скачана (сколько весит) / скачивается (%), и «Скачать» заранее, не переключаясь.
+
+    @staticmethod
+    def _dir_mb(*paths):
+        total = 0
+        for p in paths:
+            try:
+                p = Path(p)
+                if p.is_file():
+                    total += p.stat().st_size
+                elif p.is_dir():
+                    total += sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+            except OSError:
+                pass
+        return round(total / 1048576)
+
+    def models_status(self):
+        """-> {"items": [{key, group (ears|voice), title, about, installed, mb, used, pct}], "dir"}."""
+        from listen import VOSK_NAME
+        from personas import PIPER_VOICES
+        dl = self.status.get("downloads") or {}
+        st, tt = self.s.get("stt") or {}, self.s.get("tts") or {}
+        busy = getattr(self, "_model_busy", set())
+        items = []
+        vdir = MODELS_DIR / VOSK_NAME
+        have = (vdir / "am").exists() or (DATA_DIR / f"{VOSK_NAME}.zip").exists()
+        items.append({"key": "names", "group": "ears", "title": "Слух имени — Vosk, маленькая модель",
+                      "about": "Чтобы отзываться на имя без кнопки. Работает без интернета.", "installed": have,
+                      "mb": (self._dir_mb(vdir) if (vdir / "am").exists() else self._dir_mb(DATA_DIR / f"{VOSK_NAME}.zip")) if have else 45, "used": True})
+        gm = st.get("gigaam_model") or "gigaam-v3-e2e-rnnt"
+        g = self.gigaam if self.gigaam is not None and self.gigaam.model_name == gm else GigaAMSTT(gm)
+        gok = g.cached()
+        items.append({"key": "gigaam", "group": "ears", "title": "GigaAM v3 — точное распознавание речи",
+                      "about": "Лучшее качество для русского, на процессоре, без интернета.", "installed": gok,
+                      "mb": self._dir_mb(g.local_dir, MODELS_DIR / "hf" / "hub") if gok else 250, "used": st.get("engine") == "gigaam"})
+        vk = self.vosk_tts.installed()
+        items.append({"key": "vosk_tts", "group": "voice", "title": "Vosk TTS — русские голоса",
+                      "about": "Чистое произношение и ударения, несколько голосов, без интернета.", "installed": vk is not None,
+                      "mb": self._dir_mb(vk) if vk else 200, "used": tt.get("engine") == "vosk"})
+        mine = {(p.get("voice") or {}).get("piper") for p in self.personas.all()}
+        for vid, name in PIPER_VOICES.items():
+            ok_ = self.piper.has(vid)
+            items.append({"key": "piper:" + vid, "group": "voice", "title": "Piper — " + name,
+                          "about": "Запасной голос (и основной, если выбран Piper).", "installed": ok_,
+                          "mb": self._dir_mb(*self.piper.paths(vid)) if ok_ else 63,
+                          "used": tt.get("engine") in ("piper", "vosk") and vid in mine})
+        for it in items:
+            k = "m:" + it["key"]
+            it["pct"] = int(round(dl[k] * 100)) if k in dl and dl[k] < 1 else (0 if k in busy else None)
+        return {"items": items, "dir": str(MODELS_DIR)}
+
+    def models_get(self, key):
+        """«Скачать» модель заранее (в фоне), не меняя выбранного. -> {"started": bool}."""
+        from personas import PIPER_VOICES
+        if not hasattr(self, "_model_busy"):
+            self._model_busy = set()
+        if key in self._model_busy:
+            return {"started": False}
+        if key not in ("names", "gigaam", "vosk_tts") and not (key.startswith("piper:") and key[6:] in PIPER_VOICES):
+            raise ValueError("нет такой модели")
+        self._model_busy.add(key)
+        prog = (lambda f: self._dl("m:" + key, f))
+
+        def run():
+            try:
+                if key == "names":
+                    from listen import ensure_vosk
+                    ensure_vosk(DATA_DIR, MODELS_DIR, on_status=self.note, mirror=self._mirror_url("vosk_small"))
+                elif key == "gigaam":
+                    gm = self.s.get("stt", "gigaam_model") or "gigaam-v3-e2e-rnnt"
+                    g = self.gigaam if self.gigaam is not None and self.gigaam.model_name == gm else GigaAMSTT(gm)
+                    m = self._mirror("gigaam")
+                    if m and m.get("name", gm) == gm:
+                        g.mirror = m
+                    if not g.load(on_progress=prog):
+                        raise RuntimeError(g.error or "не загрузился")
+                    if self.s.get("stt", "engine") != "gigaam" and g is not self.gigaam:
+                        g.model = None                    # скачали заранее — в памяти держать незачем
+                elif key == "vosk_tts":
+                    m = self._mirror("vosk_tts")
+                    self.vosk_tts.mirror = self.s.get("tts", "vosk_url") or (m or {}).get("url") or self.updater.mirrors.get("vosk_tts") or ""
+                    self.vosk_tts.mirror_sha = (m or {}).get("sha256", "")
+                    self.vosk_tts.ensure(on_progress=prog)
+                else:
+                    self.piper.mirror = self._mirror("piper")
+                    self.piper.ensure(key[6:], on_progress=prog)
+                log.info("⬇️ Модель «%s» скачана", key)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Модель «%s» не скачалась: %s", key, e)
+                self.note(f"Не скачалось: {e}")
+            finally:
+                self._model_busy.discard(key)
+                self.status.get("downloads", {}).pop("m:" + key, None)
+                self.emit("models", **self.models_status())
+        threading.Thread(target=run, name="model-get", daemon=True).start()
+        return {"started": True}
+
     def _mirror(self, key):
         """Модель на своём сайте (dewiar.pro/dwrapp): {"url", "sha256", …} или None."""
         try:

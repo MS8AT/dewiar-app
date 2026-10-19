@@ -40,6 +40,10 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         msgs = body["messages"]
+        ctx = "\n".join(m["content"].split("(Сообщение пользователя)\n")[0] for m in msgs if m["role"] == "user"
+                        and isinstance(m["content"], str) and "(Сообщение пользователя)\n" in m["content"])   # справка к сообщению (время, дела)
+        msgs = [dict(m, content=m["content"].split("(Сообщение пользователя)\n")[-1]) if m["role"] == "user" and isinstance(m["content"], str) else m
+                for m in msgs]
         user = next((m["content"] for m in reversed(msgs) if m["role"] == "user" and isinstance(m["content"], str)), "")
         first_q = next((m["content"] for m in reversed(msgs) if m["role"] == "user" and isinstance(m["content"], str)
                         and not m["content"].startswith("СТОП")), "")
@@ -88,7 +92,7 @@ class H(BaseHTTPRequestHandler):
             send({"content": "Завтра в Минске +12 и облачно."}); send({}, "stop")
         elif msgs[-1]["role"] == "tool":
             send({"content": "Взялась за презентацию — сообщу, когда будет готово."}); send({}, "stop")
-        elif "ПЛАНЫ ПОЛЬЗОВАТЕЛЯ" in str(msgs[0].get("content")) and "полить цветы" in str(msgs[0].get("content")).lower():
+        elif "ПЛАНЫ ПОЛЬЗОВАТЕЛЯ" in str(msgs[0].get("content")) + ctx and "полить цветы" in (str(msgs[0].get("content")) + ctx).lower():
             send({"content": "Сегодня впереди — полить цветы."}); send({}, "stop")
         elif "план" in first_q or "просил" in first_q:
             send({"content": "Ты спросил, что у нас по плану. Достаю календарь и напоминания — одну секунду."}); send({}, "stop")

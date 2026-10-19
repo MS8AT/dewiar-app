@@ -780,17 +780,33 @@ async function convFold() {
   } catch (e) { console.log("разговор: свернуть не вышло — " + e.message); }
   finally { convBusy = false; }
 }
-function convPrompt() {
-  let out = "";
-  if (conv.summary) {
-    const mins = conv.started ? Math.round((Date.now() - conv.started) / 60000) : 0;
-    out += `Это продолжение долгого разговора (идёт ${mins >= 60 ? Math.floor(mins / 60) + " ч " + (mins % 60) + " мин" : mins + " мин"}, ${conv.turns} реплик). Раньше в нём было (кратко):\n`
-      + conv.summary + "\nОпирайся на это, если пользователь возвращается к прежнему, — не переспрашивай то, что уже известно. Последние реплики — ниже, дословно.";
-  }
+function convPrompt() {                         // в подсказку — только редко меняющееся (содержание раньше сказанного)
+  return conv.summary ? "Это продолжение долгого разговора. Раньше в нём было (кратко):\n" + conv.summary
+    + "\nОпирайся на это, если пользователь возвращается к прежнему, — не переспрашивай то, что уже известно. Последние реплики — ниже, дословно." : "";
+}
+function convNote() {                           // сколько идёт разговор и перерыв — в справку к вопросу (turnContext)
+  const out = [];
+  if (conv.summary) { const mins = conv.started ? Math.round((Date.now() - conv.started) / 60000) : 0;
+    out.push(`Разговор идёт ${mins >= 60 ? Math.floor(mins / 60) + " ч " + (mins % 60) + " мин" : mins + " мин"}, ${conv.turns} реплик.`); }
   const gap = conv.last ? Date.now() - conv.last : 0;
   if (gap > 20 * 60000) { const g = Math.round(gap / 60000);
-    out += (out ? "\n\n" : "") + `Перед этим сообщением в разговоре был перерыв ${g >= 60 ? Math.floor(g / 60) + " ч " + (g % 60) + " мин" : g + " мин"}. Если новая просьба не связана с прежней темой — просто выполни её, не возвращаясь к старому.`; }
-  return out;
+    out.push(`Перед этим сообщением в разговоре был перерыв ${g >= 60 ? Math.floor(g / 60) + " ч " + (g % 60) + " мин" : g + " мин"}. Если новая просьба не связана с прежней темой — просто выполни её, не возвращаясь к старому.`); }
+  return out.join(" ");
+}
+/* Справка к вопросу: время, ближайшая неделя (экзамен 11.10: «в среду» не считать в уме), разговор, найденное. Кладётся
+   в начало последнего сообщения пользователя (putContext), не в подсказку и не в историю. */
+function turnContext() {
+  const week = [1, 2, 3, 4, 5, 6, 7].map(i => { const d = new Date(Date.now() + i * 864e5); return `${WD[d.getDay()]} — ${d.getDate()} ${MON[d.getMonth()]}`; }).join("; ");
+  const n = convNote();
+  let rp = ""; try { rp = recentPrompt() || ""; } catch (e) { }
+  return (rp ? rp.trim() + "\n\n" : "") + `Сейчас ${nowText()}. Ближайшие дни: ${week}. Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой и сравни.` + (n ? " " + n : "");
+}
+function putContext(msgs, ctx) {
+  const last = msgs[msgs.length - 1];
+  if (!ctx || !last || last.role !== "user") return;
+  const head = "(Справка к этому сообщению — для тебя, вслух её не упоминай)\n" + ctx + "\n\n(Сообщение пользователя)\n";
+  if (Array.isArray(last.content)) { const t = last.content.find(x => x.type === "text"); if (t) t.text = head + (t.text || ""); else last.content.unshift({ type: "text", text: head.trim() }); }
+  else last.content = head + String(last.content || "");
 }
 const NEW_CONV_RX = /^(?:давай(?:те)?\s+)?(?:начн(?:ем|и)|начать)\s+(?:новый\s+разговор|разговор\s+заново|сначала|заново|с\s+чистого\s+листа)$|^(?:забудь|сотри|очисти)\s+(?:наш\s+|этот\s+|весь\s+)?разговор$|^новый\s+разговор$|^новая\s+тема$/;
 
@@ -1476,10 +1492,9 @@ function systemPrompt() {
     + "У тебя есть камера телефона (take_photo): «сфотографируй меня», «посмотри, что это», «прочитай надпись» — снимай и описывай. "
     + "«Посмотри, как я выгляжу», «покажи мне моё лицо» — take_photo с camera: front (камера на человека); «где я», «что вокруг», «другой камерой» — camera: back. "
     + "Снимок уже сделан и его просят показать снова («покажи фото», «покажи на экране») — show_photo. Не отвечай «Вот» и «Смотрю», не вызвав камеру: без вызова ничего не покажется.",
-    `Сейчас ${nowText()}. Это время верное, а время и даты из прошлых реплик разговора устарели — не повторяй их.`,
-    // ближайшая неделя по дням — «в среду», «через сколько дней» не считаются в уме с ошибкой (экзамен 11.10)
-    "Ближайшие дни: " + [1, 2, 3, 4, 5, 6, 7].map(i => { const d = new Date(Date.now() + i * 864e5); return `${WD[d.getDay()]} — ${d.getDate()} ${MON[d.getMonth()]}`; }).join("; ")
-      + ". Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой и сравни."];
+    // время меняется каждую минуту — оно в справке к вопросу (turnContext), а подсказка остаётся прежней: свой сервер
+    // модели берёт её из кэша, а не перечитывает целиком (отзыв 19.10: «на своём сервере долго отвечает»)
+    "Текущие дата и время — в справке в начале последнего сообщения пользователя; они верные, а время и даты из прошлых реплик разговора устарели — не повторяй их."];
   const hands = typeof D.handsState === "function" ? D.handsState() : "";
   if (!D.web) parts.push(hands === "on"
     ? "Ты умеешь работать в других приложениях телефона, как человек пальцем: open_app, затем phone_screen (что на экране), phone_tap, phone_type, phone_scroll, phone_nav. "
@@ -1492,7 +1507,7 @@ function systemPrompt() {
   if (S.memory.length) parts.push("Что ты знаешь о пользователе:\n- " + S.memory.slice(-40).join("\n- "));
   { const rl = Object.entries(S.relations || {}).filter(([, v]) => v && v.name); if (rl.length) parts.push("Кто есть кто в контактах (для звонков и сообщений): " + rl.map(([k, v]) => `${REL_RU[k] || k} — «${v.name}»`).join(", ") + "."); }
   const mp = mindPrompt(); if (mp) parts.push(mp.trim());
-  try { const rp = recentPrompt(); if (rp) parts.push(rp); } catch (e) { }
+  // «что было недавно» растёт с каждой репликой — в справке к вопросу (turnContext), чтобы подсказка не менялась
   try { parts.push(donePrompt()); } catch (e) { }
   if (S.sync.on && syncCred() && pcSeen()) parts.push("Большую задачу (исследование с отчётом, документ, презентация, работа с файлами или кодом) не делай в разговоре — передай компьютеру пользователя (start_task) и скажи, что взялся: ход и итог появятся здесь, в «Мой день» → «Сделанное».");
   try { parts.push(clPrompt()); } catch (e) { }
@@ -1981,15 +1996,17 @@ async function ask(text, opts = {}) {
   let final = "", switchTo = null;
   lastDone = "";
   try {
+    const ctxParts = [turnContext()];                   // меняющееся — в справку к вопросу, подсказка остаётся прежней
     if (!opts.hidden) {
       const kb = await personaKnowledge(text);
       if (turnAbort !== ctl) return;
-      if (kb) { msgs[0].content += kb; showBot("", "wait"); }
+      if (kb) { ctxParts.push(kb.trim()); showBot("", "wait"); }
       const pl = agendaPlans(text);                    // «что у меня в среду?» — запомненное и напоминания на этот день сразу
-      if (pl) msgs[0].content += "\n\nПЛАНЫ ПОЛЬЗОВАТЕЛЯ на этот день (кроме календаря):" + pl;
+      if (pl) ctxParts.push("ПЛАНЫ ПОЛЬЗОВАТЕЛЯ на этот день (кроме календаря):" + pl);
       if (DIAGRAM_ASK.test(text))                      // экзамен 15.10: «Схема готова, она уже на экране» — а схемы нет
         msgs[0].content += "\n\nСЕЙЧАС ПРОСЯТ СХЕМУ: в этом ответе обязательно блок ```mermaid (flowchart LR или TD, подписи узлов по-русски в кавычках) — только он и рисует схему на экране. Без блока схемы нет: не пиши «схема готова» или «на экране», не нарисовав её, и не делай схему через make_app. Сначала блок, потом одна-две фразы о главном.";
     }
+    putContext(msgs, ctxParts.filter(Boolean).join("\n\n"));
     const called = new Set(); let nudged = false;      // какие инструменты уже вызваны в этом ходе; напоминали ли «сделай по-настоящему»
     let toolOk = false, toolErr = "", spoke = false;   // хоть один инструмент сработал; первая ошибка; просили ли ответить словами
     let maxRounds = 6;                                 // работа в других приложениях — до 30 кругов (открыть, прочитать, нажать, ввести…)

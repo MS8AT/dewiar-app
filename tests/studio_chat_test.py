@@ -36,6 +36,7 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         q = next((m["content"] for m in reversed(body["messages"]) if m["role"] == "user" and isinstance(m["content"], str)), "")
+        q = q.split("(Сообщение пользователя)\n")[-1]          # справка к сообщению (время, найденное) — не сам вопрос
         self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
         for part in ("Отвечаю ", "на «" + q[:60] + "»."):
             self.wfile.write(f"data: {json.dumps({'choices': [{'delta': {'content': part}}]}, ensure_ascii=False)}\n\n".encode()); time.sleep(0.2)

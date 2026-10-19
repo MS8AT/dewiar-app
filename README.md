@@ -117,6 +117,7 @@
 | Где | Как |
 |---|---|
 | **Ubuntu 22.04 / 24.04** | `sudo apt install ./dewiar-assistant_X.Y.Z_all.deb` — дальше обновляется сам |
+| **Другой Linux** (Arch, Manjaro, Omarchy, Fedora, openSUSE, ALT, Void, Debian…) | `curl -fsSL https://raw.githubusercontent.com/dwr-git/dewiar-app/main/install.sh \| bash` — поставит библиотеки окна и звука вашим менеджером пакетов и сам Dewiar; удалить — `bash install.sh --remove` |
 | **Windows 10 / 11** | `Dewiar-Setup-X.Y.Z-online.exe` (< 30 МБ) или полный `Dewiar-Setup-X.Y.Z.exe`; права администратора не нужны |
 | **Android** | [`Dewiar.apk`](https://dewiar.pro/dwrapp/Dewiar.apk) или QR-код в студии → «Подключение» → «Dewiar на телефоне» |
 | **Сервер, круглосуточно** | тот же `.deb`, затем `sudo dewiar-server setup` — [подробнее](docs/self-hosting.md#ассистент-круглосуточно-dewiar-server) |
@@ -162,7 +163,7 @@ flowchart LR
 | `server/` | Серверы речи и синтеза для своей машины с видеокартой (`install-server.sh`) |
 | `packaging/`, `tools/` | Пакет `.deb`, установщики Windows, выпуск версии одной командой |
 | `data/` | Облики персонажей, встроенные навыки, модель VAD, радио |
-| `tests/` | 194 наборов проверок: настоящее ядро, окна в Chromium, телефон на подменённом мосте |
+| `tests/` | 197 наборов проверок: настоящее ядро, окна в Chromium, телефон на подменённом мосте |
 
 </details>
 

@@ -1166,3 +1166,15 @@ html.st-light dialog.nwdlg { background: #fff; }
   background: var(--soft2, rgba(255,255,255,.1)); color: var(--ink); }
 .tr-box .tplay svg { width: 14px; height: 14px; fill: currentColor; stroke: none; }
 .tr-box .tplay[data-fill] svg { fill: none; stroke: currentColor; stroke-width: 2; }
+
+/* «Скачано на этом компьютере» (Слух, Голос): модель строкой — что это, состояние, «Скачать» */
+.mdl { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+.mdl-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; padding: 11px 14px; border-radius: 14px; background: var(--glass); }
+.mdl-row b { font-weight: 600; font-size: 14px; }
+.mdl-row small { grid-column: 1; color: var(--dim); font-size: 12.5px; }
+.mdl-row .st { grid-row: 1 / span 2; grid-column: 2; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+.mdl-row .st .ok { color: var(--good); }
+.mdl-row .st .use { color: var(--ink); }
+.mdl-row .bar { width: 90px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }
+.mdl-row .bar i { display: block; height: 100%; background: var(--brand); transition: width .3s; }
+@media (max-width: 640px) { .mdl-row { grid-template-columns: 1fr; } .mdl-row .st { grid-row: auto; grid-column: 1; } }
