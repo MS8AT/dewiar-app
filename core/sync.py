@@ -37,7 +37,7 @@ from settings import STATE_DIR
 log = logging.getLogger("dewiar.sync")
 
 BASE_KINDS = ("reminder", "note", "money", "memory")          # знает любой сервер
-EXTRA_KINDS = ("soul", "mind", "diary", "dayturn", "taskreq", "task", "vault", "done")   # тот же список $extra в cloud.php
+EXTRA_KINDS = ("soul", "mind", "diary", "dayturn", "taskreq", "task", "vault", "done", "persona")   # тот же список $extra в cloud.php
 VAULT_MAX = 300_000                               # сервер не принимает запись больше 300 КБ — такие заметки не шлём
 VAULT_FILES = 15000
 CHUNK = 400                                       # изменений за один запрос (сервер берёт до 2000; первая отправка большого хранилища — частями)
@@ -193,6 +193,16 @@ class Sync:
     def _snap_extra(self, out):
         h = self.host
         ok = set(self.state.get("kinds") or ())
+        pers = getattr(h, "personas", None)
+        if pers is not None and "persona" in ok and hasattr(pers, "own_ids"):
+            # свои персонажи (19.10: создали на телефоне — пусть будет и на компьютере, и наоборот); облик — до 250 КБ
+            for p in pers.all():
+                if p.get("id") not in pers.own_ids():
+                    continue
+                av = pers.avatar_data_url(p) if p.get("avatar") else ""
+                out["persona:" + p["id"]] = {"name": p.get("name", ""), "gender": p.get("gender") or "female", "role": p.get("role") or "",
+                                             "about": p.get("about") or p.get("character") or "", "color": p.get("color") or "",
+                                             "avatar": av if len(av) < 250000 else ""}
         soul = getattr(h, "soul", None)
         if soul is not None and "soul" in ok:
             for name in soul.souls():
@@ -375,7 +385,7 @@ class Sync:
                 return False
             rel = self.state.get("vmap", {}).get(iid)
             return not (rel and (v / rel).exists())
-        if kind in ("soul", "mind", "diary", "task", "done") and self.state.get("_extra_failed"):
+        if kind in ("soul", "mind", "diary", "task", "done", "persona") and self.state.get("_extra_failed"):
             return False
         return True
 
@@ -434,12 +444,45 @@ class Sync:
         p.write_text(text, encoding="utf-8")
         return None
 
+    def _apply_persona(self, iid, d, deleted):
+        """Свой персонаж с телефона: создать, обновить (имя, пол, роль, характер, цвет, облик) или удалить. Встроенных и из
+        галереи не трогаем. Характер с телефона короткий («весёлая, отвечает коротко») — дописываем «Ты — имя, роль.»"""
+        pers = getattr(self.host, "personas", None)
+        if pers is None or not hasattr(pers, "own_ids") or not re.fullmatch(r"[\w-]{1,40}", iid or ""):
+            return False
+        if iid in pers.fixed_ids():
+            return False
+        cur = next((p for p in pers.all() if p.get("id") == iid), None)
+        if deleted:
+            if cur is not None:
+                pers.delete(iid)
+                log.info("🔄 Персонаж «%s» удалён на другом устройстве", cur.get("name"))
+            return None
+        name = str(d.get("name") or "").strip()[:24]
+        if not name:
+            return False
+        about, role = str(d.get("about") or "").strip()[:4000], str(d.get("role") or "").strip()[:60]
+        char = about if re.match(r"\s*Ты\s", about) else f"Ты — {name}{', ' + role if role else ''}. {about}".strip()
+        p = {"id": iid, "name": name, "gender": "male" if d.get("gender") == "male" else "female", "role": role, "about": about,
+             "color": d.get("color") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(d.get("color") or "")) else "#8A9BFF",
+             "character": char, "wake": [name.lower()]}
+        av = str(d.get("avatar") or "")
+        if av.startswith("data:image/") and (cur is None or pers.avatar_data_url(cur) != av):
+            p["avatar_data"] = av
+        if cur is not None and all(cur.get(k) == p[k] for k in ("name", "gender", "role", "color", "character")) and "avatar_data" not in p:
+            return None
+        pers.save(p)
+        log.info("🔄 Персонаж «%s» — с другого устройства", name)
+        return None
+
     def _apply_extra(self, kind, iid, d, deleted, it_updated=0):
         """Душа, конституция, выводы, дневник — удалением не стираются: у другого устройства запись могла просто
         выпасть из снимка (дневник там — за DIARY_DAYS дней), а написанное терять нельзя. Разговор (dayturn) и задачу (taskreq)
         с телефона забираем к себе; в следующем снимке их нет — и run_once сам шлёт их удаление, облако их забывает.
         Ход задач другого компьютера (task) — только для телефона: пропускаем."""
         h = self.host
+        if kind == "persona":
+            return self._apply_persona(iid, d, deleted)
         if kind in ("soul", "mind", "diary", "task") and deleted:
             return False
         if kind == "soul":

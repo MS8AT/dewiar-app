@@ -566,6 +566,7 @@ body.neu .snd.on i, body.neu .snd.play i { background: var(--brand); }
 #b-close { position: relative; }
 #b-close .dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: #FF7AB6; box-shadow: 0 0 8px #FF7AB6; display: none; }
 #b-close.has .dot { display: block; }
+@media (max-width: 420px) { .who svg { display: none; } .who { padding-right: 12px; } }   /* своё имя «Меган» не обрезается до «Мег…» (19.10) */
 @media (max-width: 380px) { #top { gap: 3px; } #top .ib { width: 38px; height: 38px; } #top .ib svg { width: 20px; height: 20px; } .who span { max-width: 72px; }
   .who { gap: 7px; padding-right: 10px; } .who svg { display: none; } }   /* стрелка — лишняя: имя важнее */
 .clp { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 10px 10px 12px; margin-bottom: 6px; border-radius: 16px; background: var(--frost); text-align: left; }
@@ -769,3 +770,17 @@ body.light .donewhy p { color: var(--ink); }
 /* «Управлять приложениями»: шаги включения (Android 13+ — сначала «Разрешить ограниченные настройки», отчёт №87) */
 .hsteps { margin: 0 0 12px; padding-left: 20px; font-size: 14px; line-height: 1.45; color: var(--muted); }
 .hsteps li { margin: 4px 0; } .hsteps b { color: var(--ink); font-weight: 600; }
+/* свой персонаж: строка списка с карандашом, редактор (облик — круг из галереи, пол, цвет) */
+.pirow { display: flex; align-items: center; gap: 6px; } .pirow .pi { flex: 1; min-width: 0; margin-bottom: 6px; }
+.pirow .pedit { flex: none; margin-bottom: 6px; } .pnew { margin: 4px 0 12px; }
+.pe-top { display: flex; gap: 14px; align-items: flex-start; }
+.pe-ava { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
+.pe-ava span { width: 84px; height: 84px; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: var(--field); }
+.pe-ava img { width: 100%; height: 100%; object-fit: cover; } .pe-ava i { font-style: normal; font-size: 30px; color: var(--muted); }
+.pe-ava small { color: var(--muted); font-size: 12px; }
+.seg { display: inline-flex; background: var(--field); border-radius: 12px; padding: 3px; gap: 3px; margin-top: 2px; }
+.seg button { padding: 7px 16px; border-radius: 10px; color: var(--muted); font-weight: 600; } .seg button.on { background: var(--card, #fff2); color: var(--ink); }
+.pe-colors { display: flex; gap: 10px; margin: 4px 0 2px; }
+.pe-colors button { width: 30px; height: 30px; border-radius: 50%; background: var(--c); outline: 2px solid transparent; outline-offset: 3px; }
+.pe-colors button.on { outline-color: var(--ink); }
+

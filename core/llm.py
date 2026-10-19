@@ -36,6 +36,10 @@ CTX_TEXT = ("модели не хватило окна контекста — р
             "длину контекста (Context Length) до 8192 или больше")
 
 
+# LM Studio сам выгружает модель по таймеру простоя (19.10: «Model is unloaded.») — следующий запрос её загрузит: один повтор
+UNLOADED_RX = re.compile(r"model (?:is |was |has been )?unloaded|no models? (?:is )?loaded|model (?:is )?not loaded", re.I)
+
+
 def ctx_full(e):
     """Ошибка — «не хватило контекста»?"""
     return bool(CTX_RX.search(str(e) or ""))
@@ -1093,6 +1097,11 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
         if not locals().get("got_text") and ctx_full(e):
             yield from _ctx_retry(p, system, messages, cancel, tools, _retry, e)
             return
+        if not locals().get("got_text") and UNLOADED_RX.search(str(e)) and not p.get("_reload"):
+            log.info("Сервер %s выгрузил модель (%s) — повторяю: загрузит снова", base, e)
+            time.sleep(1.5)
+            yield from stream_events(dict(p, _reload=True), system, messages, cancel, tools, _retry)
+            return
         # Отказ пришёл строкой «error» уже внутри потока (HTTP 200): так отвечают Ollama с облачными моделями и шлюзы —
         # «upstream returned HTTP 400». Пока модель ничего не сказала, упрощаем запрос по шагам:
         # 1) история вызовов — текстом; 2) и сами функции — текстом; 3) короче: начало и последние шаги.
@@ -1122,6 +1131,11 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
         msg = _humanize(e, base)
         if msg == CTX_TEXT and not locals().get("got_text"):
             yield from _ctx_retry(p, system, messages, cancel, tools, _retry, e)
+            return
+        if UNLOADED_RX.search(msg) and not locals().get("got_text") and not p.get("_reload"):
+            log.info("Сервер %s выгрузил модель (%s) — повторяю: загрузит снова", base, msg[:120])
+            time.sleep(1.5)
+            yield from stream_events(dict(p, _reload=True), system, messages, cancel, tools, _retry)
             return
         raise LLMError(msg) from e
 

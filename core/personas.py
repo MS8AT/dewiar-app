@@ -594,7 +594,7 @@ class Personas:
                 base, n = pid, 2
                 while pid in self.items:
                     pid, n = f"{base}-{n}", n + 1
-            keep = {k: p[k] for k in ("name", "gender", "wake", "style", "color", "tagline",
+            keep = {k: p[k] for k in ("name", "gender", "wake", "style", "color", "tagline", "about",
                                       "character", "voice", "role", "skills", "focus", "route", "gallery", "knowledge", "template") if k in p}
             if pid in TEMPLATES and pid in self.items:
                 keep["template"] = True                # свой из шаблона: живое лицо и роль — из шаблона (reload)
@@ -625,6 +625,16 @@ class Personas:
                                                      encoding="utf-8")
             self.reload()
             return pid
+
+    @staticmethod
+    def fixed_ids():
+        """id встроенных, шаблонов и галереи — их между устройствами не синхронизируем (у каждого свой комплект)."""
+        return set(BUILTIN) | set(TEMPLATES) | set(GALLERY)
+
+    def own_ids(self):
+        """Свои персонажи (созданы человеком здесь или пришли с телефона) — их синхронизация переносит между устройствами."""
+        fixed = self.fixed_ids()
+        return {pid for pid in self.items if pid not in fixed and not self.items[pid].get("gallery")}
 
     def delete(self, pid):
         """Свой персонаж удаляется, встроенный сбрасывается к заводскому (вместе с фото и выученным произношением)."""

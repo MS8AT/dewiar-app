@@ -794,6 +794,26 @@ const NEW_CONV_RX = /^(?:давай(?:те)?\s+)?(?:начн(?:ем|и)|нача
 
 /* ---------- персонажи и облик ---------- */
 const PERSONAS = window.DEWIAR_PERSONAS || [{ id: "lira", name: "Лира", style: "strings", color: "#9BD4FF", character: "Ты — Лира, голосовой помощник Dewiar.", focus: "", gender: "female", role: "Главная помощница", aliases: ["лира"] }];
+/* Свои персонажи на телефоне (19.10: «на телефоне нет функции создать персонажа», «хочу этот аватар»): имя, кто (он/она),
+   роль, характер, облик из галереи, цвет. Хранятся в pref my_personas и стоят в PERSONAS после встроенных — дальше всё
+   как у встроенных: имя зовёт, характер — в подсказке модели, облик — портретом. id «u…» — свои, встроенные не трогаем. */
+const MY_MAX = 8;
+function myPersonas() { try { const l = JSON.parse(prefGet("my_personas") || "[]"); return Array.isArray(l) ? l.filter(x => x && x.id && x.name) : []; } catch (e) { return []; } }
+function myPersonaFull(x) {
+  const fem = x.gender === "female", role = String(x.role || "").trim();
+  return Object.assign({ style: x.avatar ? "photo" : "nexus", color: "#8A9BFF", focus: "", main: false, skills: [], tagline: "" }, x, {
+    custom: true, aliases: [String(x.name).toLowerCase().replace(/ё/g, "е")],
+    role: role || (fem ? "Своя помощница" : "Свой помощник"),
+    // характер с компьютера уже целиком («Ты — …») — как есть; свой короткий — с именем и ролью впереди
+    character: (/^\s*Ты\s/.test(x.about || "") ? String(x.about).trim() : `Ты — ${x.name}${role ? ", " + role : ""}. ` + (String(x.about || "").trim() || (fem ? "Тёплая, внимательная и живая собеседница." : "Спокойный, внимательный и живой собеседник.")))
+      + " Ты — персонаж Dewiar: помогаешь делом (напоминания, заметки, звонки, поиск) и говоришь своим голосом и характером.",
+  });
+}
+function myPersonasApply() {
+  for (let i = PERSONAS.length - 1; i >= 0; i--) if (PERSONAS[i].custom) PERSONAS.splice(i, 1);
+  for (const x of myPersonas()) PERSONAS.push(myPersonaFull(x));
+}
+myPersonasApply();
 // с 0.4.27 встроенных двое — Лира и Патрик; выбранный прежде Агент, Джарвис, Эва или Кодер — теперь Лира
 if (!PERSONAS.some(p => p.id === S.persona)) { S.persona = PERSONAS[0].id; try { prefSet("settings", JSON.stringify(S)); } catch (e) { } }
 const persona = () => PERSONAS.find(p => p.id === S.persona) || PERSONAS[0];
@@ -2097,7 +2117,7 @@ async function ask(text, opts = {}) {
     }
     if (e.net) netIncident(e);                          // повторы — уже в round1 (по кругу, без повторных действий)
     if (e.human) { plog("warn", "облако: " + e.message); showBot(e.message, "err"); say(e.message); }       // облако Dewiar объясняет само: «заряд закончился…»
-    else if (SELF_HOST_RX.test(llmBase() + "/")) { const m = "Не получилось связаться с мозгом: " + SELF_HOST_TEXT; console.warn(m); showBot(m, "err"); say("Не получилось связаться с мозгом: адрес модели указывает на сам телефон. Как поправить — на экране."); }
+    else if (!D.mock && SELF_HOST_RX.test(llmBase() + "/")) { const m = "Не получилось связаться с мозгом: " + SELF_HOST_TEXT; console.warn(m); showBot(m, "err"); say("Не получилось связаться с мозгом: адрес модели указывает на сам телефон. Как поправить — на экране."); }
     else { const m = "Не получилось связаться с мозгом: " + e.message; console.warn(m); showBot(m, "err"); say("Не получилось связаться с мозгом."); }
   } finally {
     if (turnAbort === ctl) { busy = false; turnAbort = null; }
@@ -3765,7 +3785,11 @@ document.addEventListener("touchend", e => { if (touchY != null && e.changedTouc
 let pEnts = [];
 $("#who").onclick = () => {
   pEnts.forEach(e => e.dead = true); pEnts = [];
-  $("#plist").innerHTML = PERSONAS.map(p => `<button class="pi${p.id === S.persona ? " on" : ""}" data-id="${p.id}"><canvas></canvas><span><b>${esc(p.name)}</b><small>${esc(p.role || "")}${p.tagline ? " · " + esc(p.tagline) : ""}</small></span></button>`).join("");
+  $("#plist").innerHTML = PERSONAS.map(p => `<div class="pirow"><button class="pi${p.id === S.persona ? " on" : ""}" data-id="${p.id}"><canvas></canvas><span><b>${esc(p.name)}</b><small>${esc(p.role || "")}${p.tagline ? " · " + esc(p.tagline) : ""}</small></span></button>`
+    + (p.custom ? `<button class="ib soft pedit" data-e="${esc(p.id)}" title="Изменить" aria-label="Изменить: ${esc(p.name)}"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg></button>` : "") + `</div>`).join("")
+    + (myPersonas().length < MY_MAX ? `<button class="btn w pnew" id="p-new">+ Свой персонаж</button>` : "");
+  $$("#plist .pedit").forEach(b => b.onclick = () => personaEditor(b.dataset.e));
+  if ($("#p-new")) $("#p-new").onclick = () => personaEditor("");
   $$("#plist .pi").forEach(b => {
     const p = PERSONAS.find(x => x.id === b.dataset.id);
     const e = new DewiarEntity($("canvas", b), { style: p.avatar && p.style !== "aura" ? "photo" : p.style, color: p.color, image: p.avatar || null, plate: true, ring: false });
@@ -4967,7 +4991,7 @@ function wireSettings(info) {
    Запись, которой больше нет в syncSnapshot(), уходит как удаление — и другие устройства её тоже удалят.
    Формат записей, виды (SYNC_KINDS) и порядок обмена — общие с core/sync.py (компьютер) и ?p=/sync в cloud.php:
    меняешь здесь — меняй и там. Дополнительные виды (soul, mind, diary, dayturn, taskreq, task, done) шлём, только если их знает сервер. */
-const SYNC_KINDS = ["reminder", "note", "money", "memory", "soul", "mind", "diary", "dayturn", "taskreq", "task", "done"];
+const SYNC_KINDS = ["reminder", "note", "money", "memory", "soul", "mind", "diary", "dayturn", "taskreq", "task", "done", "persona"];
 let syncTimer = null, syncBusy = false, syncStatus = { ok: null, at: 0, error: "", devices: [], counts: {} };
 /* Чьи данные: аккаунт dewiar.pro (если вошли) или ключ Dewiar (dw-…). Есть и то и другое — ключ уходит в link
    (X-Sync-Link): сервер связывает их в одно пространство. -> {token, link, base, via} или null — синхронизировать нечем. */
@@ -5106,6 +5130,7 @@ function syncSnapshot() {
   if (ks.includes("dayturn")) qGet("dayq").forEach(x => { out["dayturn:" + x.id] = { ts: x.ts, who: x.who, you: x.you, bot: x.bot }; });
   if (ks.includes("taskreq")) qGet("taskq").forEach(x => { out["taskreq:" + x.id] = { title: x.title, goal: x.goal, ts: x.ts, cloud: !!x.cloud }; });
   if (ks.includes("done")) doneList().forEach(x => { out["done:" + x.id] = { title: x.title, at: +x.at, src: x.src || "", rid: x.rid || "" }; });   // сделанные дела (core/done.py)
+  if (ks.includes("persona")) myPersonas().forEach(x => { out["persona:" + x.id] = { name: x.name, gender: x.gender || "female", role: x.role || "", about: x.about || "", color: x.color || "", avatar: x.avatar || "" }; });   // свои персонажи — и на компьютер
   return out;
 }
 const TASK_RU = { running: "в работе", waiting: "ждёт ответа", paused: "на паузе", done: "готово", failed: "не вышло", sleeping: "ждёт времени", stopped: "остановлена" };
@@ -5113,6 +5138,16 @@ const TASK_RU = { running: "в работе", waiting: "ждёт ответа", 
    выводы — их ведёт компьютер; очереди dayturn/taskreq): syncRun помечает её skip, чтобы не отправить обратно удалением. */
 function syncApply(it) {
   const d = it.data || {}, del = it.deleted;
+  if (it.kind === "persona") {                      // свой персонаж с компьютера или другого телефона
+    const l = myPersonas().filter(x => x.id !== it.id);
+    if (!del) { if (!d.name) return false; l.push({ id: it.id, name: String(d.name).slice(0, 24), gender: d.gender === "male" ? "male" : "female", role: String(d.role || "").slice(0, 60),
+      about: String(d.about || "").slice(0, 4000), color: /^#[0-9a-f]{6}$/i.test(d.color || "") ? d.color : "#8A9BFF", avatar: /^data:image\//.test(d.avatar || "") ? d.avatar : "" }); }
+    prefSet("my_personas", JSON.stringify(l.slice(-MY_MAX)));
+    myPersonasApply();
+    if (!PERSONAS.some(x => x.id === S.persona)) { S.persona = PERSONAS[0].id; saveS(); }
+    applyPersona();
+    return true;
+  }
   if (it.kind === "reminder") {
     if (del) { D.alarmCancel(it.id); return true; }
     const exists = JSON.parse(D.alarms() || "[]").some(x => x.id === it.id);
@@ -5694,6 +5729,68 @@ async function askKnowledge(question, baseName) {
 }
 
 /* Знания персонажа — в листе «Кто отвечает» */
+/* Редактор своего персонажа (лист #sh-pedit): облик из галереи — квадрат 384×384 по центру (JPEG ~40 КБ, хранится здесь же). */
+const PE_COLORS = ["#9BD4FF", "#FF9BC8", "#B79BFF", "#7FE0B0", "#FFC46B", "#FF8A7A"];
+let peAvatar = "";
+function personaEditor(id) {
+  const x = myPersonas().find(v => v.id === id) || { id: "", name: "", gender: "female", role: "", about: "", color: PE_COLORS[myPersonas().length % PE_COLORS.length], avatar: "" };
+  peAvatar = x.avatar || "";
+  $("#pe-h").textContent = x.id ? `Персонаж: ${x.name}` : "Свой персонаж";
+  $("#pe-body").innerHTML = `<div class="card pe">
+      <div class="pe-top"><label class="pe-ava" title="Облик: фото из галереи"><input type="file" id="pe-file" accept="image/*" hidden><span id="pe-img"></span><small>Облик</small></label>
+        <div style="flex:1;min-width:0"><label class="f"><span>Имя — на него откликается</span><input id="pe-name" maxlength="24" value="${esc(x.name)}" placeholder="например, Меган" autocapitalize="words"></label>
+        <div class="seg" id="pe-g"><button data-g="female" class="${x.gender === "female" ? "on" : ""}">Она</button><button data-g="male" class="${x.gender !== "female" ? "on" : ""}">Он</button></div></div></div>
+      <label class="f"><span>Кто это — одной строкой</span><input id="pe-role" maxlength="60" value="${esc(x.role || "")}" placeholder="подруга, тренер по английскому, бизнес-советник"></label>
+      <label class="f"><span>Характер и как говорит</span><textarea id="pe-about" rows="4" maxlength="1200" placeholder="Весёлая, отвечает коротко, любит шутить; разбирается в фитнесе и питании. Обращается на «ты».">${esc(x.about || "")}</textarea></label>
+      <div class="pe-colors" id="pe-c">${PE_COLORS.map(c => `<button data-c="${c}" style="--c:${c}" class="${c === x.color ? "on" : ""}" aria-label="Цвет ${c}"></button>`).join("")}</div>
+      <p class="hint" style="margin:6px 0 10px">Облик, имя и характер — на этом телефоне; с синхронизацией — и на компьютере. Голос — по полу: женский или мужской. Знания из своих документов — в листе «Кто отвечает» → «Знания».</p>
+      <button class="btn p w" id="pe-save">Сохранить</button>
+      ${x.id ? `<button class="btn w" id="pe-del" style="margin-top:8px">Удалить персонажа</button>` : ""}
+      <div class="res" id="pe-res"></div></div>`;
+  const showAva = () => { $("#pe-img").innerHTML = peAvatar ? `<img src="${peAvatar}" alt="">` : `<i>+</i>`; };
+  showAva();
+  $$("#pe-g button").forEach(b => b.onclick = () => $$("#pe-g button").forEach(z => z.classList.toggle("on", z === b)));
+  $$("#pe-c button").forEach(b => b.onclick = () => $$("#pe-c button").forEach(z => z.classList.toggle("on", z === b)));
+  $("#pe-file").onchange = async (ev) => {
+    const f = ev.target.files && ev.target.files[0]; if (!f) return;
+    try { peAvatar = await squareAvatar(f, 384); showAva(); } catch (e) { $("#pe-res").className = "res bad"; $("#pe-res").textContent = "Фото не открылось: " + e.message; }
+  };
+  $("#pe-save").onclick = () => {
+    const name = $("#pe-name").value.trim().replace(/\s+/g, " "), r = $("#pe-res");
+    if (!/^[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё -]{1,23}$/.test(name)) { r.className = "res bad"; r.textContent = "Имя — буквами, от двух до 24: на него персонаж будет откликаться."; return; }
+    const clash = PERSONAS.find(p => p.id !== x.id && p.name.toLowerCase().replace(/ё/g, "е") === name.toLowerCase().replace(/ё/g, "е"));
+    if (clash) { r.className = "res bad"; r.textContent = `Имя «${clash.name}» уже занято — выберите другое.`; return; }
+    const v = { id: x.id || "u" + Date.now().toString(36), name, gender: ($("#pe-g .on") || {}).dataset ? $("#pe-g .on").dataset.g : "female",
+      role: $("#pe-role").value.trim(), about: $("#pe-about").value.trim(), color: ($("#pe-c .on") || { dataset: { c: PE_COLORS[0] } }).dataset.c, avatar: peAvatar };
+    const l = myPersonas().filter(q => q.id !== v.id); l.push(v);
+    try { prefSet("my_personas", JSON.stringify(l)); } catch (e) { r.className = "res bad"; r.textContent = "Не сохранилось: " + e.message; return; }
+    myPersonasApply(); S.persona = v.id; saveS(); applyPersona(); closeSheets(); syncSoon();
+    showYou(""); showBot(`${v.name} — с вами. Зовите по имени.`); say(gfix(`Привет! Это ${v.name}.`));
+  };
+  if ($("#pe-del")) $("#pe-del").onclick = () => {
+    if (!confirm(`Удалить персонажа «${x.name}»? Разговор и заметки останутся.`)) return;
+    prefSet("my_personas", JSON.stringify(myPersonas().filter(q => q.id !== x.id)));
+    myPersonasApply(); if (S.persona === x.id) { S.persona = PERSONAS[0].id; saveS(); applyPersona(); }
+    closeSheets(); toast(`«${x.name}» удалён`); syncSoon();
+  };
+  openSheet("#sh-pedit");
+}
+// фото из галереи → квадрат size×size по центру (как облик), JPEG
+function squareAvatar(file, size) {
+  return new Promise((ok, bad) => {
+    const u = URL.createObjectURL(file), im = new Image();
+    im.onload = () => {
+      const s = Math.min(im.naturalWidth, im.naturalHeight); if (!s) { bad(new Error("пустая картинка")); return; }
+      const c = document.createElement("canvas"); c.width = c.height = size;
+      // лицо обычно в верхней трети портрета — для высоких снимков берём квадрат чуть выше центра
+      const sx = (im.naturalWidth - s) / 2, sy = im.naturalHeight > im.naturalWidth ? Math.max(0, (im.naturalHeight - s) * 0.3) : (im.naturalHeight - s) / 2;
+      c.getContext("2d").drawImage(im, sx, sy, s, s, 0, 0, size, size);
+      URL.revokeObjectURL(u); ok(c.toDataURL("image/jpeg", 0.86));
+    };
+    im.onerror = () => { URL.revokeObjectURL(u); bad(new Error("не картинка")); };
+    im.src = u;
+  });
+}
 function renderKbPanel() {
   const box = $("#pkb"); if (!box) return;
   const p = persona(), mine = kbOf(p.id);
@@ -5895,7 +5992,7 @@ const SELF_HOST_RX = /^https?:\/\/(?:127\.\d+\.\d+\.\d+|localhost|0\.0\.0\.0|\[:
 const SELF_HOST_TEXT = "адрес 127.0.0.1 (localhost) на телефоне — это сам телефон, а не компьютер. Впишите адрес компьютера в домашней сети (например, 192.168.1.10:1234 — он виден в LM Studio или в «ipconfig»), а в LM Studio включите «Serve on Local Network» (в Ollama — OLLAMA_HOST=0.0.0.0).";
 async function probeServer(addr) {
   let a = normAddr(addr).replace(/\/v1$/, "");
-  if (SELF_HOST_RX.test(a + "/")) throw new Error(SELF_HOST_TEXT[0].toUpperCase() + SELF_HOST_TEXT.slice(1));
+  if (!D.mock && SELF_HOST_RX.test(a + "/")) throw new Error(SELF_HOST_TEXT[0].toUpperCase() + SELF_HOST_TEXT.slice(1));
   const hasPort = /:\d+$/.test(a), cands = hasPort ? [a] : [a + ":11434", a + ":8000", a + ":8080", a + ":1234", a];
   for (const b of cands) {
     try { const r = await http("GET", b + "/api/tags", { timeout: 4000 }); if (r.status === 200) { const m = (JSON.parse(r.body).models || []).map(x => x.name); if (m.length) return { kind: "ollama", base: b + "/v1", models: m }; } } catch (e) { }

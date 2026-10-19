@@ -155,6 +155,28 @@ except Exception as e:  # noqa: BLE001
     text = f"ошибка: {e}"
 ok(text == "Готово" and seen[0] > 2 and seen[-1] == 2, f"контекст переполнен — повтор с короткой историей и ответ: {text!r}, сообщений {seen}")
 srv.shutdown()
+LLMP2, seen2 = free(), []
+
+
+class LM2(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"])); seen2.append(1)
+        if len(seen2) == 1:                        # LM Studio выгрузил модель по таймеру
+            b = b'{"error":"Model is unloaded."}'
+            self.send_response(400); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(b); return
+        self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+        self.wfile.write(b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n')
+
+
+srv2 = http.server.ThreadingHTTPServer(("127.0.0.1", LLMP2), LM2); threading.Thread(target=srv2.serve_forever, daemon=True).start()
+try:
+    text2 = "".join(v for k, v in llm.stream_events(dict(prof, base_url=f"http://127.0.0.1:{LLMP2}/v1"), "sys", hist[-1:]) if k == "text")
+except Exception as e:  # noqa: BLE001
+    text2 = f"ошибка: {e}"
+ok(text2 == "ok" and len(seen2) == 2, f"«Model is unloaded» (LM Studio выгрузил модель) — один повтор, и ответ: {text2!r}, запросов {len(seen2)}")
+srv2.shutdown()
 
 # ---------- 7. чёрное окно WebView2 ----------
 sys.path.insert(0, str(ROOT / "ui"))
@@ -325,7 +347,7 @@ try:
         ok("set_reminder" in an["r"] and an["added"] == 0, f"телефон: встреча со временем — не заметка, а напоминание (№94): {an}")
         wv = pg.evaluate("""async () => { S.net.web_via = false; let e = ""; try { await dewiarWeb("search", "x"); } catch (x) { e = x.message; } S.net.web_via = true; return e; }""")
         ok("выключен" in wv, f"телефон: запасной путь через сервер Dewiar выключается (письмо 19.10): {wv}")
-        lh = pg.evaluate("""async () => { let e = ""; try { await probeServer("127.0.0.1:1234"); } catch (x) { e = x.message; } return e; }""")
+        lh = pg.evaluate("""async () => { const m = D.mock; D.mock = false; let e = ""; try { await probeServer("127.0.0.1:1234"); } catch (x) { e = x.message; } D.mock = m; return e; }""")
         ok("сам телефон" in lh, f"телефон: адрес 127.0.0.1 — объясняет, что это сам телефон, и как найти адрес компьютера: {lh[:90]}")
         pv = pg.evaluate("() => Object.keys(CLOUD)")
         ok("custom" in pv and "deepseek" in pv, f"телефон: «Другой — по адресу» и DeepSeek: {pv}")

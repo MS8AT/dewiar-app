@@ -17,6 +17,9 @@ permissions:
 jobs:
   tag:
     name: Метка и выпуск
+    # закрытый репозиторий: Actions выключены (19.10 — без оплаты GitHub задачи не запускаются, решено не платить);
+    # в открытой копии (dwr-git/dewiar-app) этот же файл работает как обычно
+    if: github.repository != 'dwr-git/dewiar'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
