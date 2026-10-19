@@ -342,8 +342,9 @@ try:
     req("POST", "/v1/audio/speech", {"input": "Call me at 5 pm", "voice": "serena", "response_format": "wav"})
     ok(any("5" in t for c in A.ENGINE.calls for t in c["texts"]), "английский текст не трогаем — модель читает его сама")
     V0 = ROOT / "server/voices"
+    vb = ROOT / "tools/voices_bundle.py"                  # сборщик пакета «Голоса» — только в закрытом репозитории
     ok("COPY *.py" in (V0 / "Dockerfile").read_text(encoding="utf-8")
-       and '"src/vllm/tts/speechnorm.py"' in (ROOT / "tools/voices_bundle.py").read_text(encoding="utf-8"), "пакет «Голоса» везёт speechnorm.py, образ его копирует")
+       and (not vb.exists() or '"src/vllm/tts/speechnorm.py"' in vb.read_text(encoding="utf-8")), "пакет «Голоса» везёт speechnorm.py, образ его копирует")
     st, _, h = req("GET", "/health")
     ok(h.get("numbers") is True, "/health: цифры словами — включены (панель покажет, если служба собрана без них)")
     # «Обновить службу» собирает образ из tar, который делает панель: раньше там были только Dockerfile и app.py — образ
