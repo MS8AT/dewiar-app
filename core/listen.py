@@ -62,6 +62,8 @@ def ensure_vosk(data_dir: Path, models_dir: Path, on_status=None, mirror=None) -
     В пакете её нет, чтобы он оставался маленьким; packaging/DEBIAN/postinst скачивает её при установке,
     а если тогда не было сети — докачиваем здесь, при первом запуске. mirror — свой сервер, пробуется первым.
     -> папка модели; RuntimeError, если не скачалась ни с одного адреса."""
+    if os.environ.get("DEWIAR_VOSK_OFF") == "1":   # проверки: как будто модель не скачалась (tests/hearing_nonames_test.py)
+        raise RuntimeError("модель имён выключена для проверки (DEWIAR_VOSK_OFF)")
     model_dir = models_dir / VOSK_NAME
     if (model_dir / "am").exists():
         return model_dir
@@ -124,6 +126,36 @@ def missing_words(model_dir: Path, words):
         if "missing in vocabulary" in line:
             miss.append(line.rsplit("'", 2)[-2])
     return miss
+
+
+class NoSpotter:
+    """Слух без модели имён: Vosk ещё не скачалась (медленный интернет при первом запуске) или не скачивается вовсе
+    (сайт модели закрыт). Имя и «стоп» голосом не ловим, но микрофон работает: кнопка, удержание и распознавание
+    выбранным движком (CI 19.10: без модели не работала даже кнопка — «Удержание слишком короткое (0.0 с)»).
+    Тот же интерфейс, что у WakeSpotter: rec.Reset(), feed(), feed_stop_only(), last_final."""
+
+    class _Rec:
+        def Reset(self):
+            pass
+
+    def __init__(self):
+        self.rec = self._Rec()
+        self.last_final = None
+
+    def feed(self, frame):
+        return ()
+
+    def feed_stop_only(self, frame):
+        return None
+
+
+class NoSTT:
+    """Распознаватель-заглушка, пока нет ни выбранного, ни запасного (Vosk): честная ошибка вместо падения."""
+    name = "распознавание ещё готовится"
+    ready = False
+
+    def transcribe(self, pcm):
+        raise RuntimeError("распознавание речи ещё готовится — модель скачивается")
 
 
 class WakeSpotter:

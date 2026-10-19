@@ -749,7 +749,7 @@ class BrainMixin:
         if r.returncode or not r.stdout:
             raise RuntimeError("голосовое не прочиталось")
         for _ in range(180):                     # программа только запустилась — подождём слух (до 90 с)
-            if getattr(self, "vosk_stt", None) is not None or self.stopping.is_set():
+            if getattr(self, "vosk_stt", None) is not None or getattr(self, "names_off", False) or self.stopping.is_set():
                 break
             time.sleep(0.5)
         stt = self.current_stt()
@@ -778,7 +778,7 @@ class BrainMixin:
         if r.returncode or not r.stdout:
             raise RuntimeError("не получилось прочитать звук из файла: " + (r.stderr or b"").decode(errors="replace")[-200:])
         for _ in range(180):                          # программа только запустилась — подождём слух (до 90 с)
-            if getattr(self, "vosk_stt", None) is not None or self.stopping.is_set():
+            if getattr(self, "vosk_stt", None) is not None or getattr(self, "names_off", False) or self.stopping.is_set():
                 break
             time.sleep(0.5)
         stt = self.current_stt()

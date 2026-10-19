@@ -46,6 +46,9 @@ SIZES = dict(BASE_SIZES)                # под масштаб интерфей
 TITLES = {"card": "Dewiar", "mini": "Dewiar — значок"}
 CARD_RADIUS = 28
 ZOOM = [1.0]                            # масштаб интерфейса: студия «Оформление» → «Масштаб», Ctrl + / Ctrl −
+CARD_DEFAULT = (300, 420)               # карточка виджета по умолчанию (логические px при масштабе 100 %)
+CARD_MIN, CARD_MAX = (280, 360), (640, 1000)   # её можно растянуть за угол (отзыв 19.10) — в этих пределах
+TRANSPARENT = [False]                   # Linux с композитором: окно прозрачное, углы скругляет страница — гладко
 
 
 def relaunch_script(installer_pid, inst_dir, exe, app, wait_s=10):
@@ -103,6 +106,36 @@ def zoom_of(v):
     except (TypeError, ValueError):
         return 1.0
     return round(min(1.5, max(0.7, v)), 2) if v > 0 else 1.0
+
+
+def set_card_base(w, h):
+    """Свой размер карточки (ui.hud_w, ui.hud_h — логические px при масштабе 100 %) -> BASE_SIZES["card"] в пределах.
+    Пусто или мусор — размер по умолчанию. -> (w, h)."""
+    try:
+        w, h = int(round(float(w))), int(round(float(h)))
+    except (TypeError, ValueError):
+        w, h = CARD_DEFAULT
+    w = max(CARD_MIN[0], min(CARD_MAX[0], w))
+    h = max(CARD_MIN[1], min(CARD_MAX[1], h))
+    BASE_SIZES["card"] = (w, h)
+    return w, h
+
+
+def composited_x11():
+    """Можно ли сделать виджет прозрачным окном (гладкие скругления вместо ступенек формы X Shape): X11 с
+    композитором (GNOME, KDE, Xfce с compositing). Выключить — ui.hud_smooth: false или DEWIAR_HUD_SOLID=1."""
+    if os.environ.get("DEWIAR_HUD_SOLID") == "1" or ui_settings().get("hud_smooth") is False:
+        return False
+    try:
+        import gi
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("Gdk", "3.0")
+        from gi.repository import Gdk, Gtk
+        Gtk.init_check([])
+        scr = Gdk.Screen.get_default()
+        return bool(scr is not None and scr.is_composited() and scr.get_rgba_visual() is not None)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def set_zoom_sizes(z):
@@ -330,6 +363,10 @@ def _shape_rects(kind, w, h, radius=None):
             out.append((x0, y, w - 2 * x0, 1))
         return out
     r = radius or card_r()
+    if TRANSPARENT[0] and kind != "rect":
+        # окно прозрачное: углы рисует страница (сглаженно), форма — только чтобы клики в углах шли мимо; её скругление
+        # чуть меньше, иначе она срезала бы сглаженный край
+        r = max(0, int(r * 0.55))
     for y in range(r):
         dy = r - y - 0.5
         inset = int(round(r - math.sqrt(max(0.0, r * r - dy * dy))))
@@ -700,6 +737,56 @@ class Api:
         except Exception as e:  # noqa: BLE001
             print(f"Масштаб: окна виджета: {e}", file=sys.stderr)
             return None
+
+    def card_size(self):
+        """Текущий размер карточки (логические px окна) — для растягивания за угол (hud.html)."""
+        return list(SIZES["card"])
+
+    def resize_card(self, w, h, final=False):
+        """Растянули карточку за угол (отзыв 19.10: «растягивать ввысь или вширь с запоминанием»). w, h — желаемый
+        размер окна сейчас (с масштабом); левый верхний угол остаётся на месте. -> [ш, в] при 100 % — их страница
+        сохраняет (ui.hud_w, ui.hud_h), или None. w или h = 0 — вернуть размер по умолчанию."""
+        z = ZOOM[0] or 1.0
+        if not w or not h:
+            set_card_base(*CARD_DEFAULT)
+        else:
+            set_card_base(float(w) / z, float(h) / z)
+        set_zoom_sizes(z)
+        W, H = SIZES["card"]
+        if WIN:
+            try:
+                form = self.wins["card"].native
+                from System import Action
+                from System.Drawing import Size
+                form.Invoke(Action(lambda f=form: setattr(f, "MinimumSize", Size(1, 1))))
+            except Exception as e:  # noqa: BLE001
+                print(f"Размер виджета: {e}", file=sys.stderr)
+            try:
+                self.wins["card"].resize(W, H)
+            except Exception as e:  # noqa: BLE001
+                print(f"Размер виджета: {e}", file=sys.stderr)
+            try:                                  # форма (скругление) — под новый размер сразу, а не после отпускания
+                hw = self._hwnd("card")
+                if hw:
+                    winshell.shape(hw, "card", card_r())
+            except Exception:  # noqa: BLE001
+                pass
+            if final:
+                self._win_shape("card")
+            return list(BASE_SIZES["card"])
+
+        def run():
+            gw = self._gw("card")
+            if gw is not None:
+                gw.set_size_request(W, H)
+                gw.resize(W, H)
+            return True
+        try:
+            self._gtk(run, timeout=5)
+        except Exception as e:  # noqa: BLE001
+            print(f"Размер виджета: {e}", file=sys.stderr)
+            return None
+        return list(BASE_SIZES["card"])
 
     def set_mode(self, mode, auto=False):
         """Карточка ↔ значок. Правый нижний угол остаётся на месте — виджет обычно стоит в углу экрана.
@@ -2113,7 +2200,9 @@ def main():
     token = ensure_token()
     api = Api(token)
 
+    set_card_base(uis.get("hud_w") or CARD_DEFAULT[0], uis.get("hud_h") or CARD_DEFAULT[1])   # свой размер карточки
     set_zoom_sizes(uis.get("zoom"))                          # окна виджета — под масштаб интерфейса
+    TRANSPARENT[0] = composited_x11()                        # гладкие скругления, если есть композитор
     mode = "card"                                            # шарика больше нет: сохранённый hud_mode «mini» — тоже карточка
     x, y = uis.get("hud_x"), uis.get("hud_y")                 # положение карточки
     if x is None or y is None:
@@ -2124,9 +2213,10 @@ def main():
             x, y = 100, 100
     for m in ("card",):
         w, h = SIZES[m]
-        api.wins[m] = webview.create_window(TITLES[m], api._url("hud.html", "&mode=" + m), width=w, height=h,
-                                            resizable=False, min_size=(w, h), frameless=True, easy_drag=False,
-                                            on_top=True, hidden=True, background_color="#0b0b0e", js_api=api)
+        api.wins[m] = webview.create_window(TITLES[m], api._url("hud.html", "&mode=" + m + ("&tw=1" if TRANSPARENT[0] else "")),
+                                            width=w, height=h, resizable=False, min_size=(w, h), frameless=True, easy_drag=False,
+                                            on_top=True, hidden=True, background_color="#0b0b0e", js_api=api,
+                                            transparent=TRANSPARENT[0])
     api._hud = api.wins["card"]
 
     def on_start():
@@ -2266,6 +2356,7 @@ def main_win(args, extra):
         threading.Event().wait()
         return
 
+    set_card_base(uis.get("hud_w") or CARD_DEFAULT[0], uis.get("hud_h") or CARD_DEFAULT[1])   # свой размер карточки
     set_zoom_sizes(uis.get("zoom"))                          # окна виджета — под масштаб интерфейса
     mode = "card"                                            # шарика больше нет: сохранённый hud_mode «mini» — тоже карточка
     x, y = uis.get("hud_x"), uis.get("hud_y")

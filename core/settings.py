@@ -122,6 +122,8 @@ DEFAULTS = {
                "told": False,
                "mem_warn": True},  # предупреждать, когда памяти не хватает (открыто много других программ) — engine_brain._memory_watch
     "ui": {"hud_x": None, "hud_y": None, "subtitles": True, "force_x11": True,
+           "hud_w": None, "hud_h": None,    # свой размер карточки виджета (растянули за угол), px при масштабе 100 %
+           "hud_smooth": True,              # Linux с композитором: прозрачное окно и гладкие скругления (ui/app.py)
            "skin": "brand",                 # тема (фон) виджета и телефона — список в ui/assets/skins.js; по умолчанию фирменная
            "voice_fx": "bars",              # когда говорит: bars (лучи вокруг портрета) | pulse (расходящиеся круги) | wave (волна)
            "zoom": 1.0,                     # масштаб интерфейса 0.7–1.5 (студия «Оформление» → «Размер», Ctrl + / Ctrl −)
@@ -272,6 +274,8 @@ def migrate_from_cortex():
         data["persona"] = "lira"
         data.get("ui", {}).pop("hud_x", None)
         data.get("ui", {}).pop("hud_y", None)
+        data.get("ui", {}).pop("hud_w", None)             # размер виджета — под экран этого компьютера
+        data.get("ui", {}).pop("hud_h", None)
         SETTINGS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except (OSError, ValueError):
         pass

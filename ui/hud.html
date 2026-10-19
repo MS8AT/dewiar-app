@@ -23,6 +23,17 @@
           display: flex; flex-direction: column; align-items: center; padding: 10px 14px 12px; cursor: grab;
           background: #0a0a0f; background: var(--skin-bg, #0a0a0f); }   /* тема — assets/skins.css (класс skin-… у body) */
   #card.dragging { cursor: grabbing; }
+  /* Linux с композитором (ui/app.py composited_x11, &tw=1): окно прозрачное, углы скругляет сама страница — сглаженно,
+     без ступенек формы окна (отзыв 19.10: «грубовато края стали» на светлой теме) */
+  html.tw, html.tw body { background: transparent; }
+  html.tw #card { border-radius: 28px; }
+  /* растянуть карточку за угол (отзыв 19.10); размер запоминается (ui.hud_w, ui.hud_h) */
+  #grip { position: absolute; right: 3px; bottom: 3px; width: 18px; height: 18px; z-index: 6; cursor: nwse-resize;
+          display: grid; place-items: center; opacity: 0; transition: opacity .2s; color: var(--muted); touch-action: none; }
+  html.tw #grip { right: 7px; bottom: 7px; }
+  #card:hover #grip, #grip.on { opacity: .75; }
+  #grip svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
+  body.mini #grip { display: none; }
   /* Темы (ui.skin, студия → «Оформление»): фон и стекло — в assets/skins.css; здесь только то, что меняет «Неон»
      сверх фона: фиолетовые кнопки и заливка строки состояния, как раньше */
   body.skin-neon { --brand: linear-gradient(135deg, #667eea 0%, #764ba2 100%); --glass: rgba(255,255,255,.065); --glass-shadow: 0 0 0 transparent; }
@@ -75,8 +86,8 @@
   body.neu #yn button:not(.yes) { background: var(--glass); box-shadow: 3px 3px 7px var(--neu-dark), -3px -3px 7px var(--neu-light); }
   body.neu #team { background: var(--glass); box-shadow: 8px 8px 20px var(--neu-dark), -8px -8px 20px var(--neu-light); }
 
-  #orb { position: relative; width: 228px; height: 228px; flex: none; cursor: pointer; transition: width .35s ease, height .35s ease; }
-  #card.busy #orb { width: 150px; height: 150px; }        /* есть текст — сфера уступает место */
+  #orb { position: relative; width: calc(228px * var(--ok, 1)); height: calc(228px * var(--ok, 1)); flex: none; cursor: pointer; transition: width .35s ease, height .35s ease; }
+  #card.busy #orb { width: calc(150px * var(--ok, 1)); height: calc(150px * var(--ok, 1)); }        /* есть текст — сфера уступает место */
   #orb canvas { width: 100%; height: 100%; display: block; }
 
   /* Строка состояния под портретом — не кнопка: стекло, слева точка. Слушает, думает, говорит — точка светится и
@@ -258,8 +269,8 @@
   .ab.send { width: 30px; height: 30px; border-radius: 50%; color: rgba(255,255,255,.45); background: rgba(255,255,255,.07); transition: background .2s, color .2s; }
   .askbox.has .ab.send { background: var(--brand); color: #fff; }
   .ab.send svg { width: 15px; height: 15px; }
-  #card.crowd #orb { width: 104px; height: 104px; }      /* тесно (fitCap): карточки и кнопки важнее большого облика */
-  #card.long #orb { width: 84px; height: 84px; }          /* длинный текст — сфера уступает место полю */
+  #card.crowd #orb { width: calc(104px * var(--ok, 1)); height: calc(104px * var(--ok, 1)); }      /* тесно (fitCap): карточки и кнопки важнее большого облика */
+  #card.long #orb { width: calc(84px * var(--ok, 1)); height: calc(84px * var(--ok, 1)); }          /* длинный текст — сфера уступает место полю */
   #card.long #bubble, #card.long #note, #card.long #cap { display: none; }
   .ab { flex: none; width: 32px; height: 32px; border: 0; border-radius: 10px; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
   .ab:hover { background: rgba(255,255,255,.09); color: var(--ink); }
@@ -443,6 +454,7 @@
     <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg></button>
     <button class="btn" id="b-set" title="Настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
   </div>
+  <div id="grip" title="Потяните, чтобы изменить размер. Двойной щелчок — как было" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M11 4 4 11M11 8 8 11"/></svg></div>
 </div>
 <button id="grow" aria-label="Развернуть"><svg viewBox="0 0 24 24"><path d="M4 10V4h6M20 14v6h-6M4 4l6 6M20 20l-6-6"/></svg></button>
 
@@ -1128,6 +1140,44 @@ function showUpd(u) {
 
 /* карточка ↔ значок: это два окна; эта страница живёт в одном из них */
 const mode = new URLSearchParams(location.search).get("mode") === "mini" ? "mini" : "card";
+if (new URLSearchParams(location.search).get("tw") === "1") document.documentElement.classList.add("tw");
+// растянутая карточка — и портрет крупнее (--ok: во сколько раз карточка больше обычной 300×420, 1…1,6)
+function orbScale() {
+  const z = (window.DewiarZoom && DewiarZoom.get().zoom) || 1;
+  const k = Math.max(1, Math.min(1.6, Math.min(innerWidth / z / 300, innerHeight / z / 420)));
+  document.documentElement.style.setProperty("--ok", k.toFixed(3));
+}
+addEventListener("resize", orbScale); orbScale();
+/* Растянуть карточку за правый нижний угол: окно меняет размер на лету (Api.resize_card), отпустили — размер в
+   настройки (ui.hud_w, ui.hud_h — при масштабе 100 %, так он переживает смену масштаба). Двойной щелчок — по умолчанию. */
+(() => {
+  const g = $("grip"); if (!g) return;
+  let rs = null, raf = 0, last = null;
+  g.addEventListener("pointerdown", async (ev) => {
+    ev.stopPropagation(); ev.preventDefault();
+    const a = api(); if (!a || !a.resize_card) return;
+    g.setPointerCapture(ev.pointerId); g.classList.add("on");
+    rs = { sx: ev.screenX, sy: ev.screenY, size: await a.card_size() };
+  });
+  g.addEventListener("pointermove", (ev) => {
+    if (!rs || !rs.size) return;
+    last = [Math.round(rs.size[0] + ev.screenX - rs.sx), Math.round(rs.size[1] + ev.screenY - rs.sy)];
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; const a = api(); if (a && last) a.resize_card(last[0], last[1], false); });
+  });
+  const done = (ev) => {
+    if (!rs) return;
+    const r = rs; rs = null; g.classList.remove("on");
+    const a = api(); if (!a || !last || !r.size) { last = null; return; }
+    a.resize_card(last[0], last[1], true).then(b => { if (b) core.call("settings_save", { patch: { ui: { hud_w: b[0], hud_h: b[1] } } }).catch(() => {}); }).catch(() => {});
+    last = null;
+  };
+  g.addEventListener("pointerup", done);
+  g.addEventListener("pointercancel", done);
+  g.addEventListener("dblclick", (ev) => {
+    ev.stopPropagation(); const a = api(); if (!a || !a.resize_card) return;
+    a.resize_card(0, 0, true).then(b => { if (b) core.call("settings_save", { patch: { ui: { hud_w: null, hud_h: null } } }).catch(() => {}); }).catch(() => {});
+  });
+})();
 document.body.classList.toggle("mini", mode === "mini");
 window.hudActive = (on) => { entity.paused = !on; };     // зовёт app.py (_activate): спрятанное окно не анимирует облик
 function setMode(m, auto = false) {

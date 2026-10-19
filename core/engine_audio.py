@@ -16,9 +16,17 @@ class AudioMixin:
         """Пересобирает слух имён. Имена, все слова которых есть в словаре Vosk, ловит быстрый WakeSpotter
         мгновенно; остальные (self.asr_names, например «Девиар») — только точной моделью в каждой фразе
         (_check_worker) или по отпечатку голоса. Обновляет и self.aliases — имена для find_name."""
-        if self.vosk_model is None:           # слух ещё запускается — соберём, когда будет модель
-            return
         only = None if self.s.get("all_names") else self.s.get("persona")
+        if self.vosk_model is None:
+            if not self.names_off:            # слух ещё запускается — соберём, когда будет модель
+                return
+            # модели имён нет (не скачалась): быстрого слуха нет, имена — только в распознанной фразе («Патрик, …»)
+            from listen import NoSpotter
+            self.spotter = NoSpotter()
+            self.asr_names = sorted(self.personas.wake_map(only=only))
+            self.aliases = {p["id"]: p.get("aliases") or p.get("wake") or [p["name"]]
+                            for p in self.personas.all() if not only or p["id"] == only}
+            return
         wm = self.personas.wake_map(only=only)
         words = {w for phrase in wm for w in phrase.split()}
         vf = STATE_DIR / "vocab.json"                   # есть ли слово в словаре Vosk — помним между запусками: проверка
@@ -67,7 +75,7 @@ class AudioMixin:
     def apply_engines(self):
         """Выставляет распознаватель и удалённый голос по настройкам и сообщает статус в интерфейс.
         GigaAM пересоздаётся только при смене модели — загрузка тяжёлая (её делает _background_loads)."""
-        if self.vosk_model is None:           # слух ещё запускается — движки выставит _start_hearing
+        if self.vosk_model is None and not self.names_off:   # слух ещё запускается — движки выставит _start_hearing
             return
         st = self.s.get("stt")
         if st["engine"] == "remote" and st["remote"].get("base_url"):
@@ -78,6 +86,9 @@ class AudioMixin:
             self.stt = self.gigaam
         else:
             self.stt = self.vosk_stt
+        if self.stt is None:                  # Vosk выбран, а модели ещё нет — честная ошибка, а не падение
+            from listen import NoSTT
+            self.stt = NoSTT()
         tt = self.s.get("tts")
         self.tts_remote = RemoteTTS(tt["remote"]) if tt["engine"] == "remote" and tt["remote"].get("base_url") else \
             ElevenTTS(tt.get("eleven") or {}) if tt["engine"] == "elevenlabs" and (tt.get("eleven") or {}).get("api_key") else None
@@ -211,7 +222,7 @@ class AudioMixin:
         """Выбранный распознаватель, а пока он не загрузился (GigaAM) — Vosk."""
         stt = getattr(self, "stt", None)
         if stt is None or not getattr(stt, "ready", True):
-            return self.vosk_stt
+            return self.vosk_stt or stt       # без модели имён Vosk нет — тогда сам выбранный (скажет, что не готов)
         return stt
 
     # ---------- аудиопоток ----------
@@ -734,6 +745,10 @@ class AudioMixin:
             try:
                 t = stt.transcribe(part).strip()
             except Exception as e:  # noqa: BLE001
+                if self.vosk_stt is None:
+                    log.warning("%s не распознал кусок диктовки: %s", stt.name, e)
+                    self.note(f"Не распознал: {e}")
+                    continue
                 log.warning("%s не распознал кусок диктовки: %s — пробую Vosk", stt.name, e)
                 t = self.vosk_stt.transcribe(part).strip()
             if t:
@@ -758,8 +773,13 @@ class AudioMixin:
                 try:
                     text = stt.transcribe(pcm).strip()
                 except Exception as e:  # noqa: BLE001
-                    log.warning("%s не распознал: %s — пробую Vosk", stt.name, e)
-                    text = self.vosk_stt.transcribe(pcm).strip()
+                    if self.vosk_stt is None:
+                        log.warning("%s не распознал: %s", stt.name, e)
+                        self.note(f"Не распознал: {e}")
+                        text = ""
+                    else:
+                        log.warning("%s не распознал: %s — пробую Vosk", stt.name, e)
+                        text = self.vosk_stt.transcribe(pcm).strip()
             from vault import mask as _mask                # продиктованный для сейфа секрет — не в журнал
             log.info("📝 %s (%s, %d мс)", _mask(text) or "—", stt.name, (time.monotonic() - t0) * 1000)
             self.emit("hearing", text=text, by=stt.name, name="", ms=int((time.monotonic() - t0) * 1000), full=True)

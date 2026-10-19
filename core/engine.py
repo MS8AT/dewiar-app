@@ -79,6 +79,9 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.espeak = SapiTTS() if os.name == "nt" else EspeakTTS()      # аварийный голос без скачивания
         self.gigaam = None
         self.vosk_model = None
+        self.names_off = False           # модель имён не скачалась — слух работает без имён (кнопка), см. _start_hearing
+        self._hearing_started = False
+        self.vad = None
         self.vosk_dir = None                  # папка модели Vosk — когда слух поднялся (до того «сохранить персонажа» не падает, №58)
         self.vosk_stt = None
         self.stt = None                  # распознаватель — появится, когда загрузится модель (до этого настройки сохраняются без него)
@@ -271,8 +274,15 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
                 vosk_dir = ensure_vosk(DATA_DIR, MODELS_DIR, on_status=self.note, mirror=self._mirror_url("vosk_small"))
                 break
             except Exception as e:  # noqa: BLE001
-                log.warning("Слух пока не запущен: %s", e)
-                self.note("Нет модели распознавания имён — проверьте интернет. Повторю через минуту.")
+                log.warning("Модель имён (Vosk) пока не скачалась: %s", e)
+                self._load("hear", "Модель имён не скачалась — имя пока не слышу, микрофон по кнопке работает")
+                if not self.names_off:
+                    # без модели имён микрофон всё равно работает: кнопка, удержание, выбранный распознаватель
+                    # (CI и отчёты 19.10: без неё не работала даже кнопка). Имена включатся, когда модель докачается
+                    self.names_off = True
+                    self._hearing_up()
+                self.note("Имя пока не слышу — не скачалась модель распознавания имён (проверьте интернет). "
+                          "Нажмите на микрофон и говорите — это работает. Повторю скачивание через минуту.")
                 self.stopping.wait(60)
         else:
             return
@@ -280,11 +290,25 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.vosk_model = Model(str(vosk_dir))
         self.vosk_dir = vosk_dir
         self.vosk_stt = VoskSTT(self.vosk_model)
-        self.decoys = (DATA_DIR / "decoys.txt").read_text(encoding="utf-8").split()
-        self.vad = SileroVAD(DATA_DIR / "silero_vad.onnx")
-        self.build_spotter()
-        self._loaded("hear")
+        if self.names_off:
+            log.info("🎤 Модель имён докачалась — снова слышу имя")
+        self.names_off = False
+        self._hearing_up()
+
+    def _hearing_up(self):
+        """Поднять слух (один раз: аудиопоток, распознавание, проверка имён, фоновые службы), а при повторном вызове —
+        только пересобрать поиск имён и движки (докачалась модель Vosk)."""
+        if not self.decoys:
+            self.decoys = (DATA_DIR / "decoys.txt").read_text(encoding="utf-8").split()
+        if self.vad is None:
+            self.vad = SileroVAD(DATA_DIR / "silero_vad.onnx")
+        self.build_spotter()                 # без модели имён — NoSpotter и имена по распознанной фразе
+        if self.vosk_model is not None:
+            self._loaded("hear")
         self.apply_engines()
+        if self._hearing_started:
+            return
+        self._hearing_started = True
         if not self.server:          # сервер: распознавание (голосовые из Telegram) и голос есть, микрофона и динамика нет
             self._audio_thread = threading.Thread(target=self._audio_loop, name="audio", daemon=True)
             self._audio_thread.start()
