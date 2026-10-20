@@ -368,7 +368,7 @@ function saveS() { llmRemember(); prefSet("settings", JSON.stringify(S)); applyP
 /* Прежние мозги (отчёт №117, 19.10: «отправил настройки с компьютера — телефон не подключается, и на Dewiar не вернуться; на
    компьютере между моделями переключаюсь, на телефоне нет»). Подключили другой мозг — прежний запоминается (до 5) и в
    «Мозге» его можно вернуть одной кнопкой. Забыли ключ или вышли из аккаунта — облачные из списка уходят. */
-function llmId(l) { return l && l.base_url ? (l.cloud ? "cloud|" + (l.account ? "acc" : l.api_key || "") : l.base_url.replace(/\/+$/, "") + "|" + (l.model || "")) : ""; }
+function llmId(l) { return l && l.base_url && !l.trial ? (l.cloud ? "cloud|" + (l.account ? "acc" : l.api_key || "") : l.base_url.replace(/\/+$/, "") + "|" + (l.model || "")) : ""; }
 let llmSeen = JSON.parse(JSON.stringify(S.llm || {}));
 function llmRemember() {
   const a = llmId(llmSeen), b = llmId(S.llm);
@@ -399,7 +399,7 @@ async function llmRestore(i) {
    логином и паролем, а на экране всё ещё «Подключить бесплатно» — человек решил, что не подключился). */
 function startCardCheck() {
   const c = $("#card .start, #card [onclick*='joinPoll']");
-  if (!c || !(S.llm.base_url || loggedIn())) return;
+  if (!c || !((S.llm.base_url && !S.llm.trial) || loggedIn())) return;     // пробный разговор — ещё не «подключено»
   showCard("");
   if (!busy && state === "idle") showBot(`Готово, всё подключено${loggedIn() ? " — аккаунт " + (S.account.login || "") : ""}. Нажмите на микрофон или удерживайте его и говорите.`);
   plog("info", "🧠 мозг подключён — карточка первого запуска убрана");
@@ -1831,6 +1831,7 @@ async function llmStream(messages, tools, onText, signal, opt = {}) {
     const rejected = !ollama && (r.status === 400 || r.status === 422 || (r.status >= 500 && REJECT_RX.test(String(msg))));
     if (rejected) { const again = retryRejected(); if (again) return again; }
     if (S.llm.cloud && r.status === 401 && await fixDeadKey(msg)) return llmStream(messages, tools, onText, signal, opt);   // ключ удалили — думаем по аккаунту
+    if (S.llm.trial && [400, 403, 429, 502, 503].includes(r.status)) throw Object.assign(new Error(String(msg)), { human: true });   // проба: пределы — словами сайта
     if (S.llm.cloud && [401, 402, 403, 429, 502, 503].includes(r.status)) { cloudInfo = null; throw Object.assign(new Error(String(msg)), { human: true }); }
     if (r.status === 401) msg = "ключ не подходит (401)";
     // отчёт №117: Groq с компьютера (через VPN) работает, а с телефона — «403: Forbidden» и «413: Request too large»
@@ -3025,6 +3026,7 @@ function calcEval(src) {
 }
 
 function toolSpecs() {
+  if (S.llm.trial) return [];                     // пробный разговор на сайте — без действий (сервер их и не пропустит)
   const t = [
     { name: "set_reminder", description: "Поставить напоминание, будильник или таймер. when — когда, словами пользователя («через 20 минут», «завтра в 9», «в пятницу в 18:30») — время посчитает телефон по своим часам, сам не считай; at — дата и время ISO (ГГГГ-ММ-ДДTЧЧ:ММ, местное) — только если when не подходит. kind: reminder | alarm (будильник) | timer. repeat: '' | daily | weekdays | weekly.",
       parameters: O({ text: STR, when: STR, at: STR, in_minutes: NUM, kind: { type: "string", enum: ["reminder", "alarm", "timer"] }, repeat: { type: "string", enum: ["", "daily", "weekdays", "weekly"] } }, ["text"]) },
@@ -4844,7 +4846,19 @@ async function cloudCaps() {
 /* Вошли аккаунтом, а мозг не выбран (облако не ответило при входе, сайт не назвал облако) — подключить модели Dewiar
    по аккаунту. Тихо: при запуске, при открытии «Мозга» и перед вопросом. -> true, если мозг есть. */
 let brainBusy = null;
+/* Пробный разговор (0.38.99): веб-версия без входа и без ключа сразу говорит через ?p=/trial сайта — без действий, с
+   пределом в час (cloud.php trial_handler). Вошли аккаунтом или подключили мозг — проба уходит сама (trialOff, cloudConnect). */
+function trialOn() {
+  if (!D.web || loggedIn() || S.llm.base_url || S.join) return false;
+  S.llm = Object.assign({}, S.llm, { kind: "openai", base_url: CLOUD_URL + "?p=/trial", api_key: "", model: "trial", name: "Пробный разговор", trial: true });
+  saveS(); return true;
+}
+function trialOff() {
+  if (!S.llm.trial) return;
+  const { base_url, api_key, model, name, trial, kind, ...rest } = S.llm; S.llm = rest; saveS();
+}
 function ensureBrain() {
+  if (S.llm.trial && loggedIn()) trialOff();       // вошли аккаунтом — проба больше не нужна, думают модели Dewiar по аккаунту
   if (S.llm.base_url) return Promise.resolve(true);
   if (!loggedIn()) return Promise.resolve(false);
   if (!brainBusy) brainBusy = cloudConnect(S.account.token, (S.accCloud && S.accCloud.base) || siteUrl((S.account.services || {}).cloud || "dwrapp/cloud.php"), { account: true })
@@ -4865,8 +4879,10 @@ function renderSettings() {
       ${S.accCloud && !S.llm.cloud ? `<button class="btn p w" id="acc-use" style="margin-top:10px">Думать моделями Dewiar</button><p class="hint" style="margin:8px 0 0">Сейчас думает ваша модель. Модели Dewiar по аккаунту — с зарядом в талерах.</p>` : ""}
       <p class="hint" style="margin:10px 0 0">Знания сайта подключаются персонажу: нажмите имя персонажа вверху → «Знания». Или просто спросите: «что в моих документах про отпуск?»</p></div>`);
     else if (S.account.problem) h.push(`<div class="card"><div class="res bad" style="margin:0">${esc(S.account.problem)}</div></div>`);
-    const on = !!S.llm.base_url;
-    h.push(`<div class="card brain ${on ? "ok" : ""}"><div class="row2"><div style="flex:1;min-width:0"><small class="hint" style="margin:0">${on ? "Подключено · думает" : "Мозг"}</small>
+    const on = !!S.llm.base_url && !S.llm.trial;   // пробный разговор на сайте — ещё не «подключено»: выбор мозга открыт
+    if (S.llm.trial) h.push(`<div class="card"><small class="hint" style="margin:0">Сейчас</small><div style="font-weight:600">Пробный разговор</div>
+      <small class="hint" style="margin:2px 0 0;display:block">Можно говорить без входа — несколько ответов в час и без дел (будильники, заметки, поиск). Войдите или подключите бесплатно — и без ограничений.</small></div>`);
+    else h.push(`<div class="card brain ${on ? "ok" : ""}"><div class="row2"><div style="flex:1;min-width:0"><small class="hint" style="margin:0">${on ? "Подключено · думает" : "Мозг"}</small>
       <div style="font-weight:600">${esc(on ? brainName() : loggedIn() ? "подключаю модели Dewiar…" : "не подключён")}</div>
       ${on && S.llm.title ? `<small class="hint" style="margin:2px 0 0;display:block">${esc(S.llm.title)}${S.llm.cloud ? " · " + esc(cloudWho()) : ""}</small>` : ""}</div>
       ${on || loggedIn() ? `<button class="btn" id="br-test">Проверить</button>` : ""}</div><div class="res" id="br-res"></div></div>`);
@@ -5560,7 +5576,7 @@ async function joinSend(name, contact, note) {
   return d;
 }
 async function joinPoll(force) {
-  const j = S.join; if (!j || !j.id || S.llm.base_url && !force) return null;
+  const j = S.join; if (!j || !j.id || S.llm.base_url && !S.llm.trial && !force) return null;
   const r = await http("GET", j.base + "?p=/join&id=" + encodeURIComponent(j.id) + "&s=" + encodeURIComponent(j.secret), { timeout: 15000 });
   let d = {}; try { d = JSON.parse(r.body || "{}"); } catch (e) { }
   if (r.status === 404) { S.join = null; saveS(); return { status: "gone", text: "Заявка не нашлась — отправьте новую." }; }
@@ -5832,6 +5848,7 @@ async function accountLogin(server, login, password) {
   S.account = { server, login: (d.user && d.user.login) || login, token: d.token, user: d.user || {}, rag_url: d.rag_url || "/synapbase/api_rag", services: sv, problem: "", since: Date.now() };
   scopeCache = null; saveS();
   const out = { login: S.account.login, cloud: null, activated: false };
+  trialOff();                                      // вошли — пробный разговор больше не нужен
   let ownKey = S.llm.cloud && !S.llm.account;
   const mine = !!S.llm.base_url && !S.llm.cloud;
   if (ownKey) {                                    // свой ключ dw- ещё действует? Удалённый на сайте — не держимся за него
@@ -6955,8 +6972,9 @@ function clRender() {
     clReBind(p, h);
     return;
   }
-  const tabs = `<div class="tabs" id="cl-tabs"><button data-t="close" class="${clTab === "close" ? "on" : ""}">Близкие</button><button data-t="near" class="${clTab === "near" ? "on" : ""}">Рядом</button><button data-t="ref" class="${clTab === "ref" ? "on" : ""}">Рефералы</button></div>`;
+  const tabs = `<div class="tabs" id="cl-tabs"><button data-t="close" class="${clTab === "close" ? "on" : ""}">Близкие</button><button data-t="near" class="${clTab === "near" ? "on" : ""}">Рядом</button><button data-t="meet" class="${clTab === "meet" ? "on" : ""}">Встречи</button><button data-t="ref" class="${clTab === "ref" ? "on" : ""}">Рефералы</button></div>`;
   if (clTab === "ref") { if (!$("#rf-body")) { box.innerHTML = tabs + `<div id="rf-body"></div>`; clTabs(); } refTab(); return; }
+  if (clTab === "meet") { if (!$("#meet-body")) { box.innerHTML = tabs + `<div id="meet-body"></div>`; clTabs(); } meetRender(); mtLoad(); return; }
   if (clTab === "near") { if (!$("#rad-body")) { box.innerHTML = tabs + `<div id="rad-body"></div>`; clTabs(); } radRender(); return; }
   // сверху — сами близкие (лица крупно: нажал — переписка), «+» — пригласить; печать с приглашением — только когда
   // её позвали («Пригласить» или «+»), а не на пол-экрана каждый раз (отзыв 11.10)
@@ -7097,6 +7115,97 @@ const radCfg = () => Object.assign({ to: [], until: 0, asked: {} }, S.radar || {
 const radOn = () => { const r = radCfg(); return r.to.length > 0 && (r.until === -1 || r.until > Date.now()); };
 const radPl = (n, a, b, c) => (n % 10 === 1 && n % 100 !== 11 ? a : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? b : c);
 const radFirst = (n) => String(n || "").trim().split(/\s+/)[0] || "Без имени";
+/* ---------- «Встречи» (0.38.98): знакомства там, где вы сейчас ----------
+   Сервер — cloud.php meet_handler (/meet/state|rules|here|leave|wave|block|report). Отметка на 1–3 часа: имя, пара слов,
+   место; другие рядом (≈700 м) видят только это — ни точного места, ни расстояния. 👋 взаимно — оба в «Близких» (переписка
+   шифруется). Ушли или вышло время — отметки и «помахал» нет. 18+ и правила — один раз; блок и жалоба — в меню «⋯». */
+let MT = null, mtErr = "", mtEdit = false, mtHours = 2, mtTimer = 0, mtMenu = "";
+async function mtLoad() {
+  clearTimeout(mtTimer);
+  try { MT = await clReq("GET", "/meet/state"); mtErr = ""; } catch (e) { mtErr = e.message; }
+  if ($("#meet-body")) { meetRender(); mtTimer = setTimeout(() => { if ($("#meet-body") && $("#sh-close").classList.contains("on")) mtLoad(); }, 20000); }
+}
+const mtMin = (s) => Math.max(0, Math.round(s / 60));
+const mtLeft = (u) => { const m = mtMin(u - Date.now() / 1000); return m >= 60 ? Math.floor(m / 60) + " ч" + (m % 60 ? " " + (m % 60) + " мин" : "") : m + " мин"; };
+const mtAgo = (ts) => { const m = mtMin(Date.now() / 1000 - ts); return m < 2 ? "только что" : m < 60 ? m + " мин" : Math.floor(m / 60) + " ч"; };
+function mtCall(path, body, btn) {
+  if (btn) btn.disabled = true;
+  return clReq("POST", path, body || {}).then(d => { MT = d; mtErr = ""; return d; })
+    .catch(e => { toast(e.message, 4500); throw e; }).finally(() => { if (btn) btn.disabled = false; if ($("#meet-body")) meetRender(); });
+}
+function meetRender() {
+  const body = $("#meet-body"); if (!body) return;
+  if (!MT) { body.innerHTML = mtErr ? `<div class="card"><b>Встречи не открылись</b><p class="hint" style="margin:6px 0 10px">${esc(mtErr)}</p><button class="btn w" id="mt-retry">Повторить</button></div>`
+    : `<p class="hint" style="text-align:center;margin:30px">Загружаю…</p>`; if ($("#mt-retry")) $("#mt-retry").onclick = () => { mtErr = ""; meetRender(); mtLoad(); }; return; }
+  const me = MT.me || {};
+  if (!me.adult) {
+    body.innerHTML = `<div class="card mt-intro"><b class="mt-big">Знакомства там, где вы сейчас</b>
+      <ul class="mt-rules"><li>Отметьтесь на концерте, выставке, в кафе — на 1–3 часа.</li>
+        <li>Рядом видят только имя, пару слов о вас и место. Ни фото, ни адреса, ни расстояния.</li>
+        <li>Связь — только если вы помахали 👋 друг другу: тогда вы оба в «Близких», переписка шифруется.</li>
+        <li>Ушли — отметка и все «помахал» стираются. Истории нет.</li>
+        <li>Неприятно — «Заблокировать» или «Пожаловаться» в одно нажатие.</li></ul>
+      <label class="mt-adult"><input type="checkbox" id="mt-18"><span>Мне есть 18 лет, правила понятны</span></label>
+      <button class="btn p w" id="mt-start" disabled>Начать</button></div>`;
+    $("#mt-18").onchange = () => { $("#mt-start").disabled = !$("#mt-18").checked; };
+    $("#mt-start").onclick = () => mtCall("/meet/rules", { adult: true }, $("#mt-start")).catch(() => { });
+    return;
+  }
+  if (me.ban_until) { body.innerHTML = `<div class="card"><b>Встречи закрыты до ${new Date(me.ban_until * 1000).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}</b><p class="hint" style="margin:6px 0 0">На вас пожаловались несколько человек. Если это ошибка — напишите в поддержку из «Ещё» → «Сообщить о проблеме».</p></div>`; return; }
+  const h = me.here, st = clLoad();
+  if (!h || mtEdit) {
+    if ($("#mt-go") && !$("#mt-go").disabled) return;      // анкета уже на экране — не стираем то, что человек вписывает (опрос раз в 20 с)
+    const nm = (h && h.name) || String((st.me && st.me.name !== "Без имени" && st.me.name) || (S.close && S.close.name) || S.user_name || "").split(/\s+/)[0];
+    body.innerHTML = `<div class="card mt-form"><b class="mt-big">${h ? "Изменить отметку" : "Отметиться здесь"}</b>
+      <label class="f"><span>Как вас называть</span><input id="mt-name" maxlength="24" placeholder="имя" value="${esc(nm)}"></label>
+      <label class="f"><span>Пара слов о себе</span><textarea id="mt-about" maxlength="120" rows="2" placeholder="например: впервые здесь, люблю джаз">${esc((h && h.about) || "")}</textarea></label>
+      <label class="f"><span>Где вы</span><input id="mt-place" maxlength="60" placeholder="концерт, выставка, кафе…" value="${esc((h && h.place) || "")}"></label>
+      <div class="mt-row"><span>Видно</span><div class="seg" id="mt-hours">${[1, 2, 3].map(n => `<button data-h="${n}" class="${mtHours === n ? "on" : ""}">${n} ч</button>`).join("")}</div></div>
+      <div class="row2"><button class="btn p" id="mt-go" style="flex:2">${h ? "Сохранить" : "Отметиться"}</button>${h ? `<button class="btn" id="mt-cancel" style="flex:1">Отмена</button>` : ""}</div>
+      <p class="hint" style="margin:10px 0 0">Ссылки, ники и номера не нужны — контакт откроется сам, когда помашете друг другу. Точное место никто не видит.</p></div>`;
+    $$("#mt-hours button").forEach(b => b.onclick = () => { mtHours = +b.dataset.h; $$("#mt-hours button").forEach(x => x.classList.toggle("on", x === b)); });
+    if ($("#mt-cancel")) $("#mt-cancel").onclick = () => { mtEdit = false; meetRender(); };
+    $("#mt-go").onclick = async () => {
+      const b = $("#mt-go"), name = $("#mt-name").value.trim();
+      if (!name) { toast("Как вас называть? Достаточно имени."); $("#mt-name").focus(); return; }
+      b.disabled = true; b.textContent = "Определяю место…";
+      let g; try { g = await myPlace(60, true); } catch (e) { b.disabled = false; b.textContent = h ? "Сохранить" : "Отметиться"; toast(e.kind === "perm" ? "Разрешите Dewiar место — иначе не понять, кто рядом." : e.kind === "off" ? "Включите определение места в телефоне." : e.message, 5000); return; }
+      // не через mtCall: при ошибке («без ссылок и номеров») анкета остаётся как есть — с тем, что человек вписал
+      try { MT = await clReq("POST", "/meet/here", { lat: g.lat, lon: g.lon, name, about: $("#mt-about").value.trim(), place: $("#mt-place").value.trim(), hours: mtHours }); mtErr = ""; mtEdit = false; meetRender(); }
+      catch (e) { toast(e.message, 5000); b.disabled = false; b.textContent = h ? "Сохранить" : "Отметиться"; }
+    };
+    return;
+  }
+  const ppl = MT.people || [];
+  body.innerHTML = `<div class="card mt-me"><i class="dot"></i><div style="flex:1;min-width:0"><b>Вы отмечены</b><small>${h.place ? esc(h.place) + " · " : ""}видно ещё ${mtLeft(h.until)}</small></div>
+      <button class="btn sm" id="mt-edit">Изменить</button><button class="btn sm" id="mt-leave">Уйти</button></div>
+    <h3>${ppl.length ? "Рядом — " + ppl.length : "Рядом пока никого"}</h3>`
+    + (ppl.length ? ppl.map(x => `<div class="card mtp${x.waves_me ? " in" : ""}${x.match ? " match" : ""}" data-mid="${esc(x.mid)}">
+        <div class="mtp-h"><i class="clava" style="--c:${clCol(x.mid)}">${esc((x.name || "?")[0].toUpperCase())}</i><div style="flex:1;min-width:0"><b>${esc(x.name)}</b>
+          <small>${x.place ? esc(x.place) + " · " : ""}здесь ${mtAgo(x.since)}</small></div><button class="ib soft mt-more" data-m="${esc(x.mid)}" aria-label="Ещё: заблокировать, пожаловаться" aria-expanded="${mtMenu === x.mid}">⋯</button></div>
+        ${x.about ? `<p class="mtp-a">${esc(x.about)}</p>` : ""}
+        ${mtMenu === x.mid ? `<div class="row2 mt-menu"><button class="btn" data-block="${esc(x.mid)}" style="flex:1">Заблокировать</button><button class="btn" data-report="${esc(x.mid)}" style="flex:1">Пожаловаться</button></div>` : ""}
+        <div class="mtp-act">${x.match ? `<span class="mt-ok">👋 Вы помахали друг другу</span><button class="btn p sm" data-chat="${esc(x.pid)}">Написать</button>`
+          : x.waved ? `<span class="mt-ok">Вы помахали — ждём ответа</span><button class="btn sm" data-undo="${esc(x.mid)}">Отменить</button>`
+          : x.waves_me ? `<span class="mt-in">👋 Вам помахали</span><button class="btn p sm" data-wave="${esc(x.mid)}">Помахать в ответ</button>`
+          : `<button class="btn sm" data-wave="${esc(x.mid)}">👋 Помахать</button>`}</div></div>`).join("")
+      : `<p class="hint" style="margin:0 4px 12px">Отметка видна ещё ${mtLeft(h.until)}. Кто отметится рядом — появится здесь.</p>`)
+    + `<p class="hint">Видно только тех, кто отметился в пределах ~${MT.radius_m || 700} м. Ни точного места, ни расстояния не видит никто.</p>`;
+  $("#mt-edit").onclick = () => { mtEdit = true; meetRender(); };
+  $("#mt-leave").onclick = () => mtCall("/meet/leave", {}, $("#mt-leave")).then(() => toast("Отметки больше нет")).catch(() => { });
+  $$("[data-m]").forEach(b => b.onclick = () => { mtMenu = mtMenu === b.dataset.m ? "" : b.dataset.m; meetRender(); });
+  $$("[data-wave]").forEach(b => b.onclick = () => mtCall("/meet/wave", { mid: b.dataset.wave }, b).then(d => {
+    if (d.match) { if (d.state) clPeople(d.state); const p = (d.people || []).find(x => x.pid === d.pid); toast(`Вы помахали друг другу — ${p ? p.name : "собеседник"} теперь в «Близких»`, 4500); clHello().catch(() => { }); }
+    else toast("👋 Помахали");
+  }).catch(() => { }));
+  $$("[data-undo]").forEach(b => b.onclick = () => mtCall("/meet/wave", { mid: b.dataset.undo, undo: 1 }, b).catch(() => { }));
+  $$("[data-chat]").forEach(b => b.onclick = async () => { b.disabled = true; try { await clHello(); } catch (e) { } clTab = "close"; clCur = b.dataset.chat; clRender(); });
+  $$("[data-block]").forEach(b => b.onclick = () => { if (!confirm("Заблокировать? Вы больше не увидите друг друга во Встречах, а если уже в «Близких» — он оттуда уйдёт.")) return;
+    mtMenu = ""; mtCall("/meet/block", { mid: b.dataset.block }, b).then(() => toast("Заблокировано")).catch(() => { }); });
+  $$("[data-report]").forEach(b => b.onclick = () => { const why = prompt("Что случилось? Можно коротко — это увидит только администратор Dewiar.", ""); if (why === null) return;
+    mtMenu = ""; mtCall("/meet/report", { mid: b.dataset.report, why }, b).then(() => toast("Спасибо. Жалоба отправлена, вы больше не увидите друг друга")).catch(() => { }); });
+}
+
 function radGeo(a, b) {                                   // от a до b: [км, направление в градусах от севера по часовой]
   const t = Math.PI / 180, f1 = a.lat * t, f2 = b.lat * t, df = (b.lat - a.lat) * t, dl = (b.lon - a.lon) * t;
   const h = Math.sin(df / 2) ** 2 + Math.cos(f1) * Math.cos(f2) * Math.sin(dl / 2) ** 2;
@@ -7526,7 +7635,11 @@ setInterval(() => { if (!document.hidden) welcomeSeen(); }, 60000);     // по�
 (function boot() {
   applyPersona(); setState("idle"); quietCheck();
   const last = history.filter(m => m.role === "assistant").slice(-1)[0];
-  if (!S.llm.base_url && !loggedIn()) {
+  if (D.web && (S.llm.trial || trialOn()) && !loggedIn()) {
+    // веб-версия без входа: говорим сразу (пробный разговор); войти — без ограничений и с действиями
+    showBot(gfix(`Привет! Я ${persona().name}. Давайте поговорим прямо сейчас — без входа и установки. Нажмите на меня и говорите или напишите.`));
+    showCard(`<div class="start"><button class="btn w" onclick="startLogin()">Войти — без ограничений и с делами</button></div>`);
+  } else if (!S.llm.base_url && !loggedIn()) {
     // первый запуск: одна понятная кнопка (отзыв: «не понимаю, как ей мозг включить») — бесплатная проба Dewiar;
     // своя модель, ключ сервиса и код с другого устройства — второй кнопкой
     if (S.join) { showBot(gfix(`Привет! Я ${persona().name}. Заявка отправлена — как только её одобрят, я подключусь сама и скажу. Обычно это быстро.`)); setTimeout(() => joinPoll(false).catch(() => {}), 2500); }

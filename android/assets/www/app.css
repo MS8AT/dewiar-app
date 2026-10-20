@@ -880,3 +880,28 @@ body.light .rad-me { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 12%,
 body.light .rad-me::after { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 body.light .rad-seen { background: var(--soft); }
 body.neu .rad-seen, body.neu .rad-sel { background: var(--glass); box-shadow: var(--raise-s); }
+/* «Встречи» (0.38.98): знакомства там, где вы сейчас — app.js meetRender */
+.btn.sm { padding: 7px 12px; font-size: 13px; border-radius: 12px; }
+.mt-big { display: block; font: 600 16px/1.35 "Unbounded", sans-serif; margin-bottom: 10px; }
+.mt-rules { list-style: none; padding: 0; margin: 0 0 14px; display: grid; gap: 8px; }
+.mt-rules li { position: relative; padding-left: 20px; font-size: 14px; line-height: 1.45; color: var(--ink); }
+.mt-rules li::before { content: ""; position: absolute; left: 3px; top: .55em; width: 7px; height: 7px; border-radius: 50%; background: #4BE3A1; }
+.mt-adult { display: flex; gap: 10px; align-items: center; margin: 0 2px 12px; font-size: 14px; }
+.mt-adult input { width: 20px; height: 20px; flex: none; accent-color: #4BE3A1; }
+.mt-form textarea { width: 100%; resize: none; }
+.mt-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 4px 12px; font-size: 13px; color: var(--muted); }
+.mt-me { display: flex; align-items: center; gap: 10px; }
+.mt-me .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #4BE3A1; box-shadow: 0 0 0 4px rgba(75,227,161,.18); }
+.mt-me b { display: block; } .mt-me small { display: block; color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mtp-h { display: flex; gap: 10px; align-items: center; }
+.mtp-h b { display: block; } .mtp-h small { display: block; color: var(--muted); font-size: 12.5px; }
+.mtp-a { margin: 8px 2px 0; font-size: 14px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.mtp-act { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.mtp-act span { flex: 1; font-size: 13px; color: var(--muted); }
+.mtp.in { box-shadow: inset 0 0 0 1.5px rgba(255,181,71,.6); } .mtp .mt-in { color: #FFB547; font-weight: 600; }
+.mtp.match { box-shadow: inset 0 0 0 1.5px rgba(75,227,161,.65); } .mtp .mt-ok { color: var(--muted); }
+.mtp.match .mt-ok { color: #4BE3A1; font-weight: 600; }
+.mt-more { width: 34px; height: 34px; font-size: 18px; line-height: 1; }
+.mt-menu { margin-top: 10px; }
+body.light .mtp.match .mt-ok { color: #1d7f55; } body.light .mtp .mt-in { color: #b46a08; }
+body.light .mt-rules li::before, body.light .mt-me .dot { background: #1d7f55; }
