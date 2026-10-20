@@ -11,6 +11,8 @@ parse(text, now) → {"text", "at": datetime, "repeat": dict|None, "kind": "remi
 
 repeat: {"kind": "daily", "time": "08:00"}  {"kind": "weekly", "days": [0, 2], "time": "19:00"} (0 — понедельник)
         {"kind": "interval", "minutes": 120}  {"kind": "monthly", "day": 5, "time": "10:00"}
+        {"kind": "interval", "minutes": 60, "from": "09:00", "to": "18:00", "days": [0, 1, 2, 3, 4]} — «по будням с 9 до 18
+        каждый час» (окно — только днём и только в эти дни; отчёт №137, 20.10)
 Этот формат хранят напоминания (Reminders в tools.py) и фоновые задания (jobs.py), он же уходит в синхронизацию
 (sync.py) — менять только вместе с ними.
 Следующее срабатывание повтора — next_time(), время словами — human(), повтор словами — describe_repeat().
@@ -237,12 +239,40 @@ def _repeat(t):
     return None
 
 
+def _hm(x, default):
+    try:
+        h, m = (int(v) for v in str(x or default).split(":"))
+        return h, m
+    except ValueError:
+        return tuple(int(v) for v in default.split(":"))
+
+
+def in_window(rep, at: datetime):
+    """Попадает ли время в окно повтора (from–to и дни недели); окна нет — всегда да."""
+    if rep.get("days") and at.weekday() not in rep["days"] and rep.get("kind") == "interval":
+        return False
+    if not rep.get("from"):
+        return True
+    f, t = _hm(rep["from"], "09:00"), _hm(rep.get("to"), "18:00")
+    return (f[0], f[1]) <= (at.hour, at.minute) <= (t[0], t[1])
+
+
 def next_time(rep, after: datetime):
     """Следующее срабатывание повтора строго после after. Нет времени — 09:00; monthly на 31-е в коротком месяце —
-    последний день месяца."""
+    последний день месяца. Интервал с окном (from/to, days) — только внутри окна: вне его — начало следующего окна."""
     k = rep.get("kind")
     if k == "interval":
-        return after + timedelta(minutes=max(1, int(rep.get("minutes") or 60)))
+        c = after + timedelta(minutes=max(1, int(rep.get("minutes") or 60)))
+        if not rep.get("from") and not rep.get("days"):
+            return c
+        if in_window(rep, c):
+            return c
+        fh, fm = _hm(rep.get("from"), "00:00")
+        for d in range(0, 9):
+            start = (c + timedelta(days=d)).replace(hour=fh, minute=fm, second=0, microsecond=0)
+            if start > after and in_window(rep, start):
+                return start
+        return c
     hh, mm = (int(x) for x in (rep.get("time") or "09:00").split(":"))
     if k == "daily":
         c = after.replace(hour=hh, minute=mm, second=0, microsecond=0)
@@ -276,8 +306,16 @@ def describe_repeat(rep):
         m = int(rep.get("minutes") or 0)
         if m % 60 == 0:
             h = m // 60
-            return "каждый час" if h == 1 else f"каждые {h} ч"
-        return f"каждые {m} мин"
+            s = "каждый час" if h == 1 else f"каждые {h} ч"
+        else:
+            s = f"каждые {m} мин"
+        days = rep.get("days") or []
+        if days:
+            s += " по будням" if days == [0, 1, 2, 3, 4] else " по выходным" if days == [5, 6] else \
+                " по " + ", ".join(["пн", "вт", "ср", "чт", "пт", "сб", "вс"][d] for d in days)
+        if rep.get("from"):
+            s += f" с {str(rep['from']).lstrip('0') or '0'} до {str(rep.get('to', '')).lstrip('0') or '0'}"
+        return s
     if k == "daily":
         return f"каждый день в {tm}"
     if k == "weekly":
@@ -349,6 +387,12 @@ def parse(text, now=None):
         if not rest.startswith("через"):
             rest = "через " + rest
     spans = []
+    # окно «с 9 до 18» / «с 9:00 по 18:00» — только днём (дело «проверяй почту по будням с 9 до 18», №137)
+    win = re.search(r"\bс\s+(\d{1,2})(?::(\d{2}))?\s+(?:до|по)\s+(\d{1,2})(?::(\d{2}))?(?:\s+час\w*)?(?=\s|$)", rest)
+    if win and int(win.group(1)) < int(win.group(3)) <= 24:
+        rest = rest[:win.start()] + " " + rest[win.end():]
+    else:
+        win = None
     rep = _repeat(rest)
     if rep:
         rep, sp = rep
@@ -416,6 +460,13 @@ def parse(text, now=None):
                 when += timedelta(days=1)
     else:
         return None
+    if win:
+        days = rep.get("days") if rep and rep.get("kind") == "weekly" else (rep or {}).get("days")
+        rep = {"kind": "interval", "minutes": rep["minutes"] if rep and rep.get("kind") == "interval" else 60,
+               "from": f"{int(win.group(1)):02d}:{int(win.group(2) or 0):02d}", "to": f"{int(win.group(3)):02d}:{int(win.group(4) or 0):02d}"}
+        if days:
+            rep["days"] = days
+        when = next_time(rep, now)                     # внутри окна — через интервал, вне — в начале следующего
     what = _restore_case(_clean_text(_cut(rest, spans)), text)
     if not what:
         what = {"alarm": "Будильник", "timer": "Таймер"}.get(kind, "Напоминание")

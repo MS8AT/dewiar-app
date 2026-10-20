@@ -28,7 +28,11 @@ k = W.advice("kaspersky", paths)
 ok(any("Исключения" in s for s in k["steps"]) and any("Ctrl+V" in s for s in k["steps"]) and str(prog) in " ".join(k["steps"]) and not k["auto"],
    "Kaspersky: шаги «Исключения», путь уже в буфере (Ctrl+V)")
 d = W.advice("defender", paths)
-ok(d["auto"] and "Да" in d["steps"][0], "Защитник: одной кнопкой (Windows спросит «Да»)")
+ok(d["auto"] and "Открыть настройки Защитника" in d["steps"][0] and "Ctrl+V" in d["steps"][1],
+   "Защитник: кнопка открывает его настройки, путь уже скопирован (сами исключения не добавляем — так делают вирусы)")
+src = (ROOT / "core/winav.py").read_text(encoding="utf-8") + (ROOT / "packaging/windows/dewiar.nsi").read_text(encoding="utf-8")
+ok("ShellExecuteW(None, \"runas\", \"powershell.exe\"" not in src and "Add-MpPreference" not in src,
+   "ни в программе, ни в установщике нет скрытого PowerShell с Add-MpPreference (Kaspersky: PDM:Trojan.Win32.Generic)")
 ok(W.looks_blocked("ImportError: DLL load failed while importing onnxruntime_pybind11_state", []) and W.looks_blocked("", ["python/pythonw.exe"])
    and W.looks_blocked("PermissionError: [WinError 5] Отказано в доступе", []) and not W.looks_blocked("ValueError: bad settings", []),
    "признаки «мешает антивирус» в ошибке")

@@ -86,21 +86,28 @@ Var IsUpdate
     FileClose $1
     ${If} $2 != ""
       ; номер мог остаться от прошлого сеанса и достаться другой программе (даже самому установщику) —
-      ; поэтому завершаем, только если под этим номером сейчас python/pythonw
-      nsExec::Exec 'taskkill /F /T /IM pythonw.exe /FI "PID eq $2"'
+      ; поэтому завершаем, только если под этим номером сейчас python/pythonw. Без /T (дерева процессов): установщик
+      ; запущен из окна Dewiar, он его потомок — /T убивал и сам установщик («нажимаю „Далее“ — и всё исчезает»,
+      ; отчёты №126, №131 и комментарии 19–20.10). Остальные python Dewiar гасит stop_dewiar.py по папке.
+      nsExec::Exec 'taskkill /F /IM pythonw.exe /FI "PID eq $2"'
       Pop $0
-      nsExec::Exec 'taskkill /F /T /IM python.exe /FI "PID eq $2"'
+      nsExec::Exec 'taskkill /F /IM python.exe /FI "PID eq $2"'
       Pop $0
     ${EndIf}
   ${EndIf}
 !macroend
 
 !macro STOP_DEWIAR
-  ; сначала по номерам процессов, которые записал сам Dewiar, затем — все его python по пути (PowerShell)
+  ; сначала по номерам процессов, которые записал сам Dewiar, затем — все его python по пути: своим же Python
+  ; (ui/stop_dewiar.py). Раньше — PowerShell с -ExecutionPolicy Bypass: антивирусы (Kaspersky) видели в этом вирус
   !insertmacro KILL_PIDFILE "$LOCALAPPDATA\Dewiar\ui.pid"
   !insertmacro KILL_PIDFILE "$LOCALAPPDATA\Dewiar\core.pid"
-  nsExec::Exec `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process pythonw,python -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like '$INSTDIR\*' } | Stop-Process -Force -ErrorAction SilentlyContinue"`
-  Pop $0
+  ${If} ${FileExists} "$INSTDIR\python\python.exe"
+    InitPluginsDir                                ; сценарий — из самого установщика: у прежней версии его ещё нет
+    File "/oname=$PLUGINSDIR\stop_dewiar.py" "${STAGE}\app\ui\stop_dewiar.py"
+    nsExec::Exec '"$INSTDIR\python\python.exe" -X utf8 "$PLUGINSDIR\stop_dewiar.py" "$INSTDIR"'
+    Pop $0
+  ${EndIf}
   Sleep 700
 !macroend
 
@@ -149,9 +156,10 @@ Function SelfCheck
     Return                                        ; что делать, уже объяснила сама проверка (окном)
   ${EndIf}
   ; Python не запускается вовсе — скорее всего, его файлы убрал антивирус
-  MessageBox MB_YESNO|MB_ICONEXCLAMATION "Похоже, антивирус не даёт запуститься файлам Dewiar (это ложная тревога).$\r$\n$\r$\nЕсли у вас Kaspersky, ESET, Dr.Web, Avast или другой антивирус — откройте его, найдите «Исключения» и добавьте туда папку:$\r$\n$INSTDIR$\r$\nЗатем запустите этот установщик ещё раз.$\r$\n$\r$\nЕсли антивирус — только Защитник Windows, нажмите «Да»: Dewiar добавит себя в его исключения (Windows спросит разрешение)." /SD IDNO IDNO selfcheck_done
-  ExecShell "runas" "powershell.exe" `-NoProfile -WindowStyle Hidden -Command "Add-MpPreference -ExclusionPath '$INSTDIR','$LOCALAPPDATA\Dewiar'"` SW_HIDE
-  MessageBox MB_OK|MB_ICONINFORMATION "Если Windows спросила разрешение и вы нажали «Да» — готово. Запустите установщик Dewiar ещё раз: он вернёт убранные файлы." /SD IDOK
+  MessageBox MB_YESNO|MB_ICONEXCLAMATION "Похоже, антивирус не даёт запуститься файлам Dewiar (это ложная тревога).$\r$\n$\r$\nЕсли у вас Kaspersky, ESET, Dr.Web, Avast или другой антивирус — откройте его, найдите «Исключения» и добавьте туда папку:$\r$\n$INSTDIR$\r$\nЗатем запустите этот установщик ещё раз.$\r$\n$\r$\nЕсли антивирус — только Защитник Windows, нажмите «Да»: откроются его настройки, там «Исключения» → «Добавить исключение» → «Папка»." /SD IDNO IDNO selfcheck_done
+  ; сами исключения не добавляем: скрытый PowerShell, добавляющий исключения Защитника — поведение вирусов (за это Kaspersky и убирал Dewiar)
+  ExecShell "open" "windowsdefender://threatsettings"
+  MessageBox MB_OK|MB_ICONINFORMATION "В открывшемся окне: «Исключения» → «Добавление или удаление исключений» → «Добавить исключение» → «Папка» → выберите:$\r$\n$INSTDIR$\r$\n$\r$\nПотом запустите установщик Dewiar ещё раз: он вернёт убранные файлы." /SD IDOK
   selfcheck_done:
 FunctionEnd
 

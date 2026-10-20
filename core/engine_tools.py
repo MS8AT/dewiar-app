@@ -364,6 +364,16 @@ class ToolsMixin:
                         r"какой (?:сегодня )?день недели", t):
             self._say_quick(f"Сегодня {WEEKDAYS[now.weekday()]}, {now.day} {MONTHS[now.month - 1]}.", text, via)
             return True
+        # «сколько сейчас времени в Омске» — по часовому поясу, а не модель «в уме» (№131: вычла 3 часа вместо прибавления)
+        m = re.fullmatch(r"(?:сколько (?:сейчас )?(?:времени|время)|который (?:сейчас )?час|какое (?:сейчас )?время)(?: сейчас)? (в|во) "
+                         r"([а-я][а-я -]{1,30}?)(?: сейчас)?", t)
+        if m:
+            from tools import world_time
+            city = re.sub(r"(^|[ -])([а-я])", lambda x: x.group(1) + x.group(2).upper(), m.group(2))
+            said = world_time(city, geocode=False, prep=m.group(1)) or world_time(city, prep=m.group(1))
+            if said:
+                self._say_quick(said, text, via)
+                return True
         return False
 
     def _plan_cmd(self, text, via=None):

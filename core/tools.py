@@ -354,6 +354,77 @@ def t_weather(a, ctx):
     return "\n".join(out) + "\n[Прогноз Open-Meteo. Называй только эти числа.]"
 
 
+# Часовые пояса без сети: города, о которых спрашивают чаще всего (отчёт №131, 20.10: «время говорит на 3 часа позднее» —
+# модель «посчитала» Омск, вычтя 3 часа вместо прибавления). Остальные — геокодер Open-Meteo (поле timezone).
+CITY_TZ = {"москв": "Europe/Moscow", "петербург": "Europe/Moscow", "питер": "Europe/Moscow", "калининград": "Europe/Kaliningrad",
+           "самар": "Europe/Samara", "екатеринбург": "Asia/Yekaterinburg", "челябинск": "Asia/Yekaterinburg", "уф": "Asia/Yekaterinburg",
+           "тюмен": "Asia/Yekaterinburg", "омск": "Asia/Omsk", "новосибирск": "Asia/Novosibirsk", "томск": "Asia/Tomsk",
+           "барнаул": "Asia/Barnaul", "красноярск": "Asia/Krasnoyarsk", "кемерово": "Asia/Novokuznetsk", "новокузнецк": "Asia/Novokuznetsk",
+           "иркутск": "Asia/Irkutsk", "улан-удэ": "Asia/Irkutsk", "чит": "Asia/Chita", "якутск": "Asia/Yakutsk",
+           "владивосток": "Asia/Vladivostok", "хабаровск": "Asia/Vladivostok", "магадан": "Asia/Magadan",
+           "сахалин": "Asia/Sakhalin", "южно-сахалинск": "Asia/Sakhalin", "камчат": "Asia/Kamchatka", "петропавловск-камчатск": "Asia/Kamchatka",
+           "минск": "Europe/Minsk", "киев": "Europe/Kyiv", "алмат": "Asia/Almaty", "астан": "Asia/Almaty",
+           "ташкент": "Asia/Tashkent", "бишкек": "Asia/Bishkek", "ереван": "Asia/Yerevan", "тбилиси": "Asia/Tbilisi", "баку": "Asia/Baku",
+           "лондон": "Europe/London", "париж": "Europe/Paris", "берлин": "Europe/Berlin", "рим": "Europe/Rome", "мадрид": "Europe/Madrid",
+           "стамбул": "Europe/Istanbul", "дуба": "Asia/Dubai", "пекин": "Asia/Shanghai", "токио": "Asia/Tokyo", "сеул": "Asia/Seoul",
+           "бангкок": "Asia/Bangkok", "дели": "Asia/Kolkata", "нью-йорк": "America/New_York", "чикаго": "America/Chicago",
+           "лос-анджелес": "America/Los_Angeles", "сан-франциско": "America/Los_Angeles", "торонто": "America/Toronto",
+           "сидне": "Australia/Sydney", "иерусалим": "Asia/Jerusalem", "тель-авив": "Asia/Jerusalem"}
+
+
+def city_tz(city, geocode=True):
+    """Город -> (название, имя часового пояса IANA) или (город, None)."""
+    c = city.lower().replace("ё", "е").strip()
+    for k, tz in CITY_TZ.items():
+        if c.startswith(k) or c == k:
+            return city, tz
+    if not geocode:
+        return city, None
+    try:
+        g = httpx.get("https://geocoding-api.open-meteo.com/v1/search", params={"name": city, "count": 1, "language": "ru"},
+                      headers=UA, timeout=10).json()
+        p = (g.get("results") or [None])[0]
+        return (p.get("name") or city, p.get("timezone")) if p else (city, None)
+    except (httpx.HTTPError, ValueError):
+        return city, None
+
+
+def world_time(city, now=None, geocode=True, prep=""):
+    """Который час в городе — по часовому поясу, а не «в уме». prep — «в»/«во», как сказал человек («в Омске»): тогда
+    «В Омске сейчас 12:39…», иначе «Омск: сейчас 12:39…». -> строка для человека или None (город не найден)."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    name, tz = city_tz(city, geocode)
+    if not tz:
+        return None
+    try:
+        z = ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    now = now or _dt.datetime.now().astimezone()
+    there = now.astimezone(z)
+    diff = round((there.utcoffset() - now.utcoffset()).total_seconds() / 3600, 1)
+    d = int(diff) if diff == int(diff) else diff
+    n = abs(d)
+    word = "часа" if n != int(n) else ("час" if n % 10 == 1 and n % 100 != 11 else "часа" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else "часов")
+    rel = "как у вас" if diff == 0 else (f"на {str(n).replace('.', ',')} {word} " + ("больше" if diff > 0 else "меньше") + ", чем у вас")
+    days = (there.date() - now.date()).days
+    day = ", там уже завтра" if days > 0 else ", там ещё вчера" if days < 0 else ""
+    if prep:
+        return f"{prep.capitalize()} {city[:1].upper() + city[1:]} сейчас {there:%H:%M}{day} — {rel}."
+    return f"{name[:1].upper() + name[1:]}: сейчас {there:%H:%M}{day} — {rel}."
+
+
+def t_world_time(a, ctx):
+    city = str(a.get("city") or "").strip()
+    if not city:
+        raise ToolError("спроси, в каком городе")
+    r = world_time(city)
+    if not r:
+        return f"Город «{city}» не нашёлся — уточни название. Время не считай в уме."
+    return r + " [Посчитано по часовому поясу — называй именно это время.]"
+
+
 def t_read_webpage(a, ctx):
     """Текст страницы, не больше PAGE_MAX символов — чтобы одна страница не съела контекст модели; длинная — начало и
     куски вокруг нужных слов (find или слова вопроса), пустая — честно «текста нет»."""
@@ -1460,6 +1531,26 @@ def t_reminder(a, ctx):
             f" (id {item['id']}).{moved} Подтверди коротко одной фразой.")
 
 
+def t_schedule_job(a, ctx):
+    """Дело по расписанию, которое делает сам ассистент (проверить почту, прислать курс, собрать новости) и сообщает
+    итог; в срок не звонит человеку, а выполняет (engine_music._run_job). Отчёт №137, 20.10: «проверяй почту и сообщай
+    о важном» становилось напоминанием человеку «проверь почту» каждый час — инструмента для такого дела у модели не было."""
+    from when import describe_repeat, human, parse
+    task = " ".join(str(a.get("task") or "").split()).strip(" .")
+    phrase = str(a.get("when") or "").strip()
+    if not task or not phrase:
+        raise ToolError("нужны task — что делать тебе, и when — когда, с повтором («каждый день в 9», «по будням с 9 до 18 каждый час»)")
+    r = parse("напоминай " + phrase + " " + task) or parse("напоминай " + phrase)
+    if not r or not r.get("repeat"):
+        raise ToolError("when — с повтором: «каждый день в 9», «по будням с 9 до 18 каждый час», «каждые 2 часа»; разовое дело — "
+                        "сделай сейчас или set_reminder")
+    deliver = a.get("deliver") if a.get("deliver") in ("telegram", "max", "voice") else "voice"
+    item = ctx["reminders"].add(r["at"], task[0].upper() + task[1:], r["repeat"], "job", {"deliver": deliver, "brief": False})
+    return (f"Дело «{item['text']}» заведено: {describe_repeat(r['repeat'])}, первый раз {human(r['at'])} (id {item['id']}). "
+            "В срок его выполнишь ты сам и сообщишь итог"
+            + (" в Telegram" if deliver == "telegram" else " в Max" if deliver == "max" else " голосом") + ". Подтверди одной фразой.")
+
+
 def calc_eval(expr, today=None):
     """Безопасный счёт: числа, + - * / // % **, скобки, проценты («17% * 2350», «2350 * 17%»), round abs min max sqrt,
     даты: days_until("2027-01-01") — дней до даты, days_between("2026-10-01", "2026-12-31"), weekday("2026-10-14"),
@@ -2131,10 +2222,24 @@ TOOLS = {
                       "(run_command, pkill по имени программы — только после согласия человека).", S({}), "safe", t_system, "Состояние компьютера"),
     "set_reminder": ("Поставить напоминание, будильник или таймер, в том числе повторяющееся. when — когда, обычными "
                      "словами по-русски: «через 10 минут», «завтра в 9», «в пятницу в 18:30», «каждый день в 8», «по "
-                     "будням в 9:15», «каждые 2 часа». Будни, выходные, дни недели — только в when, не в text. text — о чём напомнить, коротко.",
+                     "будням в 9:15», «каждые 2 часа». Будни, выходные, дни недели — только в when, не в text. text — о чём напомнить, коротко. "
+                     "Напоминание — ЧЕЛОВЕКУ: в срок он сам что-то сделает. Если делать должен ТЫ («проверяй почту», «присылай "
+                     "курс», «сообщай о важном», «следи за…») — это schedule_job, а не напоминание.",
                      S({"text": {"type": "string"}, "when": {"type": "string"}, "in_minutes": {"type": "number"},
                         "at": {"type": "string"}, "repeat": {"type": "string", "enum": list(REPEAT_WORDS)}}, ["text"]),
                      "safe", t_reminder, "Напоминания и таймеры"),
+    "schedule_job": ("Дело по расписанию, которое делаешь ТЫ сам: проверить почту и сообщить о важном, прислать курс или "
+                     "новости, собрать сводку, следить за чем-то. В срок ты выполняешь его с инструментами и сообщаешь итог — "
+                     "человеку ничего делать не нужно. Просят регулярно «проверяй / присылай / сообщай / следи» — только это, "
+                     "не set_reminder. task — что сделать, своими словами (как поручение тебе); when — повтор обычными словами: "
+                     "«каждый день в 9», «по будням с 9 до 18 каждый час», «каждые 2 часа»; «периодически» без интервала — "
+                     "«каждый час». deliver — куда сообщать итог: voice (голосом, по умолчанию), telegram, max.",
+                     S({"task": {"type": "string"}, "when": {"type": "string"}, "deliver": {"type": "string", "enum": ["voice", "telegram", "max"]}},
+                       ["task", "when"]),
+                     "safe", t_schedule_job, "Дела по расписанию"),
+    "world_time": ("Который час сейчас в другом городе или стране (по часовому поясу). Время в других городах не считай в уме "
+                   "и калькулятором — только этим. city — город.", S({"city": {"type": "string"}}, ["city"]), "safe", t_world_time,
+                   "Время в городе"),
     "list_reminders": ("Список активных напоминаний.", S({}), "safe", t_list_reminders, "Напоминания: список"),
     "calc": ("Посчитать точно: любые вычисления (проценты, суммы, скидки, деление, курсы) и даты. Считай ВСЕГДА этим "
              "инструментом, не в уме. Выражение как в Python: 2350 * 17 / 100, (1200 - 15%) * 3; даты в виде ГГГГ-ММ-ДД: "

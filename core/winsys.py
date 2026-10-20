@@ -218,7 +218,7 @@ def notify(text, title="Dewiar"):
     процесс запущен."""
     try:
         env = dict(os.environ, DEWIAR_T=title, DEWIAR_B=text)
-        popen_hidden(["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", _TOAST],
+        popen_hidden(["powershell", "-NoProfile", "-NonInteractive", "-Command", _TOAST],          # без окна — флагом процесса
                      env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except OSError as e:

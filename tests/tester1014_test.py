@@ -25,18 +25,14 @@ def free():
     s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
 
 
-# ── 1. сторож обновления ──
-inst = r"C:\Users\Миша О'Нил\AppData\Local\Programs\Dewiar"
-sc = A.relaunch_script(4242, inst, inst + r"\python\pythonw.exe", inst + r"\app\ui\app.py")
-ok("Wait-Process -Id 4242" in sc and "Start-Sleep -Seconds 10" in sc, "ждёт конца установщика и ещё 10 с")
-ok("$dir = 'C:\\Users\\Миша О''Нил\\AppData\\Local\\Programs\\Dewiar\\'" in sc, "папка установки — в кавычках PowerShell, апостроф удвоен")
-ok("if (-not $up) { Start-Process -FilePath 'C:\\Users\\Миша О''Нил\\AppData\\Local\\Programs\\Dewiar\\python\\pythonw.exe'" in sc
-   and "'\"C:\\Users\\Миша О''Нил\\AppData\\Local\\Programs\\Dewiar\\app\\ui\\app.py\"'" in sc, "запускает, только если Dewiar так и не поднялся")
-enc = base64.b64encode(sc.encode("utf-16-le")).decode()
-ok(base64.b64decode(enc).decode("utf-16-le") == sc, "-EncodedCommand: скрипт без кавычек в командной строке")
+# ── 1. сторож обновления (с 0.38.91 — cmd, не скрытый PowerShell: антивирусы видели в нём вирус) ──
+sc = A.relaunch_script(4242)
+ok(sc.isascii() and 'tasklist /FI "PID eq 4242"' in sc and "goto wait" in sc and "ping -n 11 127.0.0.1" in sc, "ждёт конца установщика и ещё 10 с")
+ok('set /p P=<"%DW_PID%"' in sc and 'find " %P% "' in sc and "goto end" in sc, "запускает, только если Dewiar так и не поднялся (живой номер в ui.pid)")
+ok('start "" "%DW_EXE%" -X utf8 "%DW_APP%"' in sc and 'del "%~f0"' in sc, "пути — переменными окружения (кириллица не мешает), сценарий удаляет себя")
 src = (ROOT / "ui/app.py").read_text(encoding="utf-8")
-ok("relaunch_after(inst.pid," in src and '"powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand"' in src,
-   "«Обновить» на Windows — установщик и сторож")
+ok("relaunch_after(inst.pid," in src and '["cmd.exe", "/d", "/c", str(f)]' in src and "EncodedCommand" not in src.split("def relaunch_after")[1][:900],
+   "«Обновить» на Windows — установщик и сторож (cmd без окна)")
 
 # ── 2. лицо персонажа вместо кружка ──
 tmp = Path(tempfile.mkdtemp()); (tmp / "cfg").mkdir()

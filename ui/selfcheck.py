@@ -36,10 +36,10 @@ def main():
         winav.copy_text(st["paths"][0])
         text = winav.message(st, errs[0] if errs else "")
         if (st.get("main") or {}).get("kind") == "defender":
-            if box(text + "\n\nДобавить Dewiar в исключения Защитника Windows сейчас?", 0x4 | 0x30) == 6:
+            if box(text + "\n\nОткрыть настройки Защитника Windows, чтобы добавить папку Dewiar в исключения?", 0x4 | 0x30) == 6:
                 winav.defender_exclude(st["paths"])
-                box("Если Windows спросила разрешение и вы нажали «Да» — готово.\n\n"
-                    "Запустите установщик Dewiar ещё раз: он вернёт убранные файлы.")
+                box("В открывшемся окне: «Исключения» → «Добавить исключение» → «Папка» → Ctrl+V (путь уже скопирован).\n\n"
+                    "Потом запустите установщик Dewiar ещё раз: он вернёт убранные файлы.")
         else:
             box(text + "\n\nПотом запустите установщик Dewiar ещё раз — он вернёт убранные файлы.", 0x30)
     else:

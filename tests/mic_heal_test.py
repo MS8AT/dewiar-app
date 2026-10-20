@@ -53,5 +53,29 @@ E._mic_zero_step(stub, st, voice, 30)
 ok(told[-1] == "" and st["since"] is None, "голос появился — подсказка убрана")
 src = (ROOT / "core/engine_audio.py").read_text(encoding="utf-8")
 ok('self._mic_zero_step(zst, frame, now) == "heal"' in src, "главный цикл слуха проверяет каждый кадр этим шагом")
+# «почти тишина» (пик ≤ 3, не нули) — массив микрофонов AMD с шумоподавлением в тихой комнате (№136, 20.10): тревога
+# и автоотчёт после каждого перезапуска, а микрофон работал. Теперь: подсказка только через минуту; микрофон в этом запуске
+# уже слышал — без уведомления и отчёта; не чаще раза в полчаса и после перезапуска (время в настройках)
+cfg = {}
+reported = []
+s4 = types.SimpleNamespace(**vars(stub)); s4._zero_heal_at = -1e9
+s4.report_problem = lambda *a: reported.append(a)
+s4.s = types.SimpleNamespace(get=lambda *k: cfg.get(k[-1], ""), update=lambda p: cfg.update(p.get("audio", {})))
+s4._mic_silent = lambda exact=True: E._mic_silent(s4, exact)
+tiny = (b"\x02\x00\xfe\xff" * 256)
+st4 = {"since": None, "told": False, "all": True}
+n0, p0 = len(told), len(pushed)
+[E._mic_zero_step(s4, st4, voice, t / 10) for t in range(0, 5)]                       # сначала слышал голос
+[E._mic_zero_step(s4, st4, tiny, 1 + t / 10) for t in range(0, 300)]                  # 30 с «почти тишины»
+ok(len(told) == n0, "почти тишина 30 с — ещё ничего не говорим (раньше — через 15 с)")
+[E._mic_zero_step(s4, st4, tiny, 31 + t / 10) for t in range(0, 400)]                 # больше минуты
+ok(len(told) == n0 + 1 and len(pushed) == p0 and not reported and cfg.get("mic_hint_at"),
+   f"минута почти тишины, а микрофон уже слышал — только подсказка, без уведомления и отчёта: {len(told) - n0}, {len(pushed) - p0}, {reported}")
+s5 = types.SimpleNamespace(**vars(s4)); s5._mic_alive = False
+E._mic_silent(s5, False)
+ok(len(told) == n0 + 1, "после перезапуска в те же полчаса — тишина (время подсказки — в настройках)")
+cfg["mic_hint_at"] = 0
+E._mic_silent(s5, False)
+ok(len(pushed) == p0 + 1 and reported, "микрофон ни разу не слышал с запуска — подсказка, уведомление и отчёт, как раньше")
 print("\nИТОГ:", "всё прошло" if not fails else f"не прошло {len(fails)}")
 sys.exit(1 if fails else 0)

@@ -416,12 +416,26 @@ class AudioMixin:
         else:
             text = ("Микрофон почти ничего не слышит: громкость записи на нуле или выбран не тот микрофон. Проверьте уровень "
                     "микрофона в настройках звука системы или выберите другой в студии → «Звук и поведение» → «Микрофон».")
-        if not exact and time.monotonic() - getattr(self, "_mic_hint_at", -1e9) < 1800:
-            return                                       # «почти тишина» бывает и в очень тихой комнате — не чаще раза в полчаса
+        if not exact:
+            # «почти тишина» бывает и в очень тихой комнате (массивы микрофонов с шумоподавлением AMD/Realtek отдают почти
+            # цифровую тишину — №136, 20.10: тревога и автоотчёт после каждого перезапуска, а микрофон работал). Не чаще раза
+            # в полчаса и после перезапуска тоже (время — в настройках)
+            try:
+                last = float(self.s.get("audio", "mic_hint_at") or 0)
+            except (TypeError, ValueError):
+                last = 0.0
+            if time.time() - last < 1800:
+                return
+            try:
+                self.s.update({"audio": {"mic_hint_at": int(time.time())}})
+            except Exception:  # noqa: BLE001
+                pass
         self._mic_hint_at = time.monotonic()
-        log.warning("🎤 15 с от микрофона %s — %s (микрофоны: %s)", "полная тишина (нули)" if exact else "почти тишина (пик ≤ 3)",
+        log.warning("🎤 %s от микрофона %s — %s (микрофоны: %s)", "15 с" if exact else "Минута", "полная тишина (нули)" if exact else "почти тишина (пик ≤ 3)",
                     text[:80], ", ".join(names) or "—")
         self.note(text)
+        if not exact and getattr(self, "_mic_alive", False):
+            return                                       # микрофон в этом запуске уже слышал — просто тихо: подсказка, без тревоги
         body = re.sub(r"^Микрофон молчит\s*[—:]\s*", "", text)          # заголовок уже «Микрофон молчит» — без повтора
         self.push("Микрофон молчит", body[:1].upper() + body[1:], telegram=False)
         self.report_problem("mic_silent", "микрофон молчит: " + ("нули" if exact else "почти тишина") + f"; устройства: {', '.join(names)[:200]}")
@@ -440,6 +454,7 @@ class AudioMixin:
         zeros = not frame.strip(b"\x00")
         peak = 0 if zeros else int(np.abs(np.frombuffer(frame, dtype=np.int16).astype(np.int32)).max())
         if peak > 3:
+            self._mic_alive = True                      # микрофон живой — «почти тишина» потом значит просто тихую комнату
             if st["told"]:
                 self.note("")
                 log.info("🎤 Микрофон снова слышно")
@@ -456,7 +471,7 @@ class AudioMixin:
             log.warning("🎤 Из микрофона идут одни нули — переоткрываю микрофон и эхоподавление")
             self.restart_audio.set()
             return "heal"
-        if not st["told"] and now - st["since"] > 15:
+        if not st["told"] and now - st["since"] > (15 if st["all"] else 60):   # почти тишина — минута, а не 15 с (№136)
             st["told"] = True
             self._mic_silent(exact=st["all"])
         return None

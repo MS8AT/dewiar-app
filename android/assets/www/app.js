@@ -439,13 +439,16 @@ window.addEventListener("unhandledrejection", (e) => {
 });
 /* Сбои связи с мозгом: копятся (pref net_inc) и, как только связь вернулась, уходят разработчику одним отчётом —
    если отчёты разрешены (S.report.auto), не чаще раза в 6 часов. Так видно, что это было: слабая связь или сервер. */
-function netIncident(e) {
+/* count — посчитать в пульс (net_fail, причина, сбой): один раз на вопрос — в итоговом обработчике. Повторы внутри вопроса
+   (round1: 2, 5, 10 с) пишутся только в журнал сбоев (отчёт) — раньше один потерянный вопрос давал до 5 «сбоев»
+   (пакет 20.10: «15 сбоев» за минуту, «13,5 % неудачных» — завышено). */
+function netIncident(e, count = true) {
   let l = []; try { l = JSON.parse(prefGet("net_inc") || "[]") || []; } catch (x) { }
   const c = navigator.connection || {};
   l.push({ ts: Date.now(), host: String(e.url || "").replace(/^https?:\/\//, "").split(/[/?]/)[0], err: String(e.raw || e.message || "").slice(0, 200),
            online: navigator.onLine, type: c.type || c.effectiveType || "" });
   prefSet("net_inc", JSON.stringify(l.slice(-30)));
-  hCount("net_fail"); hWhy(l[l.length - 1].err); hProblem(`связь с мозгом: ${l[l.length - 1].err}`);
+  if (count) { hCount("net_fail"); hWhy(l[l.length - 1].err); hProblem(`связь с мозгом: ${l[l.length - 1].err}`); }
   plog("WARNING", `связь с мозгом: ${l[l.length - 1].host} — ${l[l.length - 1].err} (${l[l.length - 1].type || "сеть ?"})`);
 }
 function netRecovered() {
@@ -1986,7 +1989,7 @@ function sentenceSink() {
 /* «Сфотографируй чек и скажи, сколько я заплатил», «сфоткай стикер и поставь напоминание», «сделай селфи» — снимаем сразу,
    сами, с отсчётом 3-2-1, и задаём вопрос уже со снимком (съёмка 17.10: модель не звала камеру и выдумывала чек; камеру
    открыла только на «включи камеру и сфотографируй», а снимать пришлось руками). Меня/себя/селфи — фронтальная. */
-const PHOTO_NOW_RX = /(?:^|[\s,.!])(?:сфотографируй|сфоткай|сфотай|сделай\s+(?:фото|фотку|снимок|селфи)|сними\s+на\s+камеру|включи\s+камеру|(?:посмотри|глянь)\s+(?:через|в)\s+камеру)(?![а-яё])/i;
+const PHOTO_NOW_RX = /(?:^|[\s,.!])(?:сфотографируй|сфоткай|сфотай|сделай\s+(?:фото|фотку|снимок|селфи)|сними\s+на\s+камеру|включи\s+камеру|(?:посмотри|глянь)\s+(?:через|в)\s+камеру|сними\s+меня|сделай\s+фотографию|открой\s+камеру|запусти\s+камеру)(?![а-яё])/i;   // синонимы — отчёт №130, 20.10
 const PHOTO_SELF_RX = /(?:^|[^а-яё])(?:меня|себя|селфи|мо[её]\s+лицо|как\s+я\s+выгляжу)(?![а-яё])/i;
 async function ask(text, opts = {}) {
   text = String(text || "").trim(); if (!text) return;
@@ -2082,7 +2085,7 @@ async function ask(text, opts = {}) {
           return r;
         } catch (e) {
           if (!e.net || tries >= (HOME_URL.test(e.url || "") ? 1 : 3) || turnAbort !== ctl || ctl.signal.aborted || sink.text().trim()) throw e;
-          netIncident(e);
+          netIncident(e, false);
           showBot(tries ? `Связь пропала — пробую ещё раз (${tries + 1})…` : "Связь пропала — пробую ещё раз…", "wait");
           await sleep([2000, 5000, 10000][tries]);
           if (turnAbort !== ctl) throw e;
@@ -2527,6 +2530,8 @@ async function quick(text) {
   const rq = await radioQuick(t); if (rq) return rq;
   { const fs = freeSpaceQuick(t); if (fs) return fs; }
   if (/^(который час|сколько времени|сколько сейчас времени)$/.test(t)) { const d = new Date(); return { say: `Сейчас ${d.getHours()}:${pad(d.getMinutes())}.` }; }
+  { const w = t.match(/^(?:сколько (?:сейчас )?(?:времени|время)|который (?:сейчас )?час|какое (?:сейчас )?время)(?: сейчас)? (в|во) ([а-яё][а-яё -]{1,30}?)(?: сейчас)?$/);
+    if (w) { const said = await worldTime(w[2], w[1]); if (said) return { say: said }; } }
   if (/^(какое (сегодня )?число|какой сегодня день)$/.test(t)) { const d = new Date(); return { say: `Сегодня ${WD[d.getDay()]}, ${d.getDate()} ${MON[d.getMonth()]}.` }; }
   let m;
   if ((m = t.match(/^(?:(включи|зажги|выключи|погаси)\s+(?:мне\s+)?(?:фонарик|фонарь|вспышку)|(посвети)(?:\s+мне)?(?:\s+фонариком)?)(?:,?\s+пожалуйста)?$/))) {
@@ -2741,8 +2746,8 @@ async function doCall(who) {
 
 /* просьба про камеру: «посмотри на меня», «как я выгляжу», «покажи фото», «с фронтальной камеры», «что это» с камерой */
 // просьба, где снимок уместен: камера, фото, «посмотри / что передо мной / что это / прочитай этикетку / сколько стоит…»
-const PHOTO_ASK_RX = /камер|фот|снимок|снимк|сним(?:и|ай|ешь)|сфоткай|посмотри|глянь|взгляни|видишь|увидь|покажи|передо мной|что (?:это|тут|здесь|там) |что это[?!.\s]*$|как я выгляжу|(?<![а-яё])лиц[оеау]|прочитай|прочти|прочесть|написано|этикетк|упаковк|(?<![а-яё])состав(?:е|ом)?(?![а-яё])|(?<![а-яё])чек|вывеск|ценник|сколько стоит|переведи|определи|узнай|распознай|что за (?:растени|цвет|предмет|вещ|модел|марк|порода|гриб|птиц)|где я/i;
-const CAM_ASK_RX = /камер|фото|снимок|снимк|сфотограф|сним(?:и|ай)|посмотри на меня|как я выгляжу|мо[её] лицо|изображени|покажи (?:мне )?(?:меня|это|его|е[её])|что (?:ты )?видишь|где я нахожусь/i;
+const PHOTO_ASK_RX = /перед\s+тобой|вокруг|в\s+рук(?:е|ах)|наряд|как\s+я\s+одет|опиши,?\s+что|расскажи,?\s+что\s+(?:ты\s+)?(?:видишь|там|тут|здесь|вокруг|перед)|камер|фот|снимок|снимк|сним(?:и|ай|ешь)|сфоткай|посмотри|глянь|взгляни|видишь|увидь|покажи|передо мной|что (?:это|тут|здесь|там) |что это[?!.\s]*$|как я выгляжу|(?<![а-яё])лиц[оеау]|прочитай|прочти|прочесть|написано|этикетк|упаковк|(?<![а-яё])состав(?:е|ом)?(?![а-яё])|(?<![а-яё])чек|вывеск|ценник|сколько стоит|переведи|определи|узнай|распознай|что за (?:растени|цвет|предмет|вещ|модел|марк|порода|гриб|птиц)|где я/i;
+const CAM_ASK_RX = /перед\s+тобой|что\s+вокруг|в\s+рук(?:е|ах)|как\s+я\s+одет|оцени\s+(?:мой\s+)?наряд|опиши,?\s+что|расскажи,?\s+что\s+(?:ты\s+)?(?:видишь|там|тут|здесь|вокруг|перед)|камер|фото|снимок|снимк|сфотограф|сним(?:и|ай)|посмотри на меня|как я выгляжу|мо[её] лицо|изображени|покажи (?:мне )?(?:меня|это|его|е[её])|что (?:ты )?видишь|где я нахожусь/i;
 /* ---------- границы помощника (как core/boundaries.py — менять вместе) ----------
    Правило — в systemPrompt; грубость в адрес помощника — спокойная граница в этом ходе и счётчик rude в пульс;
    отказ помощника — счётчик refused. Наружу — только числа. */
@@ -3032,6 +3037,7 @@ function toolSpecs() {
       parameters: O({ query: STR, count: NUM, caption: STR }, ["query"]) },
     { name: "read_webpage", description: "Прочитать страницу по ссылке (текст). Длинная — начало и места со словами find (или вопроса).",
       parameters: O({ url: STR, find: { type: "string", description: "что ищешь на длинной странице: «Доллар США», «15 октября»" } }, ["url"]) },
+    { name: "world_time", description: "Который час сейчас в другом городе или стране (по часовому поясу). Время в других городах не считай в уме — только этим.", parameters: O({ city: STR }, ["city"]) },
     { name: "weather", description: "Погода сейчас и на ближайшие дни: city — город (если пользователь не назвал — из памяти о нём).", parameters: O({ city: STR, days: NUM }, ["city"]) },
     { name: "flashlight", description: "Фонарик: on true/false.", parameters: O({ on: { type: "boolean" } }, ["on"]) },
     { name: "take_photo", description: "Сфотографировать камерой телефона и посмотреть на снимок: camera front — фронтальная (на пользователя: «сфотографируй меня», «как я выгляжу»), back — основная (на то, что перед телефоном: «что это», «прочитай надпись»). Снимок придёт следующим сообщением — опиши его или ответь на вопрос.",
@@ -3199,6 +3205,7 @@ async function runTool(name, a) {
       }
       return await readPage(url, a.find || "");
     }
+    case "world_time": { const r = await worldTime(a.city || ""); return r ? r + " [Посчитано по часовому поясу — называй именно это время.]" : `Город «${a.city || ""}» не нашёлся — уточни. Время не считай в уме.`; }
     case "weather": return await weather(a.city || "", a.days || 3);
     case "flashlight": return devTorch(!!a.on) ? (a.on ? "Фонарик включён." : "Фонарик выключен.") : "Фонарика нет.";
     case "take_photo": {
@@ -3535,6 +3542,35 @@ async function readPage(url, find) {
 const WMO = { 0: "ясно", 1: "в основном ясно", 2: "переменная облачность", 3: "пасмурно", 45: "туман", 48: "изморозь", 51: "морось", 53: "морось", 55: "сильная морось",
   61: "небольшой дождь", 63: "дождь", 65: "сильный дождь", 66: "ледяной дождь", 67: "ледяной дождь", 71: "небольшой снег", 73: "снег", 75: "сильный снег", 77: "снежная крупа",
   80: "ливень", 81: "ливни", 82: "сильные ливни", 85: "снегопад", 86: "сильный снегопад", 95: "гроза", 96: "гроза с градом", 99: "гроза с градом" };
+/* Который час в другом городе — по часовому поясу (Intl), а не «в уме» (отчёт №131, 20.10: модель вычла 3 часа вместо
+   прибавления). Частые города — таблица (как CITY_TZ в core/tools.py), остальные — геокодер Open-Meteo (поле timezone). */
+const CITY_TZ = {"москв": "Europe/Moscow", "петербург": "Europe/Moscow", "питер": "Europe/Moscow", "калининград": "Europe/Kaliningrad", "самар": "Europe/Samara", "екатеринбург": "Asia/Yekaterinburg", "челябинск": "Asia/Yekaterinburg", "уф": "Asia/Yekaterinburg", "тюмен": "Asia/Yekaterinburg", "омск": "Asia/Omsk", "новосибирск": "Asia/Novosibirsk", "томск": "Asia/Tomsk", "барнаул": "Asia/Barnaul", "красноярск": "Asia/Krasnoyarsk", "кемерово": "Asia/Novokuznetsk", "новокузнецк": "Asia/Novokuznetsk", "иркутск": "Asia/Irkutsk", "улан-удэ": "Asia/Irkutsk", "чит": "Asia/Chita", "якутск": "Asia/Yakutsk", "владивосток": "Asia/Vladivostok", "хабаровск": "Asia/Vladivostok", "магадан": "Asia/Magadan", "сахалин": "Asia/Sakhalin", "южно-сахалинск": "Asia/Sakhalin", "камчат": "Asia/Kamchatka", "петропавловск-камчатск": "Asia/Kamchatka", "минск": "Europe/Minsk", "киев": "Europe/Kyiv", "алмат": "Asia/Almaty", "астан": "Asia/Almaty", "ташкент": "Asia/Tashkent", "бишкек": "Asia/Bishkek", "ереван": "Asia/Yerevan", "тбилиси": "Asia/Tbilisi", "баку": "Asia/Baku", "лондон": "Europe/London", "париж": "Europe/Paris", "берлин": "Europe/Berlin", "рим": "Europe/Rome", "мадрид": "Europe/Madrid", "стамбул": "Europe/Istanbul", "дуба": "Asia/Dubai", "пекин": "Asia/Shanghai", "токио": "Asia/Tokyo", "сеул": "Asia/Seoul", "бангкок": "Asia/Bangkok", "дели": "Asia/Kolkata", "нью-йорк": "America/New_York", "чикаго": "America/Chicago", "лос-анджелес": "America/Los_Angeles", "сан-франциско": "America/Los_Angeles", "торонто": "America/Toronto", "сидне": "Australia/Sydney", "иерусалим": "Asia/Jerusalem", "тель-авив": "Asia/Jerusalem"};
+async function cityTz(city) {
+  const c = String(city || "").toLowerCase().replace(/ё/g, "е").trim();
+  for (const [k, tz] of Object.entries(CITY_TZ)) if (c.startsWith(k)) return { name: city, tz };
+  try {
+    const g = JSON.parse((await http("GET", "https://geocoding-api.open-meteo.com/v1/search?count=1&language=ru&name=" + encodeURIComponent(city), { timeout: 10000 })).body || "{}");
+    const p = (g.results || [])[0]; return p && p.timezone ? { name: p.name || city, tz: p.timezone } : null;
+  } catch (e) { return null; }
+}
+function tzOffsetMin(tz, d) {                    // смещение пояса от UTC в минутах — через Intl, без библиотек
+  const f = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const o = Object.fromEntries(f.formatToParts(d).map(x => [x.type, x.value]));
+  return Math.round((Date.UTC(+o.year, +o.month - 1, +o.day, +o.hour % 24, +o.minute) - Math.floor(d.getTime() / 6e4) * 6e4) / 6e4);
+}
+async function worldTime(city, prep, now) {
+  const z = await cityTz(city); if (!z) return null;
+  now = now || new Date();
+  let off; try { off = tzOffsetMin(z.tz, now); } catch (e) { return null; }
+  const there = new Date(now.getTime() + (off + now.getTimezoneOffset()) * 6e4), diff = Math.round((off + now.getTimezoneOffset()) / 6) / 10;
+  const n = Math.abs(diff), word = n !== Math.floor(n) ? "часа" : n % 10 === 1 && n % 100 !== 11 ? "час" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "часа" : "часов";
+  const rel = diff === 0 ? "как у вас" : `на ${String(n).replace(".", ",")} ${word} ${diff > 0 ? "больше" : "меньше"}, чем у вас`;
+  const dd = Math.round((new Date(there.getFullYear(), there.getMonth(), there.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
+  const day = dd > 0 ? ", там уже завтра" : dd < 0 ? ", там ещё вчера" : "";
+  const hm = `${there.getHours()}:${String(there.getMinutes()).padStart(2, "0")}`;
+  const nm = String(prep ? city : z.name).replace(/(^|[ -])([а-яё])/g, (x, a, b) => a + b.toUpperCase());
+  return prep ? `${prep[0].toUpperCase() + prep.slice(1)} ${nm} сейчас ${hm}${day} — ${rel}.` : `${nm}: сейчас ${hm}${day} — ${rel}.`;
+}
 async function weather(city, days) {
   if (!city) return "Ошибка: спроси, в каком городе.";
   const g = JSON.parse((await http("GET", "https://geocoding-api.open-meteo.com/v1/search?count=1&language=ru&name=" + encodeURIComponent(city), { timeout: 12000 })).body || "{}");

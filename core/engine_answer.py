@@ -1207,6 +1207,14 @@ class AnswerMixin:
                 system = self._system(False) + ("\n\nЭта модель не умеет выполнять действия (музыка, скриншоты, "
                                                 "программы). Если просят действие — честно скажи одной фразой, что с этой "
                                                 "моделью действия недоступны, и предложи выбрать другую модель в «Мозге».")
+            slow_at = (getattr(self, "_tools_slow", None) or {}).get(self._tools_key(prof))
+            if specs and slow_at is not None and time.monotonic() - slow_at < 1200:
+                # своя модель только что не дождалась ответа с инструментами (180 с) — 20 минут спрашиваем без них, а не
+                # ждём те же 180 с на каждом вопросе и потом ещё ответ без них (№133, 20.10: 4 ядра, Ollama, «вечно в думках»)
+                specs = []
+                system = self._system(False) + ("\n\nСейчас действия (музыка, скриншоты, программы) недоступны: модель на "
+                                                "этом компьютере не успевает с ними. Если просят действие — честно скажи "
+                                                "это одной фразой.")
             kb = self._persona_knowledge(text, turn)
             if kb:
                 ctx.append(kb.strip())
@@ -1286,6 +1294,15 @@ class AnswerMixin:
                                 and "без текста" not in str(e):
                             # с инструментами модель не отвечает — ответим хотя бы без них
                             log.warning("Модель не справилась с инструментами (%s) — отвечаю без действий", e)
+                            from health import brain_kind, why_kind
+                            if why_kind(e) == "timeout" and brain_kind(prof) in ("local", "server"):
+                                slow_key = self._tools_key(prof)
+                                if not hasattr(self, "_tools_slow"):
+                                    self._tools_slow = {}
+                                self._tools_slow[slow_key] = time.monotonic()
+                                self.note("Модель на этом компьютере не успевает отвечать с действиями — 20 минут отвечаю без "
+                                          "них, так быстрее. Действия (музыка, программы, напоминания) — с моделью полегче "
+                                          "или облаком Dewiar (студия → «Мозг»).")
                             from llm import CTX_TEXT, _ctx_cut, ctx_full
                             if ctx_full(e) or CTX_TEXT in str(e):  # окно контекста мало (LM Studio 4096): короче и без функций
                                 msgs = _ctx_cut(msgs)

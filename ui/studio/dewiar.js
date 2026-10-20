@@ -257,7 +257,7 @@ $("#dw-av-copy").onclick = async () => { const p = (DW.av && DW.av.paths || [])[
   $("#dw-av-res").className = okc ? "res ok" : "res"; $("#dw-av-res").textContent = okc ? "Путь скопирован — вставьте его в антивирусе (Ctrl+V)." : "Выделите путь выше и скопируйте (Ctrl+C)."; };
 $("#dw-av-ex").onclick = async () => { const r = $("#dw-av-res");
   const x = await core.call("av_exclude").catch(e => ({ error: e.message }));
-  r.className = x && x.ok ? "res ok" : "res bad"; r.textContent = x && x.ok ? "Windows спросит разрешение — нажмите «Да». После этого Защитник не будет трогать Dewiar." : (x && x.error) || "Не получилось открыть запрос Windows."; };
+  r.className = x && x.ok ? "res ok" : "res bad"; r.textContent = x && x.ok ? "Открыла настройки Защитника. «Исключения» → «Добавить исключение» → «Папка» → Ctrl+V (путь уже скопирован)." : (x && x.error) || "Не получилось открыть настройки Защитника — Пуск → «Безопасность Windows»."; };
 $("#dw-upd-go").onclick = () => { dwSet("upd", "run", "проверяю…"); core.call("update_check").then(u => { DW.upd = u; dwRender(); }).catch(e => toast(e.message)); };
 $("#dw-upd-open").onclick = () => $('nav button[data-p="about"]').click();
 async function dwQr() {

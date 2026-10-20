@@ -133,7 +133,18 @@ class HealthMixin:
         self._health_lock = threading.Lock()
         self._h = self._health_load()
         self._h_t0 = _proc_start()
-        self._h_start = {"ts": int(time.time()), "first": (self.s.get("ui", "intro") or "") == "", "v": VERSION}
+        # первый запуск после обновления — отдельно: новые файлы (сотни МБ) проверяет антивирус, Python заново собирает
+        # байткод — такой запуск медленный не из-за программы (пакет 20.10: «0.38.90 — 37 с», а это были обновления)
+        upd = False
+        try:
+            lv = STATE_DIR / "last_version"
+            prev = lv.read_text(encoding="utf-8").strip() if lv.exists() else ""
+            upd = bool(prev) and prev != VERSION
+            if prev != VERSION:
+                lv.write_text(VERSION, encoding="utf-8")
+        except OSError:
+            pass
+        self._h_start = {"ts": int(time.time()), "first": (self.s.get("ui", "intro") or "") == "", "v": VERSION, "upd": upd}
         self._h_marks = {}
         if self.wav_input and not os.environ.get("DEWIAR_PULSE_URL"):
             return                                       # прогон по wav-файлу — не пульс человека

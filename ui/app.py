@@ -51,26 +51,35 @@ CARD_MIN, CARD_MAX = (280, 360), (640, 1000)   # её можно растяну�
 TRANSPARENT = [False]                   # Linux с композитором: окно прозрачное, углы скругляет страница — гладко
 
 
-def relaunch_script(installer_pid, inst_dir, exe, app, wait_s=10):
-    """PowerShell-сторож обновления: дождаться конца установщика, подождать wait_s и, если Dewiar из папки установки
-    так и не запущен, запустить его. Установщик сам запускает новую версию (NSIS LaunchApp), но у тестировщика 14.10
-    после «Обновить» программа не открылась — сторож страхует. Пути — в одинарных кавычках PowerShell (' удваивается):
-    пробелы и кириллица в имени пользователя не мешают. -> текст скрипта."""
-    q = lambda s: "'" + str(s).replace("'", "''") + "'"  # noqa: E731
-    return ("$ErrorActionPreference = 'SilentlyContinue'\n"
-            f"Wait-Process -Id {int(installer_pid)} -Timeout 1800\n"
-            f"Start-Sleep -Seconds {int(wait_s)}\n"
-            f"$dir = {q(str(inst_dir).rstrip(chr(92)) + chr(92))}\n"
-            "$up = Get-Process pythonw, python | Where-Object { $_.Path -and $_.Path.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) }\n"
-            f"if (-not $up) {{ Start-Process -FilePath {q(exe)} -ArgumentList @('-X', 'utf8', {q(chr(34) + str(app) + chr(34))}) }}\n")
+def relaunch_script(installer_pid, wait_s=10):
+    """Сторож обновления (cmd): дождаться конца установщика, подождать wait_s и, если Dewiar так и не запущен (нет
+    живого номера в ui.pid), запустить его. Установщик сам запускает новую версию (NSIS LaunchApp), но у тестировщика
+    14.10 после «Обновить» программа не открылась — сторож страхует. Раньше это был скрытый PowerShell с
+    -EncodedCommand — антивирусы (Kaspersky, PDM:Trojan.Win32.Generic) видели в нём вирус и убирали Dewiar (20.10).
+    Пути — в переменных окружения DW_EXE, DW_APP, DW_PID (кириллица и пробелы в имени пользователя не мешают,
+    сам сценарий — только латиница). -> текст сценария."""
+    pid, w = int(installer_pid), int(wait_s) + 1
+    return ("@echo off\r\n"
+            ":wait\r\n"
+            f'tasklist /FI "PID eq {pid}" /NH 2>nul | find " {pid} " >nul && (ping -n 3 127.0.0.1 >nul & goto wait)\r\n'
+            f"ping -n {w} 127.0.0.1 >nul\r\n"
+            "set P=\r\n"
+            'if exist "%DW_PID%" set /p P=<"%DW_PID%"\r\n'
+            'if defined P tasklist /FI "PID eq %P%" /NH 2>nul | find " %P% " >nul && goto end\r\n'
+            'start "" "%DW_EXE%" -X utf8 "%DW_APP%"\r\n'
+            ":end\r\n"
+            '(goto) 2>nul & del "%~f0"\r\n')
 
 
 def relaunch_after(installer_pid, inst_dir, exe, app):
-    """Запустить сторожа (powershell -EncodedCommand — без кавычек в командной строке), отдельным процессом."""
-    import base64
-    enc = base64.b64encode(relaunch_script(installer_pid, inst_dir, exe, app).encode("utf-16-le")).decode("ascii")
-    subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", enc],
-                     creationflags=winshell.DETACHED, close_fds=True)
+    """Запустить сторожа отдельным процессом cmd без окна; сценарий — во временной папке, удаляет себя сам."""
+    import tempfile
+    from settings import STATE_DIR
+    f = Path(tempfile.gettempdir()) / f"dewiar-relaunch-{int(installer_pid)}.cmd"
+    f.write_text(relaunch_script(installer_pid), encoding="ascii")
+    env = dict(os.environ, DW_EXE=str(exe), DW_APP=str(app), DW_PID=str(STATE_DIR / "ui.pid"))
+    subprocess.Popen(["cmd.exe", "/d", "/c", str(f)], env=env, close_fds=True,
+                     creationflags=winshell.NO_WINDOW | 0x00000200)       # без окна; своя группа — живёт без нас
 
 
 def uptime_s():
