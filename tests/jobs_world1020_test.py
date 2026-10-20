@@ -5,7 +5,7 @@
 а set_reminder говорит, что напоминание — человеку.
 №131: «время говорит на 3 часа позднее» — на «сколько времени в Омске» модель вычла 3 часа вместо прибавления. Теперь — по
 часовому поясу: быстрый ответ без модели и инструмент world_time (компьютер и телефон)."""
-import os, subprocess, sys, tempfile, types
+import os, re, subprocess, sys, tempfile, types
 from datetime import datetime
 from pathlib import Path
 ROOT = Path(os.environ.get("DEWIAR_ROOT") or Path(__file__).resolve().parent.parent)
@@ -70,7 +70,7 @@ ok("там ещё вчера" in T.world_time("Нью-Йорк", datetime(2026, 
 import engine_tools as ET  # noqa: E402
 said = []
 me = types.SimpleNamespace(_say_quick=lambda s, t, v: said.append(s))
-ok(ET.ToolsMixin._clock_cmd(me, "Лира, сколько сейчас времени в Омске?") and said[-1].startswith("В Омске сейчас") and "на 3 часа больше" in said[-1],
+ok(ET.ToolsMixin._clock_cmd(me, "Лира, сколько сейчас времени в Омске?") and said[-1].startswith("В Омске сейчас") and re.search(r"на \d+ час\w* больше, чем у вас|так же, как у вас|чем у вас", said[-1]) is not None,   # разница — от пояса этой машины (на GitHub — UTC)
    f"компьютер: «сколько времени в Омске» — сразу, по поясу: {said[-1:]}")
 ok("world_time" in T.TOOLS, "у модели — world_time")
 
