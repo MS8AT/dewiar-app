@@ -232,3 +232,15 @@ html.st-neu .cl-m { background: var(--sk-glass); box-shadow: var(--raise-s); }
 html.st-neu .cl-m.out { background: var(--brand); color: #fff; }
 html.st-neu .cl-head { box-shadow: 0 8px 14px -12px var(--nd); }
 html.st-light .ritem .rbadge.ratt { color: #3b46a6; background: rgba(90,105,230,.14); }
+
+/* «Небесный вечер» — тёмная пара «Небесного»: тот же голубой акцент (кнопки, вкладки, переключатели), а не стекло */
+html.st-neu.st-skin[data-skin="neudusk"]:not(.st-light) { --brand: linear-gradient(135deg, #6a8dff 0%, #4f6cf0 100%); --accent: #93a9ff; }
+html.st-neu.st-skin[data-skin="neudusk"]:not(.st-light) .tg input:checked + i { background: var(--brand); }
+html.st-neu.st-skin[data-skin="neudusk"]:not(.st-light) :is(.dw-bar i, .cc-bar i, .tbar b, .tprog .bar b, #upd-bar b) { background: var(--brand); }
+
+/* «Плагины» в светлых темах и в неоморфизме */
+html.st-light .plg-md pre { background: rgba(20,30,60,.06); }
+html.st-neu .plg { background: var(--sk-glass); box-shadow: var(--raise); }
+html.st-neu .plg:hover { background: var(--sk-glass); box-shadow: var(--raise-s); transform: none; }
+html.st-neu .plg-ic { box-shadow: var(--press); background: color-mix(in srgb, var(--pc) 14%, var(--sk-glass)); }
+html.st-neu .plg.on::after { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pc) 70%, transparent); }

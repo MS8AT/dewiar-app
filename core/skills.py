@@ -60,7 +60,7 @@ FOLDER_README = """# Навыки
 
 Навык — папка с файлом SKILL.md: когда его применять (description) и что делать (инструкции ниже).
 Ассистент сам выбирает подходящий навык по описанию. Можно положить сюда навык вручную, скачать из каталога
-(студия → «Навыки и MCP») или попросить: «научись…» — он напишет навык сам.
+(студия → «Плагины» → «Навыки») или попросить: «научись…» — он напишет навык сам.
 
     Навыки/
       письмо-клиенту/
@@ -111,6 +111,17 @@ class Skills:
                     continue
                 sk["builtin"] = builtin
                 items[sk["name"]] = sk                     # свои перекрывают встроенные
+        plugins = getattr(self, "plugins", None)           # навыки установленных плагинов (core/plugins.py)
+        for d, pid in (plugins.skill_roots() if plugins else []):
+            try:
+                sk = parse_skill(d / "SKILL.md")
+            except OSError as e:
+                log.warning("навык плагина %s не прочитан: %s", d, e)
+                continue
+            if sk["name"] in items:
+                continue                                   # свой или встроенный навык с тем же именем важнее
+            sk["builtin"], sk["plugin"] = True, pid
+            items[sk["name"]] = sk
         self.items = items
         log.info("Навыки: %s", ", ".join(sorted(items)) or "—")
 
@@ -121,7 +132,7 @@ class Skills:
     def catalog(self):
         off = set(self.s.get("skills", "disabled") or [])
         return [{"name": n, "title": sk["title"], "description": sk["description"], "builtin": sk["builtin"],
-                 "enabled": n not in off, "path": str(sk["dir"])} for n, sk in sorted(self.items.items())]
+                 "enabled": n not in off, "path": str(sk["dir"]), "plugin": sk.get("plugin", "")} for n, sk in sorted(self.items.items())]
 
     def prompt(self):
         """Добавка к системному сообщению: имена и описания включённых навыков (тексты — только через use_skill)."""
@@ -141,6 +152,9 @@ class Skills:
         files = [p.relative_to(sk["dir"]).as_posix() for p in sorted(sk["dir"].rglob("*"))
                  if p.is_file() and p.name != "SKILL.md"][:40]
         extra = ("\n\nФайлы навыка (read_skill_file): " + ", ".join(files)) if files else ""
+        plugins = getattr(self, "plugins", None)
+        if sk.get("plugin") and plugins:               # настройки плагина (имя ребёнка, город дачи…) — к инструкции
+            extra = plugins.note(sk["plugin"]) + extra
         return sk["body"][:24000] + extra + f"\n\nПапка навыка: {sk['dir']}"
 
     def read_file(self, name, rel):

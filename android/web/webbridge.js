@@ -241,7 +241,7 @@
   }
 
   window.DewiarWeb = function (stub) {
-    const has = (n) => /RECORD_AUDIO|CAMERA/.test(n) ? true : /POST_NOTIFICATIONS/.test(n) ? ("Notification" in window && Notification.permission === "granted") : false;
+    const has = (n) => /RECORD_AUDIO|CAMERA|LOCATION/.test(n) ? true : /POST_NOTIFICATIONS/.test(n) ? ("Notification" in window && Notification.permission === "granted") : false;
     return Object.assign(stub, {
       mock: false, web: true,
       info: () => JSON.stringify({ version: window.DEWIAR_WEB_VERSION || "web", sdk: 0, web: true, ios: IOS, device: IOS ? "iPhone / iPad" : "Браузер", recognizer: !!SR, tts: !!synth, crash: "" }),
@@ -250,6 +250,14 @@
         if (/POST_NOTIFICATIONS/.test(n) && "Notification" in window) { Notification.requestPermission().then(p => ev({ type: "perm", name: n, granted: p === "granted" })); return; }
         ev({ type: "perm", name: n, granted: has(n) });
       },
+      // радар «Рядом»: место — у браузера (он сам спросит разрешение); ответ событием loc, как у Android
+      locate(maxAgeSec) {
+        if (!navigator.geolocation) { ev({ type: "loc", error: "браузер не умеет определять место" }); return; }
+        navigator.geolocation.getCurrentPosition(p => ev({ type: "loc", lat: p.coords.latitude, lon: p.coords.longitude, acc: Math.round(p.coords.accuracy || 0), ts: p.timestamp || Date.now() }),
+          e => ev({ type: "loc", error: e && e.code === 1 ? "браузер не разрешил определять место — разрешите в настройках сайта" : "не удалось определить место" }),
+          { maximumAge: Math.max(0, +maxAgeSec || 0) * 1000, timeout: 20000, enableHighAccuracy: false });
+      },
+      locSettings: () => false,
       openSettings: () => false, vibrate(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) { } },
       notify(title, text) { notify(title, text); },
       share(text) { if (navigator.share) navigator.share({ text }).catch(() => { }); },

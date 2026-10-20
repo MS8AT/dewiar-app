@@ -200,6 +200,12 @@ const EXAM_PHONE = [
   { id: "close_video_voice", group: "Близкие", title: "Видеозвонок Люде — понимает и форму имени", seed: { close: ["Миша Исаев", "Людмила Исаева"] },
     steps: ["Позвони Люде Исаевой по видео"], tool: { close_call: { video: true } },
     judge: "Людмила Исаева есть в «Близких» («Люде» — она): видеозвонок через Dewiar (close_call, video)." },
+  { id: "close_where_voice", group: "Близкие", title: "«Где сейчас Люда?» — по радару, без выдуманного адреса", seed: { close: ["Миша Исаев", "Людмила Исаева"] },
+    steps: ["Где сейчас Люда?"], tool: { close_where: {} },
+    judge: "Радар «Рядом» (20.10): спросил через close_where и сказал расстояние и сторону — 1,2 км на северо-запад, обновлено несколько минут назад. Выдуманный адрес или улица — 0 баллов." },
+  { id: "close_wave_voice", group: "Близкие", title: "«Помаши Мише» — помахать через радар", seed: { close: ["Миша Исаев", "Людмила Исаева"] },
+    steps: ["Помаши Мише"], tool: { close_wave: {} },
+    judge: "Помахал близкому через Dewiar (close_wave) и коротко подтвердил. Сказать «помахала», не вызвав действие, — 0 баллов." },
   { id: "close_msg_voice", group: "Близкие", title: "«Отправь Людмиле Исаевой — привет» — через Dewiar", seed: { close: ["Миша Исаев", "Людмила Исаева"] },
     steps: ["Отправь Исаевой Людмиле - привет, как дела!"], tool: { close_send: {} },
     judge: "Отправил сообщение близкой через Dewiar (close_send) с текстом «привет, как дела» и коротко подтвердил. Мессенджеры и SMS — 0 баллов." },
@@ -227,7 +233,7 @@ const EXAM_PHONE = [
 let EXAM = null;
 // действия, которые трогают телефон, — в экзамене только записываются
 // (будильник ставит addAlarm, фонарик и громкость — devTorch/devVolume: они сами пишут в песочницу)
-const EXAM_FAKE = new Set(["close_call", "close_send", "list_reminders", "cancel_reminder", "call", "send_sms", "send_message", "open_app", "open_url",
+const EXAM_FAKE = new Set(["close_call", "close_send", "close_wave", "close_where", "list_reminders", "cancel_reminder", "call", "send_sms", "send_message", "open_app", "open_url",
   "play_radio", "radio_control", "take_photo", "show_photo", "make_app", "open_made", "start_task", "smart_home", "route"]);
 
 function examFill(t) {
@@ -271,6 +277,8 @@ function examFakeTool(name, a) {
     // и модель доложила об отправке человеку, которого нет)
     case "close_call": return `Звоню через Dewiar: ${clPerson(a.to || "").name}.`;
     case "close_send": return `Отправлено ${clPerson(a.to || "").name}. Скажи коротко, что отправила.`;
+    case "close_wave": return `Помахала: ${clPerson(a.to || "").name} увидит и услышит «машет вам». Скажи коротко.`;
+    case "close_where": return `${clPerson(a.who || "").name}: в 1,2 км от вас, на северо-запад; место обновлено 3 минуты назад. Скажи коротко — расстояние и сторону; адресов и улиц не называй.`;
   }
   return "Готово.";
 }

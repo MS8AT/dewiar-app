@@ -50,7 +50,7 @@ function renderCurrent() {
 /* ---------- навыки и MCP ---------- */
 function renderSkills(list) {
   const box = $("#sklist"); box.innerHTML = "";
-  list.forEach(s => {
+  list.filter(s => !s.plugin).forEach(s => {                 // навыки плагинов — в карточке своего плагина
     const el = document.createElement("div"); el.className = "tool";
     el.innerHTML = `<div><b></b>${s.builtin ? '<span class="risk" style="color:var(--muted);background:rgba(255,255,255,.05)">встроенный</span>' : ""}<div class="d"></div></div>
       <label class="tg"><input type="checkbox" ${s.enabled ? "checked" : ""}><i></i></label>

@@ -37,6 +37,7 @@ from stt import GigaAMSTT, RemoteSTT, VoskSTT
 import provision
 from mcp import MCPError, MCPManager
 from skills import SkillError, Skills
+from plugins import Plugins
 from tools import Reminders, ToolError, Toolbox, desktop_notify
 from tts import ElevenTTS, EspeakTTS, PiperTTS, RemoteTTS, SapiTTS, VoskTTS
 

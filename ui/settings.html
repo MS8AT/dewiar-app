@@ -14,6 +14,9 @@
 <link rel="stylesheet" href="studio/studio.css">
 <link rel="stylesheet" href="assets/skins.css">
 <link rel="stylesheet" href="studio/theme.css">
+<!-- тема — до первой отрисовки (стили выше уже загружены): окно сразу в своём стиле, без вспышки фирменного фона -->
+<script src="assets/skins.js"></script>
+<script src="studio/theme.js"></script>
 </head>
 <body>
 <div id="upd"><div class="box">
@@ -82,7 +85,7 @@
   <button data-p="look">Оформление</button>
   <button data-p="sound">Звук и поведение</button>
   <button data-p="hands">Руки</button>
-  <button data-p="skills">Навыки и MCP</button>
+  <button data-p="skills">Плагины</button>
   <div class="ng">Связи и данные</div>
   <button data-p="dw" id="nav-dw">Dewiar.pro<i class="ndot" id="dw-dot"></i></button>
   <button data-p="connect">Подключение</button>
@@ -1088,12 +1091,19 @@
   </section>
 
   <section id="p-skills">
-    <h1>Навыки и MCP</h1>
-    <p class="lead">Навыки — это умения ассистента для особых задач: презентации, разбор кода, отчёты по таблицам. Встроенные уже работают —
-      скачивать ничего не нужно. Свой навык можно создать, описав словами, или установить от других (формат SKILL.md — тот же, что у Claude).
-      MCP — способ подключать внешние инструменты: файлы, базы, сервисы.</p>
-    <div class="actions" style="margin:0 0 6px"><button class="btn primary" id="sk-new">Создать навык</button></div>
+    <h1>Плагины</h1>
+    <p class="lead">Плагин — готовое умение одной кнопкой: инструкция для помощницы, нужные подключения, ваши настройки и дела
+      по расписанию. Установили — и просто говорите. Ничего дополнительно ставить не нужно.</p>
+    <div class="plg-cats" id="plg-cats" role="tablist" aria-label="Категории"></div>
+    <div class="plg-grid" id="plg-grid"></div>
+    <div class="actions plg-own">
+      <label class="btn">Установить плагин из файла…<input type="file" id="plg-file" accept=".zip" hidden></label>
+      <button class="btn ghost" id="plg-guide-b">Как сделать свой плагин</button>
+      <span class="res" id="plg-res"></span>
+    </div>
     <h2>Навыки</h2>
+    <p class="hint" style="margin:-4px 0 10px">Отдельные умения без настроек: встроенные уже работают, свой навык можно описать словами или установить от других (формат SKILL.md — как у Claude).</p>
+    <div class="actions" style="margin:0 0 6px"><button class="btn primary" id="sk-new">Создать навык</button></div>
     <div id="sklist"></div>
     <div class="actions">
       <label class="btn">Установить из файла…<input type="file" id="sk-file" accept=".zip,.md" hidden></label>
@@ -1109,6 +1119,7 @@
     </div>
     <div id="catlist" style="margin-top:8px"></div>
     <h2>MCP-серверы</h2>
+    <p class="hint" style="margin:-4px 0 10px">Подключения к внешним программам и сервисам: файлы, базы, сервисы. Серверы плагинов тоже здесь — с пометкой плагина.</p>
     <div id="mcplist"></div>
     <div class="chips" style="margin:12px 0" id="mcp-presets"></div>
     <details id="mcp-add" class="prof" style="padding:6px 16px">
@@ -1377,6 +1388,8 @@
   </div>
   <p class="res" id="e-res" style="margin-top:10px"></p>
 </div>
+<div class="drawer plg-d" id="pld" style="width:min(560px,100%)" role="dialog" aria-modal="true" aria-labelledby="pld-name"></div>
+<div class="drawer" id="plg-guide" style="width:min(680px,100%)" role="dialog" aria-modal="true" aria-label="Как сделать свой плагин"></div>
 <div class="drawer" id="skd" style="width:min(640px,100%)">
   <h1 id="skd-title">Новый навык</h1>
   <div class="prof on" style="padding:12px 14px;margin:14px 0 6px">
@@ -1404,9 +1417,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="assets/entities.js"></script>
-<script src="assets/skins.js"></script>
 <script src="assets/zoom.js"></script>
-<script src="studio/theme.js"></script>
 <script src="assets/privacy.js"></script>
 <script src="assets/vendor/zxing.min.js"></script>
 <script src="assets/codes.js"></script>
@@ -1426,6 +1437,7 @@
 <script src="studio/personas.js"></script>
 <script src="studio/brain.js"></script>
 <script src="studio/connect.js"></script>
+<script src="studio/plugins.js"></script>
 <script src="studio/dewiar.js"></script>
 <script src="studio/look.js"></script>
 <script src="studio/close.js"></script>

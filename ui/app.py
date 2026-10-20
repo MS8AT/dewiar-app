@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -200,6 +201,20 @@ def ui_settings():
         return json.loads(SETTINGS_PATH.read_text(encoding="utf-8")).get("ui", {})
     except (OSError, ValueError):
         return {}
+
+
+def ui_skin():
+    """Тема студии и виджета, как её видит ядро (core/settings.py: «Фирменная» без отметки skin_v2 — это прежнее
+    значение по умолчанию, теперь вместо неё «Небесный»), и светлая ли она — для фона окна до загрузки страницы."""
+    ui = ui_settings()
+    sk = str(ui.get("skin") or "brand")
+    if sk == "brand" and not ui.get("skin_v2"):
+        sk = "neusky"
+    try:
+        light = re.search(r'id:\s*"' + re.escape(sk) + r'"[^}]*light:\s*true', (HERE / "assets/skins.js").read_text(encoding="utf-8")) is not None
+    except OSError:
+        light = False
+    return sk, light
 
 
 def core_alive():
@@ -1246,8 +1261,9 @@ class Api:
         # работает). Вернуть системную рамку: settings.ui.studio_frame = "native".
         own = not WIN and ui_settings().get("studio_frame", "custom") != "native"
         sw, sh = self._studio_size()
-        self._studio = webview.create_window(STUDIO_TITLE, self._url("settings.html", ("&frame=1" if own else "") + query + ("#" + page if page else "")),
-                                            width=sw, height=sh, min_size=(min(820, sw), min(560, sh)), background_color="#0a0a0f",
+        skin, light = ui_skin()                     # тема — сразу в адресе: студия открывается в своём стиле, без вспышки
+        self._studio = webview.create_window(STUDIO_TITLE, self._url("settings.html", ("&frame=1" if own else "") + "&skin=" + urllib.parse.quote(skin) + query + ("#" + page if page else "")),
+                                            width=sw, height=sh, min_size=(min(820, sw), min(560, sh)), background_color="#e3eaf4" if light else "#0a0a0f",
                                             maximized=bool(ui_settings().get("studio_max", True)),
                                             frameless=own, easy_drag=False,
                                             js_api=self)     # без этого в студии нет «Обновить», выбора папки, сохранения

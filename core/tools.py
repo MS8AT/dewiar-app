@@ -1220,7 +1220,7 @@ def t_create_skill(a, ctx):
     if sk is None:
         raise ToolError("навыки недоступны")
     name = sk.save(a.get("name", ""), a.get("description", ""), a.get("instructions", ""))
-    return f"Навык «{name}» создан и уже работает. Его можно поправить в студии → «Навыки и MCP»."
+    return f"Навык «{name}» создан и уже работает. Его можно поправить в студии → «Плагины» → «Навыки»."
 
 
 # ---------- напоминания ----------

@@ -322,6 +322,15 @@ public final class Bridge {
         } catch (Throwable ignored) { }
     }
 
+    /** Где телефон (радар «Рядом», Loc.java): ответ событием loc {lat, lon, acc, ts} или {error}. */
+    @JavascriptInterface public void locate(int maxAgeSec) { Loc.once(a, Math.max(0, maxAgeSec) * 1000L, a); }
+
+    /** Настройки местоположения системы — когда оно выключено. */
+    @JavascriptInterface public boolean locSettings() {
+        try { a.startActivity(new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return true; }
+        catch (Exception e) { return false; }
+    }
+
     /** Спросить разрешение; ответ — событием perm {name, granted}. */
     @JavascriptInterface public void perm(final String perm) {
         a.runOnUiThread(new Runnable() { @Override public void run() { a.askPermission(perm); } });

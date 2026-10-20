@@ -1178,3 +1178,37 @@ html.st-light dialog.nwdlg { background: #fff; }
 .mdl-row .bar { width: 90px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }
 .mdl-row .bar i { display: block; height: 100%; background: var(--brand); transition: width .3s; }
 @media (max-width: 640px) { .mdl-row { grid-template-columns: 1fr; } .mdl-row .st { grid-row: auto; grid-column: 1; } }
+
+/* «Плагины»: каталог карточками (значок в цвете плагина, название, строка о главном), панель плагина #pld */
+.plg-cats { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
+.plg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.plg { position: relative; display: grid; grid-template-columns: auto 1fr; grid-template-rows: 1fr auto; gap: 4px 14px; text-align: left; border: 0; cursor: pointer;
+  padding: 16px 16px 14px; border-radius: 18px; background: var(--frost); color: var(--ink); transition: transform .18s, background .2s; min-height: 118px; }
+.plg:hover { background: var(--frost-hi); transform: translateY(-1px); }
+.plg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plg-ic { grid-row: 1 / 3; width: 48px; height: 48px; border-radius: 15px; display: grid; place-items: center; font-size: 25px; font-style: normal;
+  background: color-mix(in srgb, var(--pc) 22%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pc) 35%, transparent); }
+.plg-t b { display: block; font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+.plg-t small { display: block; font-size: 12.5px; line-height: 1.4; color: var(--muted); }
+.plg-st { align-self: end; font-size: 11.5px; color: var(--dim); }
+.plg.on .plg-st { color: var(--good, #4BE3A1); font-weight: 600; }
+.plg.on::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pc) 55%, transparent); pointer-events: none; }
+.plg-own { margin-top: 14px; }
+.pld-x { position: absolute; top: 18px; right: 18px; }
+.pld-h { display: flex; gap: 16px; align-items: center; margin: 4px 40px 12px 0; }
+.pld-h .plg-ic { width: 64px; height: 64px; border-radius: 20px; font-size: 34px; }
+.pld-h h1 { margin: 0 0 2px; } .pld-h p { color: var(--muted); font-size: 13.5px; }
+.pld-desc { max-width: 60ch; line-height: 1.6; margin-bottom: 8px; }
+.pld-ok { color: var(--good, #4BE3A1); font-weight: 600; font-size: 13.5px; align-self: center; }
+.pld-ph { display: flex; flex-wrap: wrap; gap: 6px; }
+.pld-ph .chip { text-align: left; }
+.pld-in { list-style: none; display: grid; gap: 8px; font-size: 13.5px; color: var(--muted); }
+.pld-in b { color: var(--ink); font-weight: 600; margin-right: 4px; }
+.plg-md { line-height: 1.6; font-size: 14px; max-width: 70ch; }
+.plg-md h1 { margin: 0 40px 12px 0; } .plg-md h2 { margin: 24px 0 8px; }
+.plg-md p, .plg-md ul, .plg-md table, .plg-md pre { margin: 0 0 12px; }
+.plg-md ul { padding-left: 20px; }
+.plg-md code { font: 12.5px ui-monospace, monospace; background: rgba(127,127,127,.16); padding: 1px 5px; border-radius: 6px; }
+.plg-md pre { font: 12.5px/1.5 ui-monospace, monospace; background: rgba(0,0,0,.25); padding: 12px 14px; border-radius: 12px; overflow-x: auto; white-space: pre; }
+.plg-md table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.plg-md th, .plg-md td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }

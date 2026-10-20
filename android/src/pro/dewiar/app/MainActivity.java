@@ -246,7 +246,9 @@ public class MainActivity extends Activity implements Net.Sink {
             try { event("perm", new JSONObject().put("name", name).put("granted", true)); } catch (Exception ignored) { }
             return;
         }
-        requestPermissions(new String[]{name}, 1);
+        // точное место Android 12+ спрашивает только вместе с приблизительным (человек выберет, какое дать)
+        if ("android.permission.ACCESS_FINE_LOCATION".equals(name)) requestPermissions(new String[]{name, "android.permission.ACCESS_COARSE_LOCATION"}, 1);
+        else requestPermissions(new String[]{name}, 1);
     }
 
     @Override public void onRequestPermissionsResult(int code, String[] perms, int[] res) {

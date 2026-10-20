@@ -107,6 +107,13 @@ html body.skin-fog > #card, html body.skin-fog #scene, .lk-prev.skin-fog {
   --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
   --ink: #24324a; --muted: rgba(36,50,74,.6);
 }
+/* «Небесный вечер» — тёмная пара «Небесного» (20.10): тот же оттенок неба, только сумерки — дымчатый сине-серый,
+   свет по краю чуть холоднее, чем у «Графитового», и без глубокой синевы «Ночного» */
+.skin-neudusk {
+  --skin-bg: #232a35; --glass: #232a35; --neu-dark: #171c24; --neu-light: #2f3846;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+  --ink: #e6edf7; --muted: rgba(230,237,247,.62);
+}
 .skin-neumint {
   --skin-bg: #dde9e5; --glass: #dde9e5; --neu-dark: #bccdc7; --neu-light: #fafffd;
   --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);

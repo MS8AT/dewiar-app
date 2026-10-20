@@ -22,6 +22,56 @@ class CommandsMixin:
 
     # ---------- окно голосом: «спрячься», «покажись», «отключись» ----------
 
+    def _plugin_cmd(self, cmd, a):
+        """plugins — каталог; plugin_install {id, values} / plugin_remove {id, jobs: снимать ли его дела} / plugin_values {id, values} /
+        plugin_job {id, job, on} — дело плагина по расписанию / plugin_zip {zip_b64} — свой плагин / plugin_delete {id}."""
+        from plugins import PluginError
+        from tools import ToolError, t_schedule_job
+        P = self.plugins
+        try:
+            if cmd == "plugin_install":
+                P.install(a["id"], a.get("values"))
+            elif cmd == "plugin_remove":
+                for rid in P.remove(a["id"]):
+                    if a.get("jobs", True):
+                        try:
+                            self.reminders.cancel(rid)
+                        except Exception:  # noqa: BLE001 — дело уже сняли руками
+                            pass
+            elif cmd == "plugin_values":
+                P.set_values(a["id"], a.get("values") or {})
+            elif cmd == "plugin_job":
+                pid, jid = a["id"], a["job"]
+                old = (((self.s.get("plugins", "on") or {}).get(pid) or {}).get("jobs") or {}).get(jid)
+                if old:
+                    try:
+                        self.reminders.cancel(old)
+                    except Exception:  # noqa: BLE001
+                        pass
+                rid = ""
+                if a.get("on"):
+                    task, when = P.job_text(pid, jid)
+                    out = t_schedule_job({"task": task, "when": when}, {"reminders": self.reminders})
+                    m = re.search(r"\(id ([^)]+)\)", out)
+                    rid = m.group(1) if m else ""
+                P.job_mark(pid, jid, rid)
+            elif cmd == "plugin_zip":
+                import base64
+                P.install(P.install_zip(base64.b64decode(a.get("zip_b64") or "")))
+            elif cmd == "plugin_delete":
+                P.delete(a["id"])
+            elif cmd != "plugins":
+                raise ValueError(f"неизвестная команда {cmd}")
+        except (PluginError, ToolError, KeyError) as e:
+            raise ValueError(str(e)) from e
+        self.skills.reload()
+        if cmd in ("plugin_install", "plugin_remove", "plugin_zip", "plugin_delete"):
+            self.mcp.reconcile()
+        out = {"plugins": P.catalog(), "skills": self.skills.catalog()}
+        if cmd == "plugins":
+            out["guide"] = P.guide()
+        return out
+
     def _window_cmd(self, text):
         """Фраза про само окно (window_phrase) -> True, если это она. Прячет и показывает виджет интерфейс
         (событие «window» ловит ui/hud.html); «отключись» — интерфейс завершает и себя, и ядро (Api.quit_all в
@@ -1253,6 +1303,8 @@ class CommandsMixin:
         if cmd == "skills_reload":
             self.skills.reload()
             return self.skills.catalog()
+        if cmd.startswith("plugin"):                # «Плагины» в студии (core/plugins.py)
+            return self._plugin_cmd(cmd, a)
         if cmd == "mcp_status":
             return self.mcp.status()
         if cmd == "status":

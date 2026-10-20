@@ -3,7 +3,7 @@
    темы берутся из assets/skins.css через невидимый образец (.lk-prev.skin-<id> — так подхватываются и текстуры)
    и пересобираются с background-attachment: fixed. Светлые темы (light) — тёмный текст и свои поля/кнопки
    (html.st-light), неоморфизм (neu) — панели из того же материала с двумя тенями (html.st-neu). «Фирменная» —
-   исходный вид студии без изменений. Последняя тема запоминается, чтобы окно не мигало фирменным фоном при открытии. */
+   исходный вид студии без изменений. Тема ставится ещё в <head> (тема из адреса &skin= или последняя запомненная), чтобы окно не мигало чужим фоном. */
 (() => {
   const root = document.documentElement;
   const split = (s) => {                        // список слоёв через запятую — без запятых внутри скобок
@@ -32,7 +32,7 @@
     const probe = document.createElement("div");
     probe.className = "lk-prev skin-" + sk.id;
     probe.style.cssText = "position:fixed;left:-9999px;top:0;width:10px;height:10px;visibility:hidden;pointer-events:none";
-    document.body.appendChild(probe);
+    (document.body || root).appendChild(probe);        // в <head> тела ещё нет — образец кладём в <html>
     const cs = getComputedStyle(probe);
     const img = split(cs.backgroundImage), pos = split(cs.backgroundPosition), size = split(cs.backgroundSize), rep = split(cs.backgroundRepeat);
     const layers = img.map((x, i) => x === "none" ? "" : `${x} ${pos[i % pos.length] || "0 0"} / ${size[i % size.length] || "auto"} ${rep[i % rep.length] || "repeat"} fixed`).filter(Boolean);
@@ -42,7 +42,9 @@
     Object.entries(VARS).forEach(([from, to]) => { const v = cs.getPropertyValue(from).trim(); if (v) root.style.setProperty(to, v); });
     probe.remove();
   };
-  let early = "brand";
-  try { early = localStorage.getItem("studio_skin") || "brand"; } catch (e) { }
-  if (document.body) studioSkin(early); else document.addEventListener("DOMContentLoaded", () => studioSkin(early));
+  // тема из адреса (ui/app.py кладёт &skin= из настроек) — точнее всего; иначе последняя запомненная; иначе «Небесный»
+  let early = "";
+  try { early = new URLSearchParams(location.search).get("skin") || ""; } catch (e) { }
+  if (!early) try { early = localStorage.getItem("studio_skin") || ""; } catch (e) { }
+  studioSkin(early || "neusky");
 })();

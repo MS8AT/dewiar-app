@@ -16,7 +16,7 @@ def ok(c, m):
 
 
 from settings import DEFAULTS  # noqa: E402
-ok(DEFAULTS["ui"]["skin"] == "brand" and DEFAULTS["ui"]["voice_fx"] == "bars", "по умолчанию — фирменная тема и лучи")
+ok(DEFAULTS["ui"]["skin"] == "neusky" and DEFAULTS["ui"]["voice_fx"] == "bars", "по умолчанию — «Небесный» (20.10) и лучи")
 sk = (ROOT / "ui/assets/skins.js").read_text(encoding="utf-8"); css = (ROOT / "ui/assets/skins.css").read_text(encoding="utf-8")
 import re as _re
 ids = _re.findall(r'id: "([a-z]+)"', sk)
@@ -57,7 +57,7 @@ for (const fx of ["bars", "pulse", "wave"]) for (const tone of ["mono", "color"]
     pg.add_init_script(FAKE)
     pg.goto((ROOT / "ui/hud.html").as_uri() + "?mode=card&port=1"); pg.wait_for_timeout(800)
     w0 = pg.evaluate("() => [document.body.className, entity.tone, entity.fx]")
-    ok("skin-brand" in w0[0] and w0[1] == "mono" and w0[2] == "bars", f"виджет по умолчанию: {w0}")
+    ok("skin-neusky" in w0[0] and "light" in w0[0] and w0[1] == "neu" and w0[2] == "bars", f"виджет по умолчанию — «Небесный»: {w0}")
     pg.evaluate("() => core.emit('settings', { settings: { ui: { skin: 'neu' } } })")
     wl = pg.evaluate("() => [document.body.className, entity.tone, getComputedStyle(document.getElementById('bubble')).color, getComputedStyle(document.getElementById('bubble')).boxShadow]")
     ok("light" in wl[0] and "neu" in wl[0] and wl[1] == "neu" and wl[2] != "rgb(255, 255, 255)" and wl[3].count("rgb") >= 2,
@@ -123,12 +123,12 @@ for (const fx of ["bars", "pulse", "wave"]) for (const tone of ["mono", "color"]
     th = pg.evaluate("async () => [(await quick('Спасибо большое')) || null, (await quick('ладно, благодарю')) || null, await quick('спасибо, а что ещё ты умеешь')]")
     ok(th[0] and th[1] and th[0]["say"].startswith(("Пожалуйста", "Обращайтесь")) and not th[2], f"телефон: «спасибо» — вежливый ответ без модели: {th}")
     ph0 = pg.evaluate("() => [document.body.className, orb.tone, orb.fx]")
-    ok("skin-brand" in ph0[0] and ph0[1] == "mono" and ph0[2] == "bars", f"телефон по умолчанию: {ph0}")
+    ok("skin-neusky" in ph0[0] and ph0[1] == "neu" and ph0[2] == "bars", f"телефон по умолчанию — «Небесный»: {ph0}")
     pg.evaluate("openSettings('more')"); pg.wait_for_timeout(400)
     card = pg.evaluate("() => [document.querySelector('#set-body').textContent.includes('№' + devId().slice(-4)), !!document.querySelector('#dev-ping')]")
     ok(card == [True, True], "«Этот телефон в кабинете»: №… как в списке экзамена и кнопка «Отметиться в кабинете»")
     ok(pg.evaluate("$$('.skm').length") >= 20 and pg.evaluate("$$('.skm[data-skin=snow]').length") == 1
-       and pg.evaluate("$('.skm.on').dataset.skin") == "brand", "телефон: все темы — круглыми образцами (группы — в подсказке), и светлые тоже; выбранная отмечена")
+       and pg.evaluate("$('.skm.on').dataset.skin") == "neusky", "телефон: все темы — круглыми образцами (группы — в подсказке), и светлые тоже; выбранная отмечена")
     pg.click('.skm[data-skin="neon"]'); pg.select_option("#ap-fx", "pulse"); pg.wait_for_timeout(300)
     ph1 = pg.evaluate("() => [document.body.className, orb.tone, orb.fx, S.skin, S.voice_fx]")
     ok("skin-neon" in ph1[0] and ph1[1:] == ["color", "pulse", "neon", "pulse"], f"телефон: тема и анимация меняются и запоминаются: {ph1}")

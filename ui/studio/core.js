@@ -55,7 +55,7 @@ $$("nav button[data-p]").forEach(b => b.onclick = () => {
   if (!S) return;                                    // данные подгрузятся после связи с ядром
   if (b.dataset.p === "sound") loadDevices();
   if (b.dataset.p === "about") core.call("status").then(renderStatus).catch(() => {});
-  if (b.dataset.p === "skills") { core.call("skills").then(renderSkills).catch(() => {}); core.call("mcp_status").then(renderMcp).catch(() => {});
+  if (b.dataset.p === "skills") { loadPlugins(); core.call("skills").then(renderSkills).catch(() => {}); core.call("mcp_status").then(renderMcp).catch(() => {});
     if (S.skills && S.skills.catalog_url) { $("#cat-url").value = S.skills.catalog_url; openCatalog(); } }
   if (b.dataset.p === "me") loadMe();
   if (b.dataset.p === "tricks") loadTricks();       // «Что я умею» — data/tricks.json через ядро

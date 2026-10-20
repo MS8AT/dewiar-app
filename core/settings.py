@@ -124,7 +124,7 @@ DEFAULTS = {
     "ui": {"hud_x": None, "hud_y": None, "subtitles": True, "force_x11": True,
            "hud_w": None, "hud_h": None,    # свой размер карточки виджета (растянули за угол), px при масштабе 100 %
            "hud_smooth": True,              # Linux с композитором: прозрачное окно и гладкие скругления (ui/app.py)
-           "skin": "brand",                 # тема (фон) виджета и телефона — список в ui/assets/skins.js; по умолчанию фирменная
+           "skin": "neusky",                # тема (фон) виджета и телефона — список в ui/assets/skins.js; по умолчанию «Небесный» (20.10)
            "voice_fx": "bars",              # когда говорит: bars (лучи вокруг портрета) | pulse (расходящиеся круги) | wave (волна)
            "zoom": 1.0,                     # масштаб интерфейса 0.7–1.5 (студия «Оформление» → «Размер», Ctrl + / Ctrl −)
            "text": 1.0,                     # размер текста ответов, «Чата», заметок 0.85–1.4 (ui/assets/zoom.js)
@@ -138,6 +138,7 @@ DEFAULTS = {
                   "speak": True},       # произнести текст напоминания голосом
     "tools": {"enabled": {}, "confirm": {}, "search_url": ""},   # пусто = как задумано по умолчанию
     "skills": {"disabled": [], "catalog_url": ""},   # каталог навыков с сайта (JSON)
+    "plugins": {"on": {}},              # установленные плагины (core/plugins.py): id -> {at, values, jobs}
     "mcp": {"servers": {}},             # имя -> {type: stdio|http, command, args, env, url, headers, enabled, trust}
     "eyes": {"camera": "/dev/video0"},
     "workspace": {"path": ""},          # папка ассистента; пусто = ~/Dewiar
@@ -203,6 +204,10 @@ class Settings:
                 if (raw.get("tts") or {}).get("speed", 1.0) == 1.0 and not (raw.get("tts") or {}).get("speed_v2"):
                     self.data["tts"]["speed"] = 1.25                     # 1.0 — прежнее значение по умолчанию, не выбор пользователя
                 self.data["tts"]["speed_v2"] = True                       # перевод один раз: выбранные потом 1.0 не трогаем
+                ui = raw.get("ui") or {}
+                if ui.get("skin", "brand") == "brand" and not ui.get("skin_v2"):
+                    self.data["ui"]["skin"] = "neusky"                   # 20.10: «Небесный» — новый стиль по умолчанию (один раз;
+                self.data["ui"]["skin_v2"] = True                         # выбранную потом «Фирменную» больше не трогаем)
                 if (raw.get("llm") or {}).get("history_reset_seconds") in (300, 1200):
                     self.data["llm"]["history_reset_seconds"] = 28800    # 300 и 1200 — прежние значения по умолчанию, не выбор пользователя
             except FileNotFoundError:

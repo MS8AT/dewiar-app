@@ -11,6 +11,7 @@ window.DEWIAR_SKINS = [
   { id: "snow", name: "Белоснежная", group: "Светлые", sub: "Чистый белый и мягкие тени, как в Material", light: true, tone: "ink" },
   { id: "neu", name: "Жемчужный", group: "Неоморфизм", sub: "Светлый, выпуклые формы из одного материала", light: true, tone: "neu", neu: true },
   { id: "neusky", name: "Небесный", group: "Неоморфизм", sub: "Светло-голубой, мягкий и прохладный", light: true, tone: "neu", neu: true },
+  { id: "neudusk", name: "Небесный вечер", group: "Неоморфизм", sub: "Пара к «Небесному»: дымчатый сине-серый, те же мягкие формы", neu: true },
   { id: "neumint", name: "Мятный", group: "Неоморфизм", sub: "Свежий светло-зелёный, спокойный", light: true, tone: "neu", neu: true },
   { id: "neudark", name: "Графитовый", group: "Неоморфизм", sub: "Тёмный графит, мягкие выпуклые формы", neu: true },
   { id: "neunavy", name: "Ночной", group: "Неоморфизм", sub: "Глубокий синий, формы светятся по краю", neu: true },
@@ -25,4 +26,5 @@ window.DEWIAR_SKINS = [
   { id: "ocean", name: "Глубина", group: "Атмосфера", sub: "Свет сверху сквозь толщу воды" },
 ];
 window.DEWIAR_SKIN_IDS = window.DEWIAR_SKINS.map(s => s.id);
-window.dewiarSkin = (id) => window.DEWIAR_SKINS.find(s => s.id === id) || window.DEWIAR_SKINS[0];
+// не задана или неизвестна — «Небесный» (стиль по умолчанию с 20.10)
+window.dewiarSkin = (id) => window.DEWIAR_SKINS.find(s => s.id === id) || window.DEWIAR_SKINS.find(s => s.id === "neusky") || window.DEWIAR_SKINS[0];

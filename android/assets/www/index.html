@@ -13,6 +13,9 @@
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
+<script>/* тема — до первой отрисовки (app.js запоминает её в look_body): без вспышки тёмного фона у светлых тем */
+try { var lb = (window.Dewiar && Dewiar.pref("look_body")) || localStorage.getItem("p_look_body") || "neusky light neu"; lb = String(lb).split(" ");
+  document.body.classList.add("skin-" + lb[0].replace(/[^\w-]/g, "")); if (lb.indexOf("light") > 0) document.body.classList.add("light"); if (lb.indexOf("neu") > 0) document.body.classList.add("neu"); } catch (e) { }</script>
 <div id="scene"></div>
 
 <header id="top">

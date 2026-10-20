@@ -612,6 +612,8 @@ class Close:
             return 0, refreshed
         item = {"mid": body.get("mid") or str(it.get("id")), "ts": _int(body.get("ts")) or _int(it.get("ts")) * 1000, "out": bool(it.get("out")),
                 "t": str(body.get("t") or "")[:20000], "f": [x for x in body.get("f") or [] if isinstance(x, dict)][:10]}
+        if body.get("wave"):
+            item["wave"] = 1
         if not self._add(peer, item) or item["out"]:
             return 0, refreshed
         name = it.get("name") or "близкого"
@@ -640,6 +642,8 @@ class Close:
         if files:
             what = (what + " " if what else "") + ("Файл «" + files[0].get("name", "") + "»." if len(files) == 1 else f"Файлов: {len(files)}.")
         text = f"{name} пишет: {what}".strip()              # без склонения имени: «Анна пишет: …»
+        if item.get("wave"):                            # 👋 с радара «Рядом» на телефоне — «Анна машет вам»
+            what, text = "машет вам 👋", f"{name} машет вам!"
         try:
             self.host.push(f"💌 {name}", what or "сообщение", telegram=False)
         except TypeError:

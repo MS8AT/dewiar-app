@@ -95,6 +95,9 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.alarm = None                 # звенящее напоминание: {"item", "done": Event, "since"}
         self._alarm_lock = threading.Lock()
         self.skills = Skills(settings)
+        self.plugins = Plugins(settings)                   # плагины: навыки + MCP + настройки + дела (core/plugins.py)
+        self.skills.plugins = self.plugins
+        self.skills.reload()
         self.mcp = MCPManager(settings, on_change=lambda: self.emit("mcp", status=self.mcp.status()))
         self.toolbox = Toolbox(settings, self.reminders, self.skills, self.mcp)
         if self.s.get("tts", "engine") == "piper" and not self.s.get("tts", "v2"):
