@@ -1290,3 +1290,66 @@ html.st-light #cl-near .rad-me::after { border-color: color-mix(in srgb, var(--a
 .nr-rest .cl-ava { width: 30px; height: 30px; font-size: 12px; }
 .nr-priv { margin-top: 18px; font-size: 12px; }
 .nr-empty { padding: 28px; border-radius: 22px; background: var(--frost); max-width: 520px; } .nr-empty b { display: block; margin-bottom: 6px; } .nr-empty span { color: var(--muted); }
+/* «Безопасность» (safety.js): стоп-кран, схема, замки, журнал. Цвета линий: зелёный — остаётся у вас, синий — зашифровано,
+   янтарный — уходит открыто, серый — на паузе */
+:root { --sf-g: #4BE3A1; --sf-b: #9AA8FF; --sf-a: #FFB547; --sf-x: rgba(255,255,255,.3); }
+html.st-light { --sf-g: #1d7f55; --sf-b: #4b5bd6; --sf-a: #b46a08; --sf-x: color-mix(in srgb, var(--ink) 30%, transparent); }
+.sfstop { display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: start; padding: 20px 22px; margin-bottom: 18px; transition: box-shadow .3s; }
+.sfstop.lo { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--sf-g) 70%, transparent), 0 18px 40px -22px color-mix(in srgb, var(--sf-g) 60%, transparent); }
+.sfbig { width: 64px; height: 36px; margin-top: 2px; }
+.sfbig i::after { width: 28px; height: 28px; top: 4px; left: 4px; }
+#sf-stop .sfbig input:checked + i { background: var(--sf-g); }
+.sfbig input:checked + i::after { transform: translateX(28px); }
+.sfbig input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sftxt h2 { font-size: 17px; margin: 0 0 4px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.sftxt h2 span { font: 600 12.5px "Manrope", sans-serif; color: var(--muted); }
+.sfstop.lo .sftxt h2 span { color: var(--sf-g); }
+.sftxt p { color: var(--muted); max-width: 78ch; margin: 0; }
+.sfnow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.sfp { font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+.sfp.g { color: var(--sf-g); background: color-mix(in srgb, var(--sf-g) 14%, transparent); }
+.sfp.b { color: var(--sf-b); background: color-mix(in srgb, var(--sf-b) 14%, transparent); }
+.sfp.a { color: var(--sf-a); background: color-mix(in srgb, var(--sf-a) 15%, transparent); }
+.sfp.x { color: var(--muted); background: var(--panel); }
+.sfcols { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 1100px) { .sfcols { grid-template-columns: 1fr; } }
+.sfcard { padding: 16px 18px; margin-bottom: 18px; }
+.sfcard h3 { font-size: 15px; margin-bottom: 2px; }
+.sfcard > .hint { margin-bottom: 10px; }
+.sfm { width: 100%; height: auto; display: block; font: 13px "Manrope", sans-serif; }
+.sfm text { fill: var(--ink); } .sfm .b { font-weight: 700; } .sfm .m { fill: var(--muted); font-size: 12px; } .sfm .m.far { fill: var(--sf-a); font-weight: 600; }
+.sfm .you rect, .sfm .row rect { fill: var(--panel); }
+.sfm .pc { fill: color-mix(in srgb, var(--sf-g) 5%, transparent); stroke: color-mix(in srgb, var(--sf-g) 45%, transparent); stroke-dasharray: 4 5; }
+.sfm .ic { fill: none; stroke: var(--ink); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.sfm .ln { fill: none; stroke-width: 2.6; } .sfm .ln.dash { stroke-dasharray: 6 5; }
+.sfm .dst { cursor: pointer; outline: none; }
+.sfm .dst rect { fill: var(--panel); stroke-width: 1.4; transition: fill .15s; }
+.sfm .dst:hover rect, .sfm .dst:focus-visible rect, .sfm .dst.pick rect { fill: var(--panel2); stroke-width: 2.4; }
+.sfm .dst.x text { fill: var(--muted); }
+.sflegend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+.sflegend b { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.sfwhy { font-size: 13.5px; color: var(--muted); margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--panel); }
+.sfwhy.on { color: var(--ink); }
+.sfwhy b { font-weight: 700; }
+.sfmore { margin-top: 12px; }
+.sfmore summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.sfmore summary:hover { color: var(--ink); }
+.sfmore .priv { margin-top: 10px; }
+.sfl { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 4px 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); }
+.sfl:first-child { border-top: 0; padding-top: 2px; }
+.sfl > svg { width: 22px; height: 22px; fill: none; stroke: var(--ink); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; grid-row: span 2; align-self: start; margin-top: 2px; }
+.sfl b { display: block; font-weight: 700; } .sfl span { color: var(--muted); font-size: 12.5px; }
+.sfseg { grid-column: 2; display: inline-flex; justify-self: start; background: var(--field); border-radius: 10px; padding: 2px; margin-top: 6px; }
+.sfseg button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 600; padding: 5px 11px; border-radius: 8px; cursor: pointer; }
+.sfseg button:hover { color: var(--ink); }
+.sfseg button.on { background: var(--panel2); color: var(--ink); box-shadow: 0 2px 8px -3px rgba(0,0,0,.35); }
+.sfseg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sft { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.sft td { padding: 8px 6px; border-top: 1px solid var(--line); vertical-align: baseline; }
+.sft tr:first-child td { border-top: 0; }
+.sft td.t { color: var(--dim); width: 52px; font-variant-numeric: tabular-nums; }
+.sft td.n { color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sft .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 9px; vertical-align: 1px; }
+.sft .h { color: var(--dim); font-size: 12px; margin-left: 8px; }
+.sfempty { color: var(--muted); margin: 4px 0; } .sfempty.lo { color: var(--sf-g); margin-bottom: 8px; }
+html.st-light .sfseg { background: var(--soft2); }

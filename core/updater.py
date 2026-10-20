@@ -307,7 +307,8 @@ class Updater:
         if stopping.wait(60):
             return
         while True:
-            if (self.s.get("updates", "auto_check") if self.s else True) is not False:
+            import egress
+            if (self.s.get("updates", "auto_check") if self.s else True) is not False and not egress.local_only():
                 self.check()
             if stopping.wait(CHECK_EVERY):
                 return

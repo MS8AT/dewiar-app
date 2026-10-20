@@ -22,7 +22,7 @@ function save(patch, quiet) {
 /* «Безопасность» → «Ваши данные»: общий текст assets/privacy.js (тот же — на телефоне и у самой помощницы) */
 if (window.DEWIAR_PRIVACY && $("#priv-box")) {
   const e = (t) => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  $("#priv-box").innerHTML = `<h3 style="font-size:15px;margin-bottom:8px">${e(DEWIAR_PRIVACY.title)}</h3>`
+  $("#priv-box").innerHTML = ($("#priv-box").closest("details") ? "" : `<h3 style="font-size:15px;margin-bottom:8px">${e(DEWIAR_PRIVACY.title)}</h3>`)
     + DEWIAR_PRIVACY.items.map(([t, x]) => `<p class="hint" style="margin:0 0 6px"><b style="color:var(--ink);font-weight:600">${e(t)}.</b> ${e(x)}</p>`).join("");
 }
 
@@ -70,7 +70,7 @@ $$("nav button[data-p]").forEach(b => b.onclick = () => {
   if (b.dataset.p === "calendar") loadCalendar();
   if (b.dataset.p === "folder") loadFolder();
   if (b.dataset.p === "diary") loadDiary();
-  if (b.dataset.p === "safety") { loadVault(); loadBackups(); }
+  if (b.dataset.p === "safety") { loadSafety(); loadVault(); loadBackups(); }
   if (b.dataset.p === "tasks") loadTasks();
   if (b.dataset.p === "prompter") loadMeetings();
   if (b.dataset.p === "about") core.call("update_status").then(renderUpdate).catch(() => {});

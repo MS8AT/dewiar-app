@@ -184,6 +184,17 @@ class CommandsMixin:
             log.warning("Окно не открылось: %s", e)
             return False
 
+    def set_mute(self, on):
+        """Микрофон выключен (кнопка в виджете или замок «Только кнопка» в «Безопасности»): имя не слушается, «говорить» —
+        одна фраза."""
+        self.muted = bool(on)
+        if self.muted:
+            self.cancel_turn()
+        self.follow_up_until = 0.0
+        self.set_state("muted" if self.muted else "idle")
+        self.emit("muted", on=self.muted)
+        return self.muted
+
     def snapshot(self):
         """Всё состояние для окна, только что подключившегося к ядру (ответ на «hello»)."""
         return {"state": self.state, "persona": self.s.get("persona"), "personas": self.personas.public(),
@@ -792,13 +803,17 @@ class CommandsMixin:
             self.interrupt("кнопка", follow=False)
             return True
         if cmd == "mute":
-            self.muted = bool(a.get("on"))
-            if self.muted:
-                self.cancel_turn()
-            self.follow_up_until = 0.0
-            self.set_state("muted" if self.muted else "idle")
-            self.emit("muted", on=self.muted)
-            return self.muted
+            return self.set_mute(bool(a.get("on")))
+        if cmd == "security_state":                       # студия → «Безопасность»: стоп-кран, схема, замки, журнал (security.py)
+            import security
+            return security.state(self)
+        if cmd == "security_set":
+            import security
+            r = security.set_(self, a)
+            self.apply_engines()
+            self.emit("settings", settings=self.s.snapshot())
+            self.emit("security", local_only=r["state"]["local_only"])
+            return r
         if cmd == "persona_set":
             self.switch_persona(a["id"])
             return True

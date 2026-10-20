@@ -47,6 +47,10 @@ def ctx_full(e):
 
 def _humanize(e, base_url):
     """Ошибка сети или HTTP → короткое объяснение по-русски для окна и голоса."""
+    if "Ничего не уходит в интернет" in str(e):           # стоп-кран (core/egress.py): модель в интернете — на паузе
+        host = (re.match(r"^\w+://([^/:?#]+)", str(base_url or "")) or [None, "сервис"])[1]
+        return (f"включён режим «Ничего не уходит в интернет», а модель ({host}) — в интернете. Подключите свою модель "
+                "(Ollama, LM Studio) в «Мозге» или выключите режим: студия → «Безопасность»")
     if isinstance(e, httpx.ConnectError):
         host = (re.match(r"^\w+://([^/:?#]+)", str(base_url or "")) or [None, ""])[1]
         if host and not re.match(r"^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1)|\.local$", host):

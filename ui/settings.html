@@ -1241,8 +1241,28 @@
 
   <section id="p-safety">
     <h1>Безопасность</h1>
-    <p class="lead">Ваши пароли, копия всего, что знает ассистент, и границы, которые он не переходит.</p>
-    <div class="prof on priv" id="priv-box" style="padding:16px 18px;margin-bottom:22px"></div>
+    <p class="lead">Что ассистент видит, что хранит и куда отправляет — на одной странице. Сверху стоп-кран: одно нажатие, и наружу не уходит ничего.</p>
+    <div class="prof on sfstop" id="sf-stop">
+      <label class="tg sfbig"><input type="checkbox" id="sf-lo" aria-describedby="sf-lo-hint"><i></i></label>
+      <div class="sftxt"><h2>Ничего не уходит с компьютера <span id="sf-lo-state"></span></h2><p id="sf-lo-hint"></p><div class="sfnow" id="sf-now"></div></div>
+    </div>
+    <div class="sfcols">
+      <div class="prof on sfcard">
+        <h3>Куда идут ваши данные</h3><p class="hint">Схема — по вашим настройкам сейчас.</p>
+        <div id="sf-map"></div>
+        <div class="sflegend"><span><b style="background:var(--sf-g)"></b>остаётся у вас</span><span><b style="background:var(--sf-b)"></b>уходит зашифрованным</span><span><b style="background:var(--sf-a)"></b>уходит открыто — и кому</span><span><b style="background:var(--sf-x)"></b>на паузе</span></div>
+        <p class="sfwhy" id="sf-why" aria-live="polite"></p>
+        <details class="sfmore"><summary>Подробно о ваших данных</summary><div class="priv" id="priv-box"></div></details>
+      </div>
+      <div class="prof on sfcard">
+        <h3>Замки</h3><p class="hint">Что ассистенту можно трогать на этом компьютере.</p>
+        <div id="sf-locks"></div>
+      </div>
+    </div>
+    <div class="prof on sfcard">
+      <h3>Что уходило наружу сегодня</h3><p class="hint">Каждое соединение из программы — куда и что это. Тексты разговоров, ключи и адреса страниц сюда не пишутся: только узел и вид. Пароли из сейфа наружу не уходят никогда.</p>
+      <div id="sf-log"></div>
+    </div>
     <div class="prof on" style="padding:16px 18px;margin-bottom:22px">
       <h3 style="font-size:15px;margin-bottom:6px">Сейф</h3>
       <p class="hint" style="margin-bottom:12px">Пароли, пин-коды, коды от домофона, ключи. Зашифрованы ключом этого компьютера и лежат отдельно: не попадают
@@ -1436,6 +1456,7 @@
 <script src="studio/icons.js"></script>
 <script src="studio/memory.js"></script>
 <script src="studio/links.js"></script>
+<script src="studio/safety.js"></script>
 <script src="studio/folder.js"></script>
 <script src="studio/soul.js"></script>
 <script src="studio/personas.js"></script>

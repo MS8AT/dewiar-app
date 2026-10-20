@@ -78,7 +78,21 @@ class AudioMixin:
         if self.vosk_model is None and not self.names_off:   # слух ещё запускается — движки выставит _start_hearing
             return
         st = self.s.get("stt")
-        if st["engine"] == "remote" and st["remote"].get("base_url"):
+        import egress                                         # «Безопасность»: стоп-кран и журнал знают, где модели
+        lo = bool(self.s.get("privacy", "local_only"))
+        egress.set_local_only(lo)
+        egress.llm_hosts([p.get("base_url", "") for p in (self.s.get("llm", "profiles") or {}).values()])
+        far = lambda u: not egress.local_host((__import__("urllib.parse").parse.urlparse(u if "://" in u else "http://" + u).hostname or ""))
+        if lo and st["engine"] == "remote" and far(st["remote"].get("base_url") or ""):
+            # стоп-кран: распознавание в интернете — на паузе, слушаем здесь (GigaAM, если скачан, иначе Vosk)
+            g = GigaAMSTT(st.get("gigaam_model") or "gigaam-v3-e2e-rnnt")
+            if g.cached():
+                if not self.gigaam or self.gigaam.model_name != g.model_name:
+                    self.gigaam = g
+                self.stt = self.gigaam
+            else:
+                self.stt = self.vosk_stt
+        elif st["engine"] == "remote" and st["remote"].get("base_url"):
             self.stt = RemoteSTT(st["remote"])
         elif st["engine"] == "gigaam":
             if not self.gigaam or self.gigaam.model_name != st["gigaam_model"]:
@@ -92,6 +106,8 @@ class AudioMixin:
         tt = self.s.get("tts")
         self.tts_remote = RemoteTTS(tt["remote"]) if tt["engine"] == "remote" and tt["remote"].get("base_url") else \
             ElevenTTS(tt.get("eleven") or {}) if tt["engine"] == "elevenlabs" and (tt.get("eleven") or {}).get("api_key") else None
+        if lo and self.tts_remote is not None and (tt["engine"] == "elevenlabs" or far(tt["remote"].get("base_url") or "")):
+            self.tts_remote = None                            # стоп-кран: голос в интернете — на паузе, говорит голос этого компьютера
         prof = self.s.active_llm()
         self.status.update(stt=self.stt.name, stt_ready=getattr(self.stt, "ready", True),
                            tts={"piper": "Piper", "vosk": "Vosk TTS" + ("" if self.vosk_tts.ready else " (загружается, пока Piper)"),

@@ -342,7 +342,11 @@
   #corner .btn, #corner-l .btn { width: 26px; height: 26px; color: rgba(255,255,255,.55); }
   #corner .btn:hover, #corner-l .btn:hover { color: #fff; background: rgba(255,255,255,.1); }
   #corner .btn svg, #corner-l .btn svg { width: 15px; height: 15px; }
-  #corner.pinned { opacity: 1; }                                  /* блокнот открыт — кнопка видна и подсвечена */
+  #corner.pinned { opacity: 1; }
+  #corner-l.lo { opacity: 1; }
+  #b-lo[hidden] { display: none; }                                    /* стоп-кран включён — щит виден всегда */
+  #corner-l #b-lo, body.light #corner-l #b-lo { color: #2fbf83; }
+  #corner-l.lo:not(:hover):not(:focus-within) #b-bug { opacity: 0; }                                  /* блокнот открыт — кнопка видна и подсвечена */
   #b-pad.on { color: var(--accent, #8B8CF7); background: rgba(139,140,247,.14); }
   body.light #b-pad.on { color: var(--accent, #4f6cf0); background: rgba(79,108,240,.12); }
   body.mini #corner, body.mini #corner-l { display: none; }
@@ -448,6 +452,8 @@
   <!-- слева сверху (появляется при наведении, как «свернуть» справа): сообщить о проблеме — нужна редко, а место на
        панели отдано заметкам (отзыв 11.10) -->
   <div id="corner-l">
+    <!-- стоп-кран «Ничего не уходит в интернет» включён (студия → «Безопасность», 0.38.98): значок виден всегда -->
+    <button class="btn" id="b-lo" hidden title="Ничего не уходит в интернет: стоп-кран включён. Выключить — студия → «Безопасность»"><svg viewBox="0 0 24 24"><path d="M12 3.2 5 6v5.6c0 4.2 2.9 7.7 7 9.2 4.1-1.5 7-5 7-9.2V6z"/><path d="m9 12 2.2 2.2L15.3 10"/></svg></button>
     <button class="btn" id="b-bug" title="Сообщить о проблеме — сниму экран и открою форму жалобы"><svg viewBox="0 0 24 24"><rect x="6.5" y="7" width="11" height="14.5" rx="5.5"/><path d="M8.8 7.6a3.2 3.2 0 0 1 6.4 0M12 11.5v10M6.5 12.5H2.5M21.5 12.5h-4M6.8 17.5 3 19.8M17.2 17.5l3.8 2.3M7.5 9.2 4 6.5M16.5 9.2 20 6.5"/></svg></button>
   </div>
   <div id="corner">
@@ -775,6 +781,7 @@ function tmrDraw() {
 core.on("hello", d => {
   tmrSet(d.reminders);
   applyLook(d.settings.ui);
+  setLocal(d.settings.privacy && d.settings.privacy.local_only);
   personas = d.personas; muted = d.muted; $("b-mic").classList.toggle("on", muted); setTextOnly(d.settings.tts && d.settings.tts.text_only);
   applyPersona(d.persona); setRadio(d.radio); setState(d.state); note(d.status);
   if (!d.settings.llm.active && (d.settings.ui || {}).intro !== "") { showCap("", "Чтобы я могла отвечать, меня нужно один раз подключить — бесплатно: студия → «Мозг» → «Подключить бесплатно».", true); }
@@ -794,7 +801,7 @@ core.on("hello", d => {
   clearTimeout(window._turnT);                    // полоса дотаяла — надпись обычная, даже если ядро ещё не сказало «покой»
   window._turnT = setTimeout(() => { if (Date.now() >= turnUntil - 50) setState(state); }, (e.seconds || 0) * 1000 + 100);
 })
-.on("settings", e => applyLook((e.settings || {}).ui))   // студия → «Оформление»: тема и «когда говорит»
+.on("settings", e => { applyLook((e.settings || {}).ui); setLocal(((e.settings || {}).privacy || {}).local_only); })   // студия → «Оформление» и «Безопасность»
 .on("persona", e => applyPersona(e.persona))
 .on("personas", e => { personas = e.personas; applyPersona(current ? current.id : personas[0].id); })
 .on("level", e => entity.set({ level: e.v, voice: e.src === "voice" }))
@@ -1065,6 +1072,8 @@ core.on("cloud", c => {
 });
 $("cloudlow").onclick = () => { const a = api(); if (a) a.open_settings("brain"); };
 $("b-cal").onclick = () => { const a = api(); if (a) a.open_settings("calendar"); };
+function setLocal(on) { $("b-lo").hidden = !on; $("corner-l").classList.toggle("lo", !!on); }
+$("b-lo").onclick = () => { const a = api(); if (a) a.open_settings("safety"); };
 // жалоба: сначала снимок экрана (каким его видит человек в момент проблемы), потом форма в студии («О программе»)
 $("b-bug").onclick = guard($("b-bug"), async () => {
   note({ note: "Снимаю экран для жалобы…" });

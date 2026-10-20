@@ -343,6 +343,9 @@ class BrainMixin:
         Речь: свой GigaAM не загрузился, а облако умеет распознавать — отдаём речь серверу Dewiar (тот же GigaAM).
         Вызывается при запуске, после входа, после подключения ключа и раз в 10 минут (_brain_watch). Ходит в сеть."""
         from cloud import CloudError, PROFILE_ID, fetch
+        import egress
+        if egress.local_only():                                # стоп-кран: в модели Dewiar сами не переключаемся
+            return
         if not (self.account.logged_in() or self.s.get("cloud", "key")):
             return
         with self._brain_lock:

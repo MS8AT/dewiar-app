@@ -83,6 +83,9 @@ def main():
         log.info("Dewiar %s — запуск ядра", VERSION)
         migrate_from_cortex()
         settings = Settings()
+        import egress                                       # стоп-кран и журнал «что уходило наружу» — до первых соединений
+        egress.install(settings, STATE_DIR / "egress.json")
+        egress.set_local_only(bool(settings.get("privacy", "local_only")))
         bridge = Bridge(ensure_token(), port=WS_PORT)
         server = args.server or os.environ.get("DEWIAR_SERVER") == "1"
         engine = Engine(settings, Personas(), bridge, wav_input=args.wav, null_player=args.null_audio or server, server=server)

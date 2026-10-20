@@ -148,6 +148,9 @@ DEFAULTS = {
                   "sound": "signature",  # signature (фирменный мотив) | bells | soft | classic
                   "window": True,       # окно-будильник по центру экрана
                   "speak": True},       # произнести текст напоминания голосом
+    # «Безопасность» (core/security.py): стоп-кран «Ничего не уходит в интернет» (core/egress.py) и модель, к которой вернуться
+    # после него; замки: files — all | folder (удалять и отправлять только из папки ассистента), mic — name | button
+    "privacy": {"local_only": False, "prev_llm": "", "files": "all", "mic": "name"},
     "tools": {"enabled": {}, "confirm": {}, "search_url": ""},   # пусто = как задумано по умолчанию
     "skills": {"disabled": [], "catalog_url": ""},   # каталог навыков с сайта (JSON)
     "plugins": {"on": {}},              # установленные плагины (core/plugins.py): id -> {at, values, jobs}

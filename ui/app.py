@@ -1918,12 +1918,30 @@ class Api:
         if win is not None:
             try:
                 self._pad_shape(g)
-                self._pad_place(g["x"], g["y"])
-                win.show()
+                if WIN:
+                    self._pad_place(g["x"], g["y"])
+                    win.show()
+                else:
+                    # 21.10, Ubuntu: «первый раз открылся, после скрытия виджета — сколько ни нажимаю, не открывается»:
+                    # win.show() pywebview окно, спрятанное вместе с виджетом, не возвращал. Показываем так же, как в первый
+                    # раз, — сами, через GTK (show_all, поверх, на место)
+                    def run():
+                        from gi.repository import Gtk
+                        gw = next((x for x in Gtk.Window.list_toplevels() if x.get_title() == PAD_TITLE), None)
+                        if gw is None:
+                            return False
+                        gw.show_all()
+                        gw.present()
+                        if gw.get_window() is not None:
+                            gw.get_window().move(g["x"], g["y"])
+                        return True
+                    if not self._gtk(run, timeout=5):
+                        raise RuntimeError("окна блокнота нет")
                 self._pad_js(self._pad_cfg_js(g) + f"; window.padShown && padShown('{g['side']}')")
                 self._js("window.padMark && padMark(true)")
                 return True
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
+                print(f"Окно блокнота: открыть снова не вышло ({e}) — создаю заново", file=sys.stderr)
                 self._pad = None
         skin, light = ui_skin()
         import json
@@ -1979,7 +1997,16 @@ class Api:
         win = getattr(self, "_pad", None)
         if win is not None:
             try:
-                win.hide()
+                if WIN:
+                    win.hide()
+                else:                                       # прячем тем же путём, каким показываем (GTK) — см. pad_open
+                    def run():
+                        from gi.repository import Gtk
+                        gw = next((x for x in Gtk.Window.list_toplevels() if x.get_title() == PAD_TITLE), None)
+                        if gw is not None:
+                            gw.hide()
+                        return True
+                    self._gtk(run, timeout=3)
             except Exception:  # noqa: BLE001
                 pass
         self._js("window.padMark && padMark(false)")

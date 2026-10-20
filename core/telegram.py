@@ -401,6 +401,11 @@ class Telegram:
         Смещение сохраняется до обработки: сообщение, на котором обработка падает, не придёт повторно по кругу."""
         wait = 3
         while not self._stop.is_set():
+            import egress
+            if egress.local_only():                          # стоп-кран: бот на паузе (без ошибок в журнале)
+                self.problem = "на паузе: включён режим «Ничего не уходит в интернет»"
+                self._stop.wait(10)
+                continue
             try:
                 ups = self._get_updates()
                 self.problem, wait = "", 3

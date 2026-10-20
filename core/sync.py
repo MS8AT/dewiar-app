@@ -1006,6 +1006,12 @@ class Sync:
         time.sleep(5)
         last = ""                                        # та же ошибка раз за разом — в журнал один раз (19.10: 342 одинаковых за сутки)
         while not stopping.is_set():
+            import egress
+            if egress.local_only():                          # стоп-кран «Ничего не уходит в интернет» — синхронизация ждёт
+                self.status.update(ok=False, error="на паузе: включён режим «Ничего не уходит в интернет»", at=int(time.time()))
+                self.soon.wait(interval)
+                self.soon.clear()
+                continue
             try:
                 self.run_once()
                 last = ""

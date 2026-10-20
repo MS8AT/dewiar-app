@@ -2439,6 +2439,10 @@ TOOLS = {
                    "confirm", t_server_run, "Команды на сервере"),
     "run_command": (("Выполнить команду в PowerShell (Windows)" if WIN else "Выполнить команду в терминале Linux (bash)") + " и вернуть вывод. Только если пользователь явно просит.", S({"command": {"type": "string"}}, ["command"]), "confirm", t_run_command, "Команды терминала"),
 }
+# Этим умениям нужен интернет из самого Dewiar — при стоп-кране (студия → «Безопасность») модель о них не узнаёт.
+# Открыть сайт, музыку или карту в браузере человека — можно: это его браузер и его просьба.
+NET_TOOLS = {"web_search", "weather", "read_webpage", "send_email", "read_emails", "read_email", "send_telegram", "close_send",
+             "close_call", "close_read", "ask_knowledge", "play_radio", "smart_home", "show_images", "server_run", "app_update"}
 DEFAULT_OFF = set()          # команды терминала включены, но каждая — только после «Выполнить?»
 
 
@@ -2494,6 +2498,10 @@ class Toolbox:
             acc = self.hooks.get("account")
             if not (acc and acc.logged_in()):
                 return False, False
+        if name in NET_TOOLS and (self.s.get("privacy") or {}).get("local_only"):
+            return False, False                 # стоп-кран «Ничего не уходит в интернет»: этим нужен интернет (off_note скажет модели)
+        if name == "run_command" and (self.s.get("privacy") or {}).get("files") == "folder":
+            return False, False                 # замок «Файлы: только папка Dewiar» (студия → «Безопасность»): терминал может всё
         t = self.s.get("tools") or {}
         on = t.get("enabled", {}).get(name, name not in DEFAULT_OFF)
         conf = t.get("confirm", {}).get(name, TOOLS[name][2] == "confirm")
@@ -2514,11 +2522,20 @@ class Toolbox:
         «открой сайт» — «я не могу открывать сайты», а открытие сайтов было выключено переключателем)."""
         en = (self.s.get("tools") or {}).get("enabled") or {}
         off = [n for n, v in en.items() if v is False and n in TOOLS]
-        if not off:
-            return ""
-        names = "; ".join(f"{n} — «{TOOLS[n][4]}»" for n in sorted(off))
-        return ("\n\nВыключено пользователем в студии («Руки» → «Умения»): " + names + ". Просят это — не говори «не умею»: "
-                "скажи одной фразой, что это умение выключено в настройках, и где его включить.")
+        pv = self.s.get("privacy") or {}
+        out = ""
+        if off:
+            names = "; ".join(f"{n} — «{TOOLS[n][4]}»" for n in sorted(off))
+            out += ("\n\nВыключено пользователем в студии («Руки» → «Умения»; камера и экран — ещё и в «Безопасности»): " + names
+                    + ". Просят это — не говори «не умею»: скажи одной фразой, что это умение выключено в настройках, и где его включить.")
+        if pv.get("files") == "folder":
+            out += ("\n\nВ «Безопасности» стоит замок «Файлы: только папка Dewiar»: команды терминала выключены, удалять и отправлять "
+                    "можно только файлы из папки ассистента. Просят другое — скажи об этом одной фразой и где снять замок.")
+        if pv.get("local_only"):
+            out += ("\n\nВключён стоп-кран «Ничего не уходит в интернет» (студия → «Безопасность»): поиск, погода, сайты, почта, "
+                    "Telegram, «Близкие» и облако сейчас недоступны — соединение наружу не откроется. Просят такое — не пробуй, "
+                    "скажи одной фразой, что включён этот режим и где его выключить. Всё, что на этом компьютере, — работает.")
+        return out
 
     def title(self, name):
         if name in TOOLS:
@@ -2538,6 +2555,16 @@ class Toolbox:
         """Защита до вопроса «Выполнить?»: -> (причина запрета | None, подтверждение обязательно, текст вопроса | None).
         Опасное подтверждается, даже если в настройках подтверждение для инструмента выключено."""
         import guard
+        s = getattr(self, "s", None)
+        if name in ("delete_files", "close_send") and s is not None and (s.get("privacy") or {}).get("files") == "folder":
+            # замок «Файлы: только папка Dewiar»: удалять и отправлять можно только то, что лежит в папке ассистента
+            roots = [Path(w).expanduser().resolve() for w in guard.WORKSPACE]
+            key = "paths" if name == "delete_files" else "files"
+            for x in (args or {}).get(key) or []:
+                fp = Path(str(x)).expanduser().resolve()
+                if not any(fp == r or r in fp.parents for r in roots):
+                    return (f"«{fp.name}» — вне папки ассистента, а в «Безопасности» стоит замок «Файлы: только папка Dewiar». "
+                            "Снять его можно там же"), False, None
         if name == "run_command":
             v = guard.check_command(str((args or {}).get("command") or ""))
             if v["level"] == "block":

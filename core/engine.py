@@ -26,7 +26,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.wav_input, self.null_player = wav_input, null_player
         self.server = server              # режим сервера (main.py --server): без микрофона и звука, ответы — текстом
         self.state = "idle"
-        self.muted = False
+        self.muted = (settings.get("privacy", "mic") == "button")   # замок «Микрофон: только кнопка» (студия → «Безопасность»)
         self._mute_pass = False                          # микрофон выключен, но нажали «говорить» — слушаем одну фразу
         self.stopping = threading.Event()
         self.aec = EchoCancel()

@@ -756,7 +756,11 @@ class Close:
         time.sleep(8)
         while not stopping.is_set():
             try:
+                import egress
                 token = self.host.credentials()[0]
+                if egress.local_only():                      # стоп-кран: «Близкие» на паузе
+                    self.error = "на паузе: включён режим «Ничего не уходит в интернет»"
+                    token = ""
                 if token:
                     if time.time() - float(self.st.get("hello_at") or 0) > 3600:   # раз в час: новые близкие и «зовут в Близкие»
                         self.hello()

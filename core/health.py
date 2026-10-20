@@ -292,7 +292,8 @@ class HealthMixin:
 
     def pulse_send(self):
         """Отправить пульс; ушёл — счётчики с нуля. -> True, если сервер принял."""
-        if self.s.get("report", "pulse") is False:
+        import egress
+        if self.s.get("report", "pulse") is False or egress.local_only():   # стоп-кран — пульс ждёт
             return False
         import httpx
         body = self.pulse_payload()
