@@ -1382,11 +1382,16 @@ function volCard() {
     if (t) say(t);
   };
 }
-function say(text) {
+function say(text, retry = 0) {
   const t = speechText(text); if (!t) return;
   if (S.textMode) { vCount("tts_text"); return; }            // текстовый режим — ответ только на экране
   if (!D.mock) {                                              // звук на нуле — голос всё равно не услышат: не синтезируем
     let v = -1; try { v = D.volume("get", 0); } catch (e) { }   // (сервер голосов не тратится впустую — идея 15.10), ответ на экране
+    if (v === 0 && retry < 6 && Date.now() - sttT0 < 120000) {
+      // только что слушали: распознаватель телефона на время записи сам глушит звук и возвращает его не сразу —
+      // «Звук на нуле» выскакивал зря (20.10, отзыв владельца: «ложно выскочило, следующее аудио — исчезло»). Ждём ~2 с.
+      setTimeout(() => say(text, retry + 1), 350); return;
+    }
     if (v === 0) {
       vCount("tts_vol0");
       // звук на нуле (у 30 телефонов из 178, пакет 20.10): тихий тост проглядывали — ответы «пропадали». Теперь — кнопка на
@@ -7330,19 +7335,27 @@ function radCard() {
 }
 function radEditor() {
   const st = clLoad(), cfg = radCfg(), sel = radEditSel || (radEditSel = new Set(cfg.to.filter(pid => st.people.some(p => p.pid === pid))));
+  if (!sel.size && st.people.length === 1) sel.add(st.people[0].pid);          // один близкий — уже отмечен
   const modes = [["hour", "На час"], ["eve", radEve()[0]], ["always", "Всегда"]];
-  return `<div class="card rad-ed"><b>Кому показать, где вы</b>
-    <div class="rad-who">${st.people.map(p => `<button class="rad-pick${sel.has(p.pid) ? " on" : ""}" data-pid="${esc(p.pid)}" aria-pressed="${sel.has(p.pid)}"><i class="clava" style="--c:${clCol(p.pid)}">${esc((p.name || "?")[0].toUpperCase())}</i><span>${esc(radFirst(p.name))}</span></button>`).join("")}</div>
+  return `<div class="card rad-ed"><b>Кому показать, где вы</b><small class="rad-ask" id="rad-ask">Нажмите на близких — отметятся галочкой</small>
+    <div class="rad-who" id="rad-who">${st.people.map(p => `<button class="rad-pick${sel.has(p.pid) ? " on" : ""}" data-pid="${esc(p.pid)}" aria-pressed="${sel.has(p.pid)}"><i class="clava" style="--c:${clCol(p.pid)}">${esc((p.name || "?")[0].toUpperCase())}</i><span>${esc(radFirst(p.name))}</span></button>`).join("")}</div>
     <div class="rad-time" role="radiogroup" aria-label="На сколько">${modes.map(([k, t]) => `<button data-m="${k}" role="radio" aria-checked="${radEditMode === k}" class="${radEditMode === k ? "on" : ""}">${t}</button>`).join("")}</div>
     <p class="hint">Отмеченные близкие увидят у себя на радаре, сколько до вас и в какую сторону. Выключить можно в любой момент.</p>
-    <div class="row2"><button class="btn p" id="rad-ok" style="flex:1.3">Показать</button>${radOn() ? `<button class="btn" id="rad-hide" style="flex:1">Никому</button>` : ""}</div></div>`;
+    <div class="row2"><button class="btn p" id="rad-ok" style="flex:1.3">${radOkText(sel.size)}</button>${radOn() ? `<button class="btn" id="rad-hide" style="flex:1">Никому</button>` : ""}</div></div>`;
 }
+/* 20.10, отзыв: «не мог понять, как добавить близкого — оказывается, нужно на шарик нажать». Подсказка над кружками,
+   у неотмеченных «+», на кнопке — сколько отмечено; «Показать» без отмеченных — кружки вздрагивают и подсказка
+   становится заметной (а не всплывашка внизу). */
+function radOkText(n) { return n ? `Показать ${n} ${n % 10 === 1 && n % 100 !== 11 ? "близкому" : "близким"}` : "Показать"; }
 function radEditBind() {
   $$(".rad-pick").forEach(b => b.onclick = () => { const on = !radEditSel.has(b.dataset.pid); if (on) radEditSel.add(b.dataset.pid); else radEditSel.delete(b.dataset.pid);
-    b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); });
+    b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); $("#rad-ok").textContent = radOkText(radEditSel.size);
+    $("#rad-ask").classList.remove("need"); $("#rad-ask").textContent = "Нажмите на близких — отметятся галочкой"; });
   $$(".rad-time button").forEach(b => b.onclick = () => { radEditMode = b.dataset.m; $$(".rad-time button").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-checked", String(x === b)); }); });
   $("#rad-ok").onclick = async () => {
-    const to = [...radEditSel]; if (!to.length) { toast("Отметьте, кому показать"); return; }
+    const to = [...radEditSel];
+    if (!to.length) { const a = $("#rad-ask"), w = $("#rad-who"); a.textContent = "Сначала нажмите на близкого — кому показать"; a.classList.add("need");
+      w.classList.remove("need"); void w.offsetWidth; w.classList.add("need"); return; }
     const b = $("#rad-ok"); b.disabled = true;
     const n = await radShare(to, radEditMode); radEdit = false; radRender();
     toast(n ? `Готово: ${radList(to.map(pid => radFirst(clPerson(pid).name)))} ${to.length === 1 ? "видит" : "видят"} вас ${radUntil(radCfg().until)}` : radCan() ? "Покажу, как только определится место" : "Сначала разрешите определять место", 3400);

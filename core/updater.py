@@ -275,10 +275,17 @@ class Updater:
             tmp.unlink()
             raise RuntimeError(f"контрольная сумма не совпала — sha256 в latest.json не от этого файла "
                                f"(у файла {got}, размер {tmp_size} байт). Опубликуйте заново через publish_update.py")
-        tmp.replace(dst)
+        try:
+            tmp.replace(dst)
+        except PermissionError:          # Windows: прежний файл занят (антивирус проверяет, установщик открыт) — WinError 32,
+            dst = dst.with_name(f"{dst.stem}-{int(time.time())}{dst.suffix}")   # пакет 20.10, №153: «не скачалось»
+            tmp.replace(dst)
         for old in self.dir.glob("*.exe" if WIN else "*.deb"):   # старые скачанные версии не копим
             if old != dst:
-                old.unlink(missing_ok=True)
+                try:
+                    old.unlink(missing_ok=True)
+                except OSError:          # занят — уберём в другой раз
+                    pass
         return dst
 
     @staticmethod

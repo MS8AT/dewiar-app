@@ -326,7 +326,7 @@ clSend = async function (who, text, files, kind, extra) {  // eslint-disable-lin
   const p = clPerson(who); SANDBOX.dev.push({ name: "close_send", args: `${p.name}: ${text}`, argsObj: { to: p.name, text }, t: Date.now() }); return { to: p.name, t: text };
 };
 const _examSay = say;
-say = function (t) { if (!EXAM) return _examSay(t); };     // eslint-disable-line no-global-assign
+say = function (...a) { if (!EXAM) return _examSay(...a); };     // eslint-disable-line no-global-assign
 const _examSyncSoon = syncSoon, _examSyncRun = syncRun;
 syncSoon = function () { if (!EXAM) return _examSyncSoon(); };                  // eslint-disable-line no-global-assign
 syncRun = async function (m) { if (!EXAM) return _examSyncRun(m); };            // eslint-disable-line no-global-assign

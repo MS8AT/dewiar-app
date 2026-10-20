@@ -9,7 +9,7 @@ from engine_base import *  # noqa: F401,F403 — общие импорты и п
 # инструменты «узнать» (не «сделать»): после них ответ без слов — не ответ, «Готово.» вместо сути не подставляем
 INFO_TOOLS = {"web_search", "weather", "read_webpage", "find_notes", "read_file", "calc", "list_reminders", "calendar_list", "money_report",
               "read_emails", "read_email", "search_documents", "ask_knowledge", "system_status", "task_status", "look_at_screen",
-              "look_through_camera"}
+              "look_through_camera", "app_update"}
 
 
 

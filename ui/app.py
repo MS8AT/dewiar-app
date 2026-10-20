@@ -399,42 +399,6 @@ def _shape_rects(kind, w, h, radius=None):
     return out
 
 
-def clear_window_bg(gw):
-    """Прозрачное окно виджета (Linux с композитором) — прозрачно на каждом кадре. pywebview задаёт фон окна цветом
-    (background_color) для всех окон сразу, и пока виджет тянут по экрану, между кадрами страницы GTK успевал
-    закрасить прозрачные углы и край этим цветом (20.10, Ubuntu: «углы, задний странный фон, пока тяну; отпускаю —
-    становится красивым»). Окно и всё внутри — без своего фона, кадр начинается с полной прозрачности."""
-    try:
-        from gi.repository import Gtk
-        css = Gtk.CssProvider()
-        css.load_from_data(b"* { background-color: transparent; background-image: none; box-shadow: none; }")
-
-        def walk(w):
-            try:
-                w.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
-            except Exception:  # noqa: BLE001
-                pass
-            if isinstance(w, Gtk.Container):
-                for c in w.get_children():
-                    walk(c)
-        walk(gw)                                      # главное: свой фон окна сильнее общего тёмного (приоритет USER)
-        try:
-            import cairo                              # python3-gi-cairo есть не везде — тогда хватает CSS выше
-        except ImportError:
-            return
-        gw.set_app_paintable(True)
-
-        def draw(_w, cr):
-            cr.set_source_rgba(0, 0, 0, 0)
-            cr.set_operator(cairo.OPERATOR_SOURCE)
-            cr.paint()
-            cr.set_operator(cairo.OPERATOR_OVER)
-            return False
-        gw.connect("draw", draw)
-    except Exception as e:  # noqa: BLE001
-        print(f"Прозрачный фон окна не задан: {e}", file=sys.stderr)
-
-
 _XDPY = []
 
 
@@ -686,8 +650,9 @@ class Api:
                 gw.set_skip_taskbar_hint(True)         # виджет — не окно приложения: в доке и Alt+Tab его нет
                 gw.set_skip_pager_hint(True)
                 gw.realize()
-                if TRANSPARENT[0]:
-                    clear_window_bg(gw)                # прозрачное окно — прозрачно всегда, и пока его тянут
+                # Фон прозрачного окна здесь НЕ трогать: 0.38.95 (clear_window_bg — CSS «прозрачно» окну и всему внутри,
+                # и странице WebKit, + свой draw) на Ubuntu сломал виджет: застывший кадр без глаз, не тянется, студия
+                # висит (20.10, 21:36; откат на 0.38.94 помог). Проверка hud_window1020_test.
                 try:
                     shape_window(gw, m)
                 except Exception as e:  # noqa: BLE001
@@ -2283,8 +2248,8 @@ def main():
         w, h = SIZES[m]
         api.wins[m] = webview.create_window(TITLES[m], api._url("hud.html", "&mode=" + m + ("&tw=1" if TRANSPARENT[0] else "")),
                                             width=w, height=h, resizable=False, min_size=(w, h), frameless=True, easy_drag=False,
-                                            on_top=True, hidden=True, background_color="#dde5f0" if ui_skin()[1] else "#0b0b0e", js_api=api,
-                                            transparent=TRANSPARENT[0])           # цвет — пока страница не загрузилась (светлая тема — светлый)
+                                            on_top=True, hidden=True, background_color="#0b0b0e", js_api=api,
+                                            transparent=TRANSPARENT[0])
     api._hud = api.wins["card"]
 
     def on_start():

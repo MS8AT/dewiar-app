@@ -581,7 +581,7 @@ input[type=radio]:checked::after { content: ""; width: 8px; height: 8px; border-
 .swatches button { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
 .swatches button.on { border-color: #fff; }
 .swatches input[type=color] { width: 30px; height: 30px; border: 0; background: none; cursor: pointer; }
-.toast { position: fixed; bottom: 22px; left: 50%; transform: translate(-50%, 20px); background: rgba(30,30,55,.92); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); padding: 9px 16px; border-radius: 999px; opacity: 0; transition: .25s; z-index: 9; font-size: 13px; }
+.toast { position: fixed; bottom: 22px; left: 50%; transform: translate(-50%, 20px); background: rgba(30,30,55,.92); color: #f3f5fb; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); padding: 9px 16px; border-radius: 999px; opacity: 0; transition: .25s; z-index: 9; font-size: 13px; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .tool { display: grid; grid-template-columns: 1fr auto; gap: 4px 20px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
 .tool b { font-weight: 600; }
