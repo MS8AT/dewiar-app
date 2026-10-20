@@ -10,6 +10,7 @@ PipeWire/PulseAudio), а голос играем в парный dewiar_out. С�
 import logging
 import math
 import os
+import sys
 import shutil
 import subprocess
 import queue
@@ -41,6 +42,7 @@ def _run(cmd, timeout=5):
 
 
 WIN = os.name == "nt"
+MAC = sys.platform == "darwin"
 
 
 def _backend():
@@ -48,8 +50,8 @@ def _backend():
     forced = os.environ.get("DEWIAR_AUDIO_BACKEND", "")
     if forced:
         return forced
-    if WIN:
-        return "sounddevice"
+    if WIN or MAC:                      # macOS: PulseAudio из Homebrew бывает наполовину (пакет 20.10: «dlopen libpulse.so.0») —
+        return "sounddevice"            # CoreAudio через sounddevice надёжнее
     if pulse.available():
         return "libpulse"
     return "cli" if shutil.which("parec") and shutil.which("pacat") else "sounddevice"
@@ -57,7 +59,7 @@ def _backend():
 
 def _pulsectl_ok():
     """Управлять устройствами через pulsectl, а не pactl: есть пакет и способ доступа не переопределён вручную."""
-    if WIN:
+    if WIN or MAC:
         return False
     try:
         import pulsectl  # noqa: F401

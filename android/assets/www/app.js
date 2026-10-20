@@ -4771,6 +4771,10 @@ const CLOUD = {
   openai: { name: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-4.1-mini", key: "https://platform.openai.com/api-keys" },
   deepseek: { name: "DeepSeek", url: "https://api.deepseek.com/v1", model: "deepseek-chat", key: "https://platform.deepseek.com/api_keys" },
   anthropic: { name: "Claude (Anthropic)", url: "https://api.anthropic.com/v1", model: "claude-sonnet-5-5", key: "https://platform.claude.com/settings/keys" },
+  polza: { name: "Polza.ai", url: "https://polza.ai/api/v1", model: "openai/gpt-4.1-mini", key: "https://polza.ai" },          // российские агрегаторы — оплата картой РФ (№141, 20.10)
+  proxyapi: { name: "ProxyAPI", url: "https://api.proxyapi.ru/openai/v1", model: "gpt-4.1-mini", key: "https://console.proxyapi.ru/keys" },
+  vsegpt: { name: "VseGPT", url: "https://api.vsegpt.ru/v1", model: "openai/gpt-4.1-mini", key: "https://vsegpt.ru" },
+  aitunnel: { name: "AITunnel", url: "https://api.aitunnel.ru/v1", model: "gpt-4.1-mini", key: "https://aitunnel.ru" },
   custom: { name: "Другой — по адресу", url: "", model: "", key: "" },      // любой OpenAI-совместимый: LiteLLM, Kimi, агрегаторы (комментарии 19.10)
 };
 /* Вписанный адрес сервиса: без хвоста /chat/completions, с https:// */

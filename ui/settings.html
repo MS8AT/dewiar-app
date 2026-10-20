@@ -941,7 +941,7 @@
     <div class="wpanel" id="w-cloud">
       <h3>Облачная модель по ключу</h3>
       <div class="actions" style="margin:0;align-items:flex-end;flex-wrap:wrap">
-        <label class="f" style="width:220px">Сервис<select id="ck-prov"><option value="openrouter">OpenRouter</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="deepseek">DeepSeek</option><option value="custom">Другой — по адресу</option></select></label>
+        <label class="f" style="width:220px">Сервис<select id="ck-prov"><option value="openrouter">OpenRouter</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="deepseek">DeepSeek</option><optgroup label="Российские — оплата картой РФ"><option value="polza">Polza.ai</option><option value="proxyapi">ProxyAPI</option><option value="vsegpt">VseGPT</option><option value="aitunnel">AITunnel</option></optgroup><option value="custom">Другой — по адресу</option></select></label>
         <label class="f" id="ck-url-f" style="flex:1;min-width:240px;display:none">Адрес (OpenAI-совместимый)<input type="url" id="ck-url" placeholder="https://api.example.ru/v1" spellcheck="false" autocomplete="off"></label>
         <label class="f" style="flex:1;min-width:240px">Ключ API<input type="password" id="ck-key" placeholder="вставьте ключ" autocomplete="off"></label>
         <button class="btn primary" id="ck-go">Подключить</button>
@@ -1311,10 +1311,11 @@
           <img id="bug-img" alt="Снимок экрана" hidden>
           <div class="bugempty" id="bug-empty"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="12" cy="12" r="3.2"/><path d="M8 5l1.5-2h5L16 5"/></svg><span>Снимка нет</span></div>
           <div class="bugbar"><button class="btn small" id="bug-snap" title="Снять весь экран сейчас (окно студии тоже попадёт)">Снять экран</button>
+            <label class="btn small" title="Картинка с компьютера; или Ctrl+V — из буфера, или перетащите сюда">Картинка…<input type="file" id="bug-file" accept="image/*" hidden></label>
             <label class="chk"><input type="checkbox" id="bug-use" checked> приложить</label></div>
         </div>
         <div class="bugtxt">
-          <textarea id="rep-note" rows="4" maxlength="2000" placeholder="Что случилось? Например: «спросил погоду — молчит» или «в машине не слышит меня»"></textarea>
+          <textarea id="rep-note" rows="4" maxlength="2000" placeholder="Что случилось? Например: «спросил погоду — молчит» или «в машине не слышит меня». Снимок из буфера — Ctrl+V"></textarea>
           <input type="text" id="bug-who" maxlength="40" placeholder="Как подписать вас в «Помощниках проекта» — необязательно">
           <div class="actions" style="margin:0"><button class="btn primary" id="bug-send">Отправить разработчику</button>
             <button class="btn" id="rep-go" title="Отчёт одним файлом на рабочий стол — если нет интернета">Сохранить отчёт в файл</button><span class="res" id="rep-res"></span></div>

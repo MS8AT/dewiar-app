@@ -22,7 +22,8 @@ function renderProfiles() {
       <label class="f">Протокол<select data-f="kind"><option value="openai">OpenAI-совместимый</option><option value="ollama">Ollama</option><option value="anthropic">Anthropic</option></select></label>
       <label class="f">Адрес сервера<input type="url" data-f="base_url"><span class="hint">Заполняется само при подключении; менять обычно не нужно.</span></label>
       <label class="f">API-ключ<input type="password" data-f="api_key" placeholder="для локальных не нужен"></label>
-      <label class="f">Модель<input type="text" data-f="model" list="ml-${id}" placeholder="пусто — первая с сервера"><datalist id="ml-${id}"></datalist></label>
+      <label class="f">Модель<input type="text" data-f="model" list="ml-${id}" placeholder="пусто — первая с сервера"><datalist id="ml-${id}"></datalist><span class="hint">Весь список — кнопка «Список моделей».</span></label>
+      <div class="mpick" id="mp-${id}" hidden></div>
       <label class="f">Максимум токенов в ответе<input type="number" data-f="max_tokens" placeholder="600"></label>
       <label class="f">Температура<input type="number" step="0.1" min="0" max="2" data-f="temperature" placeholder="0.7"></label>
       <label class="f" style="justify-content:end"><span><input type="checkbox" data-f="disable_thinking"> отключать «размышления» (Qwen3 и подобные в vLLM)</span></label>
@@ -45,7 +46,14 @@ function renderProfiles() {
       ev.target.disabled = false;
     };
     $('[data-a="models"]', el).onclick = async () => {
-      try { const ms = await core.call("llm_models", { profile: S.llm.profiles[id] }); $(`#ml-${id}`, el).innerHTML = ms.map(m => `<option value="${m}">`).join(""); res.className = "res ok"; res.textContent = `моделей: ${ms.length} — выберите в поле «Модель»`; }
+      // весь список — кнопками (№139, 20.10: подсказка поля показывает только модели, похожие на уже вписанную, — «не весь
+      // список локальных моделей»); нажали — модель выбрана и сохранена
+      try { const ms = await core.call("llm_models", { profile: S.llm.profiles[id] }); $(`#ml-${id}`, el).innerHTML = ms.map(m => `<option value="${escH(m)}">`).join("");
+            const box = $(`#mp-${id}`, el), cur = S.llm.profiles[id].model || "";
+            box.innerHTML = `<b>Модели на сервере · ${ms.length}</b>` + ms.map(m => `<button class="chip${m === cur ? " on" : ""}" data-m="${escH(m)}">${escH(m)}</button>`).join("");
+            box.hidden = !ms.length; if (openProf !== id) { openProf = id; el.classList.add("open"); }
+            $$("button", box).forEach(b => b.onclick = () => { S.llm.profiles[id].model = b.dataset.m; save({ llm: { profiles: S.llm.profiles } }, true).then(renderProfiles); toast("Модель: " + b.dataset.m); });
+            res.className = "res ok"; res.textContent = ms.length ? `моделей: ${ms.length} — нажмите нужную` : "сервер не вернул ни одной модели"; }
       catch (e) { res.className = "res bad"; res.textContent = e.message; }
     };
     $('[data-a="del"]', el).onclick = () => { delete S.llm.profiles[id]; const patch = { llm: { profiles: S.llm.profiles } }; if (S.llm.active === id) patch.llm.active = Object.keys(S.llm.profiles)[0] || ""; save(patch).then(renderProfiles); };

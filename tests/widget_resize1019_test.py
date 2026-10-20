@@ -55,7 +55,7 @@ with sync_playwright() as p:
     pg.goto((ui / "hud.html").as_uri() + "?mode=card&port=1&tw=1"); pg.wait_for_timeout(700)
     T = pg.evaluate("""() => ({ tw: document.documentElement.classList.contains('tw'), bg: getComputedStyle(document.body).backgroundColor,
         r: getComputedStyle(document.querySelector('#card')).borderTopLeftRadius })""")
-    ok(T["tw"] and T["bg"] in ("rgba(0, 0, 0, 0)", "transparent") and T["r"] == "28px", f"прозрачное окно: фон страницы прозрачный, углы скругляет карточка: {T}")
+    ok(T["tw"] and T["bg"] in ("rgba(0, 0, 0, 0)", "transparent") and T["r"] in ("28px", "24px"), f"прозрачное окно: фон страницы прозрачный, углы скругляет карточка (светлые темы — 24 px, с тенью снаружи): {T}")
     g = pg.locator("#grip").bounding_box()
     ok(g is not None and g["x"] > 260 and g["y"] > 380, f"уголок для растягивания — справа внизу: {g}")
     pg.mouse.move(g["x"] + 9, g["y"] + 9); pg.mouse.down(); pg.wait_for_timeout(100)

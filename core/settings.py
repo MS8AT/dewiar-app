@@ -63,6 +63,11 @@ LLM_PRESETS = {
     "openai":    {"name": "OpenAI",            "kind": "openai", "base_url": "https://api.openai.com/v1"},
     "anthropic": {"name": "Anthropic Claude",  "kind": "anthropic", "base_url": "https://api.anthropic.com"},
     "deepseek":  {"name": "DeepSeek",          "kind": "openai", "base_url": "https://api.deepseek.com/v1"},
+    # российские агрегаторы (№141, 20.10: «как в Deepseek Harness — другие провайдеры»): оплата картой РФ, много моделей
+    "polza":     {"name": "Polza.ai",          "kind": "openai", "base_url": "https://polza.ai/api/v1"},
+    "proxyapi":  {"name": "ProxyAPI",          "kind": "openai", "base_url": "https://api.proxyapi.ru/openai/v1"},
+    "vsegpt":    {"name": "VseGPT",            "kind": "openai", "base_url": "https://api.vsegpt.ru/v1"},
+    "aitunnel":  {"name": "AITunnel",          "kind": "openai", "base_url": "https://api.aitunnel.ru/v1"},
 }
 
 DEFAULTS = {

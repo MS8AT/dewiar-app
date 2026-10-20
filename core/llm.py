@@ -48,6 +48,11 @@ def ctx_full(e):
 def _humanize(e, base_url):
     """Ошибка сети или HTTP → короткое объяснение по-русски для окна и голоса."""
     if isinstance(e, httpx.ConnectError):
+        host = (re.match(r"^\w+://([^/:?#]+)", str(base_url or "")) or [None, ""])[1]
+        if host and not re.match(r"^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1)|\.local$", host):
+            # облачный сервис (пакет 20.10, №140: «openrouter.ai — сервер запущен?» — человеку непонятно, что делать)
+            return (f"не могу подключиться к {host} — нет интернета или сайт недоступен из вашей сети (провайдер бывает, что "
+                    "блокирует). Помогут прокси («Подключение» → «Прокси») или облако Dewiar («Мозг» → «Dewiar Облако»)")
         return f"не могу подключиться к {base_url} — сервер запущен и адрес верный?"
     if isinstance(e, httpx.TimeoutException):
         return "сервер модели не ответил вовремя"
@@ -226,6 +231,13 @@ def _root(base):
 _native = set()       # адреса, где работает только родной API Ollama (/api/chat)
 
 
+def _anth_root(base):
+    """Адрес Anthropic-совместимого сервиса без хвоста /v1: путь /v1/messages дописываем сами. Вписали «…/v1» (так у
+    агрегаторов в документации) — раньше выходило …/v1/v1/messages и «не найдено» (пакет 20.10)."""
+    base = str(base or "").rstrip("/")
+    return base[:-3] if base.endswith("/v1") else base
+
+
 def list_models(p, timeout=6):
     """-> имена моделей на сервере профиля p. Если /models нет (404), а /api/tags есть — это Ollama без
     OpenAI-совместимого API: адрес запоминается в _native. Ошибки — LLMError с понятным текстом."""
@@ -235,7 +247,7 @@ def list_models(p, timeout=6):
             r = httpx.get(_root(base) + "/api/tags", headers=_headers(p), timeout=timeout)
             r.raise_for_status()
             return [m.get("name") or m.get("model") for m in r.json().get("models", [])]
-        url = base + ("/v1/models" if p.get("kind") == "anthropic" else "/models")
+        url = (_anth_root(base) + "/v1/models") if p.get("kind") == "anthropic" else base + "/models"
         r = httpx.get(url, headers=_headers(p), timeout=timeout)
         if r.status_code == 404 and p.get("kind") != "anthropic":
             r2 = httpx.get(_root(base) + "/api/tags", headers=_headers(p), timeout=timeout)
@@ -952,7 +964,7 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
         native = p.get("kind") == "ollama" or base in _native    # ещё раз: resolve_model мог узнать, что тут только Ollama
         timeout = httpx.Timeout(5, read=float(p.get("timeout", 180)))
         if p.get("kind") == "anthropic":
-            url = base + "/v1/messages"
+            url = _anth_root(base) + "/v1/messages"
             body = {"model": model, "system": system, "messages": messages, "stream": True,
                     "max_tokens": max_tokens, "temperature": float(p.get("temperature", 0.7))}
             if tools:

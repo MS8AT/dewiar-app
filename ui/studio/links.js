@@ -510,6 +510,20 @@ $("#bug-snap").onclick = guardBtn(async () => {
   try { const x = await core.call("bug_shot"); if (x.ok) { bugShow(x.preview); r.textContent = ""; } else { r.className = "res bad"; r.textContent = "Не снялся: " + (x.error || ""); } }
   catch (e) { r.className = "res bad"; r.textContent = e.message; }
 });
+/* своя картинка к жалобе: Ctrl+V в форме (снимок из буфера), «Картинка…» или перетащить на место снимка (№139) */
+async function bugPick(file) {
+  if (!file || !/^image\//.test(file.type)) return false;
+  const r = $("#rep-res"); r.className = "res"; r.textContent = "прикладываю…";
+  const data = await new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = no; fr.readAsDataURL(file); });
+  try { const x = await core.call("bug_shot", { image: data }); if (x.ok) { bugShow(x.preview); r.textContent = ""; } else { r.className = "res bad"; r.textContent = x.error || "не приложилось"; } }
+  catch (e) { r.className = "res bad"; r.textContent = e.message; }
+  return true;
+}
+$("#bug").addEventListener("paste", (e) => { const f = [...(e.clipboardData || {}).files || []].find(x => /^image\//.test(x.type)); if (f) { e.preventDefault(); bugPick(f); } });
+$("#bug-file").onchange = (e) => { bugPick(e.target.files[0]); e.target.value = ""; };
+$("#bug-shot").addEventListener("dragover", (e) => { e.preventDefault(); $("#bug-shot").classList.add("drop"); });
+$("#bug-shot").addEventListener("dragleave", () => $("#bug-shot").classList.remove("drop"));
+$("#bug-shot").addEventListener("drop", (e) => { e.preventDefault(); $("#bug-shot").classList.remove("drop"); bugPick((e.dataTransfer.files || [])[0]); });
 $("#bug-send").onclick = guardBtn(async () => {
   const r = $("#rep-res"), note = $("#rep-note").value.trim();
   if (note.length < 3) { r.className = "res bad"; r.textContent = "Напишите хотя бы пару слов — что пошло не так"; $("#rep-note").focus(); return; }

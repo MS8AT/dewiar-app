@@ -242,7 +242,7 @@ class CommandsMixin:
             return {"auto": bool(a.get("on"))}
         # жалобы (core/health.py): снимок экрана до открытия студии, отправка, мои жалобы и помощники проекта
         if cmd == "bug_shot":
-            return self.bug_shot()
+            return self.bug_shot(a.get("image"))
         if cmd == "bug_state":
             return self.bug_state()
         if cmd == "complaint_send":

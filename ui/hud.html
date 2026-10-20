@@ -27,6 +27,12 @@
      без ступенек формы окна (отзыв 19.10: «грубовато края стали» на светлой теме) */
   html.tw, html.tw body { background: transparent; }
   html.tw #card { border-radius: 28px; }
+  /* Светлые темы: карточка сливалась со светлым окном под ней (студия в «Небесном», 20.10). Тени внутри (материал,
+     портрет, панель) не трогаем — только сама карточка: в прозрачном окне — тонкая полупрозрачная тень снаружи (по краю
+     окна для неё оставлено 6 px), в обычном окне (Windows, Linux без композитора) — едва заметная линия по краю. */
+  body.light:not(.mini) #card { box-shadow: inset 0 0 0 1px rgba(20,32,60,.09); }
+  html.tw body.light:not(.mini) #card { inset: 6px; border-radius: 24px; box-shadow: 0 2px 7px rgba(20,32,60,.16), 0 0 0 1px rgba(20,32,60,.06); }
+  html.tw body.light:not(.mini) #grip { right: 9px; bottom: 9px; }
   /* растянуть карточку за угол (отзыв 19.10); размер запоминается (ui.hud_w, ui.hud_h) */
   #grip { position: absolute; right: 3px; bottom: 3px; width: 18px; height: 18px; z-index: 6; cursor: nwse-resize;
           display: grid; place-items: center; opacity: 0; transition: opacity .2s; color: var(--muted); touch-action: none; }
@@ -75,10 +81,6 @@
   body.neu #orb::before { content: ""; position: absolute; left: 50%; top: 50%; width: 63%; height: 63%; transform: translate(-50%, -50%);
                          border-radius: 50%; background: var(--glass); box-shadow: 9px 9px 18px var(--neu-dark), -9px -9px 18px var(--neu-light); }
   body.neu.light #orb::before { width: 72%; height: 72%; }      /* светлый неоморфизм: поле материала вокруг портрета, без рамки */
-  /* светлый неоморфизм поверх светлых окон (студия в «Небесном», белые страницы) сливался с ними (20.10): к двум теням
-     материала — мягкая общая тень снизу, как у предмета над столом */
-  body.neu.light { --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light), 0 10px 24px -10px rgba(24,38,70,.30); }
-  body.neu.light #orb::before { box-shadow: 9px 9px 18px var(--neu-dark), -9px -9px 18px var(--neu-light), 0 14px 30px -12px rgba(24,38,70,.34); }
   body.neu #orb canvas { position: relative; }
   body.neu .btn:hover, body.neu .ab:hover { background: transparent; box-shadow: inset 3px 3px 6px var(--neu-dark), inset -3px -3px 6px var(--neu-light); }
   body.neu #bar { opacity: .9; }

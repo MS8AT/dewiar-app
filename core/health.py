@@ -387,17 +387,27 @@ class HealthMixin:
         threading.Thread(target=send, name="complaint", daemon=True).start()
         return True
 
-    def bug_shot(self):
+    def bug_shot(self, image=None):
         """Снимок экрана для жалобы — до того, как откроется студия (виден человеку перед отправкой, можно не прикладывать).
-        -> {"ok", "preview": data:-адрес уменьшенной копии} или {"ok": False, "error"}."""
+        image — своя картинка (data:-адрес): вставили из буфера (Ctrl+V) или перетащили в форму (№139, 20.10: «нельзя
+        скриншот из буфера к отчёту приложить»). -> {"ok", "preview": data:-адрес уменьшенной копии} или {"ok": False, "error"}."""
         from eyes import EyesError, capture_screen
         from tools import desktop_env
-        from PIL import Image
-        try:
-            raw = capture_screen(desktop_env())
-        except (EyesError, OSError) as e:
-            self._bug = None
-            return {"ok": False, "error": str(e)}
+        from PIL import Image, UnidentifiedImageError
+        if image:
+            try:
+                raw = base64.b64decode(str(image).split(",", 1)[-1], validate=False)
+                if len(raw) > 25 * 1024 * 1024:
+                    return {"ok": False, "error": "картинка больше 25 МБ"}
+                Image.open(io.BytesIO(raw)).verify()
+            except (ValueError, UnidentifiedImageError, OSError):
+                return {"ok": False, "error": "это не картинка"}
+        else:
+            try:
+                raw = capture_screen(desktop_env())
+            except (EyesError, OSError) as e:
+                self._bug = None
+                return {"ok": False, "error": str(e)}
         im = Image.open(io.BytesIO(raw)).convert("RGB")
         im.thumbnail((1600, 1600))
         buf = io.BytesIO()

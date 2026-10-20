@@ -46,7 +46,8 @@ for raw, want in (({"skin": "brand"}, ("neusky", True)), ({"skin": "brand", "ski
 sk = (ROOT / "ui/assets/skins.js").read_text(encoding="utf-8"); css = (ROOT / "ui/assets/skins.css").read_text(encoding="utf-8")
 ok('id: "neudusk", name: "Небесный вечер"' in sk and ".skin-neudusk {" in css, "«Небесный вечер» — в списке тем и в стилях")
 hud = (ROOT / "ui/hud.html").read_text(encoding="utf-8")
-ok(re.search(r"body\.neu\.light \{ --glass-shadow: [^}]*rgba\(24,38,70,\.30\)", hud) is not None, "виджет в светлом неоморфизме — с мягкой общей тенью")
+ok("html.tw body.light:not(.mini) #card { inset: 6px;" in hud and "rgba(24,38,70" not in hud and "body.neu.light { --glass-shadow" not in hud,
+   "светлые темы: тень у самой карточки снаружи; тени внутри виджета — как были (20.10: усиленные внутренние — «грубо»)")
 
 from playwright.sync_api import sync_playwright  # noqa: E402
 FAKE = "window.pywebview = { api: new Proxy({}, { get: () => () => Promise.resolve(true) }) };"

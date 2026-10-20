@@ -660,6 +660,7 @@ kbd { font-family: inherit; background: rgba(255,255,255,.12); border-radius: 6p
 .hbtn:hover { background: var(--brand); transform: scale(1.08); }
 #help { z-index: 60; width: min(460px, 100%); background: linear-gradient(rgba(12,12,14,.93), rgba(12,12,14,.93)), var(--scene); }
 html.framed #help { top: 38px; }
+html.framed .drawer { top: 38px; }               /* боковые панели (персонаж, навык, плагин) — под своей полосой заголовка (20.10: закрытие пряталось под ней) */
 #help h2 { font: 600 19px/1.3 "Unbounded", "Manrope", sans-serif; margin: 0 30px 14px 0; }
 #help .hx { position: absolute; top: 18px; right: 18px; }
 #help h4 { font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin: 18px 0 8px; }
@@ -1209,6 +1210,11 @@ html.st-light dialog.nwdlg { background: #fff; }
 .plg-md p, .plg-md ul, .plg-md table, .plg-md pre { margin: 0 0 12px; }
 .plg-md ul { padding-left: 20px; }
 .plg-md code { font: 12.5px ui-monospace, monospace; background: rgba(127,127,127,.16); padding: 1px 5px; border-radius: 6px; }
-.plg-md pre { font: 12.5px/1.5 ui-monospace, monospace; background: rgba(0,0,0,.25); padding: 12px 14px; border-radius: 12px; overflow-x: auto; white-space: pre; }
+.plg-md pre { font: 12.5px/1.5 ui-monospace, monospace; background: rgba(0,0,0,.25); padding: 12px 14px; border-radius: 12px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .plg-md table { border-collapse: collapse; width: 100%; font-size: 13px; }
 .plg-md th, .plg-md td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+/* «Мозг»: все модели сервера кнопками (№139) */
+.mpick { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,.04); max-height: 220px; overflow-y: auto; }
+.mpick b { width: 100%; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.mpick .chip { font: 12.5px ui-monospace, monospace; }
+.bugshot.drop { outline: 2px dashed var(--accent); outline-offset: 2px; }
