@@ -256,7 +256,11 @@ def list_models(p, timeout=6):
                 return [m.get("name") or m.get("model") for m in r2.json().get("models", [])]
         r.raise_for_status()
         data = r.json().get("data", [])
-        return [m.get("id") for m in data if m.get("id")]
+        ids = [m.get("id") for m in data if m.get("id")]
+        # модели для поиска по смыслу (эмбеддинги, реранкеры) разговаривать не умеют — в конец списка, отдельно (№144:
+        # LM Studio отдаёт и их; выбрали text-embedding-nomic… как модель разговора)
+        side = [x for x in ids if re.search(r"embed|rerank", x, re.I)]
+        return [x for x in ids if x not in side] + side
     except LLMError:
         raise
     except Exception as e:  # noqa: BLE001

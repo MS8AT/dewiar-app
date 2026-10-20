@@ -223,6 +223,8 @@
     <h1>Близкие</h1>
     <p class="lead">Переписка между помощниками. Скажите «Лира, напиши маме, что я задержусь» — у мамы её помощница покажет
       сообщение и прочитает вслух. Сообщения и файлы шифруются на устройствах: сервер Dewiar их прочитать не может.</p>
+    <div class="cl-tabs" id="cl-tabs" role="tablist"><button data-t="chat" class="on" role="tab" aria-selected="true">Переписка</button><button data-t="near" role="tab" aria-selected="false">Рядом</button></div>
+    <div class="cl-near" id="cl-near" hidden></div>
     <div class="cl-box">
       <aside class="cl-side">
         <div class="cl-me"><span class="hint" style="margin:0">Близкие видят вас как</span><input type="text" id="cl-myname" placeholder="ваше имя" maxlength="40"></div>
@@ -1442,6 +1444,7 @@
 <script src="studio/dewiar.js"></script>
 <script src="studio/look.js"></script>
 <script src="studio/close.js"></script>
+<script src="studio/radar.js"></script>
 <script src="studio/refs.js"></script>
 <script src="studio/notes.js"></script>
 <script src="studio/capture.js"></script>

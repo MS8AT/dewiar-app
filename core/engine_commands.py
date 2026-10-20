@@ -909,6 +909,8 @@ class CommandsMixin:
                             (out / name).write_bytes(_b64.b64decode(f.get("b64") or ""))
                             files.append(str(out / name))
                     return c.send(a.get("pid", ""), a.get("text", ""), files)
+                if cmd == "close_wave":             # 👋 с радара «Рядом»
+                    return c.wave(a.get("pid", ""))
                 if cmd == "close_react":            # реакция на сообщение (👍 ❤️ …)
                     return c.react(a.get("pid", ""), a.get("mid", ""), a.get("e", ""))
                 if cmd == "close_call":

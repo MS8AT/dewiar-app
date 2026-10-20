@@ -7108,7 +7108,7 @@ async function myPlace(maxAgeSec, ask) {
 async function radLocate(ask) {
   if (radLocate.busy && !ask) return;
   radLocate.busy = true;
-  try { await myPlace(ask ? 0 : 30, ask); radErr = null; }
+  try { const me = await myPlace(ask ? 0 : 30, ask); radErr = null; radOwn(me); }
   catch (e) { radErr = { kind: e.kind || "fail", msg: e.message }; }
   finally { radLocate.busy = false; }
   if ($("#rad-body")) radRender();
@@ -7155,9 +7155,26 @@ async function radPush(force) {
       try { await clSend(pid, "", [], "geo", { g }); n++; } catch (e) { plog("info", "радар: " + e.message); }
     }
     S.radar = Object.assign(radCfg(), { sent: { at: Date.now(), lat: me.lat, lon: me.lon } }); saveS();
+    radOwn(me);
     return n;
   } catch (e) { plog("info", "радар: место — " + e.message); return 0; }
   finally { radPush.busy = false; }
+}
+/* Место телефона — своим же устройствам (компьютер рисует радар вокруг него): конверт /close/self {mygeo}, зашифрован
+   ключами своих устройств, как ключ умного дома. Не чаще раза в 4 минуты (или сдвинулся на 50 м), только пока радаром
+   пользуются (открыт или показываю себя близким) и только если есть другие свои устройства. */
+async function radOwn(me) {
+  try {
+    if (!me || !syncCred() || !DC()) return false;
+    const k = clKeys(), devs = ((clLoad().me || {}).devs || []).filter(d => d.pub && d.dev && d.dev !== k.dev);
+    if (!devs.length) return false;
+    const last = radOwn.last || {};
+    if (Date.now() - (last.at || 0) < RAD_PUSH && last.lat != null && radGeo(last, me)[0] < 0.05) return false;
+    const t = {}; devs.forEach(d => { t[d.dev] = DC().b64d(d.pub); }); t[k.dev] = DC().b64d(k.pub);
+    const body = { mygeo: { lat: +me.lat.toFixed(5), lon: +me.lon.toFixed(5), acc: Math.round(me.acc || 0), ts: me.ts }, ts: Date.now() };
+    await clReq("POST", "/close/self", { env: DC().encryptFor(body, DC().b64d(k.priv), k.dev, t) });
+    radOwn.last = { at: Date.now(), lat: me.lat, lon: me.lon }; return true;
+  } catch (e) { plog("info", "радар: место своим устройствам — " + e.message); return false; }
 }
 async function radStop(pids) { for (const pid of pids) { try { await clSend(pid, "", [], "geo", { g: { off: 1 } }); } catch (e) { } } }
 async function radShare(to, mode) {
@@ -7233,7 +7250,7 @@ function radRender() {
       <div class="rad-me" aria-label="Вы">Я</div><div id="rad-ppl"></div></div>
       <button class="ib soft rad-cmp${radCompass ? " on" : ""}" id="rad-cmp" aria-pressed="${radCompass}" aria-label="Повернуть радар по компасу" title="По компасу"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg></button></div>
     <div id="rad-card"></div><div id="rad-rest"></div>
-    <p class="hint rad-priv">Место шифруется на телефоне — сервер Dewiar его не видит. Близкие видят только расстояние и сторону, пока вы разрешили; обновляется, когда Dewiar открыт.</p>`;
+    <p class="hint rad-priv">Место шифруется на телефоне — сервер Dewiar его не видит. Близкие видят только расстояние и сторону, пока вы разрешили; ваш компьютер с Dewiar — тоже, чтобы радар был и там. Обновляется, когда Dewiar открыт.</p>`;
   $("#rad-edit").onclick = () => { radEdit = !radEdit; radEditSel = null; radEditMode = cfg.until === -1 ? "always" : "hour"; radRender(); };
   $("#rad-cmp").onclick = () => radCompassSet(!radCompass);
   if (radEdit) radEditBind();

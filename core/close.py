@@ -236,9 +236,46 @@ class Close:
         with self._lock:
             people = [dict(p, unread=int(self.st["unread"].get(p["pid"], 0)),
                            last=(self.st["hist"].get(p["pid"]) or [{}])[-1]) for p in self.st["people"]]
-            return {"me": self.st.get("me") or {}, "people": people, "offers": list(self.st.get("offers") or []),
-                    "error": self.error, "invite": self.st.get("invite") or None,
-                    "ready": bool(self.st.get("pub"))}
+            out = {"me": self.st.get("me") or {}, "people": people, "offers": list(self.st.get("offers") or []),
+                   "error": self.error, "invite": self.st.get("invite") or None,
+                   "ready": bool(self.st.get("pub"))}
+        out["geo"] = self.geo_state()
+        return out
+
+    # ---------- радар «Рядом» (на компьютере — только смотреть и махать: место знает телефон) ----------
+    def _geo(self, pid, g, mine=False):
+        """Место близкого (или моего телефона — mine) для радара. g: {lat, lon, acc, ts, until} или {off}."""
+        ok = isinstance(g, dict) and not g.get("off") and isinstance(g.get("lat"), (int, float)) and isinstance(g.get("lon"), (int, float)) \
+            and -90 <= g["lat"] <= 90 and -180 <= g["lon"] <= 180
+        with self._lock:
+            geo = self.st.setdefault("geo", {})
+            if mine:
+                self.st["mygeo"] = {"lat": float(g["lat"]), "lon": float(g["lon"]), "acc": float(g.get("acc") or 0),
+                                    "ts": min(int(time.time() * 1000), int(g.get("ts") or time.time() * 1000))} if ok else None
+            elif ok:
+                until = g.get("until")
+                geo[pid] = {"lat": float(g["lat"]), "lon": float(g["lon"]), "acc": float(g.get("acc") or 0),
+                            "ts": min(int(time.time() * 1000), int(g.get("ts") or time.time() * 1000)),
+                            "until": -1 if until == -1 else int(until or time.time() * 1000 + 3600e3)}
+            else:
+                geo.pop(pid, None)
+            self._save()
+        self.host.emit("close_geo", geo=self.geo_state())
+
+    def geo_state(self):
+        """{people: {pid: место}, me: место моего телефона или None} — просроченное убирается."""
+        now = int(time.time() * 1000)
+        with self._lock:
+            pids = {p["pid"] for p in self.st["people"]}
+            geo = self.st.get("geo") or {}
+            for pid in [k for k, v in geo.items() if k not in pids or (v.get("until") != -1 and v.get("until", 0) < now) or now - v.get("ts", 0) > 7 * 864e5]:
+                geo.pop(pid, None)
+            me = self.st.get("mygeo")
+            return {"people": dict(geo), "me": me if me and now - me.get("ts", 0) < 7 * 864e5 else None}
+
+    def wave(self, who):
+        """👋 близкому: обычное сообщение {wave: 1, t: "👋"} — у него волны, «… машет вам» и голос."""
+        return self.send(who, "👋", payload={"wave": 1})
 
     def history(self, pid, mark_read=True):
         with self._lock:
@@ -551,7 +588,7 @@ class Close:
     def poll(self):
         """Забрать новое. -> сколько новых входящих сообщений."""
         priv, _ = self._keys()
-        d = self._req("GET", "/close/inbox", params={"after": int(self.st["cursor"])}).json()
+        d = self._req("GET", "/close/inbox", params={"after": int(self.st["cursor"]), "geo": 1}).json()   # и места для радара
         got, refreshed = 0, False
         for it in d.get("items") or []:
             try:                                   # одно кривое сообщение не должно стопорить весь ящик
@@ -594,10 +631,16 @@ class Close:
         if it.get("kind") == "sig":
             self._sig(peer, it.get("name", ""), body)
             return 0, refreshed
+        if it.get("kind") == "geo":                     # место близкого для радара «Рядом» (телефон, app.js radPush)
+            if not it.get("out"):
+                self._geo(peer, body.get("g"))
+            return 0, refreshed
         if it.get("kind") == "own":                     # от своего же устройства (ключ шифрования — из моих устройств)
             if it.get("out") and env.get("fd") != self.st["dev"]:
                 if isinstance(body.get("natt"), dict):  # фото и файлы заметки с телефона — к той же заметке здесь
                     self._natt_add(body["natt"])
+                if isinstance(body.get("mygeo"), dict):  # где мой телефон — центр радара на компьютере
+                    self._geo("", body["mygeo"], mine=True)
                 try:
                     getattr(self.host, "own_apply", lambda b: None)(body)
                     snap = body.get("want") and getattr(self.host, "own_snapshot", lambda: None)()
@@ -616,6 +659,8 @@ class Close:
             item["wave"] = 1
         if not self._add(peer, item) or item["out"]:
             return 0, refreshed
+        if body.get("wave"):                            # 👋 с радара — для студии: волны от кружка близкого
+            self.host.emit("close_wave", pid=peer, name=it.get("name") or "")
         name = it.get("name") or "близкого"
         with self._lock:
             self.st["unread"][peer] = int(self.st["unread"].get(peer, 0)) + 1

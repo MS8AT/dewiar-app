@@ -347,8 +347,17 @@ async function ccUsage() {
     const wd = (d) => ["вс", "пн", "вт", "ср", "чт", "пт", "сб"][new Date(d + "T12:00").getDay()];
     $("#cc-usage").innerHTML = `<div class="uh"><span>Расход за две недели</span><span>${u.answers} ${turnsWord(u.answers)}</span></div>
       <div class="ub">${days.map(d => `<i class="${d.answers ? "on" : ""}" style="height:${Math.max(6, d.answers / mx * 100)}%" title="${d.date}: ${d.answers} ${turnsWord(d.answers)}${d.minutes ? ", " + d.minutes + " мин речи" : ""}, ${d.percent}% заряда"></i>`).join("")}</div>
-      <div class="ud">${days.map(d => `<span>${wd(d.date)}</span>`).join("")}</div>`;
+      <div class="ud">${days.map(d => `<span>${wd(d.date)}</span>`).join("")}</div>${ccParts(u.parts)}`;
   } catch (e) { $("#cc-usage").innerHTML = ""; }
+}
+/* на что ушёл заряд (№145, 20.10: «подключил свои мозги, а баланс Dewiar всё равно тает» — это речь и голос Dewiar) */
+function ccParts(p) {
+  if (!p || !(p.chat + p.stt + p.tts)) return "";
+  const own = !((S.llm.profiles || {})[S.llm.active] || {}).cloud, sttC = S.stt.engine === "remote" && !!(S.stt.remote || {}).cloud,
+    ttsC = S.tts.engine === "remote" && !!(S.tts.remote || {}).cloud;
+  const bits = [["ответы модели", p.chat], ["распознавание речи", p.stt], ["голос Dewiar", p.tts]].filter(x => x[1] > 0).map(x => `${x[0]} — ${x[1]} %`);
+  const why = own && (sttC || ttsC) ? `<p class="hint" style="margin:6px 0 0">Отвечает ваша модель — это бесплатно. С заряда сейчас ${[sttC && "распознавание речи (\u00abСлух\u00bb)", ttsC && "голос Dewiar (\u00abГолос\u00bb)"].filter(Boolean).join(" и ")} — их можно переключить на этот компьютер.</p>` : "";
+  return `<div class="uparts">На что ушёл заряд: ${bits.join(", ")}.</div>${why}`;
 }
 /* модель облака, запасной мозг, распознавание в облаке */
 async function ccOpts() {

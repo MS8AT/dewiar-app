@@ -336,6 +336,7 @@ class AnswerMixin:
                  "Dewiar в меню приложений).")
         if with_tools:
             base += self.skills.prompt()
+            base += self.toolbox.off_note()            # выключенные человеком умения — «выключено», а не «не умею»
             try:
                 import done as _done
                 base += _done.prompt(self.done)        # «Дела»: отметить сделанное, сколько сегодня (done.py)

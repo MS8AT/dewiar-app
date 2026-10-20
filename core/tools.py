@@ -2487,6 +2487,17 @@ class Toolbox:
             out += self.mcp.specs()
         return out
 
+    def off_note(self):
+        """Что человек сам выключил в студии («Руки» → «Умения») — чтобы модель не говорила «не умею» (№144, 20.10:
+        «открой сайт» — «я не могу открывать сайты», а открытие сайтов было выключено переключателем)."""
+        en = (self.s.get("tools") or {}).get("enabled") or {}
+        off = [n for n, v in en.items() if v is False and n in TOOLS]
+        if not off:
+            return ""
+        names = "; ".join(f"{n} — «{TOOLS[n][4]}»" for n in sorted(off))
+        return ("\n\nВыключено пользователем в студии («Руки» → «Умения»): " + names + ". Просят это — не говори «не умею»: "
+                "скажи одной фразой, что это умение выключено в настройках, и где его включить.")
+
     def title(self, name):
         if name in TOOLS:
             return TOOLS[name][4]

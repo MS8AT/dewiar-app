@@ -50,7 +50,7 @@ function renderProfiles() {
       // список локальных моделей»); нажали — модель выбрана и сохранена
       try { const ms = await core.call("llm_models", { profile: S.llm.profiles[id] }); $(`#ml-${id}`, el).innerHTML = ms.map(m => `<option value="${escH(m)}">`).join("");
             const box = $(`#mp-${id}`, el), cur = S.llm.profiles[id].model || "";
-            box.innerHTML = `<b>Модели на сервере · ${ms.length}</b>` + ms.map(m => `<button class="chip${m === cur ? " on" : ""}" data-m="${escH(m)}">${escH(m)}</button>`).join("");
+            box.innerHTML = `<b>Модели на сервере · ${ms.length}</b>` + ms.map(m => `<button class="chip${m === cur ? " on" : ""}${/embed|rerank/i.test(m) ? " side" : ""}" data-m="${escH(m)}"${/embed|rerank/i.test(m) ? ' title="Для поиска по смыслу — разговаривать не умеет"' : ""}>${escH(m)}</button>`).join("");
             box.hidden = !ms.length; if (openProf !== id) { openProf = id; el.classList.add("open"); }
             $$("button", box).forEach(b => b.onclick = () => { S.llm.profiles[id].model = b.dataset.m; save({ llm: { profiles: S.llm.profiles } }, true).then(renderProfiles); toast("Модель: " + b.dataset.m); });
             res.className = "res ok"; res.textContent = ms.length ? `моделей: ${ms.length} — нажмите нужную` : "сервер не вернул ни одной модели"; }
