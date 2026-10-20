@@ -68,9 +68,9 @@ function plgDrawer(id) {
   const run = (cmd, args, done) => core.call(cmd, args).then(r => { plgSet(r); if (done) toast(done); }).catch(e => res(e.message, false));
   $("#pld-x").onclick = plgClose;
   if ($("#pld-in")) $("#pld-in").onclick = () => { $("#pld-in").disabled = true; run("plugin_install", { id, values: plgValues() }, `«${p.name}» установлен`); };
-  if ($("#pld-rm")) $("#pld-rm").onclick = () => { if (!confirm(`Удалить плагин «${p.name}»? Его навыки и подключения уберутся, дела по расписанию — тоже.`)) return; run("plugin_remove", { id }, `«${p.name}» удалён`); };
+  if ($("#pld-rm")) $("#pld-rm").onclick = async () => { if (!await ask(`Удалить плагин «${p.name}»? Его навыки и подключения уберутся, дела по расписанию — тоже.`)) return; run("plugin_remove", { id }, `«${p.name}» удалён`); };
   if ($("#pld-save")) $("#pld-save").onclick = () => run("plugin_values", { id, values: plgValues() }, "Настройки сохранены");
-  if ($("#pld-del")) $("#pld-del").onclick = () => { if (!confirm(`Удалить файлы плагина «${p.name}» с этого компьютера?`)) return; plgOpen = ""; plgClose(); run("plugin_delete", { id }, "Плагин удалён"); };
+  if ($("#pld-del")) $("#pld-del").onclick = async () => { if (!await ask(`Удалить файлы плагина «${p.name}» с этого компьютера?`)) return; plgOpen = ""; plgClose(); run("plugin_delete", { id }, "Плагин удалён"); };
   $$("#pld [data-job]").forEach(c => c.onchange = () => run("plugin_job", { id, job: c.dataset.job, on: c.checked }, c.checked ? "Дело включено — помощница сделает его сама" : "Дело выключено"));
   $$("#pld .pld-ph .chip").forEach(b => b.onclick = () => { try { navigator.clipboard.writeText(b.dataset.t); } catch (e) { } toast("Скопировано — скажите это вслух или вставьте в чат"); });
 }

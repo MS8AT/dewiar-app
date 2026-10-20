@@ -41,7 +41,7 @@ function renderKnFolders(list) {
 $("#kn-fadd").onclick = async () => {
   const a = window.api && window.api(); let path = "";
   if (a && a.pick_folder) path = await a.pick_folder();
-  else path = prompt("Полный путь к папке с документами:") || "";
+  else path = await askText("Полный путь к папке с документами:") || "";
   if (!path) return;
   try { renderKnFolders(await core.call("knowledge_folder_add", { path })); $("#kn-fres").className = "res ok"; $("#kn-fres").textContent = "Добавлено — читаю файлы в фоне"; }
   catch (e) { $("#kn-fres").className = "res bad"; $("#kn-fres").textContent = e.message; }
@@ -245,7 +245,7 @@ function svFill(d) {
     $("[data-c=chk]", el).onclick = async (ev) => { const btn = ev.currentTarget; btn.disabled = true; toast("Проверяю вход…");   // после await currentTarget уже null
       try { const r = await core.call("server_check", { id: x.id }); svFill(r); toast(`«${x.name}»: вход есть · ${r.info.system || ""} · ${r.info.uptime || ""}`); }
       catch (e) { toast(e.message); } finally { btn.disabled = false; } };
-    $("[data-c=del]", el).onclick = () => { if (confirm(`Удалить сервер «${x.name}» из Dewiar? Ключ на самом сервере останется — его можно убрать из ~/.ssh/authorized_keys.`))
+    $("[data-c=del]", el).onclick = async () => { if (await ask(`Удалить сервер «${x.name}» из Dewiar? Ключ на самом сервере останется — его можно убрать из ~/.ssh/authorized_keys.`))
       core.call("server_remove", { id: x.id }).then(svFill).catch(e => toast(e.message)); };
     box.appendChild(el);
   });
@@ -562,8 +562,8 @@ function loadMeetings() {
       : `<p class="hint">Пока встреч не было. Итог каждой появится здесь.</p>`;
     $$("#pr-list .pr-it").forEach(b => b.onclick = () => core.call("ws_open", { path: b.dataset.p }).catch(e => toast(e.message)));
     // удалить итог — в корзину, как всё удаление в Dewiar (отзыв 17.10: «как удалить прошлую встречу?»)
-    $$("#pr-list .pr-del").forEach(b => b.onclick = () => {
-      if (!confirm(`Удалить итог встречи «${b.dataset.n}»? Файл уйдёт в корзину — вернуть можно оттуда.`)) return;
+    $$("#pr-list .pr-del").forEach(b => b.onclick = async () => {
+      if (!await ask(`Удалить итог встречи «${b.dataset.n}»? Файл уйдёт в корзину — вернуть можно оттуда.`)) return;
       core.call("prompter_meeting_remove", { path: b.dataset.p }).then(() => { toast("Итог встречи — в корзине"); loadMeetings(); }).catch(e => toast(e.message, 4000));
     });
   }).catch(() => {});

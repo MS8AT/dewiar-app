@@ -72,6 +72,37 @@ class CommandsMixin:
             out["guide"] = P.guide()
         return out
 
+    def _pad_cmd(self, cmd, a):
+        """pad_tabs / pad_read {name} / pad_write {name, text, base} / pad_new {name} / pad_rename {name, to} /
+        pad_delete {name} / pad_order {names} / pad_attach {name, filename, b64} / pad_file {link}."""
+        P = self.pad
+        try:
+            if cmd == "pad_tabs":
+                return P.tabs()
+            if cmd == "pad_read":
+                return P.read(a.get("name", ""))
+            if cmd == "pad_write":
+                r = P.write(a.get("name", ""), a.get("text", ""), a.get("base"))
+                sy = getattr(self, "sync", None)
+                if sy is not None:
+                    sy.soon.set() if hasattr(sy, "soon") else None   # дома поправили — на работе уже через минуту
+                return r
+            if cmd == "pad_new":
+                return P.new(a.get("name", ""))
+            if cmd == "pad_rename":
+                return P.rename(a.get("name", ""), a.get("to", ""))
+            if cmd == "pad_delete":
+                return P.delete(a.get("name", ""))
+            if cmd == "pad_order":
+                return P.order(a.get("names") or [])
+            if cmd == "pad_attach":
+                return P.attach(a.get("name", ""), a.get("filename", ""), a.get("b64", ""))
+            if cmd == "pad_file":
+                return P.file(a.get("link", ""))
+        except (PadError, WorkspaceError, OSError) as e:
+            raise ValueError(str(e)) from e
+        raise ValueError(f"неизвестная команда {cmd}")
+
     def _window_cmd(self, text):
         """Фраза про само окно (window_phrase) -> True, если это она. Прячет и показывает виджет интерфейс
         (событие «window» ловит ui/hud.html); «отключись» — интерфейс завершает и себя, и ядро (Api.quit_all в
@@ -1027,6 +1058,8 @@ class CommandsMixin:
                 raise ValueError(str(e)) from e
             except Exception as e:  # noqa: BLE001 — защита корзины
                 raise ValueError(str(e)) from e
+        if cmd.startswith("pad_"):                              # блокнот у виджета (ui/pad.html, core/pad.py)
+            return self._pad_cmd(cmd, a)
         if cmd == "notes_list":                                 # «Заметки»: все заметки и поиск
             return self.workspace.notes(a.get("q", ""))
         if cmd in ("note_attach", "note_file"):                 # «Заметки»: фото и файлы к заметке, картинка для показа

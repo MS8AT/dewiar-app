@@ -11,6 +11,7 @@
 <a href="https://github.com/dwr-git/dewiar-app/releases/latest/download/Dewiar-Setup-online.exe"><img src="https://img.shields.io/badge/Windows-%D1%81%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-667eea?style=for-the-badge&logo=windows&logoColor=white" alt="Windows — скачать"></a>
 <a href="https://github.com/dwr-git/dewiar-app/releases/latest/download/dewiar-assistant_all.deb"><img src="https://img.shields.io/badge/Ubuntu-%D1%81%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-764ba2?style=for-the-badge&logo=ubuntu&logoColor=white" alt="Ubuntu — скачать"></a>
 <a href="https://dewiar.pro/dwrapp/Dewiar.apk"><img src="https://img.shields.io/badge/Android-%D1%81%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-3ddc84?style=for-the-badge&logo=android&logoColor=white" alt="Android — скачать"></a>
+<a href="https://dewiar.pro/dwrapp/web/"><img src="https://img.shields.io/badge/%D0%92%20%D0%B1%D1%80%D0%B0%D1%83%D0%B7%D0%B5%D1%80%D0%B5-%D0%B1%D0%B5%D0%B7%20%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B8-4BE3A1?style=for-the-badge&logo=safari&logoColor=white" alt="В браузере — без установки"></a>
 <a href="https://dewiar.pro/dwrapp/download.php"><img src="https://img.shields.io/badge/%D0%92%D1%81%D0%B5%20%D1%83%D1%81%D1%82%D1%80%D0%BE%D0%B9%D1%81%D1%82%D0%B2%D0%B0-dewiar.pro-FF7AC6?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Все устройства — dewiar.pro"></a>
 
 [![версия](https://img.shields.io/github/v/release/dwr-git/dewiar-app?label=%D0%B2%D0%B5%D1%80%D1%81%D0%B8%D1%8F&color=7c5cff)](https://github.com/dwr-git/dewiar-app/releases/latest)
@@ -163,7 +164,7 @@ flowchart LR
 | `server/` | Серверы речи и синтеза для своей машины с видеокартой (`install-server.sh`) |
 | `packaging/`, `tools/` | Пакет `.deb`, установщики Windows, выпуск версии одной командой |
 | `data/` | Облики персонажей, встроенные навыки, модель VAD, радио |
-| `tests/` | 207 наборов проверок: настоящее ядро, окна в Chromium, телефон на подменённом мосте |
+| `tests/` | 211 наборов проверок: настоящее ядро, окна в Chromium, телефон на подменённом мосте |
 
 </details>
 

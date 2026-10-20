@@ -212,7 +212,7 @@ $$(".mn-tabs button").forEach(b => b.onclick = () => { mnTab = b.dataset.t; $$("
 $("#mn-filter").oninput = renderNotes;
 function nodeOfPath(path) { return mData && mData.nodes.find(x => x.path === path); }
 async function openNote(path, focusGraph) {
-  if (meDirty && meCur && meCur.path !== path && !confirm("В заметке есть несохранённые изменения. Перейти без сохранения?")) return;
+  if (meDirty && meCur && meCur.path !== path && !await ask("В заметке есть несохранённые изменения. Перейти без сохранения?")) return;
   try {
     const f = await core.call("ws_read", { path });
     meCur = { path, text: f.text || "", binary: f.binary, mtime: f.mtime }; meDirty = false;
@@ -240,7 +240,7 @@ function renderEditor() {
   meModeApply(); meState();
   $("#me-save").onclick = meSave;
   $("#me-app").onclick = () => core.call("ws_open", { path: f.path }).catch(e => toast(e.message));
-  const del = $("#me-del"); if (del) del.onclick = async () => { if (!confirm(`Убрать заметку «${$("#me-title").value}» в корзину?`)) return;
+  const del = $("#me-del"); if (del) del.onclick = async () => { if (!await ask(`Убрать заметку «${$("#me-title").value}» в корзину?`)) return;
     try { await core.call("ws_delete", { path: f.path }); toast("Заметка в корзине"); meCur = null; meDirty = false;
       $("#m-side").innerHTML = '<p class="hint">Заметка убрана в корзину. Выберите другую слева.</p>'; loadNotes(); loadMemory(true); } catch (e) { toast(e.message); } };
   $("#me-title").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); meSave(); } };
@@ -271,7 +271,7 @@ async function meSave() {
   } catch (e) { toast(e.message); }
 }
 $("#mn-new").onclick = async () => {
-  const title = prompt("Название новой заметки:", ""); if (title === null) return;
+  const title = await askText("Название новой заметки:", ""); if (title === null) return;
   try { const r = await core.call("ws_new_note", { title: title.trim() || "Новая заметка" }); await loadNotes(); await openNote(r.path, false); meMode = "edit"; meModeApply();
     const ta = $("#me-text"); if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; } loadMemory(true); } catch (e) { toast(e.message); }
 };

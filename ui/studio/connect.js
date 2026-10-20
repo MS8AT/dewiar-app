@@ -275,14 +275,22 @@ const CLOUD = {
                rec: ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-3-5-haiku-latest", "claude-sonnet-4-0"] },
   deepseek: { hint: 'Ключ — на <a href="https://platform.deepseek.com/api_keys" target="_blank">platform.deepseek.com</a>. Напрямую — дешевле, чем через посредников.',
               rec: ["deepseek-chat", "deepseek-reasoner"] },
-  polza: { hint: 'Ключ — в личном кабинете <a href="https://polza.ai" target="_blank">polza.ai</a>. Сотни моделей (GPT, Claude, Gemini, DeepSeek), оплата картой РФ.',
-           rec: ["openai/gpt-4.1-mini", "google/gemini-2.5-flash", "anthropic/claude-haiku-4.5", "deepseek/deepseek-chat-v3.1"] },
+  gemini: { hint: 'Ключ — в <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a> («Get API key»). Есть бесплатный уровень.',
+            rec: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-pro-latest", "gemini-2.5-pro"] },
+  kimi: { hint: 'Ключ — на <a href="https://platform.moonshot.ai/console/api-keys" target="_blank">platform.moonshot.ai</a>. Модели Kimi K2 — сильные в инструментах.',
+          rec: ["kimi-latest", "kimi-k2-turbo-preview", "kimi-k2-0905-preview", "moonshot-v1-32k"] },
+  glm: { hint: 'Ключ — на <a href="https://z.ai/manage-apikey/apikey-list" target="_blank">z.ai</a> («API Keys»). Модели GLM от Zhipu.',
+         rec: ["glm-4.6", "glm-4.5-air", "glm-4.5"] },
+  qwen: { hint: 'Ключ — в <a href="https://modelstudio.console.alibabacloud.com/" target="_blank">Alibaba Cloud Model Studio</a> («API Key», международный регион).',
+          rec: ["qwen-plus", "qwen-flash", "qwen-max", "qwen3-max"] },
+  mistral: { hint: 'Ключ — на <a href="https://console.mistral.ai/api-keys" target="_blank">console.mistral.ai</a>.',
+             rec: ["mistral-medium-latest", "mistral-small-latest", "mistral-large-latest"] },
+  xai: { hint: 'Ключ — на <a href="https://console.x.ai" target="_blank">console.x.ai</a>.',
+         rec: ["grok-4-fast-non-reasoning", "grok-4-fast-reasoning", "grok-3-mini", "grok-4"] },
   proxyapi: { hint: 'Ключ — в кабинете <a href="https://console.proxyapi.ru/keys" target="_blank">ProxyAPI</a>. Модели OpenAI, оплата картой РФ.',
               rec: ["gpt-4.1-mini", "gpt-4o-mini", "gpt-5-mini"] },
   vsegpt: { hint: 'Ключ — на <a href="https://vsegpt.ru" target="_blank">vsegpt.ru</a> («Ключи API»). Много моделей, оплата картой РФ.',
             rec: ["openai/gpt-4.1-mini", "google/gemini-2.5-flash", "deepseek/deepseek-chat"] },
-  aitunnel: { hint: 'Ключ — в кабинете <a href="https://aitunnel.ru" target="_blank">aitunnel.ru</a>. Много моделей, оплата картой РФ.',
-              rec: ["gpt-4.1-mini", "gemini-2.5-flash", "deepseek-chat"] },
   custom: { hint: 'Любой сервис, который говорит «как OpenAI»: LiteLLM, Kimi, российские агрегаторы, свой прокси. Адрес обычно оканчивается на <code>/v1</code> — он есть в документации сервиса.',
             rec: [] },
 };
@@ -312,13 +320,18 @@ $("#ck-go").onclick = async (ev) => {
     let models = [];
     try { models = await core.call("llm_models", { profile: prof }); }
     catch (e) {                                   // свой адрес без /v1 — частая ошибка: пробуем с /v1
-      if (prov !== "custom" || /\/v1$/.test(prof.base_url)) throw e;
-      const p2 = Object.assign({}, prof, { base_url: prof.base_url + "/v1" });
-      models = await core.call("llm_models", { profile: p2 }); prof.base_url = p2.base_url;
+      if (prov !== "custom" && CLOUD[prov].rec.length && !/401|403|ключ/i.test(e.message)) models = [];   // нет списка — не беда, проверка покажет
+      else if (prov !== "custom" || /\/v1$/.test(prof.base_url)) throw e;
+      else {
+        const p2 = Object.assign({}, prof, { base_url: prof.base_url + "/v1" });
+        models = await core.call("llm_models", { profile: p2 }); prof.base_url = p2.base_url;
+      }
     }
+    if (!models.length && CLOUD[prov].rec.length) models = CLOUD[prov].rec.slice();   // список не отдал (бывает у GLM) — проверим первую из советуемых
     if (!models.length) throw new Error("сервис не вернул список моделей");
     const rec = CLOUD[prov].rec.filter(m => models.includes(m));
-    const ordered = rec.concat(models.filter(m => !rec.includes(m)).sort());
+    const side = (m) => /embed|rerank/i.test(m) ? 1 : 0;                   // поиск по смыслу — в конец, остальное по алфавиту
+    const ordered = rec.concat(models.filter(m => !rec.includes(m)).sort((a, b) => side(a) - side(b) || a.localeCompare(b)));
     prof.model = ordered[0]; ckSvc = prof.name; prof.name = `${prof.name} — ${prof.model}`;
     ckId = uid(); S.llm.profiles[ckId] = prof;
     await save({ llm: { profiles: S.llm.profiles, active: ckId } }); renderProfiles();

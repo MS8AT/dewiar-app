@@ -184,7 +184,7 @@ $("#e-listen").onclick = () => {
 $("#e-del").onclick = async () => {
   if (!ed || !ed.id) return;
   // заводского персонажа ядро не удаляет, а сбрасывает к исходному — текст вопроса соответствует кнопке
-  if (!confirm(ed.builtin ? `Сбросить «${ed.name}» к заводским настройкам? Ваши правки пропадут.` : `Удалить персонажа «${ed.name}»? Это нельзя отменить.`)) return;
+  if (!await ask(ed.builtin ? `Сбросить «${ed.name}» к заводским настройкам? Ваши правки пропадут.` : `Удалить персонажа «${ed.name}»? Это нельзя отменить.`)) return;
   try { await core.call("persona_delete", { id: ed.id }); closeEditor(); } catch (e) { toast(e.message); }
 };
 document.addEventListener("keydown", e => { if (e.key === "Escape") { if (ed) closeEditor(); $("#skd").classList.remove("open"); } });

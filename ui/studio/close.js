@@ -149,7 +149,7 @@ async function clPickDel() {
   const p = ((CL.st && CL.st.people) || []).find(x => x.pid === CL.cur); if (!p || !CL.pick || !CL.pick.size) return;
   const all = CL.pick.size === CL.hist.filter(m => m.mid).length, n = CL.pick.size;
   const what = all ? `всю переписку с «${p.name}»` : `${n} ${n % 10 === 1 && n % 100 !== 11 ? "сообщение" : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? "сообщения" : "сообщений"}`;
-  if (!confirm(`Удалить ${what} на этом компьютере? У ${p.name} и на ваших других устройствах переписка останется.`)) return;
+  if (!await ask(`Удалить ${what} на этом компьютере? У ${p.name} и на ваших других устройствах переписка останется.`)) return;
   try {
     const r = await core.call("close_forget", all ? { pid: p.pid } : { pid: p.pid, mids: [...CL.pick] });
     CL.st = r.state || CL.st; CL.hist = await core.call("close_history", { pid: p.pid });
@@ -198,7 +198,7 @@ async function clAccept() {
   r.className = "res"; r.textContent = "проверяю приглашение…";
   try {
     const who = await core.call("close_peek", { link });
-    if (!confirm(`Принять приглашение в «Близкие» от «${who.name}»? Ваши помощники смогут передавать друг другу сообщения.`)) { r.textContent = ""; return; }
+    if (!await ask(`Принять приглашение в «Близкие» от «${who.name}»? Ваши помощники смогут передавать друг другу сообщения.`)) { r.textContent = ""; return; }
     const p = await core.call("close_accept", { link });
     $("#cl-link").value = ""; r.className = "res ok"; r.textContent = `Готово — ${p.name || who.name} в ваших близких.`;
     await loadClose(); if (p.pid) clOpen(p.pid);
@@ -220,7 +220,7 @@ $("#cl-file").onchange = () => {
   $("#cl-file").value = "";
 };
 $("#cl-inv-go").onclick = () => clInvite(false);
-$("#cl-inv-new").onclick = () => { if (confirm("Сделать новую ссылку? Старая перестанет действовать — те, кто уже добавился, останутся в близких.")) clInvite(true); };
+$("#cl-inv-new").onclick = async () => { if (await ask("Сделать новую ссылку? Старая перестанет действовать — те, кто уже добавился, останутся в близких.")) clInvite(true); };
 $("#cl-inv-x").onclick = () => { $("#cl-invite").style.display = "none"; clHead(); };
 $("#cl-link-go").onclick = clAccept;
 $("#cl-myname").onchange = () => core.call("close_name", { name: $("#cl-myname").value }).then(st => { CL.st = st; toast("Сохранено"); }).catch(e => toast(e.message));
@@ -229,7 +229,7 @@ $("#cl-call").onclick = () => core.call("close_call", { pid: CL.cur, video: fals
 $("#cl-vcall").onclick = () => core.call("close_call", { pid: CL.cur, video: true }).then(r => toast("Видеозвонок " + r.name + " — окно открыто в браузере", 3000)).catch(e => toast(e.message, 4000));
 $("#cl-del").onclick = async () => {
   const p = ((CL.st && CL.st.people) || []).find(x => x.pid === CL.cur); if (!p) return;
-  if (!confirm(`Убрать «${p.name}» из близких? Переписка у вас останется, но писать друг другу будет нельзя, пока не пригласите снова.`)) return;
+  if (!await ask(`Убрать «${p.name}» из близких? Переписка у вас останется, но писать друг другу будет нельзя, пока не пригласите снова.`)) return;
   try { CL.st = await core.call("close_remove", { pid: p.pid }); CL.cur = ""; clRender(); } catch (e) { toast(e.message); }
 };
 core.on("close", e => { CL.st = e.state; if ($("#p-close").classList.contains("cur")) clRender(); else clDot(CL.st); })

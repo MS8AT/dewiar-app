@@ -109,6 +109,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
             self.s.update({"audio": {"barge_in": "smart", "barge_v2": True}})
         self.toolbox.hooks["call_persona"] = self._tool_call_persona
         self.workspace = Workspace(settings)
+        self.pad = Pad(self.workspace, settings, emit=self.emit, share=lambda rel, paths: self.note_files_out(rel, paths))   # блокнот у виджета
         self.toolbox.hooks["workspace"] = self.workspace
         self.toolbox.hooks["server"] = bool(server)         # сервер: без экрана и звука — экранные инструменты выключены
         self.skills.set_folder(self.workspace.root / "Навыки")    # свои навыки — видны в папке ассистента

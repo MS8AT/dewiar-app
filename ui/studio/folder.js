@@ -108,7 +108,7 @@ function renderTree(items, box) {
     $(".n", row).textContent = n.name.replace(/\.md$/, ""); row.title = n.path;
     if (canDel) $(".del", row).onclick = async (ev) => {
       ev.stopPropagation();
-      if (!confirm(`Удалить папку «${n.name}» (${fcount(n)} файлов) в корзину?`)) return;
+      if (!await ask(`Удалить папку «${n.name}» (${fcount(n)} файлов) в корзину?`)) return;
       try { await core.call("ws_delete_dir", { path: n.path }); toast("Папка — в корзине"); loadFolder(); } catch (e) { toast(e.message, 5000); }
     };
     box.appendChild(row);
@@ -187,7 +187,7 @@ async function openFile(path) {
     };
     $("#f-dl").onclick = () => dl(page ? "html" : "file", $("#f-dl"));
     if ($("#f-del")) $("#f-del").onclick = async () => {
-      if (!confirm(`Удалить «${name}» в корзину?` + (fSync.some(f => path.startsWith(f + "/")) ? " Из Obsidian он тоже уйдёт в корзину." : ""))) return;
+      if (!await ask(`Удалить «${name}» в корзину?` + (fSync.some(f => path.startsWith(f + "/")) ? " Из Obsidian он тоже уйдёт в корзину." : ""))) return;
       try { await core.call("ws_delete", { path }); toast("Файл — в корзине"); fCur = "";
         $("#f-view").innerHTML = '<div class="fempty">Удалено. Выберите файл слева.</div>'; loadFolder(); }
       catch (e) { toast(e.message, 5000); }

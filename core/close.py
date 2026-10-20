@@ -344,7 +344,7 @@ class Close:
         # «pc…» — вложения, которые отправил компьютер (natt_share): они уже лежат у заметки на нём; другому компьютеру
         # их не класть — его копия заметки пришла синхронизацией вместе со строками-ссылками, вышли бы двойники
         files = [f for f in natt.get("files") or [] if isinstance(f, dict) and f.get("id") and f.get("key")
-                 and not str(f.get("aid") or "").startswith("pc")][:12]
+                 and (not str(f.get("aid") or "").startswith("pc") or self._natt_rel(f.get("rel")))][:12]
         if not files or not str(natt.get("note") or ""):
             return
         with self._lock:
@@ -354,6 +354,17 @@ class Close:
             del q[:-50]
             self._save()
         self._natt_kick()
+
+    def _natt_rel(self, rel):
+        """Файл с другого компьютера с путём (блокнот, core/pad.py): кладётся туда же, где лежал там, если его здесь ещё
+        нет. -> путь от корня папки ассистента или "" (без пути, не «Заметки/…», или уже есть — не нужен)."""
+        rel = str(rel or "")
+        if not rel.startswith("Заметки/") or ".." in rel.split("/") or "\\" in rel:
+            return ""
+        try:
+            return "" if self.host.workspace.safe(rel).exists() else rel
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _natt_kick(self):
         if not getattr(self, "_natt_busy", False):
@@ -385,6 +396,18 @@ class Close:
         for f in job["files"]:
             aid = str(f.get("aid") or f["id"])
             if aid in done:
+                continue
+            if aid.startswith("pc"):                       # с другого компьютера — на то же место, строк в текст не добавляем
+                to = self._natt_rel(f.get("rel"))
+                if to:
+                    r = self._req("GET", "/close/file", params={"id": f["id"]}, timeout=120)
+                    dst = ws.safe(to)
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    dst.write_bytes(CC.unseal(CC.b64d(f["key"]), r.content))
+                with self._lock:
+                    done.append(aid)
+                    del done[:-2000]
+                    self._save()
                 continue
             r = self._req("GET", "/close/file", params={"id": f["id"]}, timeout=120)
             data = CC.unseal(CC.b64d(f["key"]), r.content)
@@ -424,7 +447,7 @@ class Close:
                 continue
             fk = os.urandom(32)
             d = self._req("POST", "/close/file", raw=CC.seal(fk, data), params={"to": me["pid"]}, timeout=120).json()
-            out.append({"id": d["id"], "key": CC.b64e(fk), "name": path.name, "size": len(data),
+            out.append({"id": d["id"], "key": CC.b64e(fk), "name": path.name, "size": len(data), "rel": str(rel),
                         "type": mimetypes.guess_type(path.name)[0] or "", "aid": "pc" + hashlib.sha1(str(rel).encode("utf-8")).hexdigest()[:14]})
         if out:
             self.own_send({"natt": {"note": str(note), "title": str(title or "")[:120], "files": out}})

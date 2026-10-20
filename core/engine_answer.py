@@ -1545,6 +1545,10 @@ class AnswerMixin:
             if not turn.via:
                 self._pause_ok()                           # голосом и без обрыва — добавка к паузе понемногу тает
         follow = 0.0 if turn.via or time.monotonic() < self._echo_until else float(self.s.get("audio", "follow_up_seconds") or 0)
+        if getattr(self, "_tray_at", 0) >= getattr(turn, "t0", time.monotonic()):
+            # в этом ходе виджет спрятали («Спрякся» — модель поняла и спрятала): не ждать ответа — иначе «Ваша очередь»
+            # возвращала виджет на экран (20.10, 22:41: «4 раза просил спрятаться — исчезала и появлялась»)
+            follow = 0.0
         self.follow_up_until = time.monotonic() + follow
         opened = False
         with self._turn_lock:

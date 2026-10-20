@@ -103,6 +103,8 @@ class H(BaseHTTPRequestHandler):
                 plan = ("set_reminder", {"text": "встреча с Ирой послезавтра в 12", "when": "завтра в 9:00"}, "")
             elif ("телеграм" in u or "в макс" in u) and any(t["function"]["name"] == "send_telegram" for t in body["tools"]):
                 plan = ("send_telegram", {"text": "Список покупок: хлеб, молоко", "files": ["Входящие/список.txt"]}, "")
+            elif "в тень" in u and any(t["function"]["name"] == "widget" for t in body["tools"]):     # «спрякся» — поняла модель
+                plan = ("widget", {"action": "tray"}, "")
             elif "радио" in u and any(t["function"]["name"] == "play_radio" for t in body["tools"]):
                 plan = ("play_radio", {"query": u.split("радио", 1)[1].strip(" .!?")}, "")
             elif "ролик" in u and any(t["function"]["name"] == "play_youtube" for t in body["tools"]):

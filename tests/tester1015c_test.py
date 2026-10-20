@@ -55,7 +55,7 @@ with sync_playwright() as p:
     pg.route("http://127.0.0.1:9/**", llm_route)
     pg.goto((www / "index.html").as_uri()); pg.wait_for_timeout(1000)
     pg.evaluate("() => { Object.assign(S.llm, { kind: 'openai', base_url: 'http://127.0.0.1:9/v1', model: 'm', name: 'тест', cloud: false }); saveS(); }")
-    wed = datetime.now() + timedelta(days=(2 - datetime.now().weekday()) % 7 or 7)
+    wed = datetime.now() + timedelta(days=(2 - datetime.now().weekday()) % 7)   # в среду «в среду» — это сегодня (21.10 проверка падала по средам)
     pg.evaluate("async () => { await quick('Запомни, пожалуйста: в среду в 15:00 у меня встреча с подрядчиком по кухне.'); }")
     C = pg.evaluate(f"async () => await runTool('calendar_list', {{ from: '{wed:%Y-%m-%d}', days: 1 }})")
     ok("встреча с подрядчиком по кухне" in C and "Назови и это" in C, f"calendar_list на среду — и запомненное: {C[:220]!r}")

@@ -99,7 +99,7 @@ try:
 
         pg = b.new_page(viewport={"width": 1500, "height": 1000})
         pg.on("pageerror", lambda e: errs.append(str(e)))
-        pg.on("dialog", lambda d: d.accept())
+        pg.on("dialog", lambda d: d.accept()); pg.add_init_script("window.DEWIAR_AUTO_ASK = true")   # свои окна вопроса (assets/dialog.js) — «да»
         pg.goto((ROOT / "ui/settings.html").as_uri() + f"?token={tok}&port={PORT}"); pg.wait_for_timeout(2500)
 
         # ---------- «Близкие»: выбрать и удалить у себя ----------

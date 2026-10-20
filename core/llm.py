@@ -257,6 +257,9 @@ def list_models(p, timeout=6):
         r.raise_for_status()
         data = r.json().get("data", [])
         ids = [m.get("id") for m in data if m.get("id")]
+        ids = [x[7:] if x.startswith("models/") else x for x in ids]      # Gemini: «models/gemini-…» — в ответах без «models/»
+        # не для разговора: голос, распознавание, картинки, видео, модерация — их выбирали «первой по алфавиту»
+        ids = [x for x in ids if not re.search(r"(^|[-_/])(tts|whisper|transcribe|dall-e|imagen|veo|moderation|aqa)([-_.]|$)|image-|-image\b|audio", x, re.I)] or ids
         # модели для поиска по смыслу (эмбеддинги, реранкеры) разговаривать не умеют — в конец списка, отдельно (№144:
         # LM Studio отдаёт и их; выбрали text-embedding-nomic… как модель разговора)
         side = [x for x in ids if re.search(r"embed|rerank", x, re.I)]

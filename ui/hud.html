@@ -28,11 +28,11 @@
   html.tw, html.tw body { background: transparent; }
   html.tw #card { border-radius: 28px; }
   /* Светлые темы: карточка сливалась со светлым окном под ней (студия в «Небесном», 20.10). Тени внутри (материал,
-     портрет, панель) не трогаем — только сама карточка: в прозрачном окне — тонкая полупрозрачная тень снаружи (по краю
-     окна для неё оставлено 6 px), в обычном окне (Windows, Linux без композитора) — едва заметная линия по краю. */
-  body.light:not(.mini) #card { box-shadow: inset 0 0 0 1px rgba(20,32,60,.09); }
-  html.tw body.light:not(.mini) #card { inset: 6px; border-radius: 24px; box-shadow: 0 2px 7px rgba(20,32,60,.16), 0 0 0 1px rgba(20,32,60,.06); }
-  html.tw body.light:not(.mini) #grip { right: 9px; bottom: 9px; }
+     портрет, панель) не трогаем — только сама карточка: тонкая линия по краю и светлый блик сверху, во всё окно.
+     Было (0.38.94): в прозрачном окне тень снаружи и 6 px пустого края под неё — пока виджет тянули, Ubuntu закрашивал
+     этот край тёмным фоном окна («тёмная кромка»). Пустого края больше нет — нечего закрашивать; отрисовку окна (GTK)
+     не трогаем (0.38.95: правка фона окна заморозила виджет). */
+  body.light:not(.mini) #card { box-shadow: inset 0 0 0 1px rgba(20,32,60,.075), inset 0 1px 0 rgba(255,255,255,.6); }   /* 20.10: «чуть менее заметную» — .13 → .075 */
   /* растянуть карточку за угол (отзыв 19.10); размер запоминается (ui.hud_w, ui.hud_h) */
   #grip { position: absolute; right: 3px; bottom: 3px; width: 18px; height: 18px; z-index: 6; cursor: nwse-resize;
           display: grid; place-items: center; opacity: 0; transition: opacity .2s; color: var(--muted); touch-action: none; }
@@ -342,6 +342,9 @@
   #corner .btn, #corner-l .btn { width: 26px; height: 26px; color: rgba(255,255,255,.55); }
   #corner .btn:hover, #corner-l .btn:hover { color: #fff; background: rgba(255,255,255,.1); }
   #corner .btn svg, #corner-l .btn svg { width: 15px; height: 15px; }
+  #corner.pinned { opacity: 1; }                                  /* блокнот открыт — кнопка видна и подсвечена */
+  #b-pad.on { color: var(--accent, #8B8CF7); background: rgba(139,140,247,.14); }
+  body.light #b-pad.on { color: var(--accent, #4f6cf0); background: rgba(79,108,240,.12); }
   body.mini #corner, body.mini #corner-l { display: none; }
 
   /* ---------- значок ---------- */
@@ -448,6 +451,8 @@
     <button class="btn" id="b-bug" title="Сообщить о проблеме — сниму экран и открою форму жалобы"><svg viewBox="0 0 24 24"><rect x="6.5" y="7" width="11" height="14.5" rx="5.5"/><path d="M8.8 7.6a3.2 3.2 0 0 1 6.4 0M12 11.5v10M6.5 12.5H2.5M21.5 12.5h-4M6.8 17.5 3 19.8M17.2 17.5l3.8 2.3M7.5 9.2 4 6.5M16.5 9.2 20 6.5"/></svg></button>
   </div>
   <div id="corner">
+    <!-- блокнот у виджета (20.10): вкладки, ссылки, картинки, таблицы, задачи — выезжает рядом, синхронизируется (ui/pad.html) -->
+    <button class="btn" id="b-pad" title="Блокнот — вкладки под рукой: ссылки, задачи, таблицы, картинки. Синхронизируется между устройствами"><svg viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="13" height="17" rx="2.5"/><path d="M8 8h6M8 11.5h6M8 15h3.5"/><path d="M17.5 7h2M17.5 11h2"/></svg></button>
     <button class="btn" id="b-tray" title="Спрятать — появлюсь сам, когда позовёте по имени или придёт напоминание"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
   </div>
   <div id="bar">
@@ -455,9 +460,10 @@
     <button class="btn" id="b-voice" title="Отвечать только текстом"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
     <button class="btn" id="b-type" title="Написать вопрос"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
     <span class="sep"></span><button class="btn" id="b-team" title="Кто отвечает — выбрать персонажа"><i id="team-dot" class="gi"></i><svg class="chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button><span class="sep"></span>
-    <button class="btn" id="b-chat" title="Чат — вся переписка: голосом и текстом"><svg viewBox="0 0 24 24"><path d="M20.5 11.5a7.5 7.5 0 0 1-11.2 6.5L4 19.5l1.6-4.6A7.5 7.5 0 1 1 20.5 11.5z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/></svg></button>
     <button class="btn" id="b-cal" title="Календарь: дела, деньги, напоминания"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/></svg></button>
     <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg></button>
+    <!-- чат — рядом с настройками, значок «разговор» из двух облачков (20.10: «иконка чата не нравится, поставить у шестерёнки») -->
+    <button class="btn" id="b-chat" title="Чат — вся переписка: голосом и текстом"><svg viewBox="0 0 24 24"><path d="M6.5 4h8a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-2.5 2.5H10l-3.5 3v-3A2.5 2.5 0 0 1 4 11.5v-5A2.5 2.5 0 0 1 6.5 4z"/><path d="M17 9.5h.5A2.5 2.5 0 0 1 20 12v4.5a2.5 2.5 0 0 1-2 2.45V21l-3-2.5h-2.5a2.5 2.5 0 0 1-2.4-1.8"/></svg></button>
     <button class="btn" id="b-set" title="Настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
   </div>
   <div id="grip" title="Потяните, чтобы изменить размер. Двойной щелчок — как было" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M11 4 4 11M11 8 8 11"/></svg></div>
@@ -1202,6 +1208,10 @@ core.on("confirm", () => { const a = api(); if (mode === "mini") setMode("card",
 let backT = null;
 function popUp() { const a = api(); if (a && mode === "card") { clearTimeout(backT); a.show(); } }
 function backLater(ms) { const a = api(); if (!a || mode !== "card") return; clearTimeout(backT); backT = setTimeout(() => a.tray_back && a.tray_back(), ms); }
+$("b-pad").onclick = () => { const a = api(); if (a && a.pad_toggle) a.pad_toggle(); };
+const padCheck = () => { const a = api(); $("b-pad").hidden = !(a && a.pad_toggle); };   // окно без блокнота (старая оболочка) — кнопки нет
+window.addEventListener("pywebviewready", padCheck); setTimeout(padCheck, 1500);
+window.padMark = (on) => { $("b-pad").classList.toggle("on", !!on); $("corner").classList.toggle("pinned", !!on); };
 $("b-tray").onclick = () => { const a = api(); if (!a || !a.to_tray) return; a.to_tray();
   core.call("settings_save", { patch: { ui: { hud_tray: true } } }).catch(() => {}); };
 /* окно голосом (ядро: _window_cmd): «спрячься» — как кнопка «В трей», «покажись» — вернуть, «отключись» — выйти совсем */

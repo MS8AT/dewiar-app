@@ -130,7 +130,7 @@ async function ntAdd(files) {
   NT.saveT = 1; await ntFlush(); ntShow();
 }
 async function ntDelete() {
-  const d = NT.doc; if (!d || !confirm(`Удалить заметку «${d.title}»${d.att.length ? " вместе с вложениями" : ""}? Она уйдёт в корзину — оттуда её можно вернуть.`)) return;
+  const d = NT.doc; if (!d || !await ask(`Удалить заметку «${d.title}»${d.att.length ? " вместе с вложениями" : ""}? Она уйдёт в корзину — оттуда её можно вернуть.`)) return;
   try { await core.call("ws_delete", { path: NT.cur }); NT.cur = ""; NT.doc = null; $("#nt-view").innerHTML = ""; ntLoad(); } catch (e) { toast(e.message); }
 }
 async function ntNew() {

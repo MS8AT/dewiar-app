@@ -134,13 +134,13 @@ function constRender(r) {
 }
 async function loadConst() { try { constRender(await core.call("const_get")); } catch (e) { toast(e.message); } }
 $("#c-edit").onclick = () => { cEditing = !cEditing; loadConst(); };
-$("#c-reset").onclick = async () => { if (!confirm("Вернуть исходную конституцию? Ваши правки пропадут.")) return; cEditing = false; try { constRender(await core.call("const_reset")); toast("Вернул исходную"); } catch (e) { toast(e.message); } };
+$("#c-reset").onclick = async () => { if (!await ask("Вернуть исходную конституцию? Ваши правки пропадут.")) return; cEditing = false; try { constRender(await core.call("const_reset")); toast("Вернул исходную"); } catch (e) { toast(e.message); } };
 core.on("diary", e => { if ($("#p-diary").classList.contains("cur")) loadDiary(e && e.day); });
 /* ---------- «Папка»: кнопки над деревом ---------- */
 $("#f-open").onclick = () => core.call("ws_open", {}).catch(e => toast(e.message));
 $("#f-reload").onclick = loadFolder;
 $("#f-move").onclick = async () => {
-  const p = prompt("Путь к папке ассистента (пусто — ~/Dewiar):", $("#f-root").textContent);
+  const p = await askText("Путь к папке ассистента (пусто — ~/Dewiar):", $("#f-root").textContent);
   if (p === null) return;
   try { const r = await core.call("ws_set_path", { path: p }); toast("Папка: " + r); fCur = ""; loadFolder(); } catch (e) { toast(e.message); }
 };

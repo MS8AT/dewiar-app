@@ -46,6 +46,7 @@ TASKS_SHOWN = 15
 NOTES = "Заметки"
 MEMORY = Path("Память") / "Обо мне.md"
 NOTE_MAX = 300_000
+PAD_DIR = "Блокнот"                     # вкладки блокнота у виджета (core/pad.py) — «Заметки/Блокнот/*.md»
 # Душа и конституция идут в системную подсказку каждого разговора: с другого устройства принимаем только похожее на них
 # (аудит 19.10: кто завладел ключом аккаунта, мог бы подменить поведение помощника). В подсказку и так уходит
 # не больше 1800/1400 знаков (soul.MAX_CONST / MAX_SOUL) — длиннее этого предела запись из облака не принимаем вовсе.
@@ -777,6 +778,7 @@ class Sync:
             if rel and (root / rel).exists():
                 ws.remove(f"{NOTES}/{rel}")
             self.state["map"].pop(sid, None)
+            self._pad_event(rel, True)
             return
         if not rel:
             from workspace import _clean_name
@@ -792,9 +794,19 @@ class Sync:
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         text = str(d.get("text") or "")
-        if not text.lstrip().startswith("#"):              # заметка с телефона: заголовок — как у заметок компьютера
-            text = f"# {d.get('title') or p.stem}\n\n{text}\n"
+        pad = rel.startswith(PAD_DIR + "/") and rel.count("/") == 1
+        if not text.lstrip().startswith("#") and not pad:  # заметка с телефона: заголовок — как у заметок компьютера
+            text = f"# {d.get('title') or p.stem}\n\n{text}\n"   # (вкладки блокнота — как есть: заголовок не их)
         p.write_text(text, encoding="utf-8")
+        self._pad_event(rel, False)
+
+    def _pad_event(self, rel, deleted):
+        """Вкладку блокнота поправили на другом устройстве — открытый блокнот перечитает её (ui/pad.html)."""
+        if rel and str(rel).startswith(PAD_DIR + "/") and str(rel).count("/") == 1:
+            try:
+                self.host.emit("pad_changed", name=Path(rel).stem, deleted=bool(deleted))
+            except Exception:  # noqa: BLE001
+                pass
 
     def _apply_fact(self, fid, fact, deleted):
         """Строка «Обо мне»: новую дописываем, если такой (по id) ещё нет. Удаление приходит без текста — ищем строку

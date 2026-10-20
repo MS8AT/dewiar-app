@@ -28,7 +28,7 @@ function dwSyncRender() {
 }
 $("#dw-e2e").onchange = async (ev) => {
   const on = ev.target.checked;
-  if (!on && !confirm("Выключить шифрование на этом компьютере? Свои изменения он снова будет отправлять открытыми. На других устройствах выключите отдельно.")) { ev.target.checked = true; return; }
+  if (!on && !await ask("Выключить шифрование на этом компьютере? Свои изменения он снова будет отправлять открытыми. На других устройствах выключите отдельно.")) { ev.target.checked = true; return; }
   ev.target.disabled = true;
   DW.sync = await core.call("sync_e2e", { on }).catch(x => (toast(x.message), DW.sync)); dwSyncRender();
 };
@@ -217,7 +217,7 @@ $("#dw-go").onclick = async () => {
   catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { $("#dw-go").disabled = false; }
 };
 $("#dw-pass").onkeydown = (e) => { if (e.key === "Enter") $("#dw-go").click(); };
-$("#dw-out").onclick = () => { if (confirm("Выйти из аккаунта dewiar.pro? Модели и Знания по аккаунту отключатся.")) core.call("account_logout").then(a => { renderAccount(a); DW.acc = a; DW.kb = null; $("#dw-acc-res").textContent = ""; dwLoad(); }).catch(e => toast(e.message)); };
+$("#dw-out").onclick = async () => { if (await ask("Выйти из аккаунта dewiar.pro? Модели и Знания по аккаунту отключатся.")) core.call("account_logout").then(a => { renderAccount(a); DW.acc = a; DW.kb = null; $("#dw-acc-res").textContent = ""; dwLoad(); }).catch(e => toast(e.message)); };
 $("#dw-cloud-use").onclick = () => $("#cc-use").click();
 $("#dw-cloud-go").onclick = async (ev) => { const r = $("#dw-cloud-res"); ev.target.disabled = true; r.className = "res"; r.textContent = "подключаю по аккаунту…";
   try { await cloudUse(); r.className = "res ok"; r.textContent = "Модели Dewiar подключены — отвечают они."; dwLoad(); } catch (e) { r.className = "res bad"; r.textContent = e.message; } ev.target.disabled = false; };
@@ -380,7 +380,7 @@ $("#cc-fb").onchange = () => core.call("cloud_fallback", { id: $("#cc-fb").value
 $("#cc-stt").onchange = (e) => core.call("cloud_stt", { on: e.target.checked }).then(() => toast(e.target.checked ? "Речь распознаёт облако" : "Речь распознаёт этот компьютер")).catch(x => { toast(x.message); e.target.checked = !e.target.checked; });
 $("#cc-ref").onclick = () => core.call("cloud_status", { refresh: true }).then(c => { cloudFill(c);       // «Обновить» — заметно, что сейчас на счёте
   toast(c.error ? "Не обновилось: " + c.error : "Обновлено: " + (c.site ? (c.balance_text || c.balance + " тал.") + " на счёте dewiar.pro" : "заряд " + (c.percent ?? 0) + "%")); }).catch(e => toast(e.message));
-$("#cc-off").onclick = () => { if (confirm("Убрать ключ Dewiar Облака с этого компьютера? Баланс на сервере сохранится — ключ можно вставить снова.")) core.call("cloud_forget").then(c => { cloudFill(c); renderProfiles(); }).catch(e => toast(e.message)); };
+$("#cc-off").onclick = async () => { if (await ask("Убрать ключ Dewiar Облака с этого компьютера? Баланс на сервере сохранится — ключ можно вставить снова.")) core.call("cloud_forget").then(c => { cloudFill(c); renderProfiles(); }).catch(e => toast(e.message)); };
 // «Пусть отвечает облако»: переподключение сохранённым ключом снова делает профиль облака активным
 // своим ключом dw-… или входом аккаунтом — ядро знает, чем (cloud_connect use); профиль облака снова активный
 async function cloudUse() { const r = await core.call("cloud_connect", { use: true }); DW.cloud = r; cloudFill(r); renderProfiles(); if ($("#p-dw").classList.contains("cur")) dwRender(); return r; }

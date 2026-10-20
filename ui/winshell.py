@@ -45,6 +45,9 @@ user32.MonitorFromPoint.restype = wintypes.HMONITOR
 user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
 gdi32.CreateRoundRectRgn.restype = wintypes.HRGN
 gdi32.CreateEllipticRgn.restype = wintypes.HRGN
+gdi32.CreateRectRgn.restype = wintypes.HRGN
+gdi32.CombineRgn.argtypes = [wintypes.HRGN, wintypes.HRGN, wintypes.HRGN, ctypes.c_int]
+gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
 
 
 class MONITORINFO(ctypes.Structure):
@@ -139,6 +142,20 @@ def shape(h, kind, radius=28):
         r = int(radius * scale(h)) * 2
         rgn = gdi32.CreateRoundRectRgn(0, 0, w + 1, hgt + 1, r, r)
     user32.SetWindowRgn(h, rgn, True)           # регион теперь принадлежит окну — не освобождаем
+
+
+def shape_rects(h, rects):
+    """Форма окна из прямоугольников [(x, y, ш, в)] в физических px (блокнот: лист + «крепления», app.pad_rects)."""
+    rgn = None
+    for x, y, w, hh in rects:
+        r = gdi32.CreateRectRgn(int(x), int(y), int(x + w), int(y + hh))
+        if rgn is None:
+            rgn = r
+        else:
+            gdi32.CombineRgn(rgn, rgn, r, 2)           # RGN_OR
+            gdi32.DeleteObject(r)
+    if rgn is not None:
+        user32.SetWindowRgn(h, rgn, True)           # регион теперь принадлежит окну
 
 
 def no_capture(h):

@@ -165,6 +165,18 @@ CAPTURE_TITLE = "Dewiar — закинуть идею"
 CAPTURE_RADIUS = 24
 CAPTURE_BAR, CAPTURE_BTNS = 58, 60       # заголовок окна идеи (capture.html, header): высота и место под крестик справа
 ALARM_RADIUS = 26
+PAD_TITLE = "Dewiar — блокнот"
+PAD_W, PAD_MIN_H, PAD_GAP, PAD_RADIUS = 440, 520, 14, 22   # блокнот у виджета (pad.html): ширина, высота не меньше, зазор
+PAD_CLIP = 16                           # «крепления» блокнота к виджету (просьба 20.10: «соединить условными крепежами»): высота
+
+
+def pad_rects(side, w, h, gap, clips, radius):
+    """Форма окна блокнота (физические px): скруглённый лист + два «крепления» поперёк зазора к виджету.
+    side "left" — лист слева, крепления справа (к карточке), "right" — наоборот. clips — [(y, высота)]."""
+    x0 = 0 if side == "left" else gap
+    out = [(x + x0, y, ww, hh) for x, y, ww, hh in _shape_rects("pad", w, h, radius, exact=True)]
+    cx = w if side == "left" else 0
+    return out + [(cx, int(y), gap, int(ch)) for y, ch in clips]
 PROMPTER_TITLE = "Dewiar — суфлёр"
 PROMPTER_RADIUS = 24
 PROMPTER_BAR, PROMPTER_BTNS = 56, 180   # заголовок суфлёра (prompter.html, header): высота и место под кнопки справа
@@ -371,7 +383,7 @@ def ui_http_base():
     return _UI_HTTP[0]
 
 
-def _shape_rects(kind, w, h, radius=None):
+def _shape_rects(kind, w, h, radius=None, exact=False):
     """Форма окна прямоугольниками -> [(x, y, ш, в)]: kind "rect" — без скругления, "mini" — круг (полоска в 1 px
     на каждую строку), иначе скруглённый прямоугольник (карточка, напоминание, студия): полоски углов + середина.
     Размеры — в физических пикселях окна."""
@@ -387,7 +399,7 @@ def _shape_rects(kind, w, h, radius=None):
             out.append((x0, y, w - 2 * x0, 1))
         return out
     r = radius or card_r()
-    if TRANSPARENT[0] and kind != "rect":
+    if TRANSPARENT[0] and kind != "rect" and not exact:
         # окно прозрачное: углы рисует страница (сглаженно), форма — только чтобы клики в углах шли мимо; её скругление
         # чуть меньше, иначе она срезала бы сглаженный край
         r = max(0, int(r * 0.55))
@@ -402,7 +414,7 @@ def _shape_rects(kind, w, h, radius=None):
 _XDPY = []
 
 
-def shape_window(gw, kind, size=None, radius=None):
+def shape_window(gw, kind, size=None, radius=None, rects=None):
     """Форма окна через расширение SHAPE (libXext, ctypes). Задаётся до показа окна — так её видит GNOME.
     Если окно не X11 (чистый Wayland) — просто остаётся прямоугольным (-> False). size — физические пиксели
     (по умолчанию SIZES[kind]). Своё соединение с X-сервером открываем один раз и держим (_XDPY).
@@ -426,8 +438,9 @@ def shape_window(gw, kind, size=None, radius=None):
         if not d:
             return False
         _XDPY.append(d)
-    w, h = size or SIZES[kind]
-    rects = _shape_rects(kind, w, h, radius)
+    if not rects:
+        w, h = size or SIZES[kind]
+        rects = _shape_rects(kind, w, h, radius)
     arr = (XRect * len(rects))(*[XRect(*r) for r in rects])
     xext.XShapeCombineRectangles.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                              ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
@@ -541,6 +554,8 @@ class Api:
         return self._gtk(lambda: list(self._gw(mode).get_position())) or [0, 0]
 
     def move_to(self, mode, x, y):
+        if mode == "card" and getattr(self, "_pad_on", False):     # блокнот едет вместе с карточкой
+            self._pad_follow_at(x, y)
         if WIN:
             h = self._hwnd(mode)
             if h:
@@ -824,6 +839,8 @@ class Api:
         self.auto = bool(auto)
         if mode == self.mode:
             return self.save_pos(mode)
+        if mode != "card" and getattr(self, "_pad_on", False):     # свернули в значок — блокнот прячется
+            self.pad_hide()
         src = self.mode
         if WIN:
             x, y = self.get_pos(src)
@@ -888,6 +905,8 @@ class Api:
 
     def to_tray(self, quiet=False):
         """Кнопка «В трей»: виджет прячется, ассистент слушает. Вернётся сам — на имя, напоминание, уведомление."""
+        if getattr(self, "_pad_on", False):
+            self.pad_hide()
         first = not self.in_tray
         self.in_tray, self.popped = True, False
         self._hide_now()
@@ -1813,6 +1832,191 @@ class Api:
         win.events.loaded += lambda *a: threading.Thread(target=reveal, daemon=True).start()
         threading.Timer(4.0, reveal).start()
         return True
+
+    # ---------- блокнот: окно рядом с карточкой виджета, ездит вместе с ней ----------
+    # Окно = лист (PAD_W) + зазор до карточки (PAD_GAP), в зазоре — два «крепления» (форма окна: pad_rects; рисует их
+    # pad.html). Окно сплошное, как суфлёр: прозрачность окна на Ubuntu не трогаем (урок 0.38.95).
+
+    def _pad_geom(self):
+        """-> dict(x, y, w, h, side, gap, clips, dy): окно блокнота у карточки — с той стороны, где больше места
+        (к середине экрана), той же верхней кромкой; не выходит за экран. w — ширина листа, окно шире на gap;
+        clips — [(y, высота)] креплений в окне (логические px), на высоте карточки; dy — сдвиг окна от верха карточки."""
+        z = ZOOM[0] or 1.0
+        w, gap, clip = int(round(PAD_W * z)), int(round(PAD_GAP * z)), int(round(PAD_CLIP * z))
+        cw, ch = SIZES["card"]
+        h = max(ch, int(round(PAD_MIN_H * z)))
+        cx, cy = self.get_pos("card")
+        mx, my, mw, mh = 0, 0, 1 << 15, 1 << 15
+        try:
+            if WIN:
+                l, t_, r, b = winshell.work_area()
+                mx, my, mw, mh = l, t_, r - l, b - t_
+            else:
+                from gi.repository import Gdk
+                g = Gdk.Display.get_default().get_monitor_at_point(int(cx) + cw // 2, int(cy) + ch // 2).get_workarea()
+                mx, my, mw, mh = g.x, g.y, g.width, g.height
+        except Exception:  # noqa: BLE001
+            pass
+        side = "left" if cx + cw / 2 > mx + mw / 2 else "right"
+        x = cx - gap - w if side == "left" else cx + cw
+        if x < mx or x + w + gap > mx + mw:                # с этой стороны не помещается — с другой
+            side = "right" if side == "left" else "left"
+            x = cx - gap - w if side == "left" else cx + cw
+        h = min(h, mh - 16)
+        y = max(my + 8, min(int(cy), my + mh - h - 8))
+        dy = y - int(cy)
+        clips = [(max(0, int(cy) - y + int(ch * k) - clip // 2), clip) for k in (0.2, 0.8)]
+        clips = [(cy_, c) for cy_, c in clips if cy_ + c <= h]
+        return {"x": int(x), "y": int(y), "w": w, "h": h, "side": side, "gap": gap, "clips": clips, "dy": dy}
+
+    def pad_state(self):
+        win = getattr(self, "_pad", None)
+        return {"open": bool(win is not None and getattr(self, "_pad_on", False)), "side": getattr(self, "_pad_side", "left")}
+
+    def pad_toggle(self):
+        """Кнопка блокнота в углу виджета: открыть / закрыть (страница сама «въезжает» и «уезжает»)."""
+        if getattr(self, "_pad_on", False):
+            self._pad_js("window.padClose && padClose()")
+            return False
+        return self.pad_open()
+
+    def _pad_cfg_js(self, g):
+        import json
+        return f"window.padCfg && padCfg({json.dumps({'side': g['side'], 'gap': g['gap'], 'clips': g['clips']})})"
+
+    def _pad_shape(self, g):
+        """Форма окна под геометрию g: лист + крепления (Linux — SHAPE, Windows — регион окна)."""
+        r = int(round(PAD_RADIUS * (ZOOM[0] or 1.0)))
+        if WIN:
+            hw = winshell.hwnd(PAD_TITLE)
+            if hw:
+                k = winshell.scale(hw)
+                winshell.shape_rects(hw, pad_rects(g["side"], int(g["w"] * k), int(g["h"] * k), int(g["gap"] * k),
+                                                   [(y * k, c * k) for y, c in g["clips"]], int(r * k)))
+            return
+
+        def run():
+            from gi.repository import Gtk
+            gw = next((x for x in Gtk.Window.list_toplevels() if x.get_title() == PAD_TITLE), None)
+            if gw is None or gw.get_window() is None:
+                return False
+            k = gw.get_window().get_scale_factor()
+            shape_window(gw, "pad", rects=pad_rects(g["side"], g["w"] * k, g["h"] * k, g["gap"] * k, [(y * k, c * k) for y, c in g["clips"]], r * k))
+            return True
+        self._gtk(run, timeout=3)
+
+    def pad_open(self):
+        """Окно блокнота (pad.html): одно на всё время; открыть — поставить у карточки и показать."""
+        import threading
+        import webview
+        if self.mode != "card":
+            return False
+        g = self._pad_geom()
+        self._pad_g, self._pad_side, self._pad_on = g, g["side"], True
+        W = g["w"] + g["gap"]
+        win = getattr(self, "_pad", None)
+        if win is not None:
+            try:
+                self._pad_shape(g)
+                self._pad_place(g["x"], g["y"])
+                win.show()
+                self._pad_js(self._pad_cfg_js(g) + f"; window.padShown && padShown('{g['side']}')")
+                self._js("window.padMark && padMark(true)")
+                return True
+            except Exception:  # noqa: BLE001
+                self._pad = None
+        skin, light = ui_skin()
+        import json
+        q = "&cfg=" + urllib.parse.quote(json.dumps({"side": g["side"], "gap": g["gap"], "clips": g["clips"]})) + "&skin=" + urllib.parse.quote(skin)
+        win = webview.create_window(PAD_TITLE, self._url("pad.html", q), width=W, height=g["h"], x=g["x"], y=g["y"],
+                                    resizable=False, frameless=True, easy_drag=False, on_top=True, hidden=True,
+                                    background_color="#dbe5f1" if light else "#12131b", js_api=self, **_no_shadow())
+        self._pad = win
+        win.events.closed += lambda *a: (setattr(self, "_pad", None), setattr(self, "_pad_on", False))
+        done, lock = [], threading.Lock()
+
+        def reveal():
+            with lock:
+                if done:
+                    return
+                done.append(1)
+            try:
+                if WIN:
+                    self._pad_shape(g)
+                    win.show()
+                else:
+                    def run():
+                        from gi.repository import Gtk
+                        gw = next((x for x in Gtk.Window.list_toplevels() if x.get_title() == PAD_TITLE), None)
+                        if gw is None:
+                            return False
+                        gw.set_skip_taskbar_hint(True)
+                        gw.set_skip_pager_hint(True)
+                        gw.realize()
+                        k = gw.get_window().get_scale_factor() if gw.get_window() else 1
+                        r = int(round(PAD_RADIUS * (ZOOM[0] or 1.0)))
+                        shape_window(gw, "pad", rects=pad_rects(g["side"], g["w"] * k, g["h"] * k, g["gap"] * k,
+                                                                [(y * k, c * k) for y, c in g["clips"]], r * k))
+                        gw.show_all()
+                        gw.get_window().move(g["x"], g["y"])
+                        return True
+                    if not self._gtk(run, timeout=5):
+                        win.show()
+                self._js("window.padMark && padMark(true)")
+            except Exception as e:  # noqa: BLE001 — не скруглилось: покажем как есть
+                print(f"Окно блокнота: {e}", file=sys.stderr)
+                try:
+                    win.show()
+                except Exception:  # noqa: BLE001
+                    pass
+        win.events.loaded += lambda *a: threading.Thread(target=reveal, daemon=True).start()
+        threading.Timer(4.0, reveal).start()
+        return True
+
+    def pad_hide(self):
+        """Страница доиграла «уезжание» — спрятать окно (не закрывать: следующее открытие мгновенное)."""
+        self._pad_on = False
+        win = getattr(self, "_pad", None)
+        if win is not None:
+            try:
+                win.hide()
+            except Exception:  # noqa: BLE001
+                pass
+        self._js("window.padMark && padMark(false)")
+        return True
+
+    def _pad_place(self, x, y):
+        if WIN:
+            hw = winshell.hwnd(PAD_TITLE)
+            if hw:
+                winshell.move(hw, x, y)
+            return
+        from gi.repository import GLib
+
+        def mv():
+            from gi.repository import Gtk
+            gw = next((g for g in Gtk.Window.list_toplevels() if g.get_title() == PAD_TITLE), None)
+            if gw is not None and gw.get_window() is not None:
+                gw.get_window().move(int(x), int(y))
+            return False
+        GLib.idle_add(mv, priority=GLib.PRIORITY_HIGH_IDLE)
+
+    def _pad_follow_at(self, x, y):
+        """Во время перетаскивания: карточка будет в (x, y) — блокнот рядом, той же стороной и тем же сдвигом."""
+        g = getattr(self, "_pad_g", None)
+        if not g:
+            return
+        try:
+            px = x - g["gap"] - g["w"] if g["side"] == "left" else x + SIZES["card"][0]
+            self._pad_place(int(px), int(y) + g["dy"])
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _pad_js(self, code):
+        import threading
+        win = getattr(self, "_pad", None)
+        if win is not None:
+            threading.Thread(target=lambda: win.evaluate_js(code), daemon=True).start()
 
     def close_prompter(self):
         win = getattr(self, "_prompter", None)

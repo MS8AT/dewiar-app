@@ -154,7 +154,7 @@ $("#ch-go").onclick = chatSend;
 $("#ch-text").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); chatSend(); } });
 $("#ch-text").addEventListener("input", (e) => { const t = e.target; t.style.height = ""; t.style.height = Math.min(160, t.scrollHeight) + "px"; });
 $("#ch-clear").onclick = async () => {
-  if (!confirm("Очистить всю переписку в «Чате»? Память ассистента и заметки это не трогает.")) return;
+  if (!await ask("Очистить всю переписку в «Чате»? Память ассистента и заметки это не трогает.")) return;
   await core.call("chat_clear").catch(() => {}); CH.items = []; CH.more = false; chatRender();
 };
 core.on("hello", () => { if ($("#p-chat").classList.contains("cur")) loadChat(); });

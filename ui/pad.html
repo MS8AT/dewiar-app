@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Dewiar — блокнот</title>
+<link href="assets/fonts.css" rel="stylesheet">
+<link rel="stylesheet" href="assets/skins.css">
+<style>
+  /* Блокнот у виджета (20.10): окно рядом с карточкой (ui/app.py pad_open, ездит вместе с ней), скругление 22px —
+     PAD_RADIUS. Тема — та же, что у виджета (skins.css: --skin-bg, --ink, --muted; light — светлые, neu — мягкие
+     выпуклые формы). Вкладки — заметки «Заметки/Блокнот/*.md» (core/pad.py), правятся сразу «как выглядят»
+     (assets/padmd.js), сохраняются сами и синхронизируются между устройствами.
+     Одно движение на всё окно: при открытии лист «выезжает» из-за виджета (side: left — справа налево). */
+  :root { --r: 22px; --bg: #12131b; --ink: #ECEEF4; --muted: rgba(236,238,244,.6); --faint: rgba(236,238,244,.38);
+          --line: rgba(255,255,255,.08); --chip: rgba(255,255,255,.06); --chip2: rgba(255,255,255,.11); --acc: #8B8CF7;
+          --acc-soft: rgba(139,140,247,.16); --sel: rgba(139,140,247,.28); --code: rgba(255,255,255,.07); --shadow: none; }
+  body.light { --bg: #e7edf6; --ink: #24324a; --muted: rgba(36,50,74,.62); --faint: rgba(36,50,74,.4); --line: rgba(36,50,74,.1);
+               --chip: rgba(36,50,74,.06); --chip2: rgba(36,50,74,.1); --acc: #4f6cf0; --acc-soft: rgba(79,108,240,.12);
+               --sel: rgba(79,108,240,.22); --code: rgba(36,50,74,.07); }
+  /* фон листа — фон темы виджета (--skin-bg), если он у темы есть; своё имя, без ссылки на саму себя (WebKitGTK: цикл
+     переменных — фон пропадал, лист был тёмным при светлой теме) */
+  body { --paper: var(--skin-bg, var(--bg)); }
+  body.neu.light { --shadow: inset 2px 2px 5px var(--neu-dark, #b8c5d6), inset -2px -2px 5px var(--neu-light, #fff); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  html { background: #12131b; }
+  body { font: 14.5px/1.6 "Manrope", "Ubuntu", "Segoe UI", "Noto Sans", sans-serif; color: var(--ink);
+         -webkit-font-smoothing: antialiased; background: var(--paper); }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  #wrap { position: absolute; inset: 0 var(--gap-r, 0px) 0 var(--gap-l, 0px); display: flex; flex-direction: column; border-radius: var(--r); overflow: hidden; background: var(--paper);
+          transition: transform .26s cubic-bezier(.2,.8,.2,1), opacity .2s; }
+  body.side-left #wrap.away { transform: translateX(28px); opacity: 0; }
+  body.side-right #wrap.away { transform: translateX(-28px); opacity: 0; }
+  @media (prefers-reduced-motion: reduce) { #wrap, .clip { transition: none !important; } }
+
+  /* «крепления» к виджету (просьба 20.10: «соединить условными крепежами, чтобы не банально»): две защёлки поперёк
+     зазора — от края листа до самой карточки. Форму окна под них режет ui/app.py (pad_rects). Открылся лист — защёлки
+     «щёлкают» от листа к виджету; это единственное движение, кроме самого выезда. */
+  .clip { position: absolute; height: 16px; z-index: 3; border-radius: 6px; transform: scaleX(0); opacity: 0;
+          transition: transform .22s cubic-bezier(.3,1.6,.5,1) .2s, opacity .12s .2s;
+          background: linear-gradient(#3d4656, #272e3a); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 1px 3px rgba(0,0,0,.35); }
+  .clip::before { content: ""; position: absolute; top: 6px; height: 4px; left: 5px; right: 5px; border-radius: 2px;
+                  background: rgba(0,0,0,.35); box-shadow: 0 1px 0 rgba(255,255,255,.08); }
+  .clip::after { content: ""; position: absolute; top: 4px; width: 8px; height: 8px; border-radius: 50%;
+                 background: radial-gradient(circle at 35% 35%, #8f98aa, #4c5566); box-shadow: 0 0 0 1px rgba(0,0,0,.3); }
+  body.light .clip { background: linear-gradient(#f6f9fd, #c6d2e3); box-shadow: inset 0 1px 0 #fff, 0 1px 3px rgba(20,32,60,.28); }
+  body.light .clip::before { background: rgba(36,50,74,.16); box-shadow: 0 1px 0 rgba(255,255,255,.8); }
+  body.light .clip::after { background: radial-gradient(circle at 35% 35%, #ffffff, #9fb0c8); box-shadow: 0 0 0 1px rgba(36,50,74,.18); }
+  body.side-left .clip { right: 0; transform-origin: left center; } body.side-left .clip::after { left: 3px; }
+  body.side-right .clip { left: 0; transform-origin: right center; } body.side-right .clip::after { right: 3px; }
+  body.side-left .clip::before { left: 13px; } body.side-right .clip::before { right: 13px; }
+  body.snap .clip { transform: none; opacity: 1; }
+  body:not(.snap) .clip { transition-delay: 0s; }
+
+  /* вкладки */
+  #top { display: flex; align-items: center; gap: 6px; padding: 10px 10px 6px 12px; }
+  #tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
+  #tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: none; display: flex; align-items: center; gap: 4px; max-width: 170px; padding: 6px 8px 6px 12px; border-radius: 11px;
+         color: var(--muted); font-weight: 600; font-size: 13px; white-space: nowrap; user-select: none; }
+  .tab span { overflow: hidden; text-overflow: ellipsis; }
+  .tab:hover { background: var(--chip); color: var(--ink); }
+  .tab.on { background: var(--chip2); color: var(--ink); box-shadow: var(--shadow); }
+  .tab .x { width: 18px; height: 18px; border-radius: 6px; display: grid; place-items: center; opacity: 0; color: var(--muted); }
+  .tab:hover .x, .tab.on .x { opacity: .7; } .tab .x:hover { opacity: 1; background: var(--chip2); }
+  .tab.drop { box-shadow: inset 2px 0 0 var(--acc); }
+  .tab input { font: inherit; color: var(--ink); background: transparent; border: 0; outline: none; width: 120px; }
+  .ib { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 10px; color: var(--muted); }
+  .ib:hover { background: var(--chip); color: var(--ink); }
+  .ib svg, .tool svg, .tab .x svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .tab .x svg { width: 12px; height: 12px; }
+
+  /* панель правки — тихая, проявляется под рукой */
+  #tools { display: flex; align-items: center; gap: 1px; padding: 0 12px 6px; flex-wrap: wrap; }
+  .tool { height: 28px; min-width: 28px; padding: 0 6px; display: grid; place-items: center; border-radius: 8px; color: var(--faint); font-weight: 700; font-size: 12.5px; }
+  .tool:hover, .tool.on { color: var(--ink); background: var(--chip); }
+  .sep { width: 1px; height: 16px; background: var(--line); margin: 0 5px; }
+
+  /* лист */
+  #sheet { flex: 1; overflow-y: auto; padding: 6px 22px 22px; scrollbar-width: thin; scrollbar-color: var(--chip2) transparent; }
+  #ed { outline: none; min-height: 100%; caret-color: var(--acc); word-wrap: break-word; overflow-wrap: anywhere; }
+  #sheet { position: relative; }
+  #ed.blank::before { content: attr(data-ph); position: absolute; left: 22px; right: 22px; top: 6px; color: var(--faint); pointer-events: none; white-space: pre-line; }
+  #ed ::selection { background: var(--sel); }
+  #ed > * + * { margin-top: .55em; }
+  #ed h1 { font: 700 21px/1.3 "Unbounded", "Manrope", sans-serif; letter-spacing: -.01em; margin-top: .9em; }
+  #ed h2 { font-size: 17px; font-weight: 800; margin-top: .9em; }
+  #ed h3 { font-size: 15px; font-weight: 800; color: var(--muted); margin-top: .8em; }
+  #ed > :first-child { margin-top: 0; }
+  #ed a { color: var(--acc); text-decoration: none; border-bottom: 1px solid var(--acc-soft); cursor: text; }
+  body.ctrl #ed a { cursor: pointer; border-bottom-color: var(--acc); }
+  #ed ul, #ed ol { padding-left: 1.4em; }
+  #ed li + li, #ed li > ul, #ed li > ol { margin-top: .2em; }
+  #ed li::marker { color: var(--faint); }
+  #ed li.task { list-style: none; position: relative; margin-left: -1.4em; padding-left: 1.75em; }
+  #ed li.task::before { content: ""; position: absolute; left: 0; top: .28em; width: 15px; height: 15px; border-radius: 5px;
+                        box-shadow: inset 0 0 0 1.6px var(--faint); cursor: pointer; transition: background .15s, box-shadow .15s; }
+  #ed li.task[data-done="1"]::before { background: var(--acc) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.4 6.8 11 12 5.5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/13px no-repeat; box-shadow: none; }
+  #ed li.task[data-done="1"] { color: var(--faint); text-decoration: line-through; text-decoration-color: var(--faint); }
+  #ed blockquote { padding: 2px 0 2px 14px; box-shadow: inset 3px 0 0 var(--acc-soft); color: var(--muted); }
+  #ed code { font: 12.5px "JetBrains Mono", ui-monospace, monospace; background: var(--code); padding: 1px 5px; border-radius: 5px; }
+  #ed pre { background: var(--code); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
+  #ed pre code { background: none; padding: 0; white-space: pre; }
+  #ed hr { border: 0; height: 1px; background: var(--line); margin: 1em 0; }
+  #ed mark { background: rgba(255,214,102,.35); color: inherit; border-radius: 3px; padding: 0 2px; }
+  #ed img { max-width: 100%; border-radius: 12px; display: block; margin: 6px 0; min-height: 24px; background: var(--chip); }
+  #ed img.sel { outline: 2px solid var(--acc); }
+  #ed table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  #ed th, #ed td { padding: 6px 9px; text-align: left; box-shadow: inset 0 -1px 0 var(--line); vertical-align: top; }
+  #ed th { font-weight: 700; color: var(--muted); font-size: 12.5px; }
+  #ed tbody tr:hover td { background: var(--chip); }
+
+  #foot { display: flex; align-items: center; gap: 8px; padding: 7px 16px 10px; font-size: 12px; color: var(--faint); }
+  #foot .dot { width: 6px; height: 6px; border-radius: 50%; background: #4BE3A1; flex: none; transition: background .2s; }
+  #foot.busy .dot { background: #FFC266; } #foot.bad .dot { background: #FF6B8A; }
+  #foot span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hint { font-size: 11.5px; }
+  #ask { position: absolute; inset: auto 12px 44px; padding: 12px 14px; border-radius: 14px; background: var(--chip2); backdrop-filter: blur(12px);
+         -webkit-backdrop-filter: blur(12px); display: none; gap: 10px; align-items: center; font-size: 13px; }
+  #ask.on { display: flex; } #ask b { flex: 1; font-weight: 600; }
+  #ask button { padding: 6px 12px; border-radius: 9px; background: var(--chip); font-weight: 700; }
+  #ask button.danger { background: #FF6B8A; color: #fff; }
+</style>
+</head>
+<body>
+<div id="clips"></div>
+<div id="wrap" class="away">
+  <div id="top">
+    <div id="tabs" role="tablist" aria-label="Вкладки блокнота"></div>
+    <button class="ib" id="b-new" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button class="ib" id="b-close" title="Убрать блокнот (Esc)" aria-label="Убрать блокнот"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div id="tools" aria-label="Оформление">
+    <button class="tool" data-c="h1" title="Заголовок (# пробел)">H1</button>
+    <button class="tool" data-c="h2" title="Подзаголовок (## пробел)">H2</button>
+    <button class="tool" data-c="bold" title="Жирный (Ctrl+B)"><svg viewBox="0 0 24 24"><path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/></svg></button>
+    <button class="tool" data-c="italic" title="Курсив (Ctrl+I)"><svg viewBox="0 0 24 24"><path d="M14 5h-4M14 19h-4M13 5l-2 14"/></svg></button>
+    <button class="tool" data-c="strike" title="Зачеркнуть"><svg viewBox="0 0 24 24"><path d="M5 12h14M16 7.5A3.8 3.8 0 0 0 12.2 5h-.9a3.3 3.3 0 0 0-1 6.5M8 16.5A3.8 3.8 0 0 0 11.8 19h.9a3.3 3.3 0 0 0 2.2-.8"/></svg></button>
+    <span class="sep"></span>
+    <button class="tool" data-c="ul" title="Список (- пробел)"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg></button>
+    <button class="tool" data-c="ol" title="Нумерованный (1. пробел)"><svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10M4 5l1.5-1v5M4 14.5a1.5 1.5 0 0 1 3 0c0 1.5-3 2-3 3.5h3"/></svg></button>
+    <button class="tool" data-c="task" title="Задачи с галочками ([] пробел)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="6" height="6" rx="1.5"/><path d="m4.8 7 1.2 1.2 2.2-2.4M13 7h7.5M3.5 15.5h6v6h-6zM13 18.5h7.5"/></svg></button>
+    <span class="sep"></span>
+    <button class="tool" data-c="link" title="Ссылка (Ctrl+K)"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg></button>
+    <button class="tool" data-c="table" title="Таблица"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M3.5 14.5h17M10 9.5v10"/></svg></button>
+    <button class="tool" data-c="image" title="Картинка (или Ctrl+V)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m20.5 15.5-5-5-9 9"/></svg></button>
+    <button class="tool" data-c="code" title="Код"><svg viewBox="0 0 24 24"><path d="m9 8-4 4 4 4M15 8l4 4-4 4"/></svg></button>
+    <input type="file" id="file" accept="image/*" hidden multiple>
+  </div>
+  <div id="sheet"><div id="ed" contenteditable="true" spellcheck="true" data-ph="Пишите прямо здесь — сохранится само.&#10;- пробел — список, [] пробел — задача, # пробел — заголовок.&#10;Ссылки, таблицы и картинки — просто вставьте (Ctrl+V)."></div></div>
+  <div id="foot"><i class="dot"></i><span id="st">Открываю…</span><em id="hint"></em></div>
+  <div id="ask" role="alertdialog"><b id="ask-t"></b><button id="ask-no">Нет</button><button class="danger" id="ask-yes">Удалить</button></div>
+</div>
+<script src="assets/skins.js"></script>
+<script src="assets/dewiar.js"></script>
+<script src="assets/dialog.js"></script>
+<script src="assets/padmd.js"></script>
+<script src="pad.js"></script>
+</body>
+</html>

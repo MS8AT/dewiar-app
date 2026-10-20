@@ -100,7 +100,12 @@
       for (let i = 0; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) final += t; else interim += t; }
       ev({ type: "stt_partial", g, text: (final + " " + interim).trim() });
     };
-    r.onerror = (e) => { said = true; ev({ type: "stt_error", g, code: e.error === "no-speech" ? 6 : e.error === "not-allowed" ? 9 : 5, msg: String(e.error || "ошибка") }); };
+    // «network», «service-not-allowed», «audio-capture», «language-not-supported»: распознавания у браузера на деле нет
+    // (Chrome и Chromium на Linux — без сервиса Google; 21.10: «нажимаю — через секунду сбрасывает»). Код 13 — app.js
+    // переводит слух на сервер Dewiar насовсем (или честно говорит, что слуха нет), а не молча гасит кнопку как «отменено» (5)
+    r.onerror = (e) => { said = true; const er = String(e.error || "");
+      ev({ type: "stt_error", g, code: er === "no-speech" ? 6 : er === "not-allowed" ? 9 : er === "aborted" ? 5
+        : /network|service-not-allowed|audio-capture|language-not-supported|bad-grammar/.test(er) ? 13 : 5, msg: er || "ошибка" }); };
     r.onend = () => { rec = null; ev({ type: "stt_end", g }); if (!said) ev({ type: "stt_result", g, text: final.trim() }); };
     try { r.start(); } catch (e) { ev({ type: "stt_error", g, code: 11, msg: String(e.message || e) }); }
   }

@@ -1286,6 +1286,15 @@ N.on("stt_error", e => {
     setTimeout(() => { if (state === "listening") listen(); }, 450 * sttRetry); return;
   }
   sttRetry = 0;
+  if (sttVia === "system" && e.code === 13) {          // браузер: своего распознавания на деле нет (веб-версия, webbridge.js)
+    plog("warn", "распознавание браузера недоступно: " + (e.msg || ""));
+    const c = Date.now() < sttSysUntil ? null : cloudEars();
+    if (c) { S.stt = { engine: "server", url: c.url, key: c.key, model: "gigaam", from_account: loggedIn(), auto: true }; saveS();
+      toast("В этом браузере своего распознавания нет — слушает сервер Dewiar", 4500); setState("idle"); return listen(); }
+    setState("idle"); showYou("");
+    showBot("В этом браузере распознавание речи не работает (так у Chrome и Chromium на Linux, у Firefox). Войдите аккаунтом dewiar.pro или подключите Dewiar Облако в «Мозге» — слушать будет сервер Dewiar. Или откройте в Edge, Яндекс Браузере, Safari. Пока можно писать текстом.", "err");
+    return;
+  }
   plog([6, 7, 5].includes(e.code) ? "info" : "warn", `распознавание (${sttVia}): ${e.code === 6 ? "речи не было" + (/громкость/.test(e.msg || "") ? " — " + String(e.msg).replace(/^[^(]*/, "") : "") : e.code === 7 ? "не расслышал" : "ошибка " + (e.code ?? "") + " " + (e.msg || "")}`);
   // распознаватель телефона сломался, не начав слушать (не запустился, нет сервиса, сеть) — слушает сервер Dewiar
   if (sttVia === "system" && !sttStarted && ![6, 7].includes(e.code) && cloudEars() && Date.now() >= sttSysUntil) { sttActive = true; sttStall("start"); return; }
@@ -4776,12 +4785,32 @@ const CLOUD = {
   openai: { name: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-4.1-mini", key: "https://platform.openai.com/api-keys" },
   deepseek: { name: "DeepSeek", url: "https://api.deepseek.com/v1", model: "deepseek-chat", key: "https://platform.deepseek.com/api_keys" },
   anthropic: { name: "Claude (Anthropic)", url: "https://api.anthropic.com/v1", model: "claude-sonnet-5-5", key: "https://platform.claude.com/settings/keys" },
-  polza: { name: "Polza.ai", url: "https://polza.ai/api/v1", model: "openai/gpt-4.1-mini", key: "https://polza.ai" },          // российские агрегаторы — оплата картой РФ (№141, 20.10)
+  // признанные поставщики напрямую (20.10): официальные OpenAI-совместимые адреса; модель — первая из rec, что есть у сервиса
+  gemini: { name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-flash-latest", key: "https://aistudio.google.com/apikey",
+            rec: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-pro-latest"] },
+  kimi: { name: "Kimi (Moonshot)", url: "https://api.moonshot.ai/v1", model: "kimi-latest", key: "https://platform.moonshot.ai/console/api-keys",
+          rec: ["kimi-latest", "kimi-k2-turbo-preview", "kimi-k2-0905-preview", "moonshot-v1-32k"] },
+  glm: { name: "GLM (Z.ai)", url: "https://api.z.ai/api/paas/v4", model: "glm-4.6", key: "https://z.ai/manage-apikey/apikey-list", rec: ["glm-4.6", "glm-4.5-air", "glm-4.5"] },
+  qwen: { name: "Qwen (Alibaba)", url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", model: "qwen-plus", key: "https://modelstudio.console.alibabacloud.com/",
+          rec: ["qwen-plus", "qwen-flash", "qwen-max", "qwen3-max"] },
+  mistral: { name: "Mistral", url: "https://api.mistral.ai/v1", model: "mistral-medium-latest", key: "https://console.mistral.ai/api-keys",
+             rec: ["mistral-medium-latest", "mistral-small-latest", "mistral-large-latest"] },
+  xai: { name: "Grok (xAI)", url: "https://api.x.ai/v1", model: "grok-4-fast-non-reasoning", key: "https://console.x.ai",
+         rec: ["grok-4-fast-non-reasoning", "grok-4-fast-reasoning", "grok-3-mini", "grok-4"] },
+  // российские агрегаторы — оплата картой РФ (№141). Только давно работающие (AITunnel и Polza.ai убраны 20.10)
   proxyapi: { name: "ProxyAPI", url: "https://api.proxyapi.ru/openai/v1", model: "gpt-4.1-mini", key: "https://console.proxyapi.ru/keys" },
   vsegpt: { name: "VseGPT", url: "https://api.vsegpt.ru/v1", model: "openai/gpt-4.1-mini", key: "https://vsegpt.ru" },
-  aitunnel: { name: "AITunnel", url: "https://api.aitunnel.ru/v1", model: "gpt-4.1-mini", key: "https://aitunnel.ru" },
   custom: { name: "Другой — по адресу", url: "", model: "", key: "" },      // любой OpenAI-совместимый: LiteLLM, Kimi, агрегаторы (комментарии 19.10)
 };
+/* Модели сервиса по ключу -> [] (не отдал — не беда). Gemini пишет «models/…» — без приставки; не для разговора — прочь. */
+async function svcModels(url, key) {
+  try {
+    const r = await http("GET", url.replace(/\/+$/, "") + "/models", { headers: key ? { Authorization: "Bearer " + key } : {}, timeout: 15000 });
+    if (r.status !== 200) return [];
+    return ((JSON.parse(r.body) || {}).data || []).map(m => String(m.id || "").replace(/^models\//, ""))
+      .filter(m => m && !/(^|[-_/])(tts|whisper|transcribe|dall-e|imagen|veo|moderation|aqa|embed\w*|rerank\w*)([-_.]|$)|image-|audio/i.test(m));
+  } catch (e) { return []; }
+}
 /* Вписанный адрес сервиса: без хвоста /chat/completions, с https:// */
 function svcUrl(raw) {
   let u = String(raw || "").trim().replace(/\/+$/, "").replace(/\/chat\/completions$/, "").replace(/\/models$/, "");
@@ -6174,8 +6203,13 @@ function wizard(kind) {
         : `Ключ — на <a href="${c.key}">${c.key.replace("https://", "")}</a>.`; };
     $("#w-prov").onchange = fill; fill();
     $("#w-go").onclick = async () => { const k = $("#w-prov").value, c = CLOUD[k], r = $("#w-res"); const old = S.llm;
-      const url = k === "custom" ? svcUrl($("#w-url").value) : c.url, model = $("#w-model").value.trim();
+      const url = k === "custom" ? svcUrl($("#w-url").value) : c.url; let model = $("#w-model").value.trim();
       if (!url) { r.className = "res bad"; r.textContent = "Впишите адрес сервиса"; return; }
+      if (c.rec && model === c.model) {          // имя по умолчанию не трогали — берём то, что у сервиса есть сейчас (имена меняются)
+        r.className = "res"; r.textContent = "узнаю модели сервиса…";
+        const ms = await svcModels(url, $("#w-key").value.trim());
+        if (ms.length && !ms.includes(model)) { model = c.rec.find(m => ms.includes(m)) || ms.slice().sort()[0]; $("#w-model").value = model; }
+      }
       if (!model) { r.className = "res bad"; r.textContent = "Впишите имя модели"; return; }
       let name = c.name; if (k === "custom") { try { name = new URL(url).host; } catch (e) { name = "Свой сервис"; } }
       const mk = (base) => Object.assign({}, DEF.llm, { kind: "openai", name, base_url: base, api_key: $("#w-key").value.trim(), model, disable_thinking: false });

@@ -149,8 +149,8 @@ async function openTask(id) {
     if (tTab === "results") wireOutputs(t);
     $$("#t-view [data-tab]").forEach(b => b.onclick = () => { tTab = b.dataset.tab; openTask(id); });
     $$("#t-view [data-a]").forEach(b => b.onclick = async () => {
-      if (b.dataset.a === "task_delete" && !confirm("Удалить задачу вместе с её папкой?")) return;
-      if (b.dataset.a === "task_discard" && !confirm("Отклонить изменения? Рабочая копия будет удалена.")) return;
+      if (b.dataset.a === "task_delete" && !await ask("Удалить задачу вместе с её папкой?")) return;
+      if (b.dataset.a === "task_discard" && !await ask("Отклонить изменения? Рабочая копия будет удалена.")) return;
       try { const r = await core.call(b.dataset.a, { id }); if (typeof r === "string") toast(r); if (b.dataset.a === "task_delete") tCur = ""; loadTasks(); if (b.dataset.a !== "task_delete") openTask(id); else $("#t-view").innerHTML = ""; } catch (e) { toast(e.message); }
     });
     if ($("#t-ansgo")) $("#t-ansgo").onclick = () => core.call("task_answer", { id, text: $("#t-ans").value }).then(() => openTask(id)).catch(e => toast(e.message));

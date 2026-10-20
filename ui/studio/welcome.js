@@ -83,7 +83,7 @@ function renderVault(items) {
   $$("#v-list [data-v]").forEach(b => b.onclick = async () => {
     const row = b.closest(".ritem"), id = row.dataset.id, val = row.querySelector(".vval");
     try {
-      if (b.dataset.v === "del") { if (!confirm("Удалить из сейфа «" + row.querySelector(".rtext").textContent + "»?")) return; renderVault((await core.call("vault_delete", { id })).items); return; }
+      if (b.dataset.v === "del") { if (!await ask("Удалить из сейфа «" + row.querySelector(".rtext").textContent + "»?")) return; renderVault((await core.call("vault_delete", { id })).items); return; }
       const v = (await core.call("vault_reveal", { id })).value || "";
       if (b.dataset.v === "copy") { await navigator.clipboard.writeText(v); toast("Скопировано"); return; }
       const dots = val.textContent; val.textContent = v; val.classList.add("shown");
@@ -116,8 +116,8 @@ async function loadBackups() { try { renderBackups(await core.call("backup_info"
    восстановленные настройки читаются только при запуске. Сейф из копии с паролем заменяет здешний целиком (core/backup.py). */
 async function bkRestore(path, enc, when) {
   const r = $("#bk-res"); let password = "";
-  if (enc) { password = prompt("Пароль этой копии:") || ""; if (!password) return; }
-  if (!confirm(`Восстановить из копии${when ? " от " + bkDate(when) : ""}?\n\nФайлы из копии заменят одноимённые; ничего не удаляется. Текущее состояние сначала сохранится отдельной копией. Ассистент перезапустится.`)) return;
+  if (enc) { password = await askText("Пароль этой копии:") || ""; if (!password) return; }
+  if (!await ask(`Восстановить из копии${when ? " от " + bkDate(when) : ""}?\n\nФайлы из копии заменят одноимённые; ничего не удаляется. Текущее состояние сначала сохранится отдельной копией. Ассистент перезапустится.`)) return;
   r.className = "res"; r.textContent = "восстанавливаю…";
   try { const x = await core.call("backup_restore", { path, password });
         r.className = "res ok"; r.textContent = `Восстановлено: ${x.files} файлов${x.vault ? ", сейф — " + x.vault : ""}. Ассистент перезапускается…`; }

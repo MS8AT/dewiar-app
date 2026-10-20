@@ -46,8 +46,9 @@ for raw, want in (({"skin": "brand"}, ("neusky", True)), ({"skin": "brand", "ski
 sk = (ROOT / "ui/assets/skins.js").read_text(encoding="utf-8"); css = (ROOT / "ui/assets/skins.css").read_text(encoding="utf-8")
 ok('id: "neudusk", name: "Небесный вечер"' in sk and ".skin-neudusk {" in css, "«Небесный вечер» — в списке тем и в стилях")
 hud = (ROOT / "ui/hud.html").read_text(encoding="utf-8")
-ok("html.tw body.light:not(.mini) #card { inset: 6px;" in hud and "rgba(24,38,70" not in hud and "body.neu.light { --glass-shadow" not in hud,
-   "светлые темы: тень у самой карточки снаружи; тени внутри виджета — как были (20.10: усиленные внутренние — «грубо»)")
+ok("html.tw body.light:not(.mini) #card { inset" not in hud and "body.light:not(.mini) #card { box-shadow: inset 0 0 0 1px rgba(20,32,60,.075)" in hud
+   and "rgba(24,38,70" not in hud and "body.neu.light { --glass-shadow" not in hud,
+   "светлые темы: линия по краю карточки во всё окно — без пустого края, который Ubuntu закрашивал тёмным; тени внутри — как были")
 
 from playwright.sync_api import sync_playwright  # noqa: E402
 FAKE = "window.pywebview = { api: new Proxy({}, { get: () => () => Promise.resolve(true) }) };"

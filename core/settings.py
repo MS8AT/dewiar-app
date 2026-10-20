@@ -63,11 +63,18 @@ LLM_PRESETS = {
     "openai":    {"name": "OpenAI",            "kind": "openai", "base_url": "https://api.openai.com/v1"},
     "anthropic": {"name": "Anthropic Claude",  "kind": "anthropic", "base_url": "https://api.anthropic.com"},
     "deepseek":  {"name": "DeepSeek",          "kind": "openai", "base_url": "https://api.deepseek.com/v1"},
-    # российские агрегаторы (№141, 20.10: «как в Deepseek Harness — другие провайдеры»): оплата картой РФ, много моделей
-    "polza":     {"name": "Polza.ai",          "kind": "openai", "base_url": "https://polza.ai/api/v1"},
+    # признанные поставщики напрямую (20.10: «обязательно все оригинальные — Gemini, DeepSeek, Claude, Kimi, GLM, Qwen»):
+    # у всех — официальный OpenAI-совместимый адрес
+    "gemini":    {"name": "Google Gemini",     "kind": "openai", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai"},
+    "kimi":      {"name": "Kimi (Moonshot)",   "kind": "openai", "base_url": "https://api.moonshot.ai/v1"},
+    "glm":       {"name": "GLM (Z.ai)",        "kind": "openai", "base_url": "https://api.z.ai/api/paas/v4"},
+    "qwen":      {"name": "Qwen (Alibaba)",    "kind": "openai", "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"},
+    "mistral":   {"name": "Mistral",           "kind": "openai", "base_url": "https://api.mistral.ai/v1"},
+    "xai":       {"name": "Grok (xAI)",        "kind": "openai", "base_url": "https://api.x.ai/v1"},
+    # российские агрегаторы — оплата картой РФ (№141). Только давно работающие: ProxyAPI и VseGPT (с 2023 г.); AITunnel и
+    # Polza.ai убраны 20.10 по решению владельца — у кого подключены, работают как прежде (адрес хранится в профиле)
     "proxyapi":  {"name": "ProxyAPI",          "kind": "openai", "base_url": "https://api.proxyapi.ru/openai/v1"},
     "vsegpt":    {"name": "VseGPT",            "kind": "openai", "base_url": "https://api.vsegpt.ru/v1"},
-    "aitunnel":  {"name": "AITunnel",          "kind": "openai", "base_url": "https://api.aitunnel.ru/v1"},
 }
 
 DEFAULTS = {

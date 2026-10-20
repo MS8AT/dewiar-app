@@ -300,7 +300,7 @@ $("#sh-refresh").onclick = () => core.call("home_refresh").then(shFill).catch(e 
 // умный дом — на телефон QR-кодом (только ключ дома; через сервер ключ не ходит): dewiar://import?c=… с одним «home»
 $("#sh-phone").onclick = async () => { const box = $("#sh-qrbox"); if (box.style.display !== "none") { box.style.display = "none"; $("#sh-qr").innerHTML = ""; return; }
   try { const d = await core.call("phone_home"); $("#sh-qr").innerHTML = qrSvg(d.url); box.style.display = ""; } catch (e) { toast(e.message); } };
-$("#sh-off").onclick = () => { if (confirm("Отключить умный дом?")) core.call("home_forget").then(shFill).catch(e => toast(e.message)); };
+$("#sh-off").onclick = async () => { if (await ask("Отключить умный дом?")) core.call("home_forget").then(shFill).catch(e => toast(e.message)); };
 
 /* ---------- календари Google/Яндекс ---------- */
 const I_CAL = '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>';
@@ -313,7 +313,7 @@ function csFill(c) {
         `<span>событий: ${st.count || 0}</span>${when ? `<span>обновлён ${escH(when)}</span>` : ""}`}<span>${escH(x.url)}</span></div></div>
       <label class="tg" title="Показывать"><input type="checkbox" data-c="on" ${x.enabled !== false ? "checked" : ""}><i></i></label>
       <div class="ract"><button data-c="del" title="Отключить календарь">${SVG(I_DEL)}</button></div></div>`; }).join("");
-  $$("#cs-list [data-c=del]").forEach(b => b.onclick = async () => { const id = b.closest(".ritem").dataset.id; if (!confirm("Отключить этот календарь?")) return;
+  $$("#cs-list [data-c=del]").forEach(b => b.onclick = async () => { const id = b.closest(".ritem").dataset.id; if (!await ask("Отключить этот календарь?")) return;
     try { csFill(await core.call("cal_remove", { id })); } catch (e) { toast(e.message); } });
   $$("#cs-list [data-c=on]").forEach(b => b.onchange = async () => { const id = b.closest(".ritem").dataset.id;
     try { csFill(await core.call("cal_toggle", { id, on: b.checked })); } catch (e) { toast(e.message); } });
