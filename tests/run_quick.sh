@@ -10,6 +10,7 @@ gh_error() {   # в GitHub Actions — ещё и пометка с причин�
   [ -n "$GITHUB_ACTIONS" ] || return 0
   # в заголовке пометки «:» и «,» — разделители команды GitHub: без замены пометка молча пропадает (21.10: «Встречи»: …, …)
   local m=${2:-без подробностей — см. журнал шага} t=$1; m=${m//'%'/'%25'}; m=${m//$'\n'/'%0A'}; t=${t//'%'/'%25'}; t=${t//':'/'%3A'}; t=${t//','/'%2C'}; echo "::error title=$t::$m"
+  local s="$1 — $(head -c 300 <<<"$2" | tr '\n' ' ')"; s=${s//'%'/'%25'}; echo "::error::$s"   # и простая пометка без заголовка — на случай, если заголовок не принят
   printf '### ❌ %s\n```\n%s\n```\n' "$1" "$2" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
 run() { local name=$1; shift; local out; local ws; ws=$(mktemp -d)
   out=$(DEWIAR_WORKSPACE_DIR=$ws timeout 300 "$@" 2>&1 | tr -d "\r"; echo "RC=${PIPESTATUS[0]}"); local rc=${out##*RC=}; out=${out%RC=*}
