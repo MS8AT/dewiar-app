@@ -83,6 +83,10 @@ def run_core(state, extra_env, wait=60):
     return text
 
 
+if not (ROOT / "data" / f"{VOSK}.zip").exists():         # открытая копия на GitHub — без моделей в data/
+    print("нет data/" + VOSK + ".zip — проверку настоящим ядром пропускаю")
+    print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
+    sys.exit(1 if fails else 0)
 base = tmp / "core1"
 state = base / "Пользователи" / "Виталий" / "AppData" / "Dewiar"
 (state / "models").mkdir(parents=True)

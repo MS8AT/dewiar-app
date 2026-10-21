@@ -55,7 +55,8 @@ try:
         pg.evaluate("$('nav button[data-p=\"ears\"]').click()"); pg.wait_for_timeout(900)
         E = pg.inner_text("#mdl-ears")
         ok("GigaAM v3" in E and "Слух имени" in E and ("скачана" in E), f"«Слух» → «Скачано на этом компьютере»: {E[:160]!r}")
-        ok(("Скачать" in E) == (not g["installed"]), "не скачанное — с кнопкой «Скачать»")
+        ok(("Скачать" in E) == any(not x["installed"] for x in d["items"] if x["group"] == "ears"),   # любое не скачанное в «Слухе», не только GigaAM
+           "не скачанное — с кнопкой «Скачать»")
         pg.evaluate("$('nav button[data-p=\"voice\"]').click()"); pg.wait_for_timeout(900)
         V = pg.inner_text("#mdl-voice")
         ok("Vosk TTS" in V and "Piper — Ирина" in V and "~63 МБ" in V, f"«Голос»: Vosk TTS и голоса Piper с размерами: {V[:200]!r}")

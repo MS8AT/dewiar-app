@@ -350,7 +350,7 @@ try:
     # «Обновить службу» собирает образ из tar, который делает панель: раньше там были только Dockerfile и app.py — образ
     # с новым модулем не собирался, и цифры оставались (отзыв 15.10 после 0.38.52)
     import subprocess as _sp
-    if shutil.which("php"):
+    if shutil.which("php") and (V0 / "vllm/lib/ttsctl.php").exists():     # панели сервера в открытой копии нет
         tc = tmp / "tc"; (tc / "lib").mkdir(parents=True); (tc / "tts").mkdir()
         shutil.copy(V0 / "vllm/lib/ttsctl.php", tc / "lib/ttsctl.php")
         for f in ("Dockerfile", "app.py"):
