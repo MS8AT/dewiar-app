@@ -8,7 +8,8 @@ export DEWIAR_PY=${DEWIAR_PY:-$PY} DEWIAR_FAKE_RAM_GB=${DEWIAR_FAKE_RAM_GB:-16} 
 FAIL=0
 gh_error() {   # в GitHub Actions — ещё и пометка с причиной: журнал целиком там видно не всем, пометки — всем
   [ -n "$GITHUB_ACTIONS" ] || return 0
-  local m=$2; m=${m//'%'/'%25'}; m=${m//$'\n'/'%0A'}; echo "::error title=$1::$m"
+  # в заголовке пометки «:» и «,» — разделители команды GitHub: без замены пометка молча пропадает (21.10: «Встречи»: …, …)
+  local m=$2 t=$1; m=${m//'%'/'%25'}; m=${m//$'\n'/'%0A'}; t=${t//'%'/'%25'}; t=${t//':'/'%3A'}; t=${t//','/'%2C'}; echo "::error title=$t::$m"
   printf '### ❌ %s\n```\n%s\n```\n' "$1" "$2" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
 run() { local name=$1; shift; local out; local ws; ws=$(mktemp -d)
   out=$(DEWIAR_WORKSPACE_DIR=$ws timeout 300 "$@" 2>&1 | tr -d "\r"; echo "RC=${PIPESTATUS[0]}"); local rc=${out##*RC=}; out=${out%RC=*}
