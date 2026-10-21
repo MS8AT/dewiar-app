@@ -4,7 +4,7 @@
 # Те же правила, что в run_all.sh: проверка пройдена, только если нет ❌ И код выхода 0.
 TMPROOT=$(mktemp -d); export TMPDIR="$TMPROOT"; trap 'rm -rf "$TMPROOT"' EXIT
 PY=${1:-python3}; T="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(dirname "$T")"
-export DEWIAR_PY=${DEWIAR_PY:-$PY} DEWIAR_FAKE_RAM_GB=${DEWIAR_FAKE_RAM_GB:-16} DEWIAR_FAKE_CORES=${DEWIAR_FAKE_CORES:-8}
+export PYTHONUNBUFFERED=1 DEWIAR_PY=${DEWIAR_PY:-$PY} DEWIAR_FAKE_RAM_GB=${DEWIAR_FAKE_RAM_GB:-16} DEWIAR_FAKE_CORES=${DEWIAR_FAKE_CORES:-8}
 FAIL=0
 gh_error() {   # в GitHub Actions — ещё и пометка с причиной: журнал целиком там видно не всем, пометки — всем
   [ -n "$GITHUB_ACTIONS" ] || return 0
