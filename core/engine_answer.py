@@ -873,11 +873,13 @@ class AnswerMixin:
         # tools_probe_v 2: проверка первой версии ошибочно записывала «думающие» модели в «не умеет» (none);
         # v3 (22.10): облако Dewiar отклоняло проверку из-за chat_template_kwargs, и модель записывалась в «описанием
         # в тексте» (prompt) — такие записи один раз сбрасываем, чтобы проверить заново; найденные native остаются
-        if self.s.get("llm", "tools_probe_v") != 3:
+        # v4 (22.10, вечер): настоящая причина — сайт превращал пустой объект {} в схеме функции в [] (cloud.php
+        # chat_schema_fix); после обновления сайта — проверить ещё раз
+        if self.s.get("llm", "tools_probe_v") != 4:
             stale = {k: v for k, v in modes.items() if v == "native"}
             with self.s._lock:
                 self.s.data.setdefault("llm", {})["tools_modes"] = stale
-            self.s.update({"llm": {"tools_probe_v": 3}})
+            self.s.update({"llm": {"tools_probe_v": 4}})
             modes = stale
         if key in self._probing or (not force and key in modes):
             return

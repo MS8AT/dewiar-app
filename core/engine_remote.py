@@ -363,6 +363,46 @@ class RemoteMixin:
             chain.append(self.espeak)
         return chain
 
+    def _synth_mixed(self, eng, text, voice, sp):
+        """Синтез фразы: английские обороты и слова — английским голосом Piper, остальное — голосом персонажа (пакет 22.10,
+        №194: «произношение фраз на английском — жесть»: русский голос читал их русскими звуками). Голос сервера и
+        ElevenLabs многоязычные — им как раньше. Английского голоса ещё нет — один раз скачиваем в фоне, а пока читаем
+        по-русски. Частота — как у первого куска (иначе плеер перезапускался бы между кусками)."""
+        from tts import EN_VOICES, resample, split_en
+        parts = split_en(text) if not isinstance(eng, RemoteTTS) and self.s.get("tts", "english") is not False else [("ru", text)]
+        en_id = EN_VOICES["male" if voice.get("_gender") == "male" else "female"]
+        if all(lang == "ru" for lang, _ in parts) or not self.piper.has(en_id):
+            if any(lang == "en" for lang, _ in parts):
+                self._en_voice_fetch(en_id)
+            yield from eng.synth(pronounce(text, remote=isinstance(eng, RemoteTTS)), voice, sp)
+            return
+        target = None
+        for lang, seg in parts:
+            gen = (self.piper.synth(seg.strip(), dict(voice, piper=en_id, length_scale=1.0), sp, norm=False) if lang == "en"
+                   else eng.synth(pronounce(seg), voice, sp))
+            for rate, pcm in gen:
+                target = target or rate
+                yield target, resample(pcm, rate, target)
+
+    def _en_voice_fetch(self, en_id):
+        """Скачать английский голос Piper (~60 МБ) в фоне — один раз за запуск; стоп-кран «ничего в интернет» — не качаем."""
+        if getattr(self, "_en_fetching", None) == en_id:
+            return
+        self._en_fetching = en_id
+        import egress
+
+        def run():
+            if egress.local_only():
+                return
+            try:
+                if getattr(self.piper, "mirror", None) is None and hasattr(self, "_mirror"):
+                    self.piper.mirror = self._mirror("piper")     # со своего сайта, если голос там есть; иначе Hugging Face
+                self.piper.ensure(en_id)
+                log.info("🗣 Английский голос %s скачан — английские фразы теперь читает он", en_id)
+            except Exception as e:  # noqa: BLE001
+                log.info("🗣 Английский голос %s не скачался: %s", en_id, e)
+        threading.Thread(target=run, name="en-voice", daemon=True).start()
+
     def _fx_name(self, voice):
         """Обработка голоса: общая настройка «Голос → Эффекты» или своя у персонажа."""
         mode = self.s.get("tts", "fx") or "persona"
@@ -483,7 +523,7 @@ class RemoteMixin:
                             # высота голоса без отдельной обработки: синтезируем в 1/pitch раз быстрее, а играем с частотой
                             # rate*pitch — темп прежний, голос ниже (pitch < 1) или выше
                             t_syn = time.monotonic()
-                            for rate, pcm in eng.synth(pronounce(text, remote=isinstance(eng, RemoteTTS)), voice, speed / pitch):
+                            for rate, pcm in self._synth_mixed(eng, text, voice, speed / pitch):
                                 if not sent and time.monotonic() - t_syn > 3:   # синтез не успевает за речью (для отчётов)
                                     log.info("🗣 %s: фраза из %d симв. синтезировалась %.1f с", getattr(eng, "name", "голос"), len(text),
                                              time.monotonic() - t_syn)

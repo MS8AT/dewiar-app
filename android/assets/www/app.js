@@ -365,7 +365,8 @@ let S = (() => { try { return Object.assign({}, DEF, JSON.parse(prefGet("setting
 for (const k of ["llm", "stt", "tts", "home", "account", "net", "tg"]) S[k] = Object.assign({}, DEF[k], S[k] || {});
 // 22.10: облако отклоняло chat_template_kwargs, а телефон сразу переходил на функции текстом и запоминал это — один раз
 // проверим заново: теперь сначала пробуется запрос без chat_template_kwargs, с функциями полем (так они работают лучше)
-if (S.llm.tools_prompt && !S.llm.rej_v2) { delete S.llm.tools_prompt; S.llm.rej_v2 = 1; }
+// 22.10, вечер: настоящая причина — сайт превращал пустой {} в схеме функции в [] (cloud.php chat_schema_fix): ещё раз
+if (S.llm.tools_prompt && !S.llm.rej_v3) { delete S.llm.tools_prompt; S.llm.rej_v3 = 1; }
 applyProxy();                                      // прокси для серверов Dewiar — с первого запроса
 function saveS() { llmRemember(); prefSet("settings", JSON.stringify(S)); applyProxy(); setTimeout(startCardCheck, 0); }
 /* Прежние мозги (отчёт №117, 19.10: «отправил настройки с компьютера — телефон не подключается, и на Dewiar не вернуться; на

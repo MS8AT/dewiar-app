@@ -78,6 +78,24 @@ ok(sent and sent[0]["plain"] and "Отчёт о конкурентах" not in s
    and "Ночной разбор" in sent[0]["summary"], "отчёт разработчику: технический, без журнала и названий задач")
 ok(not nw.due(dt.datetime.now().replace(hour=5)), "второй раз за сутки — нет")
 
+# 22.10: задача упала из-за прав («Отказано в доступе») — ночью не перезапускаем, объясняем; сбои только модели (ключ,
+# страна, баланс) — не повод для отчёта разработчику (пакет 22.10, №193: «сбоев 4, не решено 0», всё про модель)
+import tasks as TK  # noqa: E402
+ok(TK.ACCESS_RX.search("[WinError 5] Отказано в доступе: 'C:\\Program Files\\x'") and TK.ACCESS_RX.search("PermissionError: [Errno 13] Permission denied")
+   and not TK.ACCESS_RX.search("модель или сеть не ответили"), "ошибка прав узнаётся (Windows, Linux), сеть — нет")
+tasks2 = {"e": T("e", "Почистить папку", status="failed", error="[WinError 5] Отказано в доступе", fail_kind="access", failed_at=now_iso)}
+told2, sent2 = [], []
+h2 = types.SimpleNamespace(tasks=types.SimpleNamespace(tasks=tasks2, tell=lambda tid, text: told2.append(tid)),
+                           reminders=types.SimpleNamespace(items=[]), workspace=host.workspace, s=host.s,
+                           incidents=lambda since: [{"ts": time.time() - 30, "kind": "error", "text": "Модель (openai): User location is not supported"}] * 3,
+                           report_send=lambda **k: (sent2.append(k), {"id": 78})[1])
+nw2 = N.NightWatch(h2); nw2.data = {}
+r2 = nw2.run()
+ok(not told2 and any("прав на файл или папку" in x for x in r2["left"]), f"нет прав — не перезапускаем, объясняем: {r2['left']}")
+tasks2.clear(); sent2.clear(); nw2.data = {}
+r3 = nw2.run()
+ok(not sent2, "сбои только модели (страна, ключ) — отчёт разработчику не уходит")
+
 # второй обход: та же задача снова упала — повтора нет; согласия на отчёты нет — не шлём; спокойно — молчим
 tasks["a"].data.update(failed_at=dt.datetime.now().isoformat(timespec="seconds"))
 nw.data["last_day"], nw.data["last_ts"] = "", time.time() - 5

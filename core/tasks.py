@@ -155,6 +155,12 @@ def _now():
     return dt.datetime.now().isoformat(timespec="seconds")
 
 
+# «Отказано в доступе», Permission denied, WinError 5 — задаче нужны права, которых нет: ночной обход не перезапускает её
+# каждую ночь, а один раз объясняет человеку (отложенное 22.10)
+ACCESS_RX = re.compile(r"Permission denied|PermissionError|Отказано в доступе|Access is denied|WinError 5\b|"
+                       r"Operation not permitted|EACCES|EPERM|нет доступа|нет прав", re.I)
+
+
 def _clean(name):
     """Название задачи -> допустимое имя папки (Windows запрещает \\/:*?"<>|), не длиннее 60 символов, без пробелов и точек
     по краям: Windows их срезает, и путь к «план.md» не совпадал с папкой (пакет 22.10: FileNotFoundError в синхронизации)."""
@@ -1227,6 +1233,8 @@ class TaskManager:
         if bug:
             msg = f"внутренняя ошибка программы ({e.__class__.__name__}: {msg}) — уже записана для разработчика"
         kind = "loop" if msg.startswith("застрял") else ("bug" if bug else ("idle_model" if "не взялась за дело" in msg else "failed"))
+        if not bug and ACCESS_RX.search(msg):
+            kind = "access"                           # нет прав на файл или папку — ночью повторять бесполезно (night.NO_RETRY)
         t.data.update(status="failed", error=msg, fail_kind=kind, failed_at=_now())   # fail_kind — для ночного обхода (night.py)
         t.journal(f"⚠ Ошибка: {msg}")
         self._trace(t, "loop_detected" if kind == "loop" else ("bug" if bug else "failed"))
