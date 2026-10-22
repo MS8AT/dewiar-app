@@ -867,6 +867,10 @@ class Api:
             set_card_base(float(w) / z, float(h) / z)
         set_zoom_sizes(z)
         W, H = SIZES["card"]
+        if final and getattr(self, "_pad_on", False):     # блокнот открыт — крепления под новый размер виджета
+            import threading
+            ps, zz = list(getattr(self, "_pad_size", None) or [None, None]), ZOOM[0] or 1.0
+            threading.Timer(0.4, lambda: self.pad_resize(ps[0] * zz if ps[0] else 0, ps[1] * zz if ps[1] else 0, True)).start()
         if WIN:
             try:
                 form = self.wins["card"].native
@@ -979,6 +983,9 @@ class Api:
         """Кнопка «В трей»: виджет прячется, ассистент слушает. Вернётся сам — на имя, напоминание, уведомление."""
         if getattr(self, "_pad_on", False):
             self.pad_hide()
+            self._pad_back = True                     # вернём блокнот вместе с виджетом (from_tray)
+        elif not self.in_tray:
+            self._pad_back = False
         first = not self.in_tray
         self.in_tray, self.popped = True, False
         self._hide_now()
@@ -1002,7 +1009,30 @@ class Api:
         self.show()
         if was:
             self._js("window.trayLeft && trayLeft()")
+        if was and getattr(self, "_pad_back", False):
+            # 22.10, владелец: «свернул блокнот с виджетом — вернул, а блокнот приходится открывать заново»: был открыт —
+            # открываем снова (в фоне: из меню трея мы в главном потоке GTK, а pad_open ждёт его)
+            self._pad_back = False
+            import threading
+            threading.Timer(0.35, self.pad_open).start()
         return True
+
+    def bring_back(self):
+        """Linux: Dewiar запустили ещё раз (меню приложений, `dewiar`) — виджет поверх и целиком на экране этого
+        монитора. GitHub #7 (Kubuntu, KDE): «после того как закрыл окно, больше никакими способами не появилось» —
+        повторный запуск только «будил» уже запущенный интерфейс, а виджет мог остаться за краем экрана."""
+        if WIN:
+            return False
+
+        def run():
+            gw = self._gw(self.mode)
+            if gw is None:
+                return False
+            gw.show_all()
+            gw.present()
+            _keep_on_screen(gw)
+            return True
+        return bool(self._gtk(run))
 
     def tray_state(self):
         # icon — есть ли значок в трее (на Linux без AppIndicator вернуть виджет можно только из меню приложений)
@@ -1919,6 +1949,9 @@ class Api:
         gap, clip = int(round(PAD_GAP * z)), int(round(PAD_CLIP * z))
         cw, ch = SIZES["card"]
         h = int(round(max(PAD_H_MIN, float(bh)) * z)) if bh else max(ch, int(round(PAD_MIN_H * z)))
+        real = self._card_h()                              # настоящая высота окна виджета: крепления — только на нём
+        if real and 0 < real < ch:
+            ch = real
         cx, cy = self.get_pos("card")
         mx, my, mw, mh = 0, 0, 1 << 15, 1 << 15
         try:
@@ -1939,8 +1972,12 @@ class Api:
         h = min(h, mh - 16)
         y = max(my + 8, min(int(cy), my + mh - h - 8))
         dy = y - int(cy)
-        clips = [(max(0, int(cy) - y + int(ch * k) - clip // 2), clip) for k in (0.2, 0.8)]
-        clips = [(cy_, c) for cy_, c in clips if cy_ + c <= h]
+        # крепления — там, где лист и виджет рядом (22.10, владелец: «лист растянул — нижний крепёж смотрится оторванным»):
+        # на 20 % и 80 % высоты виджета, но не ниже его края и не ниже края листа
+        top = int(cy) - y
+        lo, hi = max(0, top) + 6, min(h, top + ch) - clip - 6
+        clips = [(min(hi, max(lo, top + int(ch * k) - clip // 2)), clip) for k in (0.2, 0.8)] if hi > lo else []
+        clips = [c for i, c in enumerate(clips) if not i or c[0] - clips[i - 1][0] >= 2 * clip]
         return {"x": int(x), "y": int(y), "w": w, "h": h, "side": side, "gap": gap, "clips": clips, "dy": dy}
 
     def _pad_base(self):
@@ -1950,6 +1987,20 @@ class Api:
             u = ui_settings()
             s = self._pad_size = [u.get("pad_w"), u.get("pad_h")]
         return s
+
+    def _card_h(self):
+        """Высота окна виджета сейчас (логические px) или 0 — не узнали. По ней — крепления блокнота: размер в SIZES бывает
+        больше видимого (растягивали карточку, окно не дошло до размера)."""
+        try:
+            if WIN:
+                hw = self._hwnd("card")
+                if hw:
+                    return int(round(winshell.rect(hw)[3] / winshell.scale(hw)))
+                return 0
+            gw = self._gw("card")
+            return int(self._gtk(lambda: gw.get_size()[1]) or 0) if gw is not None else 0
+        except Exception:  # noqa: BLE001
+            return 0
 
     def pad_size(self):
         """Текущий размер листа в px окна (без зазора) — для растягивания за уголок (pad.js)."""
@@ -2655,6 +2706,7 @@ def main():
                         api.show_capture()
                         continue
                     api.from_tray()
+                    api.bring_back()
                     if what.startswith("settings"):
                         q = what[len("settings"):]
                         api.open_settings("connect" if q else "", q)

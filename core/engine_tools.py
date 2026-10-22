@@ -99,6 +99,8 @@ class ToolsMixin:
             if name == "set_reminder" and asked and "\n\nВложения:" in asked and isinstance(res, str):
                 res = self._reminder_link_files(turn, res)
             out = res["text"] if isinstance(res, dict) else str(res)
+            if name in FACT_TOOLS and out.strip():          # что узнала — коротко в историю разговора (engine_answer)
+                turn.facts = (getattr(turn, "facts", []) + [fact_line(name, args, out)])[-FACTS_PER_TURN:]
             self.emit("tool", name=name, title=title, status="done", detail=detail, result=out[:1500])
             log.info("   ↳ %s", (res["text"] if isinstance(res, dict) else res)[:160].replace("\n", " "))
             return res

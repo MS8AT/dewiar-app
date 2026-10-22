@@ -141,6 +141,26 @@ _PW_PIPE = re.compile(r"((?:echo|printf)\s+)(['\"]?)([^'\"|;&\s]+)\2(\s*\|\s*sud
 _PW_WORD = re.compile(r"(парол\w*|password|passwd|pass)([^.\n]{0,60})", re.I)
 
 
+# Что инструменты узнали — коротко в истории разговора (отзывы: «забывает IP» — узнала адрес командой, а на «а какой у
+# него провайдер?» искала заново или выдумывала: в истории оставался только её ответ словами, без найденного).
+FACT_TOOLS = {"web_search", "weather", "read_webpage", "find_notes", "read_file", "calc", "list_reminders", "calendar_list",
+              "money_report", "read_emails", "read_email", "search_documents", "ask_knowledge", "system_status", "task_status",
+              "look_at_screen", "look_through_camera", "app_update", "run_command", "server_run", "world_time", "close_read"}
+FACT_LEN, FACTS_PER_TURN, FACT_TURNS = 280, 3, 4
+
+
+def fact_line(name, args, out):
+    """Одна строка «что узнала»: имя(главное из аргументов) → начало результата; пароли — ***."""
+    a = ""
+    if isinstance(args, dict):
+        a = next((str(v) for k, v in args.items() if isinstance(v, (str, int, float)) and str(v).strip()), "")
+        a = " ".join(a.split())[:80]
+    res = " ".join(str(out or "").split())
+    if len(res) > FACT_LEN:
+        res = res[:FACT_LEN].rstrip() + "…"
+    return redact(f"{name}({a}) → {res}")
+
+
 def redact(text):
     """Пароли — не в журнал: «echo 'пароль' | sudo -S», «пароль администратора 1234abcd» → ***."""
     t = _PW_PIPE.sub(lambda m: m.group(1) + m.group(2) + "***" + m.group(2) + m.group(4), str(text or ""))

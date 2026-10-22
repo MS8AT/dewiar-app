@@ -24,6 +24,8 @@ def team_window(hist, me, name_of):
         if msgs[i]["role"] == "assistant":
             nxt = msgs[i].get("who") or me
         owner[i] = nxt
+    from engine_base import FACT_TURNS
+    with_facts = [k for k, m in enumerate(msgs) if m["role"] == "assistant" and m.get("facts") and owner[k] == me][-FACT_TURNS:]
     out, i = [], 0
     while i < len(msgs):
         if owner[i] == me:
@@ -32,6 +34,9 @@ def team_window(hist, me, name_of):
                 # что было сделано за этим ответом (съёмка 17.10: в истории оставались одни слова «Звоню», «Включаю»,
                 # «Отправила» — и модель решала, что достаточно сказать их ещё раз, не вызывая действие)
                 c += "\n[в этом ответе выполнено инструментами: " + ", ".join(msgs[i]["acts"]) + "]"
+            if i in with_facts:
+                # и что они узнали — коротко («забывает IP»: на уточнение искала заново или выдумывала); последние ответы
+                c += "\n[узнано инструментами — опирайся на это, не ищи заново: " + "; ".join(msgs[i]["facts"]) + "]"
             out.append({"role": msgs[i]["role"], "content": c})
             i += 1
             continue
@@ -47,7 +52,7 @@ def team_window(hist, me, name_of):
     return out
 
 ATT_DEFAULT_Q = "Посмотри вложения и коротко скажи, что в них."
-ACTS_RX = re.compile(r"\s*\[в этом ответе выполнено[^\]]*\]?")       # пометка в истории (team_window) — не для человека
+ACTS_RX = re.compile(r"\s*\[(?:в этом ответе выполнено|узнано инструментами)[^\]]*\]?")       # пометка в истории (team_window) — не для человека
 
 
 def _norm_answer(t):
@@ -1568,8 +1573,10 @@ class AnswerMixin:
         if turn.full.strip():
             said = text + (" [к сообщению была приложена картинка]" if images else "")
             acts = list(dict.fromkeys(getattr(turn, "tools_ok", None) or []))
+            facts = list(getattr(turn, "facts", None) or [])
             self.history += [{"role": "user", "content": said},
-                             {"role": "assistant", "content": turn.full.strip(), "who": self.s.get("persona"), **({"acts": acts} if acts else {})}]
+                             {"role": "assistant", "content": turn.full.strip(), "who": self.s.get("persona"),
+                              **({"acts": acts} if acts else {}), **({"facts": facts} if facts else {})}]
             self.last_turn_time = time.monotonic()
             self._conv_after()
             if not turn.via:

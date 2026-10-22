@@ -63,8 +63,7 @@ asyncio.run(m())
       echo "1:$({vis})"
       xdotool mousemove $((PX + 28)) $PY; sleep 0.6; xdotool click 1; sleep 3
       echo "2:$({vis})"
-      python3 {T}/ws.py {T}/cfg/token say '{{"text": "Лира, покажись"}}' {PORT}; sleep 4
-      xdotool mousemove $PX $PY; sleep 0.6; xdotool click 1; sleep 4
+      python3 {T}/ws.py {T}/cfg/token say '{{"text": "Лира, покажись"}}' {PORT}; sleep 5
       echo "3:$({vis})"
       xdotool mousemove $PX $PY; sleep 0.6; xdotool click 1; sleep 3
       echo "4:$({vis})"
@@ -81,7 +80,7 @@ asyncio.run(m())
         print("   блокнот не открылся и в первый раз — окружение не то (координаты кнопки), живую проверку не считаю")
     else:
         ok(res.get("2") == "НЕТ", "виджет в трее — блокнот спрятан вместе с ним")
-        ok(res.get("3") == "ДА", "после «покажись» кнопка блокнота снова открывает его")
-        ok(res.get("4") == "НЕТ" and res.get("5") == "ДА", "закрыть и открыть ещё раз — тоже работает")
+        ok(res.get("3") == "ДА", "после «покажись» блокнот вернулся вместе с виджетом (22.10: не открывать заново)")
+        ok(res.get("4") == "НЕТ" and res.get("5") == "ДА", "кнопка блокнота закрывает и открывает его снова")
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")
 sys.exit(1 if fails else 0)
