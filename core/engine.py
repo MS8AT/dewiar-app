@@ -20,6 +20,8 @@ from health import HealthMixin  # noqa: E402
 class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, RemoteMixin, CommandsMixin, IntroMixin, HealthMixin):
     def __init__(self, settings, personas, bridge, wav_input=None, null_player=False, server=False):
         self.s, self.personas, self.bridge = settings, personas, bridge
+        from brain_watch import configure
+        configure(settings)
         if self.s.get("persona") not in {p["id"] for p in personas.all()}:   # выбранного больше нет (стал шаблоном и т. п.)
             from personas import DEFAULT
             self.s.update({"persona": DEFAULT})
@@ -499,8 +501,9 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         return snap
 
     def _draft_skill(self, idea):
-        """Черновик навыка по описанию словами — пишет активная модель."""
-        prof = self.s.active_llm()
+        """Черновик навыка по описанию словами — пишет назначенный мозг."""
+        from brain_routes import profile
+        prof = profile(self.s, "auxiliary")
         if not prof:
             raise ValueError("сначала подключите модель")
         if len(idea.strip()) < 8:
@@ -512,7 +515,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
                   "\"body\": \"пошаговые инструкции ассистенту на русском, markdown\"}. "
                   "Инструкции пиши для самого ассистента: какие шаги, какие инструменты вызывать, как коротко "
                   "ответить голосом. Доступные инструменты: " + tools)
-        text = "".join(stream_chat(dict(prof, max_tokens=1500, disable_thinking=True, _subscription_current=self.s.active_llm), system,
+        text = "".join(stream_chat(dict(prof, max_tokens=1500, disable_thinking=True), system,
                                    [{"role": "user", "content": idea}], purpose="skill_draft"))
         m = re.search(r"\{.*\}", text, re.S)
         try:
@@ -598,6 +601,9 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
     # ---------- события наружу ----------
 
     def emit(self, type_, **kw):
+        if type_ == "task":
+            from brain_watch import safe
+            safe("task", kw.get("task"))
         if type_ == "wake":
             self._ui_wake()                                # имя услышано, а виджета нет (закрыт, упал) — открыть
         if type_ == "answer" and not kw.pop("model", False) and kw.get("text"):

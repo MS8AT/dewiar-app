@@ -14,7 +14,7 @@ class Element {
   set innerHTML(value) {
     this.children = []; this.html = value;
     if (this.tag === 'div') {
-      for (const key of ['.res', 'small', '.head input', '.head .btn', ...['transport', 'account', 'model', 'export', 'usage', 'history', 'memory_read', 'memory_write', 'tasks', 'project_read', 'task_limit', 'task_review', 'task_learning', 'auxiliary', 'meeting', 'diary'].map(k => `[data-field="${k}"]`)]) this.fields[key] = new Element(['transport', 'account', 'model'].some(k => key.includes(k)) ? 'select' : 'input');
+      for (const key of ['b', '.res', 'small', '.head input', '.head .btn', ...['name', 'transport', 'account', 'model', 'export', 'usage', 'history', 'memory_read', 'memory_write', 'tasks', 'project_read', 'task_limit', 'task_review', 'task_learning', 'auxiliary', 'meeting', 'diary'].map(k => `[data-field="${k}"]`)]) this.fields[key] = new Element(['transport', 'account', 'model'].some(k => key.includes(k)) ? 'select' : 'input');
       this.buttons = ['profiles', 'login-new', 'login', 'models', 'health', 'disconnect', 'remove', 'use-tasks'].map(op => Object.assign(new Element('button'), {dataset: {op}}));
     }
   }
@@ -38,6 +38,17 @@ test('rendering and adding do not call network or auto-activate subscription', a
   assert.equal(f.context.S.llm.profiles.new.kind, 'chatgpt_subscription');
   assert.equal(f.context.S.llm.profiles.new.subscription_transport, 'codex');
   assert.equal(f.context.S.llm.profiles.new.subscription_usage_reviewed, false);
+});
+
+test('several named Codex brains stay separate and renaming never contacts accounts', async () => {
+  const f = fixture(); let n = 0; f.context.uid = () => 'extra' + (++n);
+  f.add.onclick(); await Promise.resolve(); f.add.onclick(); await Promise.resolve();
+  assert.equal(Object.values(f.context.S.llm.profiles).filter(p => p.kind === 'chatgpt_subscription').length, 3);
+  assert.notEqual(f.context.S.llm.profiles.extra1.name, f.context.S.llm.profiles.extra2.name);
+  const field = f.el.fields['[data-field="name"]'];
+  await field.onchange({target: {value: 'Аналитик <script>never</script>'}});
+  assert.equal(f.context.S.llm.profiles.p.name, 'Аналитик <script>never</script>');
+  assert.equal(f.calls.length, 0); assert.equal(f.context.S.llm.active, 'old');
 });
 test('model choice and both acknowledgements survive cloned settings snapshots', async () => {
   const f = fixture(), field = k => f.el.fields[`[data-field="${k}"]`];

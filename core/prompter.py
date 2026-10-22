@@ -31,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 from engine_base import DATA_DIR, FRAME_S, STATE_DIR, log
+from brain_routes import profile as brain_profile
 
 # вопрос или возражение собеседника — повод подсказать
 Q_RX = re.compile(r"\?\s*$|^(?:ну\s+|а\s+|и\s+|так\s+)?(?:как|что|сколько|почему|зачем|когда|где|куда|откуда|какой|какая|какое|какие|каким|"
@@ -150,7 +151,7 @@ class Prompter:
             return {"on": self.on, "paused": self.paused, "meeting": dict(self.meeting), "status": self.status,
                     "files": [{"name": f["name"], "chars": f["chars"]} for f in self.files], "lines": self.lines[-30:],
                     "hints": self.hints[-20:], "sheet": self.sheet, "summary": self.summary,
-                    "brain": bool(self.eng.s.active_llm()), "loopback": True, "voice": self.voice_info()}
+                    "brain": bool(brain_profile(self.eng.s, "meeting")), "loopback": True, "voice": self.voice_info()}
 
     def _emit(self, kind, **kw):
         self.eng.emit("prompter", kind=kind, **kw)
@@ -546,7 +547,8 @@ class Prompter:
         """Подсказка: на реплику q (или по кнопке — по последним репликам). Новая отменяет недописанную."""
         if not self.on and why != "test":
             raise ValueError("суфлёр выключен — начните встречу")
-        if not self.eng.s.active_llm():
+        from brain_routes import profile
+        if not profile(self.eng.s, "meeting"):
             raise ValueError("нужен «Мозг» — выберите модель в студии")
         if self._hint_cancel:
             self._hint_cancel.set()
@@ -621,7 +623,8 @@ class Prompter:
                + ("ШПАРГАЛКА:\n" + "\n".join(f"В: {x['q']} — О: {x['a']}" for x in self.sheet[:10]) + "\n\n" if self.sheet else "")
                + "РАЗГОВОР (последние реплики):\n" + (self._transcript() or "(пока тихо)") + "\n\n"
                + self._ask_line(h["why"], q))
-        prof = dict(self.eng.s.active_llm(), temperature=0.3, max_tokens=360, _subscription_current=self.eng.s.active_llm)
+        from brain_routes import profile
+        prof = dict(profile(self.eng.s, "meeting") or {}, temperature=0.3, max_tokens=360)
         text, last, t0 = "", 0.0, time.monotonic()
         try:
             for kind, val in stream_events(prof, HINT_SYSTEM, [{"role": "user", "content": ctx}], cancel=cancel, tools=None, purpose="meeting"):
@@ -657,10 +660,11 @@ class Prompter:
 
     def _ask_model(self, system, content, max_tokens=900):
         from llm import stream_events
-        prof = self.eng.s.active_llm()
+        from brain_routes import profile
+        prof = profile(self.eng.s, "meeting")
         if not prof:
             return ""
-        prof = dict(prof, temperature=0.3, max_tokens=max_tokens, _subscription_current=self.eng.s.active_llm)
+        prof = dict(prof, temperature=0.3, max_tokens=max_tokens)
         return "".join(v for k, v in stream_events(prof, system, [{"role": "user", "content": content}], tools=None, purpose="meeting") if k == "text").strip()
 
     def _prepare_sheet(self):

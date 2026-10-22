@@ -4,6 +4,7 @@
 Команды *_cmd(text) разбирают фразу своим парсером (jobs.py, music.py, smarthome.py, vault.py, pc.py) и возвращают
 True, если ответили сами; False — фразу получит модель. Ответ одной фразой — через _say_quick (engine_tools.py)."""
 from engine_base import *  # noqa: F401,F403 — общие импорты и помощники движка
+from brain_routes import profile as brain_profile
 
 
 class MusicMixin:
@@ -451,10 +452,11 @@ class MusicMixin:
 
     def diary_ask(self, instruction, material):
         """Ночная запись: модель пишет голосом текущего персонажа (его подсказка и «Обо мне»), без инструментов."""
-        prof = self.s.active_llm()
+        from brain_routes import profile
+        prof = profile(self.s, "diary")
         if not prof:
             raise ValueError("нет модели — подключите её в «Мозге»")
-        return "".join(stream_chat(dict(prof, max_tokens=1600, _subscription_current=self.s.active_llm), self._system(False),
+        return "".join(stream_chat(dict(prof, max_tokens=1600), self._system(False),
                                    [{"role": "user", "content": instruction + "\n\n---\n\n" + material}], purpose="diary"))
 
     def _diary_loop(self):
@@ -475,7 +477,7 @@ class MusicMixin:
                 quiet = self.turn is None and (not self.last_turn_time or time.monotonic() - self.last_turn_time > 600)
                 hour = self.s.get("diary", "hour")
                 day = self.diary.pending(hour=3 if hour in (None, "") else int(hour)) if on is not False and quiet else None
-                if day and self.s.active_llm():
+                if day and brain_profile(self.s, "diary"):
                     got = self.diary.write(day)
                     if got:
                         self.emit("diary", **got)

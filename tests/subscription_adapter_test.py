@@ -133,7 +133,7 @@ class AdapterTests(unittest.TestCase):
         module = ast.parse((CORE / "llm.py").read_text(encoding="utf-8"))
         names = {"stream_events", "list_models", "test_profile"}
         selected = ast.Module(body=[n for n in module.body if isinstance(n, ast.FunctionDef) and n.name in names], type_ignores=[])
-        namespace = {"LLMError": RuntimeError}
+        namespace = {"LLMError": RuntimeError, "observed_stream": __import__("brain_watch").observed_stream}
         exec(compile(selected, "llm-guard-fixture", "exec"), namespace)
         with self.assertRaises(RuntimeError):
             next(namespace["stream_events"](PROFILE, "private memory", []))

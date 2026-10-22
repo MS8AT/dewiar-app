@@ -5,7 +5,7 @@
     {
       "path": "core/engine_answer.py",
       "before": "a19561639b8e0d72f4051fa728c8a53e9ba458609d1963402c93c1fe4cef35fa",
-      "after": "54409707043611f910eb3c3041fac9d44378229966e833e68910300da64249b0"
+      "after": "1b35385f8206a448d06900b92fef76fb43f58b006786d634987f0b896e8e27f0"
     },
     {
       "path": "core/engine_brain.py",
@@ -15,17 +15,17 @@
     {
       "path": "core/engine_commands.py",
       "before": "bdbfe3d2c59ed108d9a9bf2e75e964d25524e084793bd8cc9f2cdfbe59cecd37",
-      "after": "42a2231cadd4dc0a27cc6f7680f770f68aece7b9dfbe19296ab601bb02b6b75e"
+      "after": "7580a8377b6c452decced78371140c04e47913d024750af655b687224e221472"
     },
     {
       "path": "core/engine_music.py",
       "before": "6fdcacab3ac8241a21283e457ba7fc138984daf9877c5a67c7978856591a2d81",
-      "after": "d31efac6f4991cc64f5c5f6722fd52355d2c705871a2d6a3a615ce38c6f84bbf"
+      "after": "ac0fd3bd65559d738f20146bf96afe43e36140065a394cec6fc3de2594ae7987"
     },
     {
       "path": "core/engine.py",
       "before": "c69586de2994151c021432e3a098facdfc08a483795bb14e3ecc8cfd55249a14",
-      "after": "10a0573fe0fed8cbb9c431f7781a58e5b1dcdafe64fa0df5587eb5a91469f38d"
+      "after": "6604f0027d2acf958321f04fde4f5d84f53bf9d146e15019316ae08b61a320f1"
     },
     {
       "path": "core/exam.py",
@@ -35,7 +35,7 @@
     {
       "path": "core/llm.py",
       "before": "862713465774a3fd9fd09bdc576cdffc4fbd91db2c023adf94e9a4c24929091c",
-      "after": "136b203ae3300106915c2fa44a6070424a6b5dc1a47e26ff7bd2695885ec232b"
+      "after": "cc0be6fe643f06783d3727abf6a2435bd0fe078ea6e0ece72b9b6acf7dd413ac"
     },
     {
       "path": "core/night.py",
@@ -45,12 +45,12 @@
     {
       "path": "core/prompter.py",
       "before": "c23ee53a5cf0a67142bbe218e105dfb5d8d349745c6c2bffa55b41cb5bfb83da",
-      "after": "621df79f228ffca27d4ea763ec56f72e298adaa43fb77cd90f2c35a5f4487efe"
+      "after": "2dc2de56aad03037d9b5fccca4a56791cee4278da2afa69915773324f10547c3"
     },
     {
       "path": "core/subscription_adapter.py",
       "before": null,
-      "after": "7db31ae368232f86a2e9218958e7947505d898c18458174c7ab8b0bc3e186b95"
+      "after": "3592a5dc5ce16413d24784fe67533dacb06930ca1bc469e7220e2f885c3f460a"
     },
     {
       "path": "core/subscription_context.py",
@@ -125,12 +125,12 @@
     {
       "path": "ui/settings.html",
       "before": "22a58bb82570d5c3c8008b09fc8644c2611a390792bbfc848383d7e5deb0753f",
-      "after": "e318da93eecd9d4683e9da6bd8d3a2fdb651d4180160ec71ac9bf1e3f089b60e"
+      "after": "1b5683f0218ba71dcc74c44c8034997794c096fd1ab9e42b36a2590f27097789"
     },
     {
       "path": "ui/studio/brain.js",
       "before": "cf7faaad4179e60444503bbdd94d8aa17225e0a0005f4f6ada7958c15b925849",
-      "after": "d3754b7822cb7a0fc4a301406a2942fade476897bae1d3f5d3b84eb8bb1037c3"
+      "after": "935331c3e6b818a073e0d09111630de703d2945cb4e6ddb9a474e43788755877"
     },
     {
       "path": "ui/studio/subscription_confirm.js",
@@ -140,12 +140,32 @@
     {
       "path": "ui/studio/subscription.js",
       "before": null,
-      "after": "4ca75e6b513820bbd8b2731447baa5c8e6e8db41dc13c42b27d8424eb3ca84cc"
+      "after": "0355c166fd629cba6dd303df85a2a5479d13ca5a16f9d345ec3a6daecc8eedcd"
     },
     {
       "path": "ui/studio/tasks.js",
       "before": "156d09608499edebf1a564a7f07f1677abf7ce832d308e7d62befbc4d8865588",
       "after": "771b1932878c5a8e02fc579d29ebc4f14704b63a945125956b3907225a273fcd"
+    },
+    {
+      "path": "core/brain_routes.py",
+      "before": null,
+      "after": "92453be5c7091c9d856245b59d17a998b0f40477e0a29543ccf1e1b1eea9ca26"
+    },
+    {
+      "path": "core/brain_watch.py",
+      "before": null,
+      "after": "c73a275084426c11b101b1ea522ae148d32976d61f92da41d4da6e583cb9ce57"
+    },
+    {
+      "path": "core/settings.py",
+      "before": "e88cf8e6c3660eecf6b57406a0050590908e212f11ed0ba5a2e9035b311e214d",
+      "after": "a15d54f22bc5abd0daf066465dde7a2e4681255afbb20544400230ab16d7b9fa"
+    },
+    {
+      "path": "ui/studio/brains.js",
+      "before": null,
+      "after": "b759bb592c6040281062909c71a069e44acf15f800eb7ca3f81cfb4eb01051b6"
     }
   ]
 }

@@ -210,6 +210,21 @@ class CommandsMixin:
         """Выполнить команду окна cmd с аргументами a. -> данные для ответа; ValueError — понятная ошибка."""
         if cmd == "hello":
             return self.snapshot()
+        if cmd == "brain_watch_status":
+            from brain_watch import status
+            return status(self)
+        if cmd == "brain_routes_set":
+            from brain_routes import update
+            out = update(self.s, a.get("routes"))
+            self.emit("settings", settings=out)
+            return out
+        if cmd == "brain_watch_set":
+            enabled, stale = a.get("journal"), a.get("stale_seconds")
+            if type(enabled) is not bool or type(stale) is not int or not 30 <= stale <= 900:
+                raise ValueError("Журнал: да/нет; порог свежести — от 30 до 900 секунд")
+            self.s.update({"brain_watch": {"journal": enabled, "stale_seconds": stale}})
+            self.emit("settings", settings=self.s.snapshot())
+            return self.s.snapshot()
         if cmd == "sync_status":
             return self.sync_public()
         if cmd == "sync_now":
@@ -846,8 +861,8 @@ class CommandsMixin:
             after = self.s.snapshot()
             if "audio" in a["patch"] and hasattr(self, "_end_frames"):
                 self._pause_apply()                              # пауза конца фразы — сразу, без перезапуска слуха
-            if before["llm"].get("active") != after["llm"].get("active") or \
-                    before["llm"].get("profiles") != after["llm"].get("profiles"):
+            from brain_routes import needs_probe
+            if needs_probe(before["llm"], after["llm"]):
                 self.probe_tools_bg()
             if before["llm"].get("active") != after["llm"].get("active"):
                 self._brain_manual = time.monotonic()           # модель выбрали сами — автоматика час её не трогает

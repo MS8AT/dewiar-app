@@ -6,6 +6,7 @@ subscription_context; транспорт и закрытое хранилище 
 import importlib.util
 from pathlib import Path
 import threading
+from brain_watch import observed_call
 
 _RUNTIME = Path(__file__).resolve().parent / "subscription_runtime"
 _spec = importlib.util.spec_from_file_location("workbook_subscription_ipc", _RUNTIME / "ipc_client.py")
@@ -42,6 +43,7 @@ def ui_command(action, args, host=None):
         return {"ok": False, "code": "subscription_failed", "error": MESSAGES["subscription_failed"]}
 
 
+@observed_call
 def generate(profile, text, cancel, caller=invoke, response_schema=None):
     extra = {"response_schema": response_schema} if response_schema else {}
     result = caller("generate", profile=profile.get("subscription_profile_id"), model=profile.get("model"),

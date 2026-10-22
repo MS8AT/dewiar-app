@@ -961,9 +961,25 @@
     <p class="hint wadmin">Администратор прислал файл <b>.dewiar</b>? Это готовые настройки — откройте его двойным щелчком или в разделе
       <a href="#" id="w-toconnect">«Подключение»</a>, и всё настроится само.</p>
 
-    <h2>Подключённые модели</h2>
+    <h2 id="brains-count">Подключённые мозги</h2>
+    <p class="hint">Можно добавить несколько профилей одного сервера или подписки: дайте каждому имя и выберите его модель. Кружок слева выбирает основной мозг разговора; отдельные контуры назначаются ниже. Параллельный опрос всех мозгов не запускается.</p>
     <button class="btn" id="subscription-add" type="button">Добавить ChatGPT по подписке (личный локальный режим)</button>
     <div id="profiles"></div>
+    <details class="prof" id="brains-panel" open>
+      <summary>Мозги по контурам и сердце</summary>
+      <p class="hint">Наследование основного мозга не расширяет его разрешения. Удалённое назначение блокирует контур без замены на другой аккаунт.</p>
+      <div class="row" id="brain-routes"></div>
+      <div class="actions"><button class="btn" id="brain-routes-save">Сохранить назначения</button></div>
+      <h3>Сердце — локальный наблюдатель</h3>
+      <p class="hint">Не вызывает модели, не запускает и не повторяет задачи. Нет свежего сигнала — это неизвестный прогресс, а не доказанное зависание. Успешный ответ не означает приёмку результата.</p>
+      <label><input type="checkbox" id="brain-journal"> Вести локальный журнал метаданных вызовов и состояний задач</label>
+      <div class="row"><label class="f">Порог без свежего сигнала, секунд<input type="number" min="30" max="900" id="brain-stale"></label></div>
+      <div class="actions"><button class="btn" id="brain-watch-save">Сохранить наблюдение</button><button class="btn" id="brain-watch-refresh">Обновить локально</button></div>
+      <p class="hint" id="brain-watch-state">Состояние ещё не получено.</p>
+      <div id="brain-runs"></div>
+      <details><summary>Журнал — последние 100 событий</summary><pre id="brain-events" style="white-space:pre-wrap;max-height:340px;overflow:auto"></pre></details>
+      <p class="hint">Журнал хранится только на этом ПК, до 5000 событий. Без текстов запросов/ответов, ключей, адресов серверов и сырого текста ошибок. Не отправляется разработчику. Старые журналы чата и задач не объединяются и не удаляются.</p>
+    </details>
     <details style="margin:4px 0 8px"><summary class="hint" style="cursor:pointer">Добавить вручную (для опытных)</summary>
       <div class="chips" id="presets" style="margin-top:10px"></div>
     </details>
@@ -1466,6 +1482,7 @@
 <script src="studio/brain.js"></script>
 <script src="studio/subscription.js"></script>
 <script src="studio/subscription_confirm.js"></script>
+<script src="studio/brains.js"></script>
 <script src="studio/connect.js"></script>
 <script src="studio/plugins.js"></script>
 <script src="studio/dewiar.js"></script>

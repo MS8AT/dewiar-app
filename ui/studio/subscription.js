@@ -7,6 +7,7 @@ function renderSubscriptionProfile(box, id, p) {
   el.className = 'prof' + (S.llm.active === id ? ' on' : '') + (openProf === id ? ' open' : '');
   el.innerHTML = `<div class="head"><input type="radio" name="act" title="Сделать активной"><div class="t"><b>${title}</b><small></small></div><span class="res"></span><button class="btn small">Настроить</button></div>
   <div class="body"><p class="hint">Личный локальный прототип. Обработка — в OpenAI, не на этом ПК. По умолчанию отправляется только текущий текст. Дополнительные данные Codex — только по галочкам ниже. Hermes / Human / семантическая память автоматически не подключаются. Другие аккаунты Windows имеют отдельное хранилище; профили одного пользователя Windows не являются границей защиты от этого пользователя.</p>
+  <label class="f">Название мозга<input data-field="name" type="text" maxlength="120" placeholder="Например: Кодер, Аналитик, Дневник"></label>
   <label class="f">Способ подключения<select data-field="transport"><option value="codex">Codex — официальный app-server, собственный вход</option><option value="siwc">SIWC — отдельное разрешение приложения (SDK устанавливается отдельно)</option></select></label>
   <p class="hint">${codex ? 'Отдельный профиль Codex в защищённом хранилище Windows. Токены из Hermes и основного Codex не копируются. Используется установленный проверенный CLI; правила организации сохраняются.' : 'SIWC требует отдельного допуска аккаунта и приложения. Ошибка 3p_delegated_access_policy_denied не исправляется сменой имени агента.'} Переключение режима сбросит выбор аккаунта, модели и подтверждения, но не удалит вход.</p>
   <div class="actions"><button class="btn" data-op="profiles">Аккаунты: обновить локально</button><button class="btn" data-op="login-new">Войти в новый аккаунт ChatGPT</button><button class="btn" data-op="login">Переподключить выбранный</button></div>
@@ -45,6 +46,13 @@ function renderSubscriptionProfile(box, id, p) {
     return save({llm: {profiles: S.llm.profiles}}, true);
   };
   const capabilities = ['history', 'memory_read', 'memory_write', 'tasks', 'project_read', 'task_review', 'task_learning', 'auxiliary', 'meeting', 'diary'];
+  $('b', el).textContent = p.name || title;
+  $('[data-field="name"]', el).value = p.name || '';
+  $('[data-field="name"]', el).onchange = async ev => {
+    const name = ev.target.value.trim();
+    if (!name || name.length > 120) { ev.target.value = p.name || ''; toast('Название: от 1 до 120 символов.'); return; }
+    p.name = name; await persist(); renderProfiles();
+  };
   const changedScope = () => { p.subscription_scope_revision = uid() + '-' + Date.now(); };
   const clearConsent = () => {
     p.subscription_export = false; p.subscription_usage_reviewed = false;
@@ -147,7 +155,8 @@ function renderSubscriptionProfile(box, id, p) {
 
 $('#subscription-add').onclick = () => {
   const id = uid();
-  S.llm.profiles[id] = {name: 'Codex по подписке', kind: 'chatgpt_subscription', subscription_transport: 'codex', base_url: '',
+  const number = Object.values(S.llm.profiles).filter(p => p.kind === 'chatgpt_subscription').length + 1;
+  S.llm.profiles[id] = {name: 'Codex по подписке ' + number, kind: 'chatgpt_subscription', subscription_transport: 'codex', base_url: '',
     model: '', subscription_profile_id: '', subscription_export: false, subscription_usage_reviewed: false};
   openProf = id;
   save({llm: {profiles: S.llm.profiles}}, true).then(renderProfiles);

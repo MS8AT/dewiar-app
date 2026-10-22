@@ -9,8 +9,14 @@
    llm.profiles в patch ядро заменяет целиком (settings._merge: удалённый профиль не должен вернуться), поэтому
    любая правка профиля шлёт весь словарь S.llm.profiles. */
 let openProf = null;
-function uid() { return "p" + Math.random().toString(36).slice(2, 8); }
+function uid() {
+  let id;
+  do { id = "p" + (globalThis.crypto?.randomUUID ? crypto.randomUUID().replaceAll("-", "") : Math.random().toString(36).slice(2, 14)); }
+  while (S?.llm?.profiles?.[id]);
+  return id;
+}
 function renderProfiles() {
+  if (typeof renderBrainRoutes === 'function') renderBrainRoutes();
   const box = $("#profiles"); box.innerHTML = "";
   const profs = S.llm.profiles || {};
   if (!Object.keys(profs).length) box.innerHTML = '<p class="hint" style="margin-bottom:10px">Пока ни одной — выберите выше, где будет думать ассистент.</p>';

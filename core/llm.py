@@ -17,6 +17,7 @@ import sys
 import time
 
 import httpx
+from brain_watch import observed_stream
 
 from settings import LLM_PRESETS
 
@@ -271,6 +272,8 @@ def _anth_root(base):
 def list_models(p, timeout=6):
     """-> имена моделей на сервере профиля p. Если /models нет (404), а /api/tags есть — это Ollama без
     OpenAI-совместимого API: адрес запоминается в _native. Ошибки — LLMError с понятным текстом."""
+    if p.get("_route_missing"):
+        raise LLMError("Назначенный мозг удалён. Выберите профиль для этого контура; автоматической замены нет.")
     if p.get("kind") == "chatgpt_subscription":
         raise LLMError("Подписка: используйте отдельную кнопку моделей аккаунта; фоновый доступ запрещён.")
     base = _base(p)
@@ -982,6 +985,7 @@ def wants_think(text, mode=None):
     return bool(HARD_ASK.search(t)) or len(t) > 280
 
 
+@observed_stream
 def stream_events(p, system, messages, cancel=None, tools=None, _retry=0, *, purpose=None):
     """Поток событий: ("text", кусок) и в конце, если модель решила действовать,
     ("tools", [{"id", "name", "args"}]). cancel — threading.Event для мгновенной остановки. Ошибки — LLMError.
@@ -990,6 +994,8 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0, *, pur
     функции текстом, без chat_template_kwargs, родной API Ollama, короче (_lite). Если всё время ушло на
     «размышления» и текста нет — повторит с выключенными размышлениями и вчетверо большим лимитом.
     Служебные ключи профиля с «_» (_flat, _lite, _no_kwargs, _empty_retry) ставит только сама при повторах."""
+    if p.get("_route_missing"):
+        raise LLMError("Назначенный мозг удалён. Выберите профиль для этого контура; автоматической замены нет.")
     if p.get("kind") == "chatgpt_subscription":
         from subscription_adapter import text_events, SubscriptionError
         from subscription_context import ContextError

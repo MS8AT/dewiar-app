@@ -78,6 +78,7 @@ LLM_PRESETS = {
 }
 
 DEFAULTS = {
+    "brain_watch": {"journal": True, "stale_seconds": 90},
     "version": 1,
     "persona": "lira",
     "all_names": True,              # отзываться на имя любого персонажа и переключаться на него
@@ -87,6 +88,7 @@ DEFAULTS = {
     "llm": {
         "active": "",
         "profiles": {},             # id -> {name, kind, base_url, api_key, model, disable_thinking, temperature, max_tokens}
+        "routes": {},               # явные профили контуров; пустое значение наследует активный
         "history_turns": 8,
         "think_auto": True,         # сложная просьба (стих, расчёт, анализ, план, код) — модель думает перед ответом (llm.wants_think)
         "tools_modes": {},          # «адрес|модель» → native | prompt | none: как модель вызывает инструменты (проверяется само)
@@ -269,7 +271,10 @@ class Settings:
     def active_llm(self):
         with self._lock:
             llm = self.data["llm"]
-            return copy.deepcopy(llm["profiles"].get(llm["active"]))
+            p = copy.deepcopy(llm["profiles"].get(llm["active"]))
+            if p:
+                p.update(_brain_id=llm["active"], _brain_role="chat")
+            return p
 
 
 def migrate_from_cortex():

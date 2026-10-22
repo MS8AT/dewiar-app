@@ -451,9 +451,8 @@ class AnswerMixin:
 
     def llm_profile(self):
         """Модель для фоновых задач: своя из настроек задач, иначе активная."""
-        pid = self.s.get("tasks", "llm") or ""
-        profs = self.s.get("llm", "profiles") or {}
-        return dict(profs[pid], id=pid) if pid in profs else self.s.active_llm()
+        from brain_routes import profile
+        return profile(self.s, "tasks")
 
     def max_steps(self):
         return int(self.s.get("tasks", "max_steps") or 80)
