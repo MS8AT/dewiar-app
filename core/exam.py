@@ -779,7 +779,7 @@ def judge(profile, sc, transcript, state_text, at=None, memory=""):
                + (f"ЧТО ПОМОЩНИК ЗНАЛ О ПОЛЬЗОВАТЕЛЕ (его память с прошлых разговоров — упоминать это не выдумка):\n{memory[-2500:]}\n\n" if memory.strip() else "")
                + f"ХОРОШИЙ ОТВЕТ: {sc['judge']}\n\nРазговор шёл {when:%d.%m.%Y} ({WDAYS[when.weekday()]}) в {when:%H:%M}.")
     try:
-        out = "".join(stream_chat(dict(profile, temperature=0, max_tokens=300), JUDGE_SYSTEM, [{"role": "user", "content": content}]))
+        out = "".join(stream_chat(dict(profile, temperature=0, max_tokens=300), JUDGE_SYSTEM, [{"role": "user", "content": content}], purpose="exam"))
     except Exception as e:  # noqa: BLE001
         return {"score": None, "why": f"судья не ответил: {e}"}
     m = re.search(r"\{.*\}", out, re.S)

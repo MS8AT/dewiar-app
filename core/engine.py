@@ -512,8 +512,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
                   "\"body\": \"пошаговые инструкции ассистенту на русском, markdown\"}. "
                   "Инструкции пиши для самого ассистента: какие шаги, какие инструменты вызывать, как коротко "
                   "ответить голосом. Доступные инструменты: " + tools)
-        text = "".join(stream_chat(dict(prof, max_tokens=1500, disable_thinking=True), system,
-                                   [{"role": "user", "content": idea}]))
+        text = "".join(stream_chat(dict(prof, max_tokens=1500, disable_thinking=True, _subscription_current=self.s.active_llm), system,
+                                   [{"role": "user", "content": idea}], purpose="skill_draft"))
         m = re.search(r"\{.*\}", text, re.S)
         try:
             d = json.loads(m.group(0)) if m else {}

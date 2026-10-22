@@ -872,7 +872,7 @@ core.on("hello", d => {
   a.classList.toggle("fin", e.status === "done" || e.status === "declined");
   showCap(null, null);
 })
-.on("confirm", e => { showCap(null, e.text); $("yn").classList.add("on"); $("y").focus(); requestAnimationFrame(fitCap); })
+.on("confirm", e => { $("yn").dataset.confirmId = e.id || ''; showCap(null, e.text); $("yn").classList.add("on"); $("y").focus(); requestAnimationFrame(fitCap); })
 .on("confirm_done", () => { $("yn").classList.remove("on"); requestAnimationFrame(fitCap); })
 .on("handoff", e => { $("act").className = "on"; $("act").textContent = `Отвечает ${e.name}${e.role ? " · " + e.role.toLowerCase() : ""}`; })
 .on("note_saved", e => {
@@ -1072,8 +1072,8 @@ card.addEventListener("pointerup", () => {
 });
 card.addEventListener("pointercancel", () => { if (hold && hold.by === "mouse") holdFinish(true); drag = null; card.classList.remove("dragging"); });
 
-$("y").onclick = () => core.call("confirm_answer", { ok: true }).catch(showErr);
-$("n").onclick = () => core.call("confirm_answer", { ok: false }).catch(showErr);
+$("y").onclick = () => core.call("confirm_answer", { ok: true, id: $("yn").dataset.confirmId }).catch(showErr);
+$("n").onclick = () => core.call("confirm_answer", { ok: false, id: $("yn").dataset.confirmId }).catch(showErr);
 $("b-mic").onclick = guard($("b-mic"), () => core.call("mute", { on: !muted }).then(m => { muted = m; $("b-mic").classList.toggle("on", m); $("b-mic").title = m ? "Включить микрофон" : "Выключить микрофон"; }).catch(showErr));
 $("b-set").onclick = () => { const a = api(); if (a) a.open_settings(); };
 /* Dewiar Облако: заряд на исходе — мягкая строка в виджете (нажать — студия, «Мозг») */

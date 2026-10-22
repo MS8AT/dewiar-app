@@ -14,7 +14,7 @@ class Element {
   set innerHTML(value) {
     this.children = []; this.html = value;
     if (this.tag === 'div') {
-      for (const key of ['.res', 'small', '.head input', '.head .btn', ...['transport', 'account', 'model', 'export', 'usage', 'history', 'memory_read', 'memory_write', 'tasks', 'project_read', 'task_limit'].map(k => `[data-field="${k}"]`)]) this.fields[key] = new Element(['transport', 'account', 'model'].some(k => key.includes(k)) ? 'select' : 'input');
+      for (const key of ['.res', 'small', '.head input', '.head .btn', ...['transport', 'account', 'model', 'export', 'usage', 'history', 'memory_read', 'memory_write', 'tasks', 'project_read', 'task_limit', 'task_review', 'task_learning', 'auxiliary', 'meeting', 'diary'].map(k => `[data-field="${k}"]`)]) this.fields[key] = new Element(['transport', 'account', 'model'].some(k => key.includes(k)) ? 'select' : 'input');
       this.buttons = ['profiles', 'login-new', 'login', 'models', 'health', 'disconnect', 'remove', 'use-tasks'].map(op => Object.assign(new Element('button'), {dataset: {op}}));
     }
   }

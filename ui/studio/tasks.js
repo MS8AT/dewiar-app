@@ -25,6 +25,7 @@ async function loadTasks() {
     if (!tCur && list.length) openTask(list[0].id);
     $("#t-llm").innerHTML = `<option value="">Та же, что для разговора</option>` + Object.entries(S.llm.profiles || {}).map(([k, p]) => `<option value="${k}">${escH(p.name || k)}</option>`).join("");
     $("#t-llm").value = S.tasks && S.tasks.llm || "";
+    taskSubscriptionInfo();
   } catch (e) { toast(e.message); }
 }
 function renderDiff(d) {
@@ -186,7 +187,17 @@ $("#t-go").onclick = async () => {
   try { const t = await core.call("task_create", { goal, title: $("#t-title").value.trim(), project: $("#t-proj").value.trim() });
     $("#t-form").style.display = "none"; $("#t-goal").value = ""; tCur = t.id; tTab = "plan"; loadTasks(); } catch (e) { toast(e.message); }
 };
-$("#t-llm").onchange = () => save({ tasks: { llm: $("#t-llm").value } });
+function taskSubscriptionInfo() {
+  const p = (S.llm.profiles || {})[$('#t-llm').value || S.llm.active] || {};
+  const on = p.kind === 'chatgpt_subscription', info = $('#t-subscription-info');
+  if (!info) return;
+  info.hidden = !on;
+  info.textContent = on ? `Codex: отдельный режим. Лимит ${p.subscription_task_limit ?? 5} запросов на задачу, включая самопроверку и урок. Разрешения — в профиле «Мозг». Подтверждение запуска появится здесь. Чтение проекта разрешается отдельно; команды, запись кода и подзадачи не поддерживаются. Поля передышек и автозапуска команд ниже к Codex не применяются.` : '';
+  for (const key of ['tasks.max_steps', 'tasks.cycles', 'tasks.auto_run']) {
+    const input = $(`[data-k="${key}"]`); if (input) input.disabled = on;
+  }
+}
+$('#t-llm').onchange = async () => { await save({tasks: {llm: $('#t-llm').value}}); taskSubscriptionInfo(); };
 core.on("task", e => {                     // события идут потоком на каждый шаг — перерисовываем не чаще раза в 400 мс
   if (!$("#p-tasks").classList.contains("cur")) return;
   clearTimeout(tTimer); tTimer = setTimeout(() => { loadTasks(); if (tCur === e.task.id) openTask(tCur); }, 400);

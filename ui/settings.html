@@ -344,6 +344,7 @@
       <div class="fview" id="t-view"><div class="fempty">Задач пока нет — или выберите задачу слева.</div></div>
     </div>
     <h2>Настройки задач</h2>
+    <p class="hint" id="t-subscription-info" hidden></p>
     <div class="row">
       <label class="f">Модель для задач<select id="t-llm"></select><span class="hint">Для сложного кода можно выбрать модель посильнее, чем для разговора.</span></label>
       <label class="f">Шагов без передышки<input type="number" min="10" max="500" data-k="tasks.max_steps"><span class="hint">После них — минута передышки, и задача продолжает.</span></label>
@@ -1464,6 +1465,7 @@
 <script src="studio/personas.js"></script>
 <script src="studio/brain.js"></script>
 <script src="studio/subscription.js"></script>
+<script src="studio/subscription_confirm.js"></script>
 <script src="studio/connect.js"></script>
 <script src="studio/plugins.js"></script>
 <script src="studio/dewiar.js"></script>

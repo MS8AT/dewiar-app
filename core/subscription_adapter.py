@@ -14,9 +14,20 @@ _spec.loader.exec_module(_ipc)
 MESSAGES, SubscriptionError = _ipc.MESSAGES, _ipc.SubscriptionError
 invoke, is_subscription = _ipc.invoke, _ipc.is_subscription
 
-def ui_command(action, args):
+def ui_command(action, args, host=None):
     """Чтение статуса не обновляет токены и не вызывает модель."""
     try:
+        if action in {"confirm_get", "confirm_answer"}:
+            box = getattr(host, "pending_confirm", None)
+            if not box or box.get("source") != "subscription" or box["event"].is_set():
+                return {"ok": True, "data": None}
+            if action == "confirm_get":
+                return {"ok": True, "data": {"id": box["id"], "text": box["text"]}}
+            if args.get("id") != box["id"] or type(args.get("ok")) is not bool:
+                raise SubscriptionError("invalid_request")
+            box["answer"] = args["ok"]
+            box["event"].set()
+            return {"ok": True, "data": None}
         if action not in {"health", "profiles", "login", "models", "disconnect"}:
             raise SubscriptionError("invalid_request")
         transport = args.get("transport", "siwc")
@@ -42,6 +53,44 @@ def generate(profile, text, cancel, caller=invoke, response_schema=None):
     if profile.get("subscription_transport") == "codex" and result.get("transport") != "codex":
         raise SubscriptionError("outcome_unknown")
     return result["text"]
+
+
+def text_events(profile, system, messages, cancel=None, *, purpose=None, tools=None):
+    """Явные текстовые потребители используют один транспорт, без наследования tools/fallback."""
+    from subscription_context import ContextError, enabled, pack, ready, snapshot
+    permissions = {"skill_draft": "auxiliary", "exam": "auxiliary", "meeting": "meeting",
+                   "diary": "diary", "task_review": "task_review", "task_learning": "task_learning",
+                   "history": "history"}
+    labels = {"auxiliary": "служебные текстовые функции", "meeting": "встречи и суфлёр",
+              "diary": "дневник", "task_review": "самопроверка задач",
+              "task_learning": "уроки задач", "history": "история"}
+    cancel = cancel if cancel is not None else threading.Event()
+    parent_cancel = cancel
+    current = profile.get("_subscription_current")
+    signature = snapshot(profile)
+
+    class ScopeCancel:
+        def is_set(self):
+            return parent_cancel.is_set() or (callable(current) and snapshot(current() or {}) != signature)
+
+    cancel = ScopeCancel()
+    ready(profile, cancel)
+    capability = permissions.get(purpose)
+    if not capability or not enabled(profile, capability):
+        raise ContextError("Codex: включите разрешение «" + labels.get(capability, "отдельный поддерживаемый маршрут") +
+                           "» в профиле. Неявный вызов модели не отправлен.")
+    if tools:
+        raise ContextError("Этот маршрут Codex принимает только текст. Инструменты вызываются отдельным контуром задач.")
+    if not isinstance(system, str) or not isinstance(messages, list):
+        raise ContextError("Codex: неподдерживаемый формат контекста.")
+    for item in messages:
+        if (not isinstance(item, dict) or set(item) - {"role", "content"}
+                or item.get("role") not in {"user", "assistant", "system"} or not isinstance(item.get("content"), str)):
+            raise ContextError("Codex: вложения и вызовы инструментов в текстовом маршруте запрещены.")
+    prompt = pack({"purpose": purpose, "instructions": system, "messages": messages})
+    answer = generate(profile, prompt, cancel)
+    ready(profile, cancel)
+    yield "text", answer
 
 
 def start_turn(engine, text, images=None, quiet=False, via=None, raw=False, shown=None, report=None):

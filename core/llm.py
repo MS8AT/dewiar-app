@@ -395,9 +395,10 @@ DEFAULT_MAX_TOKENS = 2048
 
 
 
-def stream_chat(p, system, messages, cancel=None):
+def stream_chat(p, system, messages, cancel=None, *, purpose=None):
     """Только текст (для проверки соединения и простых ответов)."""
-    for kind, val in stream_events(p, system, messages, cancel):
+    events = stream_events(p, system, messages, cancel, **({"purpose": purpose} if purpose else {}))
+    for kind, val in events:
         if kind == "text":
             yield val
 
@@ -981,7 +982,7 @@ def wants_think(text, mode=None):
     return bool(HARD_ASK.search(t)) or len(t) > 280
 
 
-def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
+def stream_events(p, system, messages, cancel=None, tools=None, _retry=0, *, purpose=None):
     """Поток событий: ("text", кусок) и в конце, если модель решила действовать,
     ("tools", [{"id", "name", "args"}]). cancel — threading.Event для мгновенной остановки. Ошибки — LLMError.
 
@@ -990,7 +991,13 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
     «размышления» и текста нет — повторит с выключенными размышлениями и вчетверо большим лимитом.
     Служебные ключи профиля с «_» (_flat, _lite, _no_kwargs, _empty_retry) ставит только сама при повторах."""
     if p.get("kind") == "chatgpt_subscription":
-        raise LLMError("Подписка разрешена только через отдельный локальный маршрут; общий tools/фон/fallback запрещён.")
+        from subscription_adapter import text_events, SubscriptionError
+        from subscription_context import ContextError
+        try:
+            yield from text_events(p, system, messages, cancel, purpose=purpose, tools=tools)
+        except (SubscriptionError, ContextError) as exc:
+            raise LLMError(str(exc)) from None
+        return
     base = _base(p)
     tools_all = tools
     if tools and prompt_tools_mode(p):

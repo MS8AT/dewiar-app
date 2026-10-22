@@ -147,9 +147,10 @@ def sys_boom(self, t):
 TK.TaskManager._tool_raw, TK.TaskManager._system = boom, sys_boom
 b = tm.create("Сломанная", "Упасть")
 ok(wait_for(lambda: tm.get(b.id).status == "failed", 15), "ошибка программы — задача остановлена честно")
-ok("внутренняя ошибка" in tm.get(b.id).error and any("Сломанная" in s for s in host.said), "сказано голосом, что сломалось")
-ok(any(p[0].startswith("⚠ Задача остановилась") for p in host.pushes), "и уведомлением")
-ok(any(k == "task" and "AttributeError" in x for k, x in host.problems), "и в пульс разработчику (тип ошибки, без содержания задачи)")
+# Статус меняется до записи журнала и уведомлений в рабочем потоке; ждём сами сигналы.
+ok(wait_for(lambda: "внутренняя ошибка" in tm.get(b.id).error and any("Сломанная" in s for s in host.said), 15), "сказано голосом, что сломалось")
+ok(wait_for(lambda: any(p[0].startswith("⚠ Задача остановилась") for p in host.pushes), 15), "и уведомлением")
+ok(wait_for(lambda: any(k == "task" and "AttributeError" in x for k, x in host.problems), 15), "и в пульс разработчику (тип ошибки, без содержания задачи)")
 ok(any(k == "task" and "инструмент log: KeyError" in x for k, x in host.problems), "упавший инструмент — тоже в пульс")
 TK.TaskManager._tool_raw, TK.TaskManager._system = orig, orig_sys
 

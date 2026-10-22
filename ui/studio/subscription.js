@@ -20,6 +20,11 @@ function renderSubscriptionProfile(box, id, p) {
   <p><label><input type="checkbox" data-field="memory_write"> Предлагать запись в память «Обо мне» — каждый факт с отдельным подтверждением.</label></p>
   <p><label><input type="checkbox" data-field="tasks"> Разрешить фоновые задачи Codex. Каждый запуск требует подтверждения; лимит сохраняется при продолжении.</label></p>
   <p><label><input type="checkbox" data-field="project_read"> В задачах читать текстовые исходники выбранного человеком проекта и отправлять фрагменты в OpenAI.</label></p>
+  <p><label><input type="checkbox" data-field="task_review"> Самопроверка итога задачи отдельным запросом, в общем лимите. Это не независимая приёмка.</label></p>
+  <p><label><input type="checkbox" data-field="task_learning"> Черновик урока из текущей задачи отдельным запросом, в общем лимите. Сохраняется рядом с итогом, не применяется к общей памяти автоматически.</label></p>
+  <p><label><input type="checkbox" data-field="auxiliary"> Служебные текстовые функции: черновики навыков и оценка сценариев. Разрешаю отправлять подготовленные инструкции, сценарий, разговор и память, переданные этой функции.</label></p>
+  <p><label><input type="checkbox" data-field="meeting"> Встречи и суфлёр: отправлять расшифровку, материалы и выбранные знания, получать подсказки и итоги. Каждый вызов расходует лимит; автоматические подсказки управляются настройками встречи.</label></p>
+  <p><label><input type="checkbox" data-field="diary"> Дневник: отправлять дневной материал, память и подсказку персонажа по расписанию дневника. Запись дневника и души выполняет обычный модуль Dewiar.</label></p>
   <label class="f">Максимум запросов на одну задачу (1–20)<input type="number" min="1" max="20" step="1" data-field="task_limit" value="5"></label>
   <div class="actions"><button class="btn" data-op="use-tasks">Выбрать этот профиль для задач</button></div>
   <p class="hint">Контекст ограничивается локально. Нет команд оболочки, записи в проект, MCP, скачивания, подзадач и автоматических повторов. Изменение аккаунта или разрешений останавливает текущий запрос; для ранее привязанной задачи создайте новую. Известные секретные пути исключены, но не выбирайте проект с конфиденциальными данными.</p></fieldset>
@@ -39,7 +44,7 @@ function renderSubscriptionProfile(box, id, p) {
     S.llm.profiles[id] = p;
     return save({llm: {profiles: S.llm.profiles}}, true);
   };
-  const capabilities = ['history', 'memory_read', 'memory_write', 'tasks', 'project_read'];
+  const capabilities = ['history', 'memory_read', 'memory_write', 'tasks', 'project_read', 'task_review', 'task_learning', 'auxiliary', 'meeting', 'diary'];
   const changedScope = () => { p.subscription_scope_revision = uid() + '-' + Date.now(); };
   const clearConsent = () => {
     p.subscription_export = false; p.subscription_usage_reviewed = false;

@@ -15,22 +15,47 @@
     {
       "path": "core/engine_commands.py",
       "before": "bdbfe3d2c59ed108d9a9bf2e75e964d25524e084793bd8cc9f2cdfbe59cecd37",
-      "after": "05b45822384e30f65acaf61991c02ae72d7910965acc10583bc156d509992813"
+      "after": "42a2231cadd4dc0a27cc6f7680f770f68aece7b9dfbe19296ab601bb02b6b75e"
+    },
+    {
+      "path": "core/engine_music.py",
+      "before": "6fdcacab3ac8241a21283e457ba7fc138984daf9877c5a67c7978856591a2d81",
+      "after": "d31efac6f4991cc64f5c5f6722fd52355d2c705871a2d6a3a615ce38c6f84bbf"
+    },
+    {
+      "path": "core/engine.py",
+      "before": "c69586de2994151c021432e3a098facdfc08a483795bb14e3ecc8cfd55249a14",
+      "after": "10a0573fe0fed8cbb9c431f7781a58e5b1dcdafe64fa0df5587eb5a91469f38d"
+    },
+    {
+      "path": "core/exam.py",
+      "before": "fd501c3b0dc5a4d45fe4344c1f69b50a077a6e600a1e4ad265e6bbd520e5b014",
+      "after": "5de543a4cd9d8dc6e18e345becd24233a976505c0a01c14c45ae5f8bcf0e096a"
     },
     {
       "path": "core/llm.py",
       "before": "862713465774a3fd9fd09bdc576cdffc4fbd91db2c023adf94e9a4c24929091c",
-      "after": "17db83fd12015f212694a7b6acc9475ee54fa91108951d15add782c5e86889d7"
+      "after": "136b203ae3300106915c2fa44a6070424a6b5dc1a47e26ff7bd2695885ec232b"
+    },
+    {
+      "path": "core/night.py",
+      "before": "e486d9fa3a77947601692b5d2322623252841272f8968551c6371b5d4c7e29cd",
+      "after": "2e0aa5b1077936f4b86d1ca4754eba1ea12dcea3e4a4be82bcc0292b99fe08e5"
+    },
+    {
+      "path": "core/prompter.py",
+      "before": "c23ee53a5cf0a67142bbe218e105dfb5d8d349745c6c2bffa55b41cb5bfb83da",
+      "after": "621df79f228ffca27d4ea763ec56f72e298adaa43fb77cd90f2c35a5f4487efe"
     },
     {
       "path": "core/subscription_adapter.py",
       "before": null,
-      "after": "b6690e4428210b79dd72dbb92d0a6bf84ff981f9d8412ea1d7bdbc7595499ad3"
+      "after": "7db31ae368232f86a2e9218958e7947505d898c18458174c7ab8b0bc3e186b95"
     },
     {
       "path": "core/subscription_context.py",
       "before": null,
-      "after": "c63cdc4dfa439cb08e8a82301e186bbc28e95d3fb9d86a58fe96d71259c2771e"
+      "after": "e3fabd440e792b310d3517f1533b1302924f9e58da0f94c83608975262367a7f"
     },
     {
       "path": "core/subscription_runtime/client.py",
@@ -93,9 +118,14 @@
       "after": "4bf27c6b0feb958a4ce2f47fbd38a948eefd2b3cc0dff8e2a6c3ab71ffe70962"
     },
     {
+      "path": "ui/hud.html",
+      "before": "85f07591e40058b2c00e0be79c7cee3d3dbb50b0d4e9034e07af1fd6c6443cd1",
+      "after": "a47ac0a71100b7d754e81250d88d516a89df8ab12d63fd9214453a2a6d962dd7"
+    },
+    {
       "path": "ui/settings.html",
       "before": "22a58bb82570d5c3c8008b09fc8644c2611a390792bbfc848383d7e5deb0753f",
-      "after": "c164902fefa2a5c88eaebb472cc32296d90b9edfc430685f7d9c826013fa2911"
+      "after": "e318da93eecd9d4683e9da6bd8d3a2fdb651d4180160ec71ac9bf1e3f089b60e"
     },
     {
       "path": "ui/studio/brain.js",
@@ -103,9 +133,19 @@
       "after": "d3754b7822cb7a0fc4a301406a2942fade476897bae1d3f5d3b84eb8bb1037c3"
     },
     {
+      "path": "ui/studio/subscription_confirm.js",
+      "before": null,
+      "after": "5874bc6c8bca68f3397e82645413bdf2c18febb22ffd5310b09f22c57576cc6f"
+    },
+    {
       "path": "ui/studio/subscription.js",
       "before": null,
-      "after": "770f23595ef18842df735394e89101187c05221e48448828959ae05b5e46ef90"
+      "after": "4ca75e6b513820bbd8b2731447baa5c8e6e8db41dc13c42b27d8424eb3ca84cc"
+    },
+    {
+      "path": "ui/studio/tasks.js",
+      "before": "156d09608499edebf1a564a7f07f1677abf7ce832d308e7d62befbc4d8865588",
+      "after": "771b1932878c5a8e02fc579d29ebc4f14704b63a945125956b3907225a273fcd"
     }
   ]
 }

@@ -454,8 +454,8 @@ class MusicMixin:
         prof = self.s.active_llm()
         if not prof:
             raise ValueError("нет модели — подключите её в «Мозге»")
-        return "".join(stream_chat(dict(prof, max_tokens=1600), self._system(False),
-                                   [{"role": "user", "content": instruction + "\n\n---\n\n" + material}]))
+        return "".join(stream_chat(dict(prof, max_tokens=1600, _subscription_current=self.s.active_llm), self._system(False),
+                                   [{"role": "user", "content": instruction + "\n\n---\n\n" + material}], purpose="diary"))
 
     def _diary_loop(self):
         """Фоновый поток: ночью (после diary.hour, по умолчанию 3:00) — или утром, как только компьютер проснулся, —

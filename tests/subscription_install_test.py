@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("installer", ROOT / "tools" / "install_local_codex.py")
@@ -100,6 +101,18 @@ class InstallerTests(unittest.TestCase):
         for item in installer.entries(ROOT / "tools/local_codex_manifest.json"):
             with self.subTest(path=item["path"]):
                 self.assertEqual(installer.digest(ROOT / item["path"]), item["after"])
+
+    def test_process_guard_excludes_own_pid_but_still_refuses_dewiar(self):
+        # --app содержит путь Dewiar: сам установщик не является работающим ядром.
+        with patch.object(installer.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            installer.stopped()
+            command = run.call_args.args[0][-1]
+            self.assertIn(f"$_.ProcessId -ne {installer.os.getpid()}", command)
+            self.assertIn("Get-CimInstance Win32_Process", command)
+            run.return_value.returncode = 2
+            with self.assertRaises(ValueError):
+                installer.stopped()
 
 
 if __name__ == "__main__":

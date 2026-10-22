@@ -621,10 +621,10 @@ class Prompter:
                + ("ШПАРГАЛКА:\n" + "\n".join(f"В: {x['q']} — О: {x['a']}" for x in self.sheet[:10]) + "\n\n" if self.sheet else "")
                + "РАЗГОВОР (последние реплики):\n" + (self._transcript() or "(пока тихо)") + "\n\n"
                + self._ask_line(h["why"], q))
-        prof = dict(self.eng.s.active_llm(), temperature=0.3, max_tokens=360)
+        prof = dict(self.eng.s.active_llm(), temperature=0.3, max_tokens=360, _subscription_current=self.eng.s.active_llm)
         text, last, t0 = "", 0.0, time.monotonic()
         try:
-            for kind, val in stream_events(prof, HINT_SYSTEM, [{"role": "user", "content": ctx}], cancel=cancel, tools=None):
+            for kind, val in stream_events(prof, HINT_SYSTEM, [{"role": "user", "content": ctx}], cancel=cancel, tools=None, purpose="meeting"):
                 if cancel.is_set():
                     return
                 if kind != "text":
@@ -660,8 +660,8 @@ class Prompter:
         prof = self.eng.s.active_llm()
         if not prof:
             return ""
-        prof = dict(prof, temperature=0.3, max_tokens=max_tokens)
-        return "".join(v for k, v in stream_events(prof, system, [{"role": "user", "content": content}], tools=None) if k == "text").strip()
+        prof = dict(prof, temperature=0.3, max_tokens=max_tokens, _subscription_current=self.eng.s.active_llm)
+        return "".join(v for k, v in stream_events(prof, system, [{"role": "user", "content": content}], tools=None, purpose="meeting") if k == "text").strip()
 
     def _prepare_sheet(self):
         m = self.meeting

@@ -144,7 +144,7 @@ class NightWatch:
     def _check_brain(self):
         """True — модель ответила, False — нет, None — модели нет или проверять нечем."""
         prof = self.host.s.active_llm() if hasattr(self.host.s, "active_llm") else None
-        if not prof:
+        if not prof or prof.get("kind") == "chatgpt_subscription":
             return None
         try:
             from llm import stream_chat

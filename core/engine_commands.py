@@ -874,7 +874,7 @@ class CommandsMixin:
             return after
         if cmd.startswith("subscription_"):
             from subscription_adapter import ui_command
-            return ui_command(cmd[len("subscription_"):], a)
+            return ui_command(cmd[len("subscription_"):], a, self)
         if cmd == "llm_test":
             prof = a.get("profile") or {}
             r = test_profile(prof)
@@ -1270,6 +1270,9 @@ class CommandsMixin:
         if cmd == "confirm_answer":
             box = self.pending_confirm
             if box:
+                if box.get("source") == "subscription":
+                    from subscription_adapter import ui_command
+                    return ui_command("confirm_answer", a, self)
                 box["answer"] = bool(a.get("ok"))
                 box["event"].set()
             return True

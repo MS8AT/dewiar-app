@@ -65,8 +65,9 @@ def stopped():
     """Не завершаем процессы: при запущенном или непроверяемом Dewiar отказываем."""
     command = ("$ErrorActionPreference='Stop'; "
                "$p=@(Get-CimInstance Win32_Process | Where-Object {"
+               f"$_.ProcessId -ne {os.getpid()} -and ("
                "$_.Name -match '^Dewiar.*[.]exe$' -or "
-               r"($_.Name -match '^python(w)?[.]exe$' -and $_.CommandLine -match 'Dewiar[\\/]')}); "
+               r"($_.Name -match '^python(w)?[.]exe$' -and $_.CommandLine -match 'Dewiar[\\/]'))}); "
                "if($p.Count){exit 2}")
     result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30,
@@ -89,9 +90,9 @@ def replace(source, target):
             os.unlink(temp)
 
 
-def transfer(mode, app, backup, source=SOURCE, manifest=MANIFEST):
+def transfer(mode, app, backup, source=SOURCE, manifest=MANIFEST, *, files=None):
     """Все проверки комплекта выполняются до первой записи; пути проверяет CLI."""
-    files = entries(manifest)
+    files = entries(manifest) if files is None else files
     if not app.is_dir() or not source.is_dir():
         raise ValueError("Каталог приложения или исходников отсутствует")
     if app == source or app in source.parents or source in app.parents:

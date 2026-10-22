@@ -9,9 +9,11 @@ from pathlib import Path
 import re
 import threading
 import time
+import uuid
 
 CAPS = ("subscription_history", "subscription_memory_read", "subscription_memory_write",
-        "subscription_tasks", "subscription_project_read")
+        "subscription_tasks", "subscription_project_read", "subscription_task_review",
+        "subscription_task_learning", "subscription_auxiliary", "subscription_meeting", "subscription_diary")
 PROFILE_FIELDS = ("id", "kind", "subscription_transport", "subscription_profile_id", "model",
                   "subscription_export", "subscription_usage_reviewed", *CAPS, "subscription_task_limit", "subscription_scope_revision")
 _MEMORY_LOCK = threading.Lock()
@@ -157,12 +159,13 @@ def confirm_local(host, question, cancel, timeout=120):
     """Подтверждение в виджете без облачной озвучки и внешних уведомлений."""
     if not _CONFIRM_LOCK.acquire(blocking=False):
         return False
-    box = {"event": threading.Event(), "answer": False}
+    box = {"event": threading.Event(), "answer": False, "id": uuid.uuid4().hex,
+           "text": question, "source": "subscription"}
     try:
         if cancel.is_set() or getattr(host, "pending_confirm", None) is not None:
             return False
         host.pending_confirm = box
-        host.emit("confirm", text=question)
+        host.emit("confirm", text=question, id=box["id"], source="subscription")
         end = time.monotonic() + timeout
         while not box["event"].wait(0.1):
             if cancel.is_set() or time.monotonic() >= end:
@@ -171,7 +174,7 @@ def confirm_local(host, question, cancel, timeout=120):
     finally:
         if host.pending_confirm is box:
             host.pending_confirm = None
-            host.emit("confirm_done", ok=box["answer"] is True and not cancel.is_set())
+            host.emit("confirm_done", id=box["id"], ok=box["answer"] is True and not cancel.is_set())
         _CONFIRM_LOCK.release()
 
 
@@ -198,7 +201,7 @@ def save_memory(host, profile, cancel, fact):
 
 
 def chat_answer(host, profile, text, cancel, generate):
-    if not codex(profile) or not any(enabled(profile, key.removeprefix("subscription_")) for key in CAPS):
+    if not codex(profile) or not any(enabled(profile, key) for key in ("history", "memory_read", "memory_write", "tasks")):
         with _HISTORY_LOCK:
             host.__dict__.pop("_subscription_history", None)
         return generate(profile, text, cancel)
@@ -311,6 +314,47 @@ def task_actions(profile):
     return actions
 
 
+def finish_task(manager, task, profile, cancel, generate, summary, context, limit):
+    """Дополнительные запросы расходуют тот же бюджет; урок не становится правилом сам."""
+    review = enabled(profile, "task_review") and manager.host.s.get("tasks", "self_check") is not False
+    learn = enabled(profile, "task_learning") and manager.host.s.get("tasks", "learn") is not False
+    context["draft_summary"] = clipped(summary, 8000)
+    task.data["subscription_context"] = context
+    task.save()
+    if task.data["subscription_attempts"] + int(review) + int(learn) > limit:
+        raise ContextError("Для самопроверки/урока не осталось запросов в лимите задачи. Черновик итога сохранён; повтора нет.")
+
+    def ask(operation, structured=False):
+        ready(profile, cancel)
+        prompt = pack({"operation": operation, "goal": task.goal, "summary": clipped(summary, 8000),
+                       "plan": clipped(context.get("plan"), 2500), "notebook": clipped(context.get("notebook"), 3000),
+                       "allowed_actions": {"finish": ["summary"], "pause": ["question"]} if structured else {},
+                       "response_format": response_format() if structured else "Только короткий текст урока, без действий."})
+        task.data["subscription_attempts"] += 1
+        task.data["activity"] = "Codex: " + ("самопроверка итога" if structured else "черновик урока")
+        task.save(); manager._beat(task); manager._emit(task)
+        result = generate(profile, prompt, cancel, **({"response_schema": "dewiar-actions-v1"} if structured else {}))
+        ready(profile, cancel)
+        return result
+
+    if review:
+        raw = ask("Проверь, подтверждён ли итог доступными данными и отвечает ли цели. "
+                  "finish — возражений нет, pause — укажи конкретный недостаток. Это мнение модели, не независимая приёмка.", True)
+        _, actions = decode(raw, {"finish": ["summary"], "pause": ["question"]})
+        if not actions:
+            raise ContextError("Самопроверка не дала решения. Черновик сохранён; повтора нет.")
+        task.data["subscription_review"] = actions[0][0]
+        if actions[0][0] == "pause":
+            task.data.update(status="paused", error="Самопроверка: " + actions[0][1]["question"])
+            return False
+    if learn:
+        lesson = ask("Составь короткий черновик урока только из этой задачи. Не делай выводов о других задачах, "
+                     "не считай модельную оценку доказанным результатом. Урок не применяется автоматически.")
+        (task.dir / "урок Codex.md").write_text(clipped(lesson, 4000), encoding="utf-8")
+        task.journal("Черновик урока сохранён в «урок Codex.md»; общая память и правила не изменены.")
+    return True
+
+
 def run_task(manager, task, generate=None):
     """Отдельный маршрут задач; True также при отказе, без перехода к другому провайдеру."""
     host = manager.host
@@ -332,7 +376,7 @@ def run_task(manager, task, generate=None):
         ready(profile, cancel)
         if not enabled(profile, "tasks"):
             raise ContextError("В настройках этого профиля Codex выключены фоновые задачи.")
-        if bound and bound != sig:
+        if bound and snapshot(bound) != sig:
             raise ContextError("Задача привязана к другому профилю или набору разрешений. Создайте новую задачу; автоматического переноса данных нет.")
         limit = profile.get("subscription_task_limit", 5)
         if type(limit) is not int or not 1 <= limit <= 20:
@@ -348,8 +392,11 @@ def run_task(manager, task, generate=None):
         description = (f"Запустить задачу через Codex ({profile['model']})?\nЦель: {task.goal}\n"
                        f"Осталось не более {limit - used} запросов; возможен расход лимита/кредитов.\n"
                        f"Чтение памяти: {enabled(profile, 'memory_read')}; запись: {enabled(profile, 'memory_write')}.\n"
+                       f"Самопроверка: {enabled(profile, 'task_review')}; черновик урока: {enabled(profile, 'task_learning')}.\n"
                        f"Чтение проекта: {project if enabled(profile, 'project_read') else 'выключено'}. "
                        "Нет команд, записи в проект, сети, MCP или подзадач. Ошибки не повторяются.")
+        task.data["activity"] = "Ожидаю подтверждения запуска — кнопки в студии или виджете"
+        task.save(); manager._emit(task)
         if not confirm_local(host, description, cancel):
             raise ContextError("Запуск Codex не подтверждён. Запрос не отправлен.")
         allowed = task_actions(profile)
@@ -401,6 +448,8 @@ def run_task(manager, task, generate=None):
             elif name == "pause":
                 task.data.update(status="paused", question=args["question"], error=args["question"])
             elif name == "finish":
+                if not finish_task(manager, task, profile, cancel, generate, args["summary"], context, limit):
+                    break
                 task.data.update(status="done", result=args["summary"], finished=True, verified=False, error="")
                 (task.dir / "итог.md").write_text(args["summary"], encoding="utf-8")
             context["last_result"] = name + ": " + clipped(result, 6000)
