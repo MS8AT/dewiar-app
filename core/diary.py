@@ -13,6 +13,7 @@
 """
 import datetime as dt
 import json
+import os
 import logging
 import re
 import threading
@@ -176,7 +177,10 @@ class Diary:
     def _save(self):
         try:
             self.state.parent.mkdir(parents=True, exist_ok=True)
-            self.state.write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding="utf-8")
+            # целиком или никак (аудит 19.10, #4): запись обрывается (выключили питание) — прежний файл цел, а не пустой
+            tmp = self.state.with_name(self.state.name + ".tmp")
+            tmp.write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding="utf-8")
+            os.replace(tmp, self.state)
         except OSError as e:
             log.warning("дневник: состояние не сохранилось: %s", e)
 

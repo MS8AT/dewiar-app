@@ -760,7 +760,11 @@ class Sync:
                 continue
             idx[key] = {"h": None, "u": now}
             goal = str(d.get("goal") or d.get("title") or "").strip()
-            t = h.tasks.create(str(d.get("title") or goal[:50]), goal + "\n\n(Задачу поставили с телефона — результат он увидит.)")
+            try:
+                t = h.tasks.create(str(d.get("title") or goal[:50]), goal + "\n\n(Задачу поставили с телефона — результат он увидит.)")
+            except (OSError, ValueError) as e:            # не роняем весь обмен из-за одной задачи
+                log.warning("Задача с телефона не создалась: %s", e)
+                continue
             log.info("🔄 Задача с телефона: «%s»", t.title)
             try:
                 h.push("Задача с телефона", f"Взялся: «{t.title}». Ход — в «Задачах», на телефоне тоже.", telegram=False)

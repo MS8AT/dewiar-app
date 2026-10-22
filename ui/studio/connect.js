@@ -267,7 +267,7 @@ async function wizardCheck(id) {
    обработчик доставался той кнопке; комментарии «почему нельзя подключить свой сервис». Теперь свои id (ck-…),
    DeepSeek и «Другой — по адресу»: любой OpenAI-совместимый сервис (LiteLLM, Kimi, агрегаторы) — адрес + ключ. */
 const CLOUD = {
-  openrouter: { hint: 'Ключ — на <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>. Один ключ — сотни моделей, оплата с баланса.',
+  openrouter: { hint: 'Ключ — на <a href="https://openrouter.ai/settings/keys" target="_blank">openrouter.ai → Settings → Keys</a>. Один ключ — сотни моделей, оплата с баланса.',
                 rec: ["google/gemini-2.5-flash", "openai/gpt-4.1-mini", "anthropic/claude-haiku-4.5", "qwen/qwen3-235b-a22b-2507", "deepseek/deepseek-chat-v3.1"] },
   openai: { hint: 'Ключ — на <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a>.',
             rec: ["gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini", "gpt-5", "gpt-4.1"] },
@@ -316,6 +316,9 @@ $("#ck-go").onclick = async (ev) => {
   if (!key) { r.className = "res bad"; r.textContent = "Вставьте ключ API"; return; }
   btn.disabled = true; r.className = "res"; r.textContent = "проверяю ключ…"; $("#ck-found").style.display = "none";
   const prof = Object.assign({ api_key: key, model: "" }, ckPreset(prov)); delete prof.models; delete prof.preset;
+  if (!prof.base_url) {        // список сервисов приходит от ядра с «hello» — студия открылась раньше (пакет 22.10: KeyError 'base_url')
+    btn.disabled = false; r.className = "res bad"; r.textContent = "Студия ещё не на связи с ядром — подождите секунду и нажмите снова"; return;
+  }
   try {
     let models = [];
     try { models = await core.call("llm_models", { profile: prof }); }

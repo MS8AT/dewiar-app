@@ -9,6 +9,12 @@ from engine_base import *  # noqa: F401,F403 — общие импорты и п
 VOSK_RETRY_MIN = float(os.environ.get("DEWIAR_VOSK_RETRY_MIN") or 30)   # голоса Vosk не скачались — повтор через столько минут
 
 
+# сбои открытия микрофона, которые значат «его нет или он отключён» (а не поломку): ждём и переподключаемся без отчёта
+# о сбое. MME 2 «device ID out of range», MME 1 «Undefined external error», -9986 — отчёты 21.10
+NO_MIC_ERR = ("device -1", "No Default Input", "Invalid device", "out of range for your system", "Undefined external error",
+              "PaErrorCode -9986", "PaErrorCode -9999")
+
+
 class AudioMixin:
     # ---------- настройка движков ----------
 
@@ -374,7 +380,7 @@ class AudioMixin:
                 last_err = None
                 self._listen()
             except Exception as e:  # noqa: BLE001
-                no_mic = "device -1" in str(e) or "No Default Input" in str(e) or "Invalid device" in str(e)
+                no_mic = any(s in str(e) for s in NO_MIC_ERR)
                 if str(e) != last_err:              # подробно — один раз; повторы (нет микрофона) — строкой
                     if no_mic:
                         log.warning("Микрофон не найден (%s) — жду, пока его подключат", e)
@@ -392,7 +398,13 @@ class AudioMixin:
                 if self.restart_audio.is_set():
                     self.restart_audio.clear()
                     self.aec.teardown()
-                elif last_err and ("device -1" in last_err or "No Default Input" in last_err or "Invalid device" in last_err):
+                elif last_err and any(s in last_err for s in NO_MIC_ERR):
+                    if os.name == "nt":             # подключат микрофон — увидим его без перезапуска (№165)
+                        try:
+                            from audio_io import sd_refresh
+                            sd_refresh()
+                        except Exception:  # noqa: BLE001
+                            pass
                     self.note("Микрофон не найден — подключите его или выберите в студии («Звук и поведение» → «Микрофон»)"
                               + ("; в Windows проверьте «Параметры → Конфиденциальность → Микрофон» — доступ для приложений"
                                  if os.name == "nt" else "") + ". Пока можно писать в виджете.")
@@ -1279,7 +1291,11 @@ class AudioMixin:
                 return
             long_ = (dur is not None and dur > FOLLOW_MAX_S) or len(ws) > FOLLOW_MAX_WORDS
             named = name_inside(text, self.aliases)
-            if long_ and not named and not to_me(text):
+            # позвали по имени и ждём вопрос («Лира» → «Слушаю») — это вопрос мне, какой бы длинный ни был (пакет 22.10,
+            # №182/№183: «пропадает, не дослушав вопрос»: 15-секундный вопрос после имени принимался за разговор рядом)
+            invited = time.monotonic() < getattr(self, "_invited_until", 0.0)
+            self._invited_until = 0.0
+            if long_ and not named and not invited and not to_me(text):
                 # без имени, долго и много слов — это разговор людей рядом, а не продолжение со мной (отчёт 11.10:
                 # «как только кто-то рядом — она сама вклинивается в беседу»). Слушаю дальше только по имени.
                 log.info("Продолжение разговора: длинная фраза без имени (%.1f с, %d слов) — похоже, говорят не со мной",
@@ -1292,7 +1308,8 @@ class AudioMixin:
                               "начните с имени или попросите: «расскажи…», «найди…».")
                 return
             if long_:
-                log.info("Продолжение разговора: длинная фраза — %s", "имя внутри фразы" if named else "просьба ко мне")
+                log.info("Продолжение разговора: длинная фраза — %s", "имя внутри фразы" if named else
+                         "вопрос после имени" if invited else "просьба ко мне")
             self.ask(text)
         else:
             if by_wake:
@@ -1319,6 +1336,7 @@ class AudioMixin:
         self._listen_peak, self._listen_vad = 0.0, 0.0
         log.info("🎤 Слушаю вопрос (%d с)", seconds)
         self.follow_up_until = time.monotonic() + seconds
+        self._invited_until = self.follow_up_until + 30     # начатая в эти секунды фраза — вопрос мне, даже длинная
         self.set_state("listening")
         self.emit("heard", text="")
         if time.monotonic() - getattr(self, "_wake_tone_at", 0.0) > 4:   # уже прозвучал на само имя — второй раз не нужен

@@ -279,7 +279,9 @@ class BrainMixin:
             if st.get("engine") == "vosk":
                 self.s.update({"stt": {"engine": "gigaam"}})
                 done.append("распознавание — снова точный GigaAM")
-            if self.s.get("tts", "engine") == "piper":
+            # голос Piper, потому что Vosk на этом компьютере не успевал за речью (engine_remote._vosk_slow, auto_piper), —
+            # остаётся Piper: иначе после лёгкого режима снова минуты на загрузку и секунды на фразу (пакет 22.10, №185)
+            if self.s.get("tts", "engine") == "piper" and not self.s.get("tts", "auto_piper"):
                 self.s.update({"tts": {"engine": "vosk"}})
                 done.append("голос — снова Vosk")
         log.info("Лёгкий режим %s: %s", "включён" if on else "выключен", ", ".join(done) or "без изменений")

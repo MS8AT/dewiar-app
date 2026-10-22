@@ -143,7 +143,9 @@ DEFAULTS = {
            "cursor_look": False,            # портрет смотрит на курсор над виджетом (hud.html lookAt) — по желанию, выключено
            "memory_motion": "auto",         # «Память»: анимация карты — auto (на слабом компьютере выкл) | on | off
            "welcome": "",                   # «Первые шаги»: "" — показать, "later" — кнопкой в меню, "done" — всё
-           "intro": ""},                    # знакомство голосом (engine_intro.py): "" — ещё не было, "done" — было
+           "intro": "",                     # знакомство голосом (engine_intro.py): "" — ещё не было, "done" — было
+           "pad_w": None, "pad_h": None,    # свой размер блокнота у виджета (растянули за уголок), px при 100 % (ui/app.py pad_resize)
+           "pad_text": None},               # размер текста в блокноте, 0.8–1.7 (ui/pad.js textSize); пусто — как задумано
     "reminders": {"ring_minutes": 2,    # сколько звенит, если никто не ответил (потом — «пропущено» в окне)
                   "sound": "signature",  # signature (фирменный мотив) | bells | soft | classic
                   "window": True,       # окно-будильник по центру экрана

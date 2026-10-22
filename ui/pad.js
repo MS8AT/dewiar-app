@@ -128,9 +128,9 @@ core.on("pad_changed", async (e) => {                 // правка с дру�
   const r = await core.call("pad_read", { name: P.active }).catch(() => null);
   if (r && r.mtime !== P.base) { P.base = r.mtime; ED.innerHTML = PadMD.md2html(r.text); paint(); status("Обновлено с другого устройства"); }
 });
-core.on("hello", (d) => { try { const u = (d && d.settings && d.settings.ui) || {}; if (u.skin) skin(u.skin); } catch (e) { }
+core.on("hello", (d) => { try { const u = (d && d.settings && d.settings.ui) || {}; if (u.skin) skin(u.skin); textSize(u.pad_text, true); } catch (e) { }
   if (P.loaded) { P.loaded = false; refresh(); } });
-core.on("settings", (e) => { try { const u = ((e && e.settings) || e || {}).ui || {}; if (u.skin) skin(u.skin); } catch (x) { } });   // тему сменили в студии        // ядро перезапустилось — перечитать
+core.on("settings", (e) => { try { const u = ((e && e.settings) || e || {}).ui || {}; if (u.skin) skin(u.skin); textSize(u.pad_text, true); } catch (x) { } });   // тему сменили в студии        // ядро перезапустилось — перечитать
 
 /* ---------- картинки ---------- */
 /* пустой лист — всегда с абзацем: иначе первая строка — голый текст без блока, и «- », «[] » не срабатывают (WebKitGTK) */
@@ -306,6 +306,60 @@ function tidy() {
   for (const i of ED.querySelectorAll("i")) { const n = document.createElement("em"); n.innerHTML = i.innerHTML; i.replaceWith(n); }
   for (const s of ED.querySelectorAll("strike")) { const n = document.createElement("s"); n.innerHTML = s.innerHTML; s.replaceWith(n); }
 }
+
+/* ---------- размер текста (22.10): «Aa» на панели — ползунок 80–170 %, Ctrl + колёсико, Ctrl+= / Ctrl+− / Ctrl+0;
+   хранится в настройках (ui.pad_text) — одинаковый на этом компьютере после перезапуска ---------- */
+let PZ = 1, pzT = 0;
+function textSize(v, quiet) {
+  const n = Math.round(Math.max(0.8, Math.min(1.7, +v || 1)) * 100) / 100;
+  if (quiet && n === PZ) return;
+  PZ = n; document.documentElement.style.setProperty("--pz", n);
+  $("#sz-r").value = Math.round(n * 100); $("#sz-v").textContent = Math.round(n * 100) + " %";
+  if (!quiet) { clearTimeout(pzT); pzT = setTimeout(() => core.call("settings_save", { patch: { ui: { pad_text: n === 1 ? null : n } } }).catch(() => { }), 400); }
+}
+const szOpen = (on) => { $("#sz").classList.toggle("on", on); $("#b-size").classList.toggle("on", on); $("#b-size").setAttribute("aria-expanded", String(on)); };
+$("#b-size").onmousedown = (e) => e.preventDefault();
+$("#b-size").onclick = () => szOpen(!$("#sz").classList.contains("on"));
+$("#sz-r").oninput = () => textSize($("#sz-r").value / 100);
+$("#sz-m").onclick = () => textSize(PZ - 0.1);
+$("#sz-p").onclick = () => textSize(PZ + 0.1);
+$("#sz-v").onclick = () => textSize(1);
+document.addEventListener("mousedown", (e) => { if ($("#sz").classList.contains("on") && !e.target.closest("#sz, #b-size")) szOpen(false); });
+$("#sheet").addEventListener("wheel", (e) => { if (!(e.ctrlKey || e.metaKey)) return; e.preventDefault(); textSize(PZ + (e.deltaY < 0 ? 0.05 : -0.05)); }, { passive: false });
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  if (e.key === "=" || e.key === "+") { e.preventDefault(); textSize(PZ + 0.1); }
+  else if (e.key === "-" || e.key === "_") { e.preventDefault(); textSize(PZ - 0.1); }
+  else if (e.key === "0") { e.preventDefault(); textSize(1); }
+}, true);
+textSize(1, true);
+
+/* ---------- размер листа (22.10: «как виджет — менять размер»): уголок внизу, дальний от виджета ----------
+   Окно меняет размер на лету (Api.pad_resize), отпустили — размер в настройки (ui.pad_w, ui.pad_h при масштабе 100 %).
+   Двойной щелчок — как задумано. */
+(() => {
+  const g = $("#grip"); let rs = null, raf = 0, last = null;
+  g.addEventListener("pointerdown", async (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const a = api(); if (!a || !a.pad_resize) return;
+    g.setPointerCapture(ev.pointerId); g.classList.add("on");
+    rs = { sx: ev.screenX, sy: ev.screenY, left: document.body.classList.contains("side-left"), size: await a.pad_size() };
+  });
+  g.addEventListener("pointermove", (ev) => {
+    if (!rs || !rs.size) return;
+    const dx = ev.screenX - rs.sx;
+    last = [Math.round(rs.size[0] + (rs.left ? -dx : dx)), Math.round(rs.size[1] + ev.screenY - rs.sy)];
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; const a = api(); if (a && last) a.pad_resize(last[0], last[1], false); });
+  });
+  const save = (b) => { if (b) core.call("settings_save", { patch: { ui: { pad_w: b[0], pad_h: b[1] } } }).catch(() => { }); };
+  const done = () => {
+    if (!rs) return; rs = null; g.classList.remove("on");
+    const a = api(); if (!a || !last) { last = null; return; }
+    a.pad_resize(last[0], last[1], true).then(save).catch(() => { }); last = null;
+  };
+  g.addEventListener("pointerup", done); g.addEventListener("pointercancel", done);
+  g.addEventListener("dblclick", (ev) => { ev.stopPropagation(); const a = api(); if (a && a.pad_resize) a.pad_resize(0, 0, true).then(save).catch(() => { }); });
+})();
 
 try { document.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) { }   // новый абзац — <p>, а не <div>
 /* первое открытие */

@@ -1825,7 +1825,12 @@ async function llmStream(messages, tools, onText, signal, opt = {}) {
   if (buf) { try { line(buf); } catch (e) { err = err || e; } }
   if (!err) { gateEnd(); feedInner("", true); }      // остаток, придержанный на случай разрезанного тега
   if (r.status >= 400) {
-    let msg = r.body || ""; try { const j = JSON.parse(msg); msg = (j.error && (j.error.message || j.error)) || j.detail || msg; } catch (e) { }
+    let msg = r.body || ""; try { let j = JSON.parse(msg); if (Array.isArray(j)) j = j[0] || {}; msg = (j.error && (j.error.message || j.error)) || j.detail || msg; } catch (e) { }   // Gemini — ошибкой-списком
+    // Gemini из России и др. (пакет 22.10): «User location is not supported» — повторять бесполезно, сказать, что делать
+    if (/location is not supported|unsupported_country|not available in your (country|region)/i.test(String(msg)))
+      throw Object.assign(new Error(`${brainName()}: Gemini недоступен из вашей страны. Включите VPN, подключите Gemini через OpenRouter или выберите другой мозг: Настройки → Мозг.`), { human: true });
+    if (/insufficient (balance|quota|funds)|no resource package|exceeded your current quota/i.test(String(msg)))
+      throw Object.assign(new Error(`${brainName()}: на ключе нет оплаченного пакета или закончились деньги — пополните баланс у сервиса или выберите другой мозг.`), { human: true });
     /* Сервер модели отклонил сам запрос (400/422; через облако Dewiar или шлюз — 502 с текстом «…400…», «отклонил»).
        Обычно виноваты функции полем tools или chat_template_kwargs: «Проверить» (без них) проходит, а разговор — нет. */
     const rejected = !ollama && (r.status === 400 || r.status === 422 || (r.status >= 500 && REJECT_RX.test(String(msg))));
@@ -4783,7 +4788,7 @@ function renderSoul() {
    после вставки; мастера подключения мозга (плитки data-w) — в wizard() ---------- */
 const UPD_URL = "https://dewiar.pro/dwrapp/latest.json";
 const CLOUD = {
-  openrouter: { name: "OpenRouter", url: "https://openrouter.ai/api/v1", model: "google/gemini-2.5-flash", key: "https://openrouter.ai/keys" },
+  openrouter: { name: "OpenRouter", url: "https://openrouter.ai/api/v1", model: "google/gemini-2.5-flash", key: "https://openrouter.ai/settings/keys" },
   openai: { name: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-4.1-mini", key: "https://platform.openai.com/api-keys" },
   deepseek: { name: "DeepSeek", url: "https://api.deepseek.com/v1", model: "deepseek-chat", key: "https://platform.deepseek.com/api_keys" },
   anthropic: { name: "Claude (Anthropic)", url: "https://api.anthropic.com/v1", model: "claude-sonnet-5-5", key: "https://platform.claude.com/settings/keys" },

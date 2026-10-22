@@ -68,6 +68,34 @@ def _pulsectl_ok():
         return False
 
 
+# PortAudio (Windows) читает список устройств один раз — при первом import sounddevice. Микрофон, подключённый позже,
+# не виден, а номер отключённого даёт «device ID out of range» (MME 2) или «Undefined external error» (MME 1) —
+# отчёты 21.10 (№165, сбои аудиопотока). sd_refresh перечитывает список, когда ни один наш поток PortAudio не открыт.
+_SD_LOCK, _SD_OPEN, _SD_AT = threading.RLock(), [0], [0.0]
+
+
+def _sd_open(n):
+    with _SD_LOCK:
+        _SD_OPEN[0] = max(0, _SD_OPEN[0] + n)
+
+
+def sd_refresh(force=False):
+    """Перечитать устройства PortAudio. -> True, если перечитали. Не чаще раза в 3 с и только без открытых потоков:
+    Pa_Terminate оборвал бы их."""
+    import sounddevice as sd
+    with _SD_LOCK:
+        if _SD_OPEN[0] or (not force and time.monotonic() - _SD_AT[0] < 3):
+            return False
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception as e:  # noqa: BLE001
+            log.warning("Список звуковых устройств не обновлён: %s", e)
+            return False
+        _SD_AT[0] = time.monotonic()
+        return True
+
+
 def _sd_devices():
     """Windows: устройства одного звукового API (того, что у микрофона по умолчанию — обычно MME: он сам приводит
     частоту к 16 кГц, а одно устройство в разных API иначе показалось бы несколько раз). Имя — его id в настройках."""
@@ -107,7 +135,9 @@ def list_devices():
     """-> [{"name", "description", "kind": "source" | "sink"}] — микрофоны и выходы, без наших dewiar_* и мониторов."""
     if WIN:
         try:
-            return [{k: d[k] for k in ("name", "description", "kind")} for d in _sd_devices()]
+            sd_refresh()                        # подключили микрофон после запуска — студия его увидит
+            with _SD_LOCK:
+                return [{k: d[k] for k in ("name", "description", "kind")} for d in _sd_devices()]
         except Exception as e:  # noqa: BLE001
             log.warning("Список звуковых устройств не получен: %s", e)
             return []
@@ -257,10 +287,26 @@ class Capture:
                 self._sd_q.put_nowait(bytes(data))
             except queue.Full:                  # ядро не успевает — старый кадр не нужен
                 pass
-        self.stream = sd.RawInputStream(samplerate=RATE, blocksize=FRAME, channels=1, dtype="int16", callback=cb,
-                                        device=_sd_index(self.device, "source"))
-        self.stream.start()
-        return self.device or "микрофон по умолчанию"
+        mk = lambda i: sd.RawInputStream(samplerate=RATE, blocksize=FRAME, channels=1, dtype="int16", callback=cb, device=i)
+        label = self.device or "микрофон по умолчанию"
+        with _SD_LOCK:
+            try:
+                self.stream = mk(_sd_index(self.device, "source"))
+            except sd.PortAudioError as e:     # номер устарел (микрофон отключили, переподключили) — перечитать список
+                log.warning("Микрофон не открылся (%s) — перечитываю список устройств", e)
+                sd_refresh(force=True)
+                idx = _sd_index(self.device, "source")
+                try:
+                    self.stream = mk(idx)
+                except sd.PortAudioError:
+                    if idx is None:
+                        raise
+                    log.warning("«%s» недоступен — беру микрофон по умолчанию", self.device)
+                    self.stream = mk(None)
+                    label = "микрофон по умолчанию (выбранный недоступен)"
+            self.stream.start()
+            _sd_open(1)
+        return label
 
     def read(self) -> bytes:
         """Блокирующее чтение одного кадра. b"" — источник закончился/упал."""
@@ -310,9 +356,12 @@ class Capture:
             self.proc.wait()
             self.proc = None
         if self.stream:
-            self.stream.stop()
-            self.stream.close()
-            self.stream = None
+            s, self.stream = self.stream, None
+            try:
+                s.stop()
+                s.close()
+            finally:
+                _sd_open(-1)
 
 
 class LoopbackCapture:
@@ -416,9 +465,11 @@ class Player:
             else:
                 try:
                     import sounddevice as sd
-                    self.proc = sd.RawOutputStream(samplerate=rate, channels=1, dtype="int16",
-                                                   device=_sd_index(self.device, "sink"))
-                    self.proc.start()
+                    with _SD_LOCK:
+                        self.proc = sd.RawOutputStream(samplerate=rate, channels=1, dtype="int16",
+                                                       device=_sd_index(self.device, "sink"))
+                        self.proc.start()
+                        _sd_open(1)
                 except Exception as e:  # noqa: BLE001 — PortAudioError, нет библиотеки: нет устройства вывода или оно занято
                     self.proc = None
                     raise AudioOutError(f"вывод звука не открылся (нет устройства или оно занято): {e}") from e
@@ -497,8 +548,11 @@ class Player:
                 p.kill()
                 p.wait(timeout=2)
             else:
-                p.abort()
-                p.close()
+                try:
+                    p.abort()
+                    p.close()
+                finally:
+                    _sd_open(-1)
         except Exception:  # noqa: BLE001
             pass
 

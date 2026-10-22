@@ -167,6 +167,7 @@ CAPTURE_BAR, CAPTURE_BTNS = 58, 60       # заголовок окна идеи 
 ALARM_RADIUS = 26
 PAD_TITLE = "Dewiar — блокнот"
 PAD_W, PAD_MIN_H, PAD_GAP, PAD_RADIUS = 440, 520, 14, 22   # блокнот у виджета (pad.html): ширина, высота не меньше, зазор
+PAD_W_MIN, PAD_W_MAX, PAD_H_MIN = 320, 1100, 300   # пределы своего размера листа (растягивают за нижний уголок), px при 100 %
 PAD_CLIP = 16                           # «крепления» блокнота к виджету (просьба 20.10: «соединить условными крепежами»): высота
 
 
@@ -552,6 +553,29 @@ class Api:
             h = self._hwnd(mode)
             return winshell.get_pos(h) if h else [0, 0]
         return self._gtk(lambda: list(self._gw(mode).get_position())) or [0, 0]
+
+    def drag_begin(self, mode="card"):
+        """Windows: начали тащить виджет — запомнить, где курсор относительно окна (drag_step ведёт окно за курсором)."""
+        if not WIN:
+            return False
+        h = self._hwnd(mode)
+        if not h:
+            return False
+        cx, cy = winshell.cursor(h)
+        x, y = winshell.get_pos(h)
+        self._drag = (mode, cx - x, cy - y)
+        return True
+
+    def drag_step(self, mode="card"):
+        """Windows: окно — туда, где сейчас курсор (минус точка захвата). Порядок вызовов не важен: каждый берёт курсор
+        сейчас, а не координаты из страницы (21.10, №169: «стрелка убегает быстрей, чем окно»)."""
+        d = getattr(self, "_drag", None)
+        h = self._hwnd(mode) if WIN else None
+        if not d or d[0] != mode or not h:
+            return False
+        cx, cy = winshell.cursor(h)
+        self.move_to(mode, round(cx - d[1]), round(cy - d[2]))
+        return True
 
     def move_to(self, mode, x, y):
         if mode == "card" and getattr(self, "_pad_on", False):     # блокнот едет вместе с карточкой
@@ -1842,14 +1866,16 @@ class Api:
         (к середине экрана), той же верхней кромкой; не выходит за экран. w — ширина листа, окно шире на gap;
         clips — [(y, высота)] креплений в окне (логические px), на высоте карточки; dy — сдвиг окна от верха карточки."""
         z = ZOOM[0] or 1.0
-        w, gap, clip = int(round(PAD_W * z)), int(round(PAD_GAP * z)), int(round(PAD_CLIP * z))
+        bw, bh = self._pad_base()                         # свой размер листа (растянули за уголок) — ui.pad_w, ui.pad_h
+        w = int(round(max(PAD_W_MIN, min(PAD_W_MAX, float(bw) if bw else PAD_W)) * z))
+        gap, clip = int(round(PAD_GAP * z)), int(round(PAD_CLIP * z))
         cw, ch = SIZES["card"]
-        h = max(ch, int(round(PAD_MIN_H * z)))
+        h = int(round(max(PAD_H_MIN, float(bh)) * z)) if bh else max(ch, int(round(PAD_MIN_H * z)))
         cx, cy = self.get_pos("card")
         mx, my, mw, mh = 0, 0, 1 << 15, 1 << 15
         try:
             if WIN:
-                l, t_, r, b = winshell.work_area()
+                l, t_, r, b = winshell.work_area(self._hwnd("card"))     # монитор виджета, а не основной (№161)
                 mx, my, mw, mh = l, t_, r - l, b - t_
             else:
                 from gi.repository import Gdk
@@ -1868,6 +1894,68 @@ class Api:
         clips = [(max(0, int(cy) - y + int(ch * k) - clip // 2), clip) for k in (0.2, 0.8)]
         clips = [(cy_, c) for cy_, c in clips if cy_ + c <= h]
         return {"x": int(x), "y": int(y), "w": w, "h": h, "side": side, "gap": gap, "clips": clips, "dy": dy}
+
+    def _pad_base(self):
+        """Свой размер листа при масштабе 100 % ([ш, в] или [None, None] — как задумано). Читается из настроек один раз."""
+        s = getattr(self, "_pad_size", None)
+        if s is None:
+            u = ui_settings()
+            s = self._pad_size = [u.get("pad_w"), u.get("pad_h")]
+        return s
+
+    def pad_size(self):
+        """Текущий размер листа в px окна (без зазора) — для растягивания за уголок (pad.js)."""
+        g = getattr(self, "_pad_g", None) or self._pad_geom()
+        return [g["w"], g["h"]]
+
+    def pad_resize(self, w, h, final=False):
+        """Растянули блокнот за нижний уголок (22.10: «чтобы, как виджет, можно было менять размер»). w, h — желаемый
+        размер листа сейчас (px окна); лист остаётся прижат к виджету, верх — на месте. w или h = 0 — как задумано.
+        -> [ш, в] при 100 % (pad.js сохраняет в ui.pad_w / ui.pad_h) или [None, None]."""
+        z = ZOOM[0] or 1.0
+        self._pad_size = [None, None] if not w or not h else \
+            [round(max(PAD_W_MIN, min(PAD_W_MAX, float(w) / z))), round(max(PAD_H_MIN, float(h) / z))]
+        g = self._pad_geom()
+        self._pad_g, self._pad_side = g, g["side"]
+        W, H = g["w"] + g["gap"], g["h"]
+        try:
+            if WIN:
+                hw = winshell.hwnd(PAD_TITLE)
+                win = getattr(self, "_pad", None)
+                if win is not None:
+                    try:
+                        form = win.native
+                        from System import Action
+                        from System.Drawing import Size
+                        form.Invoke(Action(lambda f=form: setattr(f, "MinimumSize", Size(1, 1))))
+                    except Exception:  # noqa: BLE001
+                        pass
+                    win.resize(W, H)
+                if hw:
+                    winshell.move(hw, g["x"], g["y"])
+                self._pad_shape(g)
+            else:
+                r = int(round(PAD_RADIUS * z))
+
+                def run():
+                    from gi.repository import Gtk
+                    gw = next((x for x in Gtk.Window.list_toplevels() if x.get_title() == PAD_TITLE), None)
+                    if gw is None:
+                        return False
+                    gw.set_size_request(W, H)
+                    gw.resize(W, H)
+                    if gw.get_window() is not None:
+                        gw.get_window().move(g["x"], g["y"])
+                        k = gw.get_window().get_scale_factor()
+                        shape_window(gw, "pad", rects=pad_rects(g["side"], g["w"] * k, g["h"] * k, g["gap"] * k,
+                                                                [(y * k, c * k) for y, c in g["clips"]], r * k))
+                    return True
+                self._gtk(run, timeout=5)
+            if final:
+                self._pad_js(self._pad_cfg_js(g))
+        except Exception as e:  # noqa: BLE001
+            print(f"Размер блокнота: {e}", file=sys.stderr)
+        return list(self._pad_size)
 
     def pad_state(self):
         win = getattr(self, "_pad", None)
@@ -1917,11 +2005,12 @@ class Api:
         win = getattr(self, "_pad", None)
         if win is not None:
             try:
-                self._pad_shape(g)
                 if WIN:
-                    self._pad_place(g["x"], g["y"])
                     win.show()
+                    self._pad_place(g["x"], g["y"])          # после показа: скрытая форма возвращается на прежнее место
+                    self._pad_shape(g)
                 else:
+                    self._pad_shape(g)
                     # 21.10, Ubuntu: «первый раз открылся, после скрытия виджета — сколько ни нажимаю, не открывается»:
                     # win.show() pywebview окно, спрятанное вместе с виджетом, не возвращал. Показываем так же, как в первый
                     # раз, — сами, через GTK (show_all, поверх, на место)
@@ -1960,8 +2049,9 @@ class Api:
                 done.append(1)
             try:
                 if WIN:
-                    self._pad_shape(g)
                     win.show()
+                    self._pad_place(g["x"], g["y"])          # на свой монитор — и после показа (№161)
+                    self._pad_shape(g)
                 else:
                     def run():
                         from gi.repository import Gtk

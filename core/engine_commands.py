@@ -853,6 +853,9 @@ class CommandsMixin:
                 self._brain_manual = time.monotonic()           # модель выбрали сами — автоматика час её не трогает
                 if after["llm"].get("auto_from"):
                     self.s.update({"llm": {"auto_from": ""}})
+            if before["tts"].get("engine") != after["tts"].get("engine") and "engine" in (a["patch"].get("tts") or {}) \
+                    and "auto_piper" not in (a["patch"].get("tts") or {}) and after["tts"].get("auto_piper"):
+                self.s.update({"tts": {"auto_piper": 0}})       # голос выбрали сами — автоматика больше не решает
             if before["all_names"] != after["all_names"]:
                 self.build_spotter()
             if before["audio"]["input"] != after["audio"]["input"] or \
@@ -870,14 +873,15 @@ class CommandsMixin:
             self.emit("settings", settings=after)
             return after
         if cmd == "llm_test":
-            r = test_profile(a["profile"])
+            prof = a.get("profile") or {}
+            r = test_profile(prof)
             if r.get("tools_mode"):
-                key = self._tools_key(dict(a["profile"], model=a["profile"].get("model") or ""))
+                key = self._tools_key(dict(prof, model=prof.get("model") or ""))
                 # проверка заодно узнала, как этот сервер принимает инструменты, — запомним, чтобы не проверять снова
                 self.s.update({"llm": {"tools_modes": {key: r["tools_mode"]}}})
             return r
         if cmd == "llm_models":
-            return list_models(a["profile"])
+            return list_models(a.get("profile") or {})
         if cmd in ("cloud_usage", "cloud_topup", "cloud_topup_send", "cloud_models", "cloud_model", "cloud_stt", "cloud_tts", "cloud_fallback"):
             from cloud import CloudError
             try:

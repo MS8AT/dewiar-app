@@ -8,6 +8,7 @@ Linux — потоки записи PulseAudio/PipeWire (pulsectl), Windows — 
 import logging
 import os
 import re
+import time
 
 log = logging.getLogger("dewiar.meeting")
 WIN = os.name == "nt"
@@ -27,6 +28,14 @@ NICE = {"zoom": "Zoom", "teams": "Teams", "telegram": "Telegram", "skype": "Skyp
         "chrome": "браузер", "chromium": "браузер", "firefox": "браузер", "yandex": "браузер", "opera": "браузер",
         "brave": "браузер", "vivaldi": "браузер", "msedge": "браузер", "edge": "браузер", "whatsapp": "WhatsApp",
         "viber": "Viber", "webex": "Webex", "jitsi": "Jitsi", "mattermost": "Mattermost", "element": "Element"}
+
+
+# Windows: не созвон — «Параметры» (проверка микрофона) и т. п.
+WIN_IGNORE = re.compile(r"immersivecontrolpanel|systemsettings|soundrecorder|voicerecorder", re.I)
+# держат микрофон для голосовой активации («Слушай, Алиса»): дольше LONG_HOLD секунд подряд — фон, а не созвон
+BACKGROUND_MIC = re.compile(r"yandex", re.I)
+LONG_HOLD = 15 * 60
+_told = set()
 
 
 def _nice(name):
@@ -101,6 +110,17 @@ def _windows():
                     continue
                 exe = app.rsplit("\\", 1)[-1].split("_")[0]
                 if RECORDERS.search(exe) or RECORDERS.search(app):   # OBS и другие программы записи — не созвон
+                    continue
+                # «Параметры» Windows (страница микрофона) — не созвон (пакет 22.10, №165)
+                if WIN_IGNORE.search(app):
+                    continue
+                # Яндекс Браузер с «Слушай, Алиса» держит микрофон всё время — это не созвон (пакет 22.10, №170: «в трее
+                # не слышит меня»: Dewiar считал это созвоном часами). Держит дольше LONG_HOLD — фон, а не звонок
+                age = time.time() - (start / 1e7 - 11644473600)              # FILETIME → секунды Unix
+                if BACKGROUND_MIC.search(app) and age > LONG_HOLD:
+                    if app not in _told:
+                        _told.add(app)
+                        log.info("Микрофон держит %s уже %d мин — похоже на голосовую активацию (Алиса), не созвон", exe, age // 60)
                     continue
                 out.append(_nice(app.rsplit("\\", 1)[-1].split("_")[0]))
         winreg.CloseKey(k)

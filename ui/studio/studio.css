@@ -663,6 +663,9 @@ html.framed #help { top: 38px; }
 html.framed .drawer { top: 38px; }               /* боковые панели (персонаж, навык, плагин) — под своей полосой заголовка (20.10: закрытие пряталось под ней) */
 #help h2 { font: 600 19px/1.3 "Unbounded", "Manrope", sans-serif; margin: 0 30px 14px 0; }
 #help .hx { position: absolute; top: 18px; right: 18px; }
+/* панель персонажа: крестик всегда виден — и в начале, и когда прокрутили вниз (пакет 22.10, №184: «как закрыть панель
+   справа — неочевидно»; «Закрыть» было только в самом низу) */
+#drawer #e-x { position: sticky; top: -8px; float: right; margin: -8px -8px 0 0; z-index: 3; }
 #help h4 { font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin: 18px 0 8px; }
 #help p { color: var(--ink); line-height: 1.6; }
 #help ul { padding-left: 18px; color: var(--ink); line-height: 1.55; } #help li { margin-bottom: 6px; }

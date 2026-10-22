@@ -457,6 +457,10 @@ function renderAccount(a) {
 }
 $("#acc-go").onclick = async () => {
   const login = $("#acc-login").value.trim(), password = $("#acc-pass").value;
+  const code = /^\d{6}$/.test(login.replace(/[\s-]/g, "")) ? login.replace(/[\s-]/g, "") : "";   // в поле логина — 6 цифр: это код   // код с другого устройства (№167)
+  if (code) { $("#acc-res").textContent = "Это код с другого устройства — подключаю по нему…";
+    return core.call("cloud_connect", { key: code }).then(() => { $("#acc-pass").value = ""; $("#acc-res").textContent = "Подключено по коду."; })
+      .catch(e => { $("#acc-res").textContent = e.message + " (код живёт 10 минут — возьмите новый на том устройстве)"; }); }
   if (!login || !password) return ($("#acc-res").textContent = "Введите логин и пароль");
   $("#acc-go").disabled = true; $("#acc-res").textContent = "Вхожу…";
   try { const a = await core.call("account_login", { server: $("#acc-server").value.trim(), login, password }); $("#acc-pass").value = ""; renderAccount(a); toast("Вход выполнен"); }

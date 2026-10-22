@@ -685,12 +685,24 @@ function tapOrb() {
   if (orbBusy) return; orbBusy = true;
   core.call("ptt").catch(showErr).finally(() => { orbBusy = false; });
 }
+/* Текст ошибки для человека: событие (не прочитался файл, не загрузилась картинка) — словами, а не «[object ProgressEvent]»
+   (пакет 22.10, жалоба №181) */
+function errText(e) {
+  if (e && e.message) return String(e.message);
+  if (e && typeof Event !== "undefined" && e instanceof Event) {
+    const t = e.target || {}, err = t.error && t.error.name;
+    return t instanceof FileReader ? "файл не прочитался" + (err ? ` (${err})` : "") + " — возможно, это папка, файл в облаке или занят другой программой"
+      : "не загрузилось" + (t.src || t.currentSrc ? ": " + String(t.src || t.currentSrc).slice(0, 80) : "");
+  }
+  return String(e);
+}
 function showErr(e) {
-  showCap(null, String(e.message || e), true); hideCapLater(12000);
+  const msg = errText(e);
+  showCap(null, msg, true); hideCapLater(12000);
   // сразу после ошибки — отчёт разработчику одним нажатием (журнал + настройки без ключей); нет связи — файлом на рабочий стол
   const b = document.createElement("button"); b.className = "rep"; b.textContent = "Отправить отчёт разработчику";
   b.onclick = (ev) => { ev.stopPropagation(); b.disabled = true; b.textContent = "Отправляю…"; hideCapLater(60000);
-    core.call("report_send", { note: "Ошибка в виджете: " + String(e.message || e).slice(0, 300) })
+    core.call("report_send", { note: "Ошибка в виджете: " + msg.slice(0, 300) })
       .then(r => { b.textContent = `Отчёт №${r.id} отправлен — спасибо!`; hideCapLater(6000); })
       .catch(err => core.call("report").then(p => { const d = p.split(/[\\/]/).slice(-2, -1)[0] || "";
         b.textContent = `Не отправился (${err.message.slice(0, 80)}) — сохранил в папку «${d}»`; b.title = p; }))
@@ -1020,6 +1032,7 @@ card.addEventListener("pointerdown", async (ev) => {
   drag = { sx: ev.screenX, sy: ev.screenY, moved: false, pos: null, orb: !!ev.target.closest("#orb") };
   if (drag.orb) holdBegin("mouse");
   const a = api(); if (a) drag.pos = await a.get_pos(mode);
+  if (a && a.drag_begin && /^Win/.test(navigator.platform)) drag.win = await a.drag_begin(mode).catch(() => false);   // Windows: окно идёт за курсором (№169)
 });
 document.addEventListener("keydown", (e) => {          // пробел в виджете — то же удержание (не в поле ввода)
   if (e.code === "Escape" && hold) { e.preventDefault(); if (!holdFinish(true)) hold = null; return; }
@@ -1045,7 +1058,8 @@ card.addEventListener("pointermove", (ev) => {
   if (hold && !hold.on && Math.hypot(dx, dy) > 5) { clearTimeout(hold.wait); hold = null; }   // потащили — это перетаскивание
   if (!drag.moved && Math.hypot(dx, dy) > 5) { drag.moved = true; card.classList.add("dragging"); }
   if (drag.moved && drag.pos && !raf) {
-    raf = requestAnimationFrame(() => { raf = 0; const a = api(); if (a && drag) a.move_to(mode, drag.pos[0] + dx, drag.pos[1] + dy); });
+    raf = requestAnimationFrame(() => { raf = 0; const a = api(); if (!a || !drag) return;
+      if (drag.win) a.drag_step(mode); else a.move_to(mode, drag.pos[0] + dx, drag.pos[1] + dy); });
   }
 });
 card.addEventListener("pointerup", () => {
@@ -1151,11 +1165,25 @@ function showUpd(u) {
     const x = api(); if (!x || !a) return;
     // страница новее запущенной программы (обновились, а интерфейс не перезапускали) — кнопки установки в ней нет
     if (typeof x.install_update !== "function") { $("upd").textContent = "Закройте Dewiar и откройте снова — затем обновите"; return; }
-    $("upd").textContent = navigator.platform.startsWith("Win") ? "Устанавливаю… Dewiar перезапустится сам" : "Устанавливаю… GNOME спросит пароль";
+    $("upd").textContent = navigator.platform.startsWith("Win") ? "Устанавливаю… Dewiar перезапустится сам" : "Устанавливаю… система спросит пароль";
     updating = Date.now();
     const r = await x.install_update(a.path).catch(e => ({ ok: false, error: e.message }));
-    $("upd").textContent = r.ok ? "Готово — перезапускаюсь…" : `Не получилось: ${r.error}`;
-    updating = r.ok ? Date.now() : 0;
+    if (!r.ok) { $("upd").textContent = `Не получилось: ${r.error} — нажмите, чтобы попробовать снова`; updating = 0; return; }
+    updating = Date.now();
+    if (!r.started || typeof x.update_progress !== "function") { $("upd").textContent = "Готово — перезапускаюсь…"; return; }
+    // Linux: установка только началась — показываем ход, а не «готово» сразу (пакет 22.10, №173: «выглядит, как будто
+    // зависло»): ждём пароль → ставлю N % → перезапускаюсь; отменили пароль или ошибка — так и пишем, можно повторить
+    clearInterval(window._updT);
+    window._updT = setInterval(async () => {
+      let u = null; try { u = await x.update_progress(); } catch (e) { return; }
+      if (!u || !u.stage) return;
+      updating = Date.now();
+      if (u.stage === "auth") $("upd").textContent = "Введите пароль в окне системы — без него обновление не встанет";
+      else if (u.stage === "install") $("upd").textContent = `Ставлю обновление… ${u.pct ? u.pct + " %" : ""}`.trim();
+      else if (u.stage === "restart" || u.stage === "done") { $("upd").textContent = "Готово — перезапускаюсь…"; clearInterval(window._updT); }
+      else if (u.stage === "error") { clearInterval(window._updT); updating = 0;
+        $("upd").textContent = `Не встало: ${String(u.error || "ошибка установки").slice(0, 140)} — нажмите, чтобы попробовать снова`; }
+    }, 700);
   };
 }
 
@@ -1251,7 +1279,9 @@ function shrink(file) {
     img.src = URL.createObjectURL(file);
   });
 }
-const b64of = (file) => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = bad; r.readAsDataURL(file); });
+const b64of = (file) => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result);
+  r.onerror = () => bad(new Error(`«${file.name}» не прочитался${r.error && r.error.name ? " (" + r.error.name + ")" : ""} — возможно, это папка, файл в облаке или занят другой программой`));
+  r.readAsDataURL(file); });
 function renderAtts() {
   const box = $("atts"); box.innerHTML = "";
   atts.forEach((a, i) => {

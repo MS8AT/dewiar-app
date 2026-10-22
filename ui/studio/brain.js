@@ -61,6 +61,7 @@ function renderProfiles() {
   });
 }
 function addProfile(preset, extra = {}) {
+  if (!(S_presets[preset] || extra.base_url)) { toast("Студия ещё не на связи с ядром — попробуйте через секунду"); return Promise.resolve(); }
   const id = uid(); const p = Object.assign({ api_key: "", model: "" }, S_presets[preset], extra); delete p.models; delete p.preset;
   S.llm.profiles[id] = p; openProf = id;
   const patch = { llm: { profiles: S.llm.profiles } }; if (!S.llm.active) patch.llm.active = id;

@@ -210,11 +210,26 @@ $("#dw-check").onclick = async (ev) => {
 };
 $("#dw-go").onclick = async () => {
   const login = $("#dw-login").value.trim(), password = $("#dw-pass").value, r = $("#dw-acc-res");
+  // 6 цифр вместо логина или пароля — это код «Добавить устройство» с другого устройства, а не вход (пакет 22.10, №167:
+  // «код у меня перед глазами» — пять раз «неверный логин или пароль», потом сайт закрыл вход на 15 минут)
+  const code = /^\d{6}$/.test(login.replace(/[\s-]/g, "")) ? login.replace(/[\s-]/g, "") : "";   // в поле логина — 6 цифр: это код
+  if (code) {
+    $("#dw-go").disabled = true; r.className = "res"; r.textContent = "Это код с другого устройства — подключаю по нему…";
+    try { await core.call("cloud_connect", { key: code }); $("#dw-pass").value = ""; r.className = "res ok"; r.textContent = "Подключено по коду — как на том устройстве."; setTimeout(() => dwLoad(), 1500); }
+    catch (e) { r.className = "res bad"; r.textContent = e.message + " (код живёт 10 минут: возьмите новый — «Добавить устройство» на том устройстве)"; }
+    finally { $("#dw-go").disabled = false; }
+    return;
+  }
   if (!login || !password) { r.className = "res bad"; r.textContent = "Введите логин и пароль"; return; }
   $("#dw-go").disabled = true; r.className = "res"; r.textContent = "Вхожу…";
   // после входа ядро само подключает модели и Знания аккаунта — карточки перечитываем чуть позже
   try { const a = await core.call("account_login", { server: $("#dw-server").value.trim() || (DW.acc && DW.acc.server) || "", login, password }); $("#dw-pass").value = ""; renderAccount(a); DW.acc = a; r.className = "res ok"; r.textContent = "Вход выполнен — модели и Знания подключаются…"; setTimeout(() => dwLoad().then(() => { r.textContent = "Вход выполнен."; }), 2500); }
-  catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { $("#dw-go").disabled = false; }
+  catch (e) {
+    r.className = "res bad"; r.textContent = e.message;
+    const pc = String(password).replace(/[\s-]/g, "");
+    if (/^\d{6}$/.test(pc) && /неверн|логин|пароль/i.test(e.message))     // в поле пароля — 6 цифр: может, это код с другого устройства
+      try { await core.call("cloud_connect", { key: pc }); $("#dw-pass").value = ""; r.className = "res ok"; r.textContent = "Это был код с другого устройства — подключено по нему."; setTimeout(() => dwLoad(), 1500); } catch (x) { }
+  } finally { $("#dw-go").disabled = false; }
 };
 $("#dw-pass").onkeydown = (e) => { if (e.key === "Enter") $("#dw-go").click(); };
 $("#dw-out").onclick = async () => { if (await ask("Выйти из аккаунта dewiar.pro? Модели и Знания по аккаунту отключатся.")) core.call("account_logout").then(a => { renderAccount(a); DW.acc = a; DW.kb = null; $("#dw-acc-res").textContent = ""; dwLoad(); }).catch(e => toast(e.message)); };

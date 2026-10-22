@@ -188,3 +188,7 @@ $("#e-del").onclick = async () => {
   try { await core.call("persona_delete", { id: ed.id }); closeEditor(); } catch (e) { toast(e.message); }
 };
 document.addEventListener("keydown", e => { if (e.key === "Escape") { if (ed) closeEditor(); $("#skd").classList.remove("open"); } });
+/* закрыть панель персонажа: крестиком, щелчком мимо (по странице, не по карточкам) и переходом в другой раздел (№184) */
+$("#e-x").onclick = () => closeEditor();
+document.addEventListener("mousedown", (e) => { if (ed && e.target.closest("main") && !e.target.closest(".drawer, .dwq, .card, button")) closeEditor(); });
+$$("nav button[data-p]").forEach(b => b.addEventListener("click", () => { if (ed) closeEditor(); $("#skd").classList.remove("open"); }));

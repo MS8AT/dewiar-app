@@ -153,3 +153,13 @@ document.addEventListener("paste", (e) => {                 // снимок из
   const fs = [...(e.clipboardData && e.clipboardData.files || [])].filter(f => /^image\//.test(f.type));
   if (fs.length) { e.preventDefault(); ntAdd(fs); }
 });
+/* голосом записали заметку, пока открыта эта страница, — список освежается сам и видно, что записано (пакет 22.10, №179:
+   «непонятно, выполнена ли команда — страница не обновляется»). Правку на месте не перебиваем. */
+let ntBump = 0;
+function ntLive(e) {
+  if (!$("#p-notes") || !$("#p-notes").classList.contains("cur") || NT.edit) return;
+  if (e && e.title && e.kind !== "reminder") toast(`Заметка «${e.title}» сохранена`, 2600);
+  clearTimeout(ntBump); ntBump = setTimeout(() => { NT.cur = (e && e.path) || NT.cur; ntLoad().then(() => { if (e && e.path) ntOpen(e.path); }).catch(() => { }); }, 300);
+}
+core.on("note_saved", ntLive);
+core.on("notes_changed", () => ntLive(null));

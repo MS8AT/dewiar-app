@@ -103,5 +103,10 @@ console.log(JSON.stringify(r));"""
 out = subprocess.run(["node", "-e", js], capture_output=True, text=True)
 ok(out.stdout.strip() == '["ok","","",""]' and "mindText(d); if (!t) return false; m.constitution = t" in app,
    f"телефон принимает душу и конституцию по тем же правилам: {out.stdout.strip() or out.stderr[-200:]}")
+# неатомарная запись diary.json / soul.json (аудит, «частично»): оборванная запись не должна оставлять пустой файл
+for mod in ("diary", "soul"):
+    src = (ROOT / "core" / (mod + ".py")).read_text(encoding="utf-8")
+    body = src[src.index("    def _save(self):"):][:600]
+    ok("os.replace(tmp, self.state)" in body and 'self.state.write_text' not in body, f"{mod}.json пишется целиком или никак (временный файл и замена)")
 print("\nИТОГ:", "всё прошло" if not fails else f"не прошло {len(fails)}")
 sys.exit(1 if fails else 0)

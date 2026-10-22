@@ -96,6 +96,15 @@ def get_pos(h):
     return [round(x / k), round(y / k)]
 
 
+def cursor(h=None):
+    """Где курсор мыши — в логических px (масштаб — окна h). Для перетаскивания виджета: координаты из страницы
+    (screenX) в WebView2 при движении окна бывают устаревшими — курсор «убегал» от окна (№169)."""
+    pt = wintypes.POINT()
+    user32.GetCursorPos(ctypes.byref(pt))
+    k = scale(h) if h else 1.0
+    return [pt.x / k, pt.y / k]
+
+
 def move(h, x, y):
     k = scale(h)
     user32.SetWindowPos(h, None, int(round(x * k)), int(round(y * k)), 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
@@ -115,8 +124,21 @@ def clamp(h, x, y, w, hgt):
     return int(max(l, min(x, r - w))), int(max(t, min(y, b - hgt)))
 
 
-def work_area():
-    """Рабочая область основного монитора, логические px (для первого положения виджета)."""
+user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
+user32.MonitorFromWindow.restype = wintypes.HMONITOR
+user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+
+
+def work_area(h=None):
+    """Рабочая область монитора, на котором окно h (без h — основного), логические px. 21.10, №161: блокнот считался по
+    основному монитору — у виджета на втором мониторе он вставал за край экрана и не был виден."""
+    if h:
+        mon = user32.MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST)
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(MONITORINFO)
+        if mon and user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
+            k, wa = scale(h), mi.rcWork
+            return wa.left / k, wa.top / k, wa.right / k, wa.bottom / k
     r = wintypes.RECT()
     user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0)       # SPI_GETWORKAREA
     try:

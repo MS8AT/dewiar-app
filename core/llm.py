@@ -45,6 +45,22 @@ def ctx_full(e):
     return bool(CTX_RX.search(str(e) or ""))
 
 
+def _base(p):
+    """Адрес сервера профиля. Пусто (профиль из старой копии настроек, студия до связи с ядром) — понятная ошибка, а не
+    KeyError в журнале (пакет 22.10: «Команда llm_test упала: 'base_url'», «'NoneType' object has no attribute 'rstrip'»)."""
+    b = str((p or {}).get("base_url") or "").strip().rstrip("/")
+    if not b:
+        raise LLMError("не указан адрес сервера модели — «Мозг» → профиль → «Адрес сервера»")
+    return b
+
+
+# Денег на ключе нет, а сервис отвечает 429 (Z.ai: «Insufficient balance or no resource package») — ждать и повторять
+# бессмысленно: пакет 22.10 — по 3 повтора с ожиданием до минуты на каждый вопрос, человек минутами ждал тишину.
+NO_MONEY_RX = re.compile(r"insufficient (balance|quota|funds)|no resource package|exceeded your current quota|"
+                         r"credit balance is too low|payment required|недостаточно средств", re.I)
+LOCATION_RX = re.compile(r"location is not supported|unsupported_country|not available in your (country|region)", re.I)
+
+
 def _humanize(e, base_url):
     """Ошибка сети или HTTP → короткое объяснение по-русски для окна и голоса."""
     if "Ничего не уходит в интернет" in str(e):           # стоп-кран (core/egress.py): модель в интернете — на паузе
@@ -68,9 +84,19 @@ def _humanize(e, base_url):
         except Exception:  # noqa: BLE001
             pass
         try:                                          # облако Dewiar и др. объясняют сами: «заряд закончился…»
-            msg = (e.response.json().get("error") or {}).get("message", "")
+            j = e.response.json()
+            j = j[0] if isinstance(j, list) and j else j   # Gemini отдаёт ошибку списком: [{"error": …}]
+            msg = ((j or {}).get("error") or {}).get("message", "") if isinstance(j, dict) else ""
         except Exception:  # noqa: BLE001
             msg = ""
+        if LOCATION_RX.search(body + " " + msg):
+            return ("Gemini недоступен из вашей страны — Google не пускает к API отсюда. Включите VPN или прокси "
+                    "(«Подключение» → «Прокси»), подключите Gemini через OpenRouter или выберите другой сервис")
+        if NO_MONEY_RX.search(body + " " + msg) and "Dewiar" not in msg:
+            zai = "z.ai" in str(base_url or "")
+            return ("на ключе нет оплаченного пакета или закончились деньги — пополните баланс у сервиса"
+                    + (". Подписка GLM Coding Plan работает по своему адресу (…/api/coding/paas/v4), и по правилам Z.ai — "
+                       "только в программах для кода" if zai else ""))
         if msg and (code in (402, 429) or "Dewiar" in msg or "dw-" in msg):
             return msg.rstrip(".")
         if code == 402:
@@ -245,7 +271,7 @@ def _anth_root(base):
 def list_models(p, timeout=6):
     """-> имена моделей на сервере профиля p. Если /models нет (404), а /api/tags есть — это Ollama без
     OpenAI-совместимого API: адрес запоминается в _native. Ошибки — LLMError с понятным текстом."""
-    base = p["base_url"].rstrip("/")
+    base = _base(p)
     try:
         if p.get("kind") == "ollama" or base in _native:
             r = httpx.get(_root(base) + "/api/tags", headers=_headers(p), timeout=timeout)
@@ -300,7 +326,7 @@ def resolve_model(p):
     """Модель из профиля, а если не указана — выбранная pick_model (запоминается по адресу до перезапуска)."""
     if p.get("model"):
         return p["model"]
-    key = p["base_url"]
+    key = _base(p)
     if key not in _model_cache:
         models = list_models(p)
         if not models:
@@ -693,7 +719,7 @@ def prompt_tools_mode(p):
     Для Anthropic и явного "native" — никогда."""
     if p.get("kind") == "anthropic" or p.get("tools_mode") == "native":
         return False
-    return p.get("tools_mode") == "prompt" or p.get("base_url", "").rstrip("/") in _no_tools
+    return p.get("tools_mode") == "prompt" or str(p.get("base_url") or "").rstrip("/") in _no_tools
 
 
 PROBE_TOOL = {"name": "get_time", "description": "Узнать точное текущее время", "parameters": {"type": "object", "properties": {}}}
@@ -960,7 +986,7 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
     функции текстом, без chat_template_kwargs, родной API Ollama, короче (_lite). Если всё время ушло на
     «размышления» и текста нет — повторит с выключенными размышлениями и вчетверо большим лимитом.
     Служебные ключи профиля с «_» (_flat, _lite, _no_kwargs, _empty_retry) ставит только сама при повторах."""
-    base = p["base_url"].rstrip("/")
+    base = _base(p)
     tools_all = tools
     if tools and prompt_tools_mode(p):
         system = system + tools_prompt(tools)            # сервер не принимает функции полем — описываем текстом
@@ -1014,7 +1040,7 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
                 r.read()
                 err = r.text.lower()
                 n = int(p.get("_rl") or 0)
-                if r.status_code == 429 and n < len(RATE_WAIT):     # «слишком много запросов» — подождать и повторить
+                if r.status_code == 429 and n < len(RATE_WAIT) and not NO_MONEY_RX.search(err):   # «много запросов» — подождать (денег нет — не ждать)
                     try:
                         wait = min(90.0, float(r.headers.get("retry-after") or RATE_WAIT[n]))
                     except ValueError:
@@ -1219,6 +1245,10 @@ def test_profile(p):
     t0 = time.monotonic()
     models = []
     try:
+        _base(p)
+    except LLMError as e:
+        return {"ok": False, "error": str(e)}
+    try:
         models = list_models(p)
     except LLMError as e:
         if not p.get("model"):
@@ -1230,7 +1260,7 @@ def test_profile(p):
         if first is None:
             first = time.monotonic() - t0
         text += piece
-    base = p["base_url"].rstrip("/")
+    base = _base(p)
     tools_mode = (probe_tools(dict(p, model=model)) or "") if text.strip() else ""
     return {"ok": bool(text.strip()), "models": models, "model": model, "api": "ollama" if base in _native else p.get("kind", "openai"),
             "tools_mode": tools_mode,
