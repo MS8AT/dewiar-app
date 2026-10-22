@@ -959,6 +959,8 @@ class CommandsMixin:
                             (out / name).write_bytes(_b64.b64decode(f.get("b64") or ""))
                             files.append(str(out / name))
                     return c.send(a.get("pid", ""), a.get("text", ""), files)
+                if cmd == "close_meet":             # «Встречи» в студии (studio/meet.js) — через то же пространство, что телефон
+                    return c.meet(a.get("path", ""), a.get("body") or {})
                 if cmd == "close_wave":             # 👋 с радара «Рядом»
                     return c.wave(a.get("pid", ""))
                 if cmd == "close_react":            # реакция на сообщение (👍 ❤️ …)

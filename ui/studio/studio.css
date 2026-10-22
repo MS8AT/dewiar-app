@@ -1356,3 +1356,69 @@ html.st-light { --sf-g: #1d7f55; --sf-b: #4b5bd6; --sf-a: #b46a08; --sf-x: color
 .sft .h { color: var(--dim); font-size: 12px; margin-left: 8px; }
 .sfempty { color: var(--muted); margin: 4px 0; } .sfempty.lo { color: var(--sf-g); margin-bottom: 8px; }
 html.st-light .sfseg { background: var(--soft2); }
+
+/* Студия → «Близкие» → «Встречи» (ui/studio/meet.js): не прибор, как «Рядом», а доска с бейджами «Привет, меня зовут…» —
+   как на конференции. Бумажные бейджи с цветной полосой (цвет — у каждого свой), чуть наклонены; кто машет вам —
+   полоса «👋 Машет вам», кто помахал в ответ — «Вы в «Близких»». Наверху — ваша отметка-билет с фитилём: сколько ещё видно. */
+.cl-meet { --paper: #fbfaf6; --paper-ink: #1f2230; --paper-dim: rgba(31,34,48,.58); max-width: 980px; }
+.mt-note { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 22px 24px; border-radius: 20px; background: var(--glass2); box-shadow: inset 0 0 0 1px var(--line); max-width: 640px; }
+.mt-note b { font: 600 17px "Unbounded", sans-serif; letter-spacing: -.01em; }
+.mt-note span { color: var(--muted); line-height: 1.55; }
+.mt-note ul { margin: 4px 0 6px; padding-left: 20px; color: var(--muted); line-height: 1.6; }
+.mt-18 { display: flex; gap: 10px; align-items: center; margin: 4px 0 6px; cursor: pointer; }
+.mt-here { position: relative; display: flex; align-items: center; gap: 16px; padding: 14px 18px 18px 22px; margin: 0 0 22px; border-radius: 18px;
+  background: var(--paper); color: var(--paper-ink); box-shadow: 0 14px 30px -18px rgba(10,12,30,.55); overflow: hidden; }
+.mt-here::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: linear-gradient(#5fd39b, #2fae74); }
+.mt-pin { width: 12px; height: 12px; border-radius: 50%; background: #2fae74; box-shadow: 0 0 0 5px rgba(47,174,116,.18); flex: none; animation: mt-beat 2.4s ease-in-out infinite; }
+@keyframes mt-beat { 50% { box-shadow: 0 0 0 9px rgba(47,174,116,.05); } }
+.mt-hw { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mt-hw b { font: 600 15px "Unbounded", sans-serif; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt-hw span { font-size: 13px; color: var(--paper-dim); }
+.mt-fuse { position: absolute; left: 22px; right: 18px; bottom: 9px; height: 3px; border-radius: 2px; background: rgba(31,34,48,.08); }
+.mt-fuse::after { content: ""; position: absolute; inset: 0; border-radius: 2px; background: linear-gradient(90deg, #2fae74, #f2b33d); transform-origin: left; transform: scaleX(var(--left, 1)); }
+.mt-ha { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.mt-here .btn, .mt-tag .btn { color: var(--paper-ink); background: rgba(31,34,48,.06); box-shadow: none; border: 0; }
+.mt-here .btn:hover, .mt-tag .btn:hover { background: rgba(31,34,48,.12); }
+.mt-tag .btn.primary { color: #fff; background: var(--paper-ink); }
+.mt-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 22px 18px; padding: 22px 18px; border-radius: 22px;
+  background: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ink) 14%, transparent) 1px, transparent 1.5px) 0 0 / 18px 18px, var(--soft); }
+.mt-tag { position: relative; display: flex; flex-direction: column; border-radius: 14px; background: var(--paper); color: var(--paper-ink);
+  transform: rotate(var(--r, 0deg)); box-shadow: 0 1px 0 rgba(255,255,255,.6) inset, 0 12px 22px -14px rgba(10,12,30,.6); transition: transform .25s ease, box-shadow .25s ease; }
+.mt-tag:hover, .mt-tag:focus-within { transform: rotate(0deg) translateY(-3px); box-shadow: 0 18px 30px -16px rgba(10,12,30,.6); }
+.mt-tag header { padding: 9px 14px 8px; border-radius: 14px 14px 0 0; background: var(--c); color: #12131c; font: 600 12px "Manrope", sans-serif; letter-spacing: .01em; }
+.mt-tag .mt-body { padding: 12px 14px 8px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.mt-nm { font: 600 22px/1.15 "Unbounded", sans-serif; letter-spacing: -.02em; word-break: break-word; }
+.mt-ab { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--paper-ink); font-style: italic; }
+.mt-tag small { font-size: 12px; color: var(--paper-dim); }
+.mt-tag footer { display: flex; align-items: center; gap: 6px; padding: 6px 10px 12px 14px; flex-wrap: wrap; }
+.mt-tag footer .btn { font-size: 12.5px; padding: 6px 11px; }
+.mt-more { margin-left: auto; width: 28px; height: 28px; border: 0; border-radius: 8px; background: none; color: var(--paper-dim); font-size: 16px; cursor: pointer; }
+.mt-more:hover { background: rgba(31,34,48,.08); color: var(--paper-ink); }
+.mt-wait { font-size: 12px; color: var(--paper-dim); }
+.mt-menu { display: flex; gap: 6px; padding: 0 12px 12px 14px; flex-wrap: wrap; }
+.mt-menu input { flex: 1; min-width: 0; font: inherit; font-size: 12.5px; padding: 6px 9px; border-radius: 8px; border: 1px solid rgba(31,34,48,.18); background: #fff; color: var(--paper-ink); }
+.mt-tag.in header { background: repeating-linear-gradient(-45deg, var(--c) 0 10px, color-mix(in srgb, var(--c) 78%, #fff) 10px 20px); }
+.mt-tag.in { box-shadow: 0 0 0 2px var(--c), 0 16px 28px -14px color-mix(in srgb, var(--c) 70%, #000); }
+.mt-tag.in header { animation: mt-wave 2.6s ease-in-out infinite; }
+@keyframes mt-wave { 0%, 70%, 100% { background-position: 0 0; } 85% { background-position: 28px 0; } }
+.mt-tag.match header { background: var(--paper-ink); color: #fff; }
+.mt-tag.match header::before { content: "✓ "; color: var(--c); }
+.mt-tag.waved header { background: color-mix(in srgb, var(--c) 45%, var(--paper)); }
+.mt-tag.ghost { background: transparent; box-shadow: none; outline: 2px dashed color-mix(in srgb, var(--ink) 22%, transparent); outline-offset: -2px; color: var(--muted); max-width: 260px; }
+.mt-tag.ghost header { background: none; color: var(--muted); }
+.mt-tag.ghost .mt-ab { color: var(--muted); }
+.mt-fly { position: absolute; right: 18px; bottom: 30px; font-style: normal; font-size: 28px; pointer-events: none; animation: mt-fly 1.1s ease-out forwards; }
+@keyframes mt-fly { 0% { transform: translate(0, 0) rotate(0); opacity: 1; } 40% { transform: translate(-6px, -26px) rotate(-18deg); } 70% { transform: translate(4px, -44px) rotate(14deg); opacity: 1; } 100% { transform: translate(0, -70px) rotate(0); opacity: 0; } }
+.mt-foot { margin-top: 14px; }
+.mt-form { display: grid; grid-template-columns: 250px 1fr; gap: 32px; align-items: start; max-width: 820px; padding: 10px 6px; }
+.mt-form .mt-tag.preview { pointer-events: none; }
+.mt-fields { display: flex; flex-direction: column; gap: 10px; }
+.mt-fields .mt-big { font: 600 17px "Unbounded", sans-serif; }
+.mt-fields .f { display: flex; flex-direction: column; gap: 4px; } .mt-fields .f span { font-size: 12.5px; color: var(--muted); }
+.mt-hours { display: inline-flex; gap: 2px; padding: 3px; border-radius: 12px; background: var(--soft); align-self: flex-start; }
+.mt-hours button { border: 0; background: none; color: var(--muted); font: 600 13px "Manrope", sans-serif; padding: 7px 14px; border-radius: 9px; cursor: pointer; }
+.mt-hours button.on { color: #fff; background: var(--brand); }
+.mt-phone { max-width: 680px; }
+@media (max-width: 720px) { .mt-form { grid-template-columns: 1fr; } .mt-here { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) { .mt-pin, .mt-tag.in header { animation: none; } .mt-tag, .mt-tag:hover { transition: none; } }
+.mt-tag button:focus-visible, .mt-here button:focus-visible, .mt-hours button:focus-visible { outline: 2px solid var(--c, var(--accent)); outline-offset: 2px; }
