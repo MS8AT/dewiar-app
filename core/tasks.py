@@ -265,6 +265,8 @@ class TaskManager:
 
     def _watch(self, t):
         """Работающая задача (раз в 2 с из _scheduler): завис ли шаг; пора ли весточкой сказать, как идёт."""
+        if t.data.get("subscription_binding"):
+            return  # Разрешение задачи Codex не включает внешние уведомления.
         import time as _t
         now = _t.monotonic()
         limit = HANG_TOOL_SEC if t.beat_tool else HANG_SEC
@@ -1407,6 +1409,9 @@ class TaskManager:
         """Поток задачи: цикл «модель -> вызовы инструментов» до finish, wait, остановки, ошибки или лимита шагов.
         История сохраняется после каждого шага (продолжение после перезапуска). Временный сбой модели — сон
         и повтор (RETRY_MIN), прочие ошибки — status=failed с объявлением."""
+        from subscription_context import run_task as subscription_task
+        if subscription_task(self, t):
+            return
         hist = t.dir / "история.json"
         try:
             msgs = json.loads(hist.read_text(encoding="utf-8")) if hist.exists() else []

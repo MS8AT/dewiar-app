@@ -1,4 +1,5 @@
 # сборки и кэш
+.local-review/
 dist/
 __pycache__/
 *.pyc

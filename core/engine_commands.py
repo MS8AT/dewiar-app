@@ -872,6 +872,9 @@ class CommandsMixin:
                 threading.Thread(target=self.ensure_voice, args=(after["persona"],), daemon=True).start()
             self.emit("settings", settings=after)
             return after
+        if cmd.startswith("subscription_"):
+            from subscription_adapter import ui_command
+            return ui_command(cmd[len("subscription_"):], a)
         if cmd == "llm_test":
             prof = a.get("profile") or {}
             r = test_profile(prof)

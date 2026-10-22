@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "upstream": "7da1d0e7e5f19b152e1661f752c318a154b5513a",
+  "files": [
+    {
+      "path": "core/engine_answer.py",
+      "before": "3d7d31716357826ccff96ef1f0a977b445b2b2b5d0c4f18ec00d5fcc99132285",
+      "after": "26653a16ac07316d09ec13867a03b46ba2ea2f891929b3d3a59d67062732a13d"
+    },
+    {
+      "path": "core/engine_brain.py",
+      "before": "6f9a2678494b2ba905a1211cf7465288688c8d0c3576fe6ac21cd3569ab12041",
+      "after": "e03a1b9fcacb35ec599f3603abe09df133433c116d0cf17f552c101d1c853c04"
+    },
+    {
+      "path": "core/engine_commands.py",
+      "before": "bdbfe3d2c59ed108d9a9bf2e75e964d25524e084793bd8cc9f2cdfbe59cecd37",
+      "after": "05b45822384e30f65acaf61991c02ae72d7910965acc10583bc156d509992813"
+    },
+    {
+      "path": "core/llm.py",
+      "before": "862713465774a3fd9fd09bdc576cdffc4fbd91db2c023adf94e9a4c24929091c",
+      "after": "17db83fd12015f212694a7b6acc9475ee54fa91108951d15add782c5e86889d7"
+    },
+    {
+      "path": "core/subscription_adapter.py",
+      "before": null,
+      "after": "b6690e4428210b79dd72dbb92d0a6bf84ff981f9d8412ea1d7bdbc7595499ad3"
+    },
+    {
+      "path": "core/subscription_context.py",
+      "before": null,
+      "after": "c63cdc4dfa439cb08e8a82301e186bbc28e95d3fb9d86a58fe96d71259c2771e"
+    },
+    {
+      "path": "core/subscription_runtime/client.py",
+      "before": null,
+      "after": "5d6e90229c38e21a6a2d3503f3184042d95564cc41590bca61e68c3a61fbe462"
+    },
+    {
+      "path": "core/subscription_runtime/codex_policy.py",
+      "before": null,
+      "after": "67cfe4945b76a7131180b483a2e81eebba5b7d67000e45a48f1b90a6e8caee92"
+    },
+    {
+      "path": "core/subscription_runtime/codex_rpc.py",
+      "before": null,
+      "after": "b0d5c411c0be5d1ec723708eee69d7c360fd9ac7bb8a82f0f2fcbf719d2c4be8"
+    },
+    {
+      "path": "core/subscription_runtime/codex_sidecar.py",
+      "before": null,
+      "after": "d44c645ae794230f0a6ff4288775299ff2430eec7219a1e2ba76e9b2ab240086"
+    },
+    {
+      "path": "core/subscription_runtime/codex-dependency.json",
+      "before": null,
+      "after": "66900753bea99a1cdcfe2d56af81e2d9973bb6ab819b8696bafa1ad67c1e8eaa"
+    },
+    {
+      "path": "core/subscription_runtime/dependency.json",
+      "before": null,
+      "after": "69e04bd103b308c7fa40d03afad9051daceffcead25636d89801ed38a3dfb74e"
+    },
+    {
+      "path": "core/subscription_runtime/ipc_client.py",
+      "before": null,
+      "after": "8a250e35071a2d4f992547584cfb465abf9755a4c8161fd690e72916b9736cf3"
+    },
+    {
+      "path": "core/subscription_runtime/policy.mjs",
+      "before": null,
+      "after": "fba9b3368d16258873ad0472b5a3163ae989f62ef93050d8ed3b40ad8f21c7c0"
+    },
+    {
+      "path": "core/subscription_runtime/probe_codex.py",
+      "before": null,
+      "after": "9efed7bb5dd483f62894da6c084258747033cfd18eba4a3888cc894e8e4be4f0"
+    },
+    {
+      "path": "core/subscription_runtime/sidecar.mjs",
+      "before": null,
+      "after": "1539f8f3cb68d584d9304146c94663bedd4b96b7297023472330e363967eb7d0"
+    },
+    {
+      "path": "core/subscription_runtime/windows_store.py",
+      "before": null,
+      "after": "97fca6d0b10f68e97621f82c029fe5f7c1028fb807e31e6103ab5056650d4bb1"
+    },
+    {
+      "path": "core/tasks.py",
+      "before": "4c5c180da988349c5fe3df7189b72252c2aa3ba174eebd59994a7519db113e6a",
+      "after": "4bf27c6b0feb958a4ce2f47fbd38a948eefd2b3cc0dff8e2a6c3ab71ffe70962"
+    },
+    {
+      "path": "ui/settings.html",
+      "before": "22a58bb82570d5c3c8008b09fc8644c2611a390792bbfc848383d7e5deb0753f",
+      "after": "839a110bc1c29efd19030c75dd6019247e97ab4d83610de8dcceea4abde3f3fc"
+    },
+    {
+      "path": "ui/studio/brain.js",
+      "before": "cf7faaad4179e60444503bbdd94d8aa17225e0a0005f4f6ada7958c15b925849",
+      "after": "d3754b7822cb7a0fc4a301406a2942fade476897bae1d3f5d3b84eb8bb1037c3"
+    },
+    {
+      "path": "ui/studio/subscription.js",
+      "before": null,
+      "after": "770f23595ef18842df735394e89101187c05221e48448828959ae05b5e46ef90"
+    }
+  ]
+}

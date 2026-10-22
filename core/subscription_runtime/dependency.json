@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/openai/sign-in-with-chatgpt-devkit.git",
+  "commit": "0a36fefeb913055c8c7a1a29b63d82b96b2e841a",
+  "workspace": "@siwc/local",
+  "version": "0.1.0",
+  "node_minimum": "22.12.0",
+  "license": "SIGN-IN WITH CHATGPT DEVKIT NONCOMMERCIAL LICENSE Version 1.0",
+  "commercial_use": "requires separate written agreement; not authorized by this prototype",
+  "modified_sdk": false,
+  "package_registry": "not published at implementation time; build pinned source",
+  "build": "npm ci --ignore-scripts --workspace @siwc/local --include-workspace-root --no-audit --no-fund && npm run build --workspace @siwc/local"
+}

@@ -15,6 +15,7 @@ function renderProfiles() {
   const profs = S.llm.profiles || {};
   if (!Object.keys(profs).length) box.innerHTML = '<p class="hint" style="margin-bottom:10px">Пока ни одной — выберите выше, где будет думать ассистент.</p>';
   Object.entries(profs).forEach(([id, p]) => {
+    if (p.kind === 'chatgpt_subscription') { renderSubscriptionProfile(box, id, p); return; }
     const el = document.createElement("div"); el.className = "prof" + (S.llm.active === id ? " on" : "") + (openProf === id ? " open" : "");
     el.innerHTML = `<div class="head"><input type="radio" name="act" ${S.llm.active === id ? "checked" : ""} title="Сделать активной"><div class="t"><b></b><small></small></div><span class="res"></span><button class="btn small">Настроить</button></div>
     <div class="body"><div class="row" style="margin-top:12px">

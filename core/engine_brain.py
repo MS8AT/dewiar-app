@@ -353,6 +353,8 @@ class BrainMixin:
         with self._brain_lock:
             active = self.s.get("llm", "active") or ""
             profiles = self.s.get("llm", "profiles") or {}
+            if profiles.get(active, {}).get("kind") == "chatgpt_subscription":
+                return  # Выбранная подписка не заменяется облачным профилем автоматически.
             back = self.s.get("llm", "auto_from") or ""
             if active and active not in profiles:
                 # активная модель указывает на удалённый профиль (например, профиль облака убрали, а выбор остался) —

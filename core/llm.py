@@ -271,6 +271,8 @@ def _anth_root(base):
 def list_models(p, timeout=6):
     """-> имена моделей на сервере профиля p. Если /models нет (404), а /api/tags есть — это Ollama без
     OpenAI-совместимого API: адрес запоминается в _native. Ошибки — LLMError с понятным текстом."""
+    if p.get("kind") == "chatgpt_subscription":
+        raise LLMError("Подписка: используйте отдельную кнопку моделей аккаунта; фоновый доступ запрещён.")
     base = _base(p)
     try:
         if p.get("kind") == "ollama" or base in _native:
@@ -987,6 +989,8 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
     функции текстом, без chat_template_kwargs, родной API Ollama, короче (_lite). Если всё время ушло на
     «размышления» и текста нет — повторит с выключенными размышлениями и вчетверо большим лимитом.
     Служебные ключи профиля с «_» (_flat, _lite, _no_kwargs, _empty_retry) ставит только сама при повторах."""
+    if p.get("kind") == "chatgpt_subscription":
+        raise LLMError("Подписка разрешена только через отдельный локальный маршрут; общий tools/фон/fallback запрещён.")
     base = _base(p)
     tools_all = tools
     if tools and prompt_tools_mode(p):
@@ -1251,6 +1255,8 @@ def test_profile(p):
     """Проверка для кнопки «Проверить» в «Мозге»: какие модели есть, какая выбрана, отвечает ли она текстом
     и как быстро, как вызывает инструменты. -> {"ok", "models", "model", "api", "tools_mode", "first_token_ms",
     "total_ms", "reply", "error"}; ошибка соединения при выборе модели — {"ok": False, "error"}."""
+    if p.get("kind") == "chatgpt_subscription":
+        return {"ok": False, "error": "Подписка: используйте проверку установки без сети; тестовый inference отключён."}
     t0 = time.monotonic()
     models = []
     try:

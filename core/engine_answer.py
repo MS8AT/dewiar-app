@@ -129,6 +129,11 @@ class AnswerMixin:
             text = "Что на этой картинке?"
         if not text:
             return
+        # Подписка проходит отдельные проверки до общей истории и инструментов.
+        if (self.s.active_llm() or {}).get("kind") == "chatgpt_subscription":
+            from subscription_adapter import start_turn
+            if start_turn(self, text, images, quiet, via, raw, shown, report):
+                return
         if via:
             quiet = False
         if not raw and not quiet and not images and self.alarm and not via and self._alarm_voice(text):
@@ -286,7 +291,7 @@ class AnswerMixin:
     def _conv_fold(self, turns):
         """Содержание начала длинного разговора пишет активная модель; история берётся свежей в момент сворачивания."""
         prof = self.s.active_llm()
-        if not prof:
+        if not prof or prof.get("kind") == "chatgpt_subscription":
             return
 
         def ask(system, messages):
@@ -538,7 +543,7 @@ class AnswerMixin:
             return None
         fid = self.s.get("llm", "fallback") or ""
         fb = (self.s.get("llm", "profiles") or {}).get(fid)
-        if not fb or is_cloud(fb):
+        if not fb or is_cloud(fb) or fb.get("kind") == "chatgpt_subscription":
             return None
         log.warning("☁ Облако: %s — отвечает запасной мозг «%s»", e, fb.get("name") or fid)
         self.note(f"Облако не ответило ({str(e)[:60]}) — ответил запасной мозг «{fb.get('name') or fid}»")
