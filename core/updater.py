@@ -132,8 +132,10 @@ class Updater:
     """Проверка и скачивание новой версии программы (STATE_DIR/updates) и адреса моделей со своего сайта.
     Последний полученный latest.json хранится в updates/manifest.json — модели можно найти и без сети."""
 
-    def __init__(self, settings, version, state_dir, emit=None):
+    def __init__(self, settings, version, state_dir, emit=None, source_managed=False):
         self.s = settings
+        self.source_managed = source_managed
+        self.upstream_info = None
         self.version = version
         self.dir = Path(state_dir) / "updates"
         self.emit = emit or (lambda *a, **k: None)
@@ -224,16 +226,31 @@ class Updater:
             try:
                 m, base = self._fetch()
             except Exception as e:  # noqa: BLE001
-                self.last["error"] = f"{self.url}: {e}"
+                self.last["error"] = "upstream_check_failed" if self.source_managed else f"{self.url}: {e}"
                 log.info("Обновления: %s", self.last["error"])
                 return None
             self.last["error"] = ""
+            if self.source_managed and (not isinstance(m, dict) or (WIN and not isinstance(m.get("windows", {}), dict))):
+                self.last["error"] = "upstream_manifest_invalid"
+                return None
             if WIN:                     # Windows: свой раздел в том же latest.json — {"windows": {"version", "exe", "sha256", …}}
                 m, key = (m.get("windows") or {}), "exe"
             else:
                 key = "deb"
             ver = str(m.get("version") or "")
             self.last["remote"] = ver
+            if self.source_managed:
+                from fork_update_policy import BLOCK_REASON
+                self.available = None
+                ver = ver if re.fullmatch(r"\d{1,4}(?:\.\d{1,4}){1,3}", ver) else ""
+                self.last["remote"] = ver
+                self.upstream_info = {"version": ver,
+                                      "notes": str(m.get("notes") or "")[:3000],
+                                      "checked_at": self.last["checked"],
+                                      "newer": bool(ver) and vtuple(ver) > vtuple(self.version)}
+                self.last["error"] = BLOCK_REASON if ver else "upstream_manifest_invalid"
+                self.emit("update", update=self.public())
+                return None
             if not ver or vtuple(ver) <= vtuple(self.version) or not m.get(key):
                 self.available = None
                 return None
@@ -255,6 +272,9 @@ class Updater:
         """Скачать пакет обновления -> путь. Без sha256 в latest.json или при несовпадении — не сохраняем:
         пакет ставится с правами администратора, непроверенный файл ставить нельзя. Уже скачанный и проверенный —
         не качаем заново."""
+        if self.source_managed:
+            from fork_update_policy import BLOCK_REASON
+            raise ValueError(BLOCK_REASON)
         import httpx
         self.dir.mkdir(parents=True, exist_ok=True)
         name = info["url"].rsplit("/", 1)[-1].split("?")[0] or f"dewiar-{info['version']}.{'exe' if WIN else 'deb'}"
@@ -298,8 +318,15 @@ class Updater:
 
     def public(self):
         """Для студии: текущая версия, доступное обновление, время и ошибка последней проверки."""
-        return {"current": self.version, "url": self.url, "available": self.available, "failed": self.failed,
-                "checked": self.last["checked"], "error": self.last["error"], "remote": self.last.get("remote", "")}
+        out = {"current": self.version, "url": self.url, "available": self.available, "failed": self.failed,
+               "checked": self.last["checked"], "error": self.last["error"], "remote": self.last.get("remote", "")}
+        if self.source_managed:
+            from fork_update_policy import status, BLOCK_REASON
+            out.update(fork=status(), upstream=self.upstream_info, available=None, failed=None)
+            out["fork"]["discovery"] = {"attempted_at": self.last["checked"],
+                                        "ok": bool(self.upstream_info) and self.last["error"] == BLOCK_REASON,
+                                        "error": "network_or_manifest_error" if self.last["error"] and self.last["error"] != BLOCK_REASON else ""}
+        return out
 
     def loop(self, stopping):
         """Фоновая проверка: через минуту после запуска и дальше раз в 6 часов (если не выключена updates.auto_check).

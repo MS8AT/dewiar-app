@@ -117,7 +117,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.skills.set_folder(self.workspace.root / "Навыки")    # свои навыки — видны в папке ассистента
         self.toolbox.hooks["persona_name"] = lambda: self.personas.get(self.s.get("persona"))["name"]
         self.reminders.on_change = self._on_reminders_changed
-        self.updater = Updater(settings, VERSION, STATE_DIR, emit=self.emit)
+        self.updater = Updater(settings, VERSION, STATE_DIR, emit=self.emit, source_managed=True)
         self.on_quit = None
         self._blind = set()                         # модели, которые не видят картинок (узнаём по первой ошибке)
         self._listen_peak, self._listen_vad = 0.0, 0.0

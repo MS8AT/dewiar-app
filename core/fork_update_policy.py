@@ -1,0 +1,17 @@
+"""Граница обновлений форка: upstream — справка, а не установщик наших дополнений.
+
+Доверенный канал подписанных полных выпусков пока не настроен. Не выдаём наличие
+новой версии upstream за готовность обновления форка и не запускаем её EXE.
+Состояние доступно API/интерфейсу; никакой фоновой задачи этот модуль не создаёт.
+"""
+PRODUCT = "MS8AT8DWiar"
+BUILD = 2
+REQUIRED_FEATURES = ("codex_local", "brain_routes", "brain_watch", "diagnostics_v1")
+BLOCK_REASON = "Канал обновления форка ещё не настроен. Обычный установщик Dewiar может удалить дополнения; автоматическая установка заблокирована."
+
+
+def status():
+    return {"product": PRODUCT, "build": BUILD, "state": "unconfigured", "auto_download": False,
+            "auto_install": False, "required_features": list(REQUIRED_FEATURES),
+            "blockers": ["trusted_release_feed", "publisher_verification", "verified_package", "closed_app_installer"],
+            "message": BLOCK_REASON}

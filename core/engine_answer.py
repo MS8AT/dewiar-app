@@ -1084,7 +1084,11 @@ class AnswerMixin:
             except Exception as e:  # noqa: BLE001
                 info, st = None, {"error": str(e)}
             cur = st.get("current") or ""
-            if info:
+            if st.get("fork"):
+                msg = "Канал автоматического обновления нашего форка ещё не настроен. Обычный установщик заблокирован, чтобы сохранить дополнения. Подробности — в студии, О программе."
+                if (st.get("upstream") or {}).get("version"):
+                    msg += " Последняя известная версия исходного Dewiar — " + st["upstream"]["version"] + "."
+            elif info:
                 msg = (f"Есть новая версия — {info['version']}, она уже скачана. Нажмите на плашку «Доступна версия» в виджете — "
                        "обновление встанет за минуту, разговор и настройки сохранятся.")
             elif st.get("error"):

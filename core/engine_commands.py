@@ -210,6 +210,11 @@ class CommandsMixin:
         """Выполнить команду окна cmd с аргументами a. -> данные для ответа; ValueError — понятная ошибка."""
         if cmd == "hello":
             return self.snapshot()
+        if cmd == "diagnostics_read":
+            from diagnostics import dispatch
+            if not isinstance(a, dict) or not set(a) <= {"action", "args"}:
+                raise ValueError("Неизвестные параметры диагностики")
+            return dispatch(self, a.get("action"), a.get("args"))
         if cmd == "brain_watch_status":
             from brain_watch import status
             return status(self)

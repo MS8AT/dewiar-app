@@ -86,7 +86,13 @@ class Bridge:
         try:
             first = json.loads(await asyncio.wait_for(ws.recv(), 5))
             tok = str(first.get("token", ""))
+            diagnostic = first.get("scope") == "diagnostics"
             lim = next((v for k, v in list(self.limited.items()) if hmac.compare_digest(tok, k) and v[1] > time.time()), None)
+            if diagnostic:
+                if not hmac.compare_digest(tok, self.token):
+                    await ws.close(code=4001, reason="bad token")
+                    return
+                lim = ({"diagnostics_read"}, time.time() + 30)
             if lim is None and not hmac.compare_digest(tok, self.token):
                 await ws.close(code=4001, reason="bad token")
                 return
@@ -94,8 +100,10 @@ class Bridge:
             return
         if lim is not None:                           # страница звонка: без снимка состояния, только своё
             try:
-                await ws.send(json.dumps({"type": "hello", "data": {"limited": True}}))
-                self.limited_ws[ws] = lim[0]
+                hello = {"limited": True, "scope": "diagnostics"} if diagnostic else {"limited": True}
+                await ws.send(json.dumps({"type": "hello", "data": hello}))
+                if not diagnostic:           # CLI не подписывается даже на события звонков.
+                    self.limited_ws[ws] = lim[0]
                 async for raw in ws:
                     try:
                         msg = json.loads(raw)

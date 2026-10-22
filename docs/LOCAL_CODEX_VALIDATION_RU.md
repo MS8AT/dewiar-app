@@ -4,6 +4,40 @@
 `4b6e2af26829fc693b451e6af5601c426fb1bc95`. Это отчёт о локальных проверках
 кандидата, не подтверждение успешного live-запроса или готовности upstream-релиза.
 
+## CLI/API/SLI и защита обновления — 22 октября, 15:27 +03:00
+
+- PASS: `subscription_suite_test.py` — 224 теста (180 Python + 44 JS), без skipped.
+  Новое покрытие: 23 диагностики, 12 CLI/Bridge/упаковки, 10 updater policy, 2 UI.
+- PASS: четыре команды через настоящий loopback WebSocket на синтетическом token
+  и временном журнале. Нет личных настроек, модели или внешней сети.
+- PASS: upstream `update_now1022_test.py` — 14 проверок; AST 106 выбранных Python,
+  синтаксис JS и `git diff --check`. Полный upstream `run_quick` NOT_RUN.
+- PASS: повторная репетиция полного комплекта 300 файлов: план → установка →
+  откат → проверка исходной базы. Контроль процессов выполнен установщиком.
+- INSTALLED: 0.39.2 + fork build 2, 300/300 SHA совпали с планом.
+  Изменены 11 файлов, включая 4 новых. Новая резервная копия:
+  `%LOCALAPPDATA%\DewiarModBackups\diagnostics-0392-20261022-2`.
+- PASS: установленный `dewiar-cli.cmd test` — пять offline smoke-проверок;
+  `dewiar-cli.cmd api` — описание протокола. Для обеих команд exit 0,
+  пустой stderr, весь stdout разобран как JSON schema 1.
+- В первой установке smoke выявил ошибку CMD из-за UTF-8/LF комментария.
+  Пакет полностью откатан, launcher переведён в ASCII/CRLF, добавлен regression
+  test. Повторная установка использовала новый backup; первая копия сохранена.
+- Внутренний read-only review завершён; ошибки границ version parsing, `-O`
+  selftest, устаревшего discovery и `upstream=None` исправлены. Это не приёмка
+  Manager/Router и не отдельная проверка production-релиза.
+- PARTIAL: поиск upstream-версии сохранён, скачивание/запуск upstream EXE
+  блокируются, чтобы не удалить дополнения. Автоматическое скачивание/установка
+  **выпусков форка не реализованы и не включены**: нет доверенного feed, ключа,
+  опубликованного проверенного пакета и внешнего helper. План — U01–U08.
+- NOT_RUN: CLI с личным token, живые модели, визуальная приёмка окна, новая
+  проверка upstream через сеть, публикация GitHub. Приложение не запускалось.
+- Настройки, память, аккаунты, Python и зависимости не менялись. Прежний PARTIAL
+  OpenCV/NumPy остаётся отдельным вопросом.
+
+Инструкции: [DIAGNOSTICS_API_RU.md](DIAGNOSTICS_API_RU.md),
+[FORK_AUTOUPDATE_PLAN_RU.md](FORK_AUTOUPDATE_PLAN_RU.md).
+
 ## Дополнение «Мозги по контурам» — 22 октября, 14:49 +03:00
 
 - PASS: `subscription_suite_test.py` — 177 тестов (135 Python + 42 JS), без skipped.

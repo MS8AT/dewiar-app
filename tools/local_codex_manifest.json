@@ -5,7 +5,7 @@
     {
       "path": "core/engine_answer.py",
       "before": "a19561639b8e0d72f4051fa728c8a53e9ba458609d1963402c93c1fe4cef35fa",
-      "after": "1b35385f8206a448d06900b92fef76fb43f58b006786d634987f0b896e8e27f0"
+      "after": "630385b0bee5ea29c7388231a69b9563d5ceddcdf3df40376000b332af247ae9"
     },
     {
       "path": "core/engine_brain.py",
@@ -15,7 +15,7 @@
     {
       "path": "core/engine_commands.py",
       "before": "bdbfe3d2c59ed108d9a9bf2e75e964d25524e084793bd8cc9f2cdfbe59cecd37",
-      "after": "7580a8377b6c452decced78371140c04e47913d024750af655b687224e221472"
+      "after": "ffe969b2be2e57c089d2c25b9deba0fcc0576f0335e165332e5d9146db4b455d"
     },
     {
       "path": "core/engine_music.py",
@@ -25,7 +25,7 @@
     {
       "path": "core/engine.py",
       "before": "c69586de2994151c021432e3a098facdfc08a483795bb14e3ecc8cfd55249a14",
-      "after": "6604f0027d2acf958321f04fde4f5d84f53bf9d146e15019316ae08b61a320f1"
+      "after": "42667c73b1068652569b47e0645cbab1cb6493a7a092576a737cff5eb8a5dfb7"
     },
     {
       "path": "core/exam.py",
@@ -145,7 +145,7 @@
     {
       "path": "ui/studio/tasks.js",
       "before": "156d09608499edebf1a564a7f07f1677abf7ce832d308e7d62befbc4d8865588",
-      "after": "771b1932878c5a8e02fc579d29ebc4f14704b63a945125956b3907225a273fcd"
+      "after": "e7310ca251ecc7d9d6d68aa2071fc03bd6f8bd314811bd7703099ed2d830e3af"
     },
     {
       "path": "core/brain_routes.py",
@@ -166,6 +166,41 @@
       "path": "ui/studio/brains.js",
       "before": null,
       "after": "b759bb592c6040281062909c71a069e44acf15f800eb7ca3f81cfb4eb01051b6"
+    },
+    {
+      "path": "core/bridge.py",
+      "before": "fb249715b81ceaa59002e002c59b9c94e849080bf2f58640acb6d341d752750d",
+      "after": "e0dd6de8b7a7085d5a1f95888b3e0b7fd9f3fa621bdca8960d08bdc2edda7c55"
+    },
+    {
+      "path": "core/updater.py",
+      "before": "c8e8ee7718b3c84f1e360cdb2462c07f6fb1c4027a3a2929b14d57e4ae0576b4",
+      "after": "5cb69e5640ad059d8f7f67b0bc3412c9a2f472a91d746bb8b933635204642946"
+    },
+    {
+      "path": "ui/app.py",
+      "before": "b736a94331706f90a21c9cf3c2bf3c2d4b5f82fde51f0653f84a29e8650cbe01",
+      "after": "82a7bea1677f027ced5c8a71b0640236d38018aced352b2258c26cfd6612689a"
+    },
+    {
+      "path": "core/diagnostic_cli.py",
+      "before": null,
+      "after": "35bf29f2f119a4691558cde6122dbbc9deca0b8528e1e1f12bf3397a21316416"
+    },
+    {
+      "path": "core/diagnostics.py",
+      "before": null,
+      "after": "2423dbe657d9a557b4be2aa63fff1bbc42a69841835b1f4f3f62764ae1802f04"
+    },
+    {
+      "path": "core/fork_update_policy.py",
+      "before": null,
+      "after": "ad8f9cc01137372cd0480b6bc1bae3cd4de3668047aee865e7fffb5ed94c5f63"
+    },
+    {
+      "path": "core/dewiar-cli.cmd",
+      "before": null,
+      "after": "538276463cc614fc4425bcd1ae154d03344b220e472968a3c40d02567aa66f3b"
     }
   ]
 }

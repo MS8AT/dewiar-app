@@ -506,6 +506,7 @@ class Api:
 
     def __init__(self, token):
         self.token = token
+        self._fork_managed = True
         self._hud = None
         self._studio = None
         self.wins = {}
@@ -1062,6 +1063,9 @@ class Api:
         только файл из STATE_DIR/updates. Linux: pkexec apt-get (GNOME спросит пароль) в фоне — ход в
         update_progress(); после установки интерфейс перезапускается сам, ядро перезапускает установщик пакета.
         DEWIAR_UPDATE_CMD — команда вместо pkexec apt-get, для проверок без root."""
+        if getattr(self, "_fork_managed", False):
+            from fork_update_policy import BLOCK_REASON
+            return {"ok": False, "error": BLOCK_REASON}
         p = Path(path or "").resolve()
         from settings import STATE_DIR
         allowed = STATE_DIR.resolve() / "updates"
@@ -1159,6 +1163,9 @@ class Api:
     def _install_update_win(self, p, allowed):
         """Windows: остановить ядро (иначе его файлы заняты), запустить установщик тихо (/S /UPDATE) и выйти —
         установщик заменит файлы и сам запустит новую версию. Права администратора не нужны (установка в профиль)."""
+        if getattr(self, "_fork_managed", False):
+            from fork_update_policy import BLOCK_REASON
+            return {"ok": False, "error": BLOCK_REASON}
         if allowed not in p.parents or p.suffix.lower() != ".exe" or not p.is_file():
             return {"ok": False, "error": "это не скачанное обновление Dewiar"}
         try:
@@ -1186,6 +1193,9 @@ class Api:
     def run_installer(self, path):
         """Тихое обновление не встало — открыть скачанный установщик обычным окном (Windows): он сам остановит Dewiar,
         покажет ход и ошибку, если что-то мешает, и запустит новую версию. Только файл из STATE_DIR/updates."""
+        if getattr(self, "_fork_managed", False):
+            from fork_update_policy import BLOCK_REASON
+            return {"ok": False, "error": BLOCK_REASON}
         p = Path(path or "").resolve()
         from settings import STATE_DIR
         allowed = STATE_DIR.resolve() / "updates"

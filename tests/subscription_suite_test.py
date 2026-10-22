@@ -19,6 +19,9 @@ def main():
              ROOT / "tests" / "subscription_install_test.py",
              ROOT / "tests" / "subscription_upgrade_test.py",
              ROOT / "tests" / "brain_watch_test.py",
+             ROOT / "tests" / "diagnostics_test.py",
+             ROOT / "tests" / "diagnostic_cli_test.py",
+             ROOT / "tests" / "fork_update_policy_test.py",
              RUNTIME / "test_codex.py", RUNTIME / "test_windows_store.py"]
     for test in tests:
         subprocess.run([sys.executable, "-B", str(test)], check=True, cwd=ROOT)
@@ -27,6 +30,7 @@ def main():
         raise RuntimeError("Для проверок интерфейса требуется Node.js")
     subprocess.run([node, "--test", str(ROOT / "tests" / "subscription.test.mjs"),
                     str(ROOT / "tests" / "brains.test.mjs"),
+                    str(ROOT / "tests" / "fork_update_ui.test.mjs"),
                     str(ROOT / "tests" / "subscription_confirm.test.mjs"),
                     str(RUNTIME / "policy.test.mjs")], check=True, cwd=ROOT)
     print("ALL OK")

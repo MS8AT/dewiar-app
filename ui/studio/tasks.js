@@ -207,6 +207,16 @@ core.on("task", e => {                     // события идут поток
 function renderUpdate(u) {
   if (!u) return;
   $("#ab-title").textContent = `Dewiar ${u.current}`;
+  if (u.fork) {
+    $("#up-state").textContent = `${u.fork.product} · сборка ${u.fork.build}. ${u.fork.message}${u.upstream?.version ? ' Upstream: ' + u.upstream.version + (u.upstream.newer ? ' — нужна интеграция дополнений.' : '.') : ''}`;
+    if (u.upstream?.checked_at) $("#up-state").textContent += ` Сведения получены: ${new Date(u.upstream.checked_at * 1000).toLocaleString('ru-RU')}.`;
+    if (u.fork.discovery?.error) $("#up-state").textContent += ' Последняя проверка неуспешна; прежние сведения могут быть устаревшими.';
+    else if (!u.fork.discovery?.attempted_at) $("#up-state").textContent += ' Сетевая проверка ещё не выполнялась.';
+    $("#up-notes").textContent = u.upstream?.notes || '';
+    $("#up-install").style.display = 'none';
+    $("#up-install").onclick = null;
+    return;
+  }
   const a = u.available;
   $("#up-state").textContent = a ? `Доступна версия ${a.version}${a.date ? " от " + a.date : ""} — уже скачана и проверена.` :
     u.error ? `Не удалось обновиться: ${u.error}` : u.checked ? `У вас последняя версия${u.remote ? " (на сайте — " + u.remote + ")" : ""}. Проверено ${new Date(u.checked * 1000).toLocaleString("ru-RU", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}.` : "Проверка — через минуту после запуска и раз в 6 часов.";
