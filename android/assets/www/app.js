@@ -363,6 +363,9 @@ const DEF = {
 };
 let S = (() => { try { return Object.assign({}, DEF, JSON.parse(prefGet("settings") || "{}")); } catch (e) { return Object.assign({}, DEF); } })();
 for (const k of ["llm", "stt", "tts", "home", "account", "net", "tg"]) S[k] = Object.assign({}, DEF[k], S[k] || {});
+// 22.10: облако отклоняло chat_template_kwargs, а телефон сразу переходил на функции текстом и запоминал это — один раз
+// проверим заново: теперь сначала пробуется запрос без chat_template_kwargs, с функциями полем (так они работают лучше)
+if (S.llm.tools_prompt && !S.llm.rej_v2) { delete S.llm.tools_prompt; S.llm.rej_v2 = 1; }
 applyProxy();                                      // прокси для серверов Dewiar — с первого запроса
 function saveS() { llmRemember(); prefSet("settings", JSON.stringify(S)); applyProxy(); setTimeout(startCardCheck, 0); }
 /* Прежние мозги (отчёт №117, 19.10: «отправил настройки с компьютера — телефон не подключается, и на Dewiar не вернуться; на
@@ -453,8 +456,18 @@ function netIncident(e, count = true) {
   if (count) { hCount("net_fail"); hWhy(l[l.length - 1].err); hProblem(`связь с мозгом: ${l[l.length - 1].err}`); }
   plog("WARNING", `связь с мозгом: ${l[l.length - 1].host} — ${l[l.length - 1].err} (${l[l.length - 1].type || "сеть ?"})`);
 }
+const STALE_CONN = /unexpected end of stream|connection reset|broken pipe|ECONNRESET/i;
+/* Повтор внутри вопроса помог — последние n сбоев помечены «прошло само»: в отчёт разработчику они не идут
+   (пакет 22.10, №189: отчёт «Связь с мозгом: 1 сбой» про вопрос, на который ответ пришёл через 5 с). */
+function netHealed(n) {
+  let l = []; try { l = JSON.parse(prefGet("net_inc") || "[]") || []; } catch (x) { }
+  for (let i = Math.max(0, l.length - n); i < l.length; i++) l[i].ok = true;
+  prefSet("net_inc", JSON.stringify(l));
+}
 function netRecovered() {
   let l = []; try { l = JSON.parse(prefGet("net_inc") || "[]") || []; } catch (x) { }
+  if (l.length && l.every(x => x.ok)) { prefSet("net_inc", "[]"); return; }
+  l = l.filter(x => !x.ok);
   if (!l.length || !(S.report || {}).auto) return;
   if (Date.now() - (+prefGet("net_rep") || 0) < 6 * 36e5) return;
   prefSet("net_rep", String(Date.now())); prefSet("net_inc", "[]");
@@ -1812,11 +1825,12 @@ async function llmStream(messages, tools, onText, signal, opt = {}) {
     });
   };
   let err = null;
-  /* Сервер модели отклонил запрос: сначала — функции текстом (а не полем tools), потом — без chat_template_kwargs,
-     в конце — без функций вовсе. Возвращает новый вызов или null, если пробовать больше нечего. */
+  /* Сервер модели отклонил запрос: сначала — без chat_template_kwargs (облако Ollama за шлюзом отклоняет незнакомое
+     поле, а функции полем принимает — так они работают лучше), потом — функции текстом (а не полем tools), в конце —
+     без функций вовсе. Возвращает новый вызов или null, если пробовать больше нечего. */
   const retryRejected = () => {
-    if (body.tools) { S.llm.tools_prompt = llmBase(); saveS(); return llmStream(messages, tools, onText, signal, opt); }
     if (body.chat_template_kwargs) { S.llm.no_kwargs = true; saveS(); return llmStream(messages, tools, onText, signal, opt); }
+    if (body.tools) { S.llm.tools_prompt = llmBase(); saveS(); return llmStream(messages, tools, onText, signal, opt); }
     if (tools && tools.length) return llmStream(messages, null, onText, signal, opt);
     return null;
   };
@@ -2105,12 +2119,15 @@ async function ask(text, opts = {}) {
           const r = await llmStream(msgs, tools, (p) => { if (turnAbort === ctl) sink.push(p); }, ctl.signal, deep ? { think: true } : {});
           if (S.llm.cloud && !String(r.text || "").trim() && !r.calls.length && !r.finish && !ctl.signal.aborted)
             throw Object.assign(new Error("связь оборвалась — ответ пришёл пустым"), { net: true });
+          if (tries) netHealed(tries);                 // повтор помог — это не сбой для разработчика (пакет 22.10, №189)
           return r;
         } catch (e) {
           if (!e.net || tries >= (HOME_URL.test(e.url || "") ? 1 : 3) || turnAbort !== ctl || ctl.signal.aborted || sink.text().trim()) throw e;
           netIncident(e, false);
           showBot(tries ? `Связь пропала — пробую ещё раз (${tries + 1})…` : "Связь пропала — пробую ещё раз…", "wait");
-          await sleep([2000, 5000, 10000][tries]);
+          // «unexpected end of stream» с первого раза — сервер закрыл старое соединение, которое телефон держал открытым:
+          // новое откроется сразу, ждать 2 с незачем
+          await sleep(!tries && STALE_CONN.test(String(e.raw || e.message || "")) ? 300 : [2000, 5000, 10000][tries]);
           if (turnAbort !== ctl) throw e;
         }
       }

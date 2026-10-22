@@ -132,6 +132,19 @@ def main():
         pass
     engine.shutdown()
 
+    def hard_exit():                            # не-фоновый поток (скачивание, ответ) держит процесс — а с ним порт и файлы,
+        log.info("Завершаюсь принудительно: фоновые дела не закончились за 5 с")    # которые заменяет установщик
+        if os.name == "nt":
+            try:
+                (STATE_DIR / "core.pid").unlink(missing_ok=True)
+            except OSError:
+                pass
+        logging.shutdown()
+        os._exit(0)
+    t = threading.Timer(5, hard_exit)
+    t.daemon = True
+    t.start()
+
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,6 @@
 """Компьютер: отказ сервера модели строкой «error» внутри потока (HTTP 200) — «upstream returned HTTP 400», как у
-Ollama с облачными моделями. Ядро повторяет запрос, описав инструменты текстом, и вызов <tool_call> распознаётся."""
+Ollama с облачными моделями. Ядро повторяет запрос сначала без chat_template_kwargs (22.10), затем — описав инструменты
+текстом, и вызов <tool_call> распознаётся."""
 import json, os, sys, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,6 +23,6 @@ tools = [{"name": "get_time", "description": "Который час", "parameter
 out = list(llm.stream_events(p, "Ты ассистент.", [{"role": "user", "content": "Который час?"}], tools=tools))
 calls = [v for k, v in out if k == "tools"]
 text = "".join(v for k, v in out if k == "text")
-ok = len(seen) == 2 and not seen[1].get("tools") and calls and calls[0][0]["name"] == "get_time" and "<tool_call>" not in text
+ok = len(seen) == 3 and "chat_template_kwargs" not in seen[1] and seen[1].get("tools") and not seen[2].get("tools") and calls and calls[0][0]["name"] == "get_time" and "<tool_call>" not in text
 print(("✅ " if ok else "❌ ") + f"отказ внутри потока — повтор с инструментами текстом, вызов распознан: {calls} {text!r}")
 sys.exit(0 if ok else 1)

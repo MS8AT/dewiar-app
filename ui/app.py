@@ -245,7 +245,7 @@ def ensure_core():
     if core_alive():
         return
     if WIN:
-        CORE_PROC[:] = [winshell.start_core(ROOT)]
+        start_core_win()
         for _ in range(40):                    # первый запуск на Windows — несколько секунд (импорт библиотек)
             if core_alive():
                 return
@@ -276,12 +276,54 @@ def _core_call(token, cmd, timeout=4):
 
 
 CORE_PROC = []          # Windows: процесс ядра, запущенный этим интерфейсом (сторож видит, если он упал)
+CORE_LOG_AT = [0, 0.0]  # Windows: с какого места core.log и с какого времени (time.time) пишет последний запуск ядра
+CORE_ERR_RX = re.compile(r"\b(ERROR|CRITICAL)\b|Traceback|\b\w+(Error|Exception):|Ошибка")
 
 
-def core_watch(api=None, limit=240):
-    """Windows: ядро не вышло на связь (упало при запуске или так и не поднялось) — понять почему и объяснить
-    по-человечески. Чаще всего это антивирус: убрал файлы в карантин или не даёт загрузить библиотеку.
-    Причину берём из core.fail (его пишет упавшее ядро), иначе — из хвоста core.log; разбор — core/winav.py.
+def start_core_win():
+    """Windows: запустить ядро и запомнить, где в core.log начинаются его строки: объясняя сбой, сторож берёт только
+    их (пакет 22.10, №188: после обновления показал «Ядро не запустилось: … explain-error …» — строку списка навыков
+    из прошлого запуска, двадцатиминутной давности)."""
+    try:
+        CORE_LOG_AT[0] = (winshell.log_dir() / "core.log").stat().st_size
+    except OSError:
+        CORE_LOG_AT[0] = 0
+    CORE_LOG_AT[1] = time.time()
+    CORE_PROC[:] = [winshell.start_core(ROOT)]
+    return CORE_PROC[0]
+
+
+def core_log_new():
+    """Строки core.log, написанные с последнего запуска ядра (журнал успел смениться — весь новый файл)."""
+    f = winshell.log_dir() / "core.log"
+    try:
+        size = f.stat().st_size
+        with open(f, "rb") as fh:
+            if size >= CORE_LOG_AT[0]:
+                fh.seek(CORE_LOG_AT[0])
+            return fh.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+
+
+def core_fail_reason(lines, fail_path):
+    """Почему ядро не поднялось: core.fail этого запуска (не старый), иначе — последняя строка с ошибкой среди новых
+    строк журнала (уровень ERROR, Traceback, «…Error:»), а не любое слово error (навык «explain-error»)."""
+    try:
+        d = json.loads(fail_path.read_text(encoding="utf-8"))
+        if float(d.get("time") or 0) >= CORE_LOG_AT[1] - 5 and d.get("error"):
+            return str(d["error"])
+    except (OSError, ValueError, TypeError):
+        pass
+    return next((x for x in reversed(lines[-60:]) if CORE_ERR_RX.search(x)), "")
+
+
+def core_watch(api=None, limit=240, tries=2):
+    """Windows: ядро не вышло на связь (упало при запуске или так и не поднялось) — запустить ещё раз, а не вышло —
+    понять почему и объяснить по-человечески. Чаще всего это антивирус: убрал файлы в карантин или не даёт загрузить
+    библиотеку. Причину берём из core.fail этого запуска, иначе — из новых строк core.log; разбор — core/winav.py.
+    Ещё раз (tries раз) — если процесса ядра нет или он завершился, и если он молчит: за 150 с ни строки в журнале
+    (№188: после обновления 14 минут не было ни ядра, ни новой попытки — помогла только кнопка «Перезапустить»).
     Блокирует (запускать в потоке): limit — сколько секунд ждать, -> True, если ядро на связи."""
     from settings import STATE_DIR
     t0 = time.monotonic()
@@ -289,22 +331,28 @@ def core_watch(api=None, limit=240):
         if core_alive():
             return True
         proc, waited = (CORE_PROC[0] if CORE_PROC else None), time.monotonic() - t0
-        if proc is not None and proc.poll() is not None and waited > 3:
-            break                                       # ядро завершилось само — ждать дальше нечего
-        if waited > limit and not (proc is not None and proc.poll() is None and waited < 600):
+        gone = proc is None or proc.poll() is not None
+        silent = not gone and waited > 150 and not core_log_new()
+        if (gone and waited > 3 or silent) and tries > 0:
+            tries -= 1
+            print("Ядро " + ("молчит" if silent else "не отвечает") + " — запускаю ещё раз", file=sys.stderr)
+            if silent:
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(1)
+            start_core_win()
+            t0 = time.monotonic()
+            continue
+        if gone and waited > 3:
+            break                                       # ядро завершилось само, и попытки кончились — ждать нечего
+        if waited > limit and not (not gone and waited < 600):
             break                                       # процесс жив — грузится (медленный диск, проверка антивирусом): ждём до 10 минут
         time.sleep(2)
     if core_alive():
         return True
-    error = ""
-    try:
-        error = json.loads((STATE_DIR / "core.fail").read_text(encoding="utf-8")).get("error", "")
-    except (OSError, ValueError):
-        try:                                            # ошибки нет в core.fail — последние строки журнала
-            tail = (winshell.log_dir() / "core.log").read_text(encoding="utf-8", errors="replace").splitlines()[-30:]
-            error = next((x for x in reversed(tail) if re.search(r"Error|Ошибка|error", x)), "")
-        except OSError:
-            pass
+    error = core_fail_reason(core_log_new(), STATE_DIR / "core.fail")
     print(f"Ядро не запустилось: {error or 'без ошибки в журнале'}", file=sys.stderr)
     try:
         import winav
@@ -322,8 +370,8 @@ def core_watch(api=None, limit=240):
                 if st.get("missing"):
                     winshell.message_box("Готово. Теперь запустите установщик Dewiar ещё раз — он вернёт убранные файлы.")
                 else:
-                    CORE_PROC[:] = [winshell.start_core(ROOT)]
-                    return core_watch(api, 120) if limit > 120 else False
+                    start_core_win()
+                    return core_watch(api, 120, 0) if limit > 120 else False
         else:
             winshell.message_box(text + "\n\nПотом запустите Dewiar снова.", wait=True)
         return False
@@ -1169,7 +1217,7 @@ class Api:
                         except Exception:  # noqa: BLE001
                             pass
                     time.sleep(1.5)
-                    CORE_PROC[:] = [winshell.start_core(ROOT)]
+                    start_core_win()
                 elif subprocess.run(["systemctl", "--user", "cat", "dewiar-core.service"], capture_output=True).returncode == 0:
                     subprocess.run(["systemctl", "--user", "restart", "dewiar-core.service"], capture_output=True, timeout=30)
                 else:                                      # из исходников: ядро — просто процесс на нашем порту
@@ -2650,16 +2698,16 @@ def main_win(args, extra):
         else:
             sig.write_text(("settings" + extra) if args.settings else "hud", encoding="utf-8")
             return
-    ensure_core()
-    import threading as _th
-    _th.Thread(target=core_watch, name="core-watch", daemon=True).start()
-    try:
+    try:     # номер — сразу, до ожидания ядра: по нему сторож обновления видит, что мы уже запущены (иначе второй запуск)
         (STATE_DIR / "ui.pid").write_text(str(os.getpid()), encoding="ascii")
         (STATE_DIR / "ui.ver").write_text(me, encoding="utf-8")
         import atexit
         atexit.register(lambda: [(STATE_DIR / n).unlink(missing_ok=True) for n in ("ui.pid", "ui.ver")])
     except OSError:
         pass
+    ensure_core()
+    import threading as _th
+    _th.Thread(target=core_watch, name="core-watch", daemon=True).start()
     token = ensure_token()
     api = Api(token)
     fresh = not SETTINGS_PATH.exists() or ui_settings().get("welcome") == ""   # первый запуск — откроем «Первые шаги»

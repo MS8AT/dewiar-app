@@ -863,13 +863,14 @@ class AnswerMixin:
             return
         key = self._tools_key(prof)
         modes = self.s.get("llm", "tools_modes") or {}
-        # tools_probe_v 2: проверка первой версии ошибочно записывала «думающие» модели в «не умеет» (none) —
-        # такие записи один раз сбрасываем, чтобы проверить заново; найденные native/prompt остаются
-        if self.s.get("llm", "tools_probe_v") != 2:
-            stale = {k: v for k, v in modes.items() if v != "none"}
+        # tools_probe_v 2: проверка первой версии ошибочно записывала «думающие» модели в «не умеет» (none);
+        # v3 (22.10): облако Dewiar отклоняло проверку из-за chat_template_kwargs, и модель записывалась в «описанием
+        # в тексте» (prompt) — такие записи один раз сбрасываем, чтобы проверить заново; найденные native остаются
+        if self.s.get("llm", "tools_probe_v") != 3:
+            stale = {k: v for k, v in modes.items() if v == "native"}
             with self.s._lock:
                 self.s.data.setdefault("llm", {})["tools_modes"] = stale
-            self.s.update({"llm": {"tools_probe_v": 2}})
+            self.s.update({"llm": {"tools_probe_v": 3}})
             modes = stale
         if key in self._probing or (not force and key in modes):
             return

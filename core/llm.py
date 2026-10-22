@@ -340,6 +340,7 @@ def resolve_model(p):
 _REJECT = re.compile(r"\b4(00|22)\b|invalid|unsupported|roles must alternate|cannot parse|bad request|tool|function", re.I)
 _no_tools = set()          # серверы, которые отказались принимать инструменты (vLLM без --enable-auto-tool-choice)
 _flat = set()              # серверы, которые не принимают историю вызовов (роль tool, tool_calls) — пишем её текстом
+_no_kw = set()             # серверы, которые отклоняют запрос с chat_template_kwargs (облако Ollama: «upstream returned HTTP 400»)
 
 
 def _has_tool_history(messages):
@@ -1026,7 +1027,7 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
                     "messages": [{"role": "system", "content": system}] + hist,
                     "max_tokens": max_tokens, "temperature": float(p.get("temperature", 0.7))}
             # chat_template_kwargs понимают vLLM/SGLang (Qwen3 и др.); облачные API на незнакомое поле отвечают ошибкой
-            if no_think and not p.get("_no_kwargs") and not re.search(r"openai\.com|openrouter|deepseek\.com|anthropic|googleapis", base):
+            if no_think and not p.get("_no_kwargs") and base not in _no_kw and not re.search(r"openai\.com|openrouter|deepseek\.com|anthropic|googleapis", base):
                 body["chat_template_kwargs"] = {"enable_thinking": False}
             if tools:
                 body["tools"] = [{"type": "function", "function": t} for t in tools]
@@ -1155,6 +1156,14 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
         # «upstream returned HTTP 400». Пока модель ничего не сказала, упрощаем запрос по шагам:
         # 1) история вызовов — текстом; 2) и сами функции — текстом; 3) короче: начало и последние шаги.
         rejected = not locals().get("got_text") and p.get("kind") != "anthropic" and _REJECT.search(str(e))
+        # Сначала — без chat_template_kwargs: облако Ollama за шлюзом отклоняет незнакомое поле, а функции полем tools
+        # принимает. Раньше сразу переходили на функции текстом — хуже для всех на облаке Dewiar (пакеты 21–22.10:
+        # «Проверка инструментов (native): upstream returned HTTP 400» в каждом журнале).
+        if rejected and "chat_template_kwargs" in (locals().get("body") or {}) and base not in _no_kw:
+            log.info("Сервер %s отклонил запрос (%s) — повторяю без chat_template_kwargs", base, e)
+            _no_kw.add(base)
+            yield from stream_events(dict(p, _no_kwargs=True), system, messages, cancel, tools, _retry)
+            return
         if rejected and _has_tool_history(messages) and not p.get("_flat") and base not in _flat and not native:
             log.info("Сервер %s отклонил запрос (%s) — пишу историю вызовов текстом", base, e)
             _flat.add(base)

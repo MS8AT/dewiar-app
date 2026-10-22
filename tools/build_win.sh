@@ -13,6 +13,9 @@ CACHE=${DEWIAR_WIN_CACHE:-$HOME/wincache}
 PYREL=${DEWIAR_WIN_PYREL:-20260929}
 PYVER=${DEWIAR_WIN_PYVER:-3.12.14}
 TAR="cpython-${PYVER}+${PYREL}-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+# Контрольная сумма архива Python — сверяется при скачивании и перед каждой сборкой (подменённый архив в кэше или по пути
+# не попадёт в установщик). Сменили PYREL/PYVER — впишите сумму нового архива из SHA256SUMS выпуска python-build-standalone.
+PYSHA=${DEWIAR_WIN_PYSHA:-f38e68f4d612ade6dd50c894fc80b14c0be0c3b5201145d6fff5f20b9323204d}
 UV=$(command -v uv || echo /opt/dewiar/bin/uv)
 STAGE=$(mktemp -d); trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$CACHE" "$ROOT/dist"
@@ -20,8 +23,10 @@ mkdir -p "$CACHE" "$ROOT/dist"
 if [ ! -f "$CACHE/$TAR" ]; then
   echo "Скачиваю Python для Windows…"
   curl -fL -o "$CACHE/$TAR.part" "https://github.com/astral-sh/python-build-standalone/releases/download/$PYREL/$TAR"
+  echo "$PYSHA  $CACHE/$TAR.part" | sha256sum -c --quiet || { rm -f "$CACHE/$TAR.part"; echo "Архив Python не совпал с контрольной суммой" >&2; exit 1; }
   mv "$CACHE/$TAR.part" "$CACHE/$TAR"
 fi
+echo "$PYSHA  $CACHE/$TAR" | sha256sum -c --quiet || { echo "Архив Python в кэше ($CACHE/$TAR) не совпал с контрольной суммой — удалите его" >&2; exit 1; }
 VOSK="$ROOT/data/vosk-model-small-ru-0.22.zip"             # модель имён — внутрь установщика (архив исходников её не везёт)
 VOSK_SHA=961d5ff98a17f4aa6de69864d0aa71fa5bac682301d2b5d17a3f24c5c99a46d4
 if [ "$ONLINE" = 0 ] && [ ! -f "$VOSK" ]; then
