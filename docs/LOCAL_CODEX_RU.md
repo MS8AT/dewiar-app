@@ -1,7 +1,7 @@
 # Локальный режим Codex: экспериментальное дополнение
 
 Это кандидат для обсуждения в upstream Dewiar, а не официальный выпуск.
-База: Dewiar 0.39.1, commit `7da1d0e7e5f19b152e1661f752c318a154b5513a`.
+База: Dewiar 0.39.2, commit `4b6e2af26829fc693b451e6af5601c426fb1bc95`.
 Исходная [лицензия](../LICENSE) и авторство сохранены. Порядок вклада —
 [CONTRIBUTING](../CONTRIBUTING.md); форк не означает разрешение продавать
 или распространять самостоятельный переименованный продукт.
@@ -31,7 +31,7 @@ Codex в защищённом хранилище Windows. Токены осно�
 ## Установка и откат
 
 Сначала сохраните нужные изменения своей установленной копии. Этот установщик
-принимает только точные исходные файлы 0.39.1: старая версия, прежнее дополнение
+принимает только точные исходные файлы 0.39.2: старая версия, прежнее дополнение
 или чужие правки будут отклонены, а не затёрты. Не обновляйте рабочую копию
 только ради прохождения проверки без отдельного резервного копирования.
 
@@ -46,7 +46,7 @@ py -3 -B tools/install_local_codex.py --app "$env:LOCALAPPDATA\Programs\Dewiar\a
 включая трей. Укажите **новый** каталог резервной копии вне приложения и checkout:
 
 ```powershell
-py -3 -B tools/install_local_codex.py --mode install --closed --app "$env:LOCALAPPDATA\Programs\Dewiar\app" --backup "$env:LOCALAPPDATA\DewiarModBackups\codex-0391-01"
+py -3 -B tools/install_local_codex.py --mode install --closed --app "$env:LOCALAPPDATA\Programs\Dewiar\app" --backup "$env:LOCALAPPDATA\DewiarModBackups\codex-0392-01"
 ```
 
 Установщик проверяет SHA-256, ссылки/junction и процессы Dewiar, сохраняет старые
@@ -54,7 +54,7 @@ py -3 -B tools/install_local_codex.py --mode install --closed --app "$env:LOCALA
 При ошибке записи не запускайте приложение до отката той же версией комплекта:
 
 ```powershell
-py -3 -B tools/install_local_codex.py --mode rollback --closed --app "$env:LOCALAPPDATA\Programs\Dewiar\app" --backup "$env:LOCALAPPDATA\DewiarModBackups\codex-0391-01"
+py -3 -B tools/install_local_codex.py --mode rollback --closed --app "$env:LOCALAPPDATA\Programs\Dewiar\app" --backup "$env:LOCALAPPDATA\DewiarModBackups\codex-0392-01"
 ```
 
 Если после установки файлы менялись, откат откажет: сначала разберите конфликт.
@@ -115,14 +115,20 @@ py -3 -B tests/subscription_suite_test.py
 профиль, только initialize/config/read, без model/list и inference.
 Живой вход, ответы моделей, визуальная приёмка и установка на рабочий ПК —
 отдельные проверки, не доказанные unit-тестами.
+Фактические результаты и оставшиеся проверки — в
+[отчёте кандидата](LOCAL_CODEX_VALIDATION_RU.md).
 
 ## Что сохранено из обновления
 
-База содержит все изменения 0.39.0 и 0.39.1, а не отдельную выборку.
+База содержит все изменения 0.39.0–0.39.2, а не отдельную выборку.
 Среди них: размеры/масштаб блокнота, исправления длинной голосовой просьбы,
 второго монитора и смены микрофона; перезапуск ядра Windows после обновления,
 проверка SHA-256 Python и исправления облачных ошибок 400/сети Android.
 Подробности и авторство — в [upstream CHANGELOG](../CHANGELOG.md).
+В 0.39.2 добавлены перетаскивание окна за блокнот, ползунок размера текста
+и прямой запрос обновления без модели. В режиме подписки ранняя изоляция
+текста сохраняется: обновления проверяйте отдельной кнопкой «О программе»,
+а не обещанием модели; обычный маршрут команды upstream не меняется.
 Повторы обычных провайдеров не включаются для маршрута подписки.
 
 Следующий отдельный этап — [план изоляции WireGuard](WIREGUARD_ISOLATION_PLAN_RU.md).
