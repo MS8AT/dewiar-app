@@ -361,6 +361,38 @@ textSize(1, true);
   g.addEventListener("dblclick", (ev) => { ev.stopPropagation(); const a = api(); if (a && a.pad_resize) a.pad_resize(0, 0, true).then(save).catch(() => { }); });
 })();
 
+/* ---------- потянуть блокнот за пустое место наверху (вкладки, панель) — едет весь Dewiar ----------
+   22.10, владелец: «можно всё перетягивать за виджет, но не за окошко блокнота, а интуитивно хочется». Двигаем карточку
+   виджета (Api.move_to / на Windows drag_step — окно за курсором), блокнот едет за ней сам (_pad_follow_at). */
+(() => {
+  let mv = null, raf = 0;
+  const free = (t) => !t.closest("button, input, select, a, .tab, [role=tab], #sz, #ed, #grip");
+  for (const el of [$("#top"), $("#tools")]) {
+    el.addEventListener("pointerdown", async (ev) => {
+      if (ev.button !== 0 || !free(ev.target)) return;
+      const a = api(); if (!a || !a.move_to || !a.get_pos) return;
+      ev.preventDefault(); el.setPointerCapture(ev.pointerId);
+      mv = { el, sx: ev.screenX, sy: ev.screenY, moved: false, pos: null, win: false };
+      mv.pos = await a.get_pos("card").catch(() => null);
+      if (a.drag_begin && /^Win/.test(navigator.platform)) mv.win = await a.drag_begin("card").catch(() => false);
+    });
+    el.addEventListener("pointermove", (ev) => {
+      if (!mv || mv.el !== el) return;
+      const dx = ev.screenX - mv.sx, dy = ev.screenY - mv.sy;
+      if (!mv.moved && Math.hypot(dx, dy) > 4) { mv.moved = true; document.body.classList.add("moving"); }
+      if (mv.moved && mv.pos && !raf) raf = requestAnimationFrame(() => { raf = 0; const a = api(); if (!a || !mv) return;
+        if (mv.win) a.drag_step("card"); else a.move_to("card", mv.pos[0] + dx, mv.pos[1] + dy); });
+    });
+    const end = () => {
+      if (!mv || mv.el !== el) return;
+      const d = mv; mv = null; document.body.classList.remove("moving");
+      const a = api();
+      if (d.moved && a && a.save_pos) a.save_pos("card").then(p => core.call("settings_save", { patch: { ui: { hud_x: p[0], hud_y: p[1] } } })).catch(() => { });
+    };
+    el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
+  }
+})();
+
 try { document.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) { }   // новый абзац — <p>, а не <div>
 /* первое открытие */
 const wait = setInterval(() => { if (core.connected) { clearInterval(wait); padShown(Q.get("side")); } }, 120);

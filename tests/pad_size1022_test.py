@@ -4,7 +4,9 @@
   отпустили — размер в настройки (ui.pad_w / ui.pad_h, при масштабе 100 %), двойной щелчок — как было;
 - «Aa» на панели — ползунок 80–170 %, A− / A+, щелчок по числу — 100 %; Ctrl+колёсико и Ctrl+= / Ctrl+− / Ctrl+0;
   размер — в настройки (ui.pad_text), заголовки и код растут вместе с текстом;
-- ui/app.py: _pad_geom берёт свой размер (в пределах), pad_resize двигает лист так, что он остаётся прижат к виджету."""
+- ui/app.py: _pad_geom берёт свой размер (в пределах), pad_resize двигает лист так, что он остаётся прижат к виджету.
+22.10, после выхода: «не удобно, что можно перетягивать за виджет, но не за окошко блокнота» и «здесь же я ожидал ползунок» —
+широкий лист показывает ползунок прямо на панели; пустое место наверху тянет весь Dewiar."""
 import json, os, re, sys, types
 from pathlib import Path
 ROOT = Path(os.environ.get("DEWIAR_ROOT") or Path(__file__).resolve().parent.parent)
@@ -44,6 +46,8 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 FAKE = """window.apiCalls = []; window.pywebview = { api: new Proxy({}, { get: (_, k) => (...a) => { apiCalls.push([k, ...a]);
   if (k === 'pad_size') return Promise.resolve([440, 520]);
   if (k === 'pad_resize') return Promise.resolve(a[0] ? [Math.round(a[0]), Math.round(a[1])] : [null, null]);
+  if (k === 'get_pos') return Promise.resolve([1500, 300]);
+  if (k === 'save_pos') return Promise.resolve([1460, 340]);
   return Promise.resolve(true); } }) };"""
 CORE = r"""
 (() => { window.calls = [];
@@ -99,6 +103,26 @@ with sync_playwright() as p:
     ok(pg.inner_text("#sz-v") == "150 %" and len([c for c in pg.evaluate("calls") if c[0] == "settings_save"]) == n,
        "размер из настроек (сменили в другом окне) — применяется, без записи обратно")
     pg.screenshot(path="/tmp/claude-0/pad_size.png")
+    # широкий лист (22.10, владелец: «здесь же я ожидал ползунок») — ползунок прямо на панели, без «Aa»
+    pw = b.new_page(viewport={"width": 1000, "height": 700}); pw.on("pageerror", lambda e: errs.append(str(e)))
+    pw.add_init_script(FAKE); pw.add_init_script(CORE)
+    pw.goto((ROOT / "ui/pad.html").as_uri() + "?skin=neusky&cfg=" + __import__("urllib.parse").parse.quote(json.dumps({"side": "left", "gap": 14, "clips": []})))
+    pw.wait_for_timeout(1000)
+    tb, sb = pw.locator("#tools").bounding_box(), pw.locator("#sz-r").bounding_box()
+    ok(pw.is_visible("#sz-r") and not pw.is_visible("#b-size") and sb and tb and sb["y"] >= tb["y"] and sb["y"] < tb["y"] + tb["height"]
+       and sb["x"] > tb["x"] + tb["width"] * 0.6, f"широкий лист — ползунок на панели справа, сразу виден: {sb}")
+    # потянуть за пустое место панели — едет весь Dewiar (карточка виджета; блокнот — за ней)
+    x0, y0 = tb["x"] + tb["width"] * 0.5, tb["y"] + tb["height"] / 2
+    pw.mouse.move(x0, y0); pw.mouse.down(); pw.mouse.move(x0 - 40, y0 + 30, steps=6); pw.wait_for_timeout(150); pw.mouse.up(); pw.wait_for_timeout(300)
+    calls = pw.evaluate("apiCalls")
+    mv = [c for c in calls if c[0] == "move_to"]
+    ok(mv and mv[-1][1] == "card" and mv[-1][2] == 1460 and mv[-1][3] == 330, f"потянули за панель на −40, +30 — карточка виджета переехала: {mv[-1:] or calls[-4:]}")
+    saved = [c[1] for c in pw.evaluate("calls") if c[0] == "settings_save"]
+    ok(any(s["patch"]["ui"].get("hud_x") == 1460 for s in saved), "место запомнено, как при перетаскивании виджета")
+    n = len([c for c in pw.evaluate("apiCalls") if c[0] == "move_to"])
+    pw.click("#tools button[data-c='bold']"); pw.wait_for_timeout(150)
+    ok(len([c for c in pw.evaluate("apiCalls") if c[0] == "move_to"]) == n, "кнопки панели — по-прежнему кнопки, не перетаскивание")
+    pw.screenshot(path="/tmp/claude-0/pad_wide.png")
     ok(not errs, f"без ошибок на странице: {errs[:2]}")
     b.close()
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")

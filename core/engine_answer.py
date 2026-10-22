@@ -204,6 +204,8 @@ class AnswerMixin:
                 return
         if not raw and not quiet and not via and not images and self._direct_call(text):
             return
+        if not raw and not quiet and not images and self._direct_update(text, via):
+            return
         if not raw and not quiet and not via and not images and self.radio.paused and \
                 re.sub(r"[^\w ]", "", text.lower()).strip() in {"продолжи", "продолжай", "включи обратно", "верни радио",
                                                                 "включи радио", "играй", "продолжи радио"}:
@@ -1060,6 +1062,33 @@ class AnswerMixin:
         self.emit("answer", text=f"Радио {'громче' if up else 'тише'}: {round(nv * 100)}%.", done=True)
         self.emit("radio", **self.radio.status())
         self.set_state("idle")
+        return True
+
+    def _direct_update(self, text, via=None):
+        """«Обновись», «проверь обновления» — проверить сайт сейчас же и сказать итог, без модели (модель обещала «сейчас
+        посмотрю» и не вызывала app_update). Новое скачивается и проверяется, в виджете — плашка «Доступна версия …»:
+        ставит человек одним нажатием. -> True, если это была такая просьба."""
+        from engine_base import UPDATE_RX
+        up = getattr(self, "updater", None)
+        if up is None or not UPDATE_RX.match(text or ""):
+            return False
+
+        def run():
+            try:
+                info = up.check()
+                st = up.public()
+            except Exception as e:  # noqa: BLE001
+                info, st = None, {"error": str(e)}
+            cur = st.get("current") or ""
+            if info:
+                msg = (f"Есть новая версия — {info['version']}, она уже скачана. Нажмите на плашку «Доступна версия» в виджете — "
+                       "обновление встанет за минуту, разговор и настройки сохранятся.")
+            elif st.get("error"):
+                msg = "Сейчас не получилось проверить обновления — сайт не ответил. Проверю позже ещё раз; можно и в студии: «О программе» → «Проверить обновления»."
+            else:
+                msg = f"Обновлений нет — у вас последняя версия{(' ' + cur) if cur else ''}."
+            self._say_quick(msg, text, via)
+        threading.Thread(target=run, name="update-now", daemon=True).start()
         return True
 
     def _direct_call(self, text):

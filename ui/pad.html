@@ -118,6 +118,18 @@
   #sz input { width: 120px; accent-color: var(--acc); }
   #sz b { min-width: 42px; text-align: right; font-size: 12px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; cursor: pointer; }
   #sz .ib { width: 26px; height: 26px; font-weight: 800; }
+  /* лист широкий (22.10, владелец: «здесь же я ожидал ползунок») — ползунок прямо на панели, справа; узкий — за «Aa» */
+  @media (min-width: 600px) {
+    #b-size, #tools > span.sep:last-of-type { display: none; }
+    #sz { position: static; display: flex; margin-left: auto; padding: 0; gap: 2px; background: none; box-shadow: none; border-radius: 0; }
+    #sz input { width: 92px; margin: 0 2px; }
+    #sz .ib { width: 24px; height: 24px; font-size: 11.5px; color: var(--muted); }
+    #sz #sz-p { font-size: 14px; }
+    #sz b { min-width: 38px; font-size: 11.5px; }
+  }
+  /* потянуть за пустое место наверху — едет весь Dewiar: виджет и блокнот вместе (как за виджет) */
+  #top, #tools { cursor: default; }
+  body.moving, body.moving * { cursor: grabbing !important; user-select: none; }
 
   /* растянуть лист за нижний внешний уголок (у виджета — правый нижний; здесь — тот, что дальше от виджета) */
   #grip { position: absolute; bottom: 3px; width: 18px; height: 18px; z-index: 6; border-radius: 6px; opacity: .45; touch-action: none; }
@@ -167,9 +179,9 @@
     <button class="tool" data-c="code" title="Код"><svg viewBox="0 0 24 24"><path d="m9 8-4 4 4 4M15 8l4 4-4 4"/></svg></button>
     <span class="sep"></span>
     <button class="tool" id="b-size" title="Размер текста (Ctrl + колёсико, Ctrl+= и Ctrl+−)" aria-label="Размер текста" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M3 18 8 6l5 12M4.7 14h6.6M15 18l3.2-7.5L21.4 18M15.9 16h4.6"/></svg></button>
+    <div id="sz" role="group" aria-label="Размер текста" title="Размер текста (Ctrl + колёсико, Ctrl+= и Ctrl+−)"><button class="ib" id="sz-m" aria-label="Мельче">A−</button><input type="range" id="sz-r" min="80" max="170" step="5" aria-label="Размер текста, %"><button class="ib" id="sz-p" aria-label="Крупнее">A+</button><b id="sz-v" title="Щелчок — как было">100 %</b></div>
     <input type="file" id="file" accept="image/*" hidden multiple>
   </div>
-  <div id="sz" role="group" aria-label="Размер текста"><button class="ib" id="sz-m" aria-label="Мельче">A−</button><input type="range" id="sz-r" min="80" max="170" step="5" aria-label="Размер текста, %"><button class="ib" id="sz-p" aria-label="Крупнее">A+</button><b id="sz-v" title="Щелчок — как было">100 %</b></div>
   <div id="sheet"><div id="ed" contenteditable="true" spellcheck="true" data-ph="Пишите прямо здесь — сохранится само.&#10;- пробел — список, [] пробел — задача, # пробел — заголовок.&#10;Ссылки, таблицы и картинки — просто вставьте (Ctrl+V)."></div></div>
   <div id="foot"><i class="dot"></i><span id="st">Открываю…</span><em id="hint"></em></div>
   <div id="grip" title="Потяните — размер блокнота. Двойной щелчок — как было"></div>
