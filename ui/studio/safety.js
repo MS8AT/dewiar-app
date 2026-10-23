@@ -27,7 +27,49 @@ async function loadSafety() {
   }, 10000);
 }
 
-function renderSafety() { if (!SF) return; renderStop(); renderMap(); renderLocks(); renderJournal(); }
+function renderSafety() { if (!SF) return; renderStop(); renderMap(); renderLocks(); renderJournal(); loadRights(); }
+
+/* ---------- «Что делает сам, а что — с вашего «да»» (отзывы 18–20.10: «насколько безопасен агент?», «лучше разрешать,
+   а не запрещать — разрешаю только калькулятор») ----------
+   Список умений — команда ядра tools (core/tools.py catalog: enabled, confirm, off_by, core). «Только безопасное» выключает
+   всё, кроме core (разговор, напоминания, заметки, деньги, поиск); «Включить всё» — обратно; по одному — «Руки» → «Умения».
+   Удаление файлов и команды терминала всегда спрашивают — это держит ядро (guard), а не галочка. */
+let sfTools = [], sfArm = 0;
+async function loadRights() {
+  try { sfTools = await core.call("tools"); } catch (e) { return; }
+  renderRights();
+}
+function renderRights() {
+  const box = $("#sf-rights"); if (!box) return;
+  const self = sfTools.filter(t => t.enabled && !t.confirm), ask = sfTools.filter(t => t.enabled && t.confirm);
+  const off = sfTools.filter(t => t.off_by === "user"), na = sfTools.filter(t => t.off_by === "service");
+  const chips = (list) => list.map(t => `<span class="sfchip" title="${escH(t.description)}">${escH(t.title)}</span>`).join("");
+  const row = (cls, title, sub, list) => `<div class="sfr ${cls}"><div class="sfr-h"><i></i><b>${title}</b><span>${list.length}</span></div>`
+    + (sub ? `<p class="sfr-sub">${sub}</p>` : "") + `<div class="sfchips">${chips(list)}</div></div>`;
+  box.innerHTML = row("g", "Сам, без вопросов", "", self)
+    + row("a", "Только после вашего «да»", "Спросит «Выполнить?» голосом и кнопками в виджете. Удаление файлов и команды терминала спрашивают всегда, даже если это выключить.", ask)
+    + (off.length ? row("x", "Выключено вами", "Этого ассистент не делает и знает об этом — скажет, где включить.", off) : "")
+    + (na.length ? `<p class="sfr-na">Ещё ${na.length} — появятся, когда подключите то, что им нужно (почту, умный дом, Telegram, сервер), или снимете замок.</p>` : "");
+  const notCore = sfTools.filter(t => !t.core && t.off_by !== "user").length;
+  $("#sfr-safe").disabled = !notCore; $("#sfr-all").disabled = !off.length;
+}
+async function sfSetTools(on) {
+  const patch = {}; sfTools.forEach(t => { patch[t.name] = on(t); });
+  await save({ tools: { enabled: patch } }, true);
+  await loadRights();
+}
+$("#sfr-safe").onclick = async () => {
+  const n = sfTools.filter(t => !t.core && t.off_by !== "user").length;
+  if (Date.now() > sfArm) {                       // два нажатия: выключить сразу много умений — осознанно
+    sfArm = Date.now() + 5000;
+    $("#sfr-note").textContent = `Нажмите ещё раз — выключу ${n} умений: файлы, программы, команды, почту, сообщения, камеру и экран. Останутся разговор, напоминания, заметки, деньги и поиск.`;
+    return;
+  }
+  sfArm = 0; await sfSetTools(t => !!t.core);
+  $("#sfr-note").textContent = "Готово: только безопасное. Нужное включите по одному — «Настроить по одному».";
+};
+$("#sfr-all").onclick = async () => { sfArm = 0; await sfSetTools(() => true); $("#sfr-note").textContent = "Все умения снова включены; опасные по-прежнему спрашивают «Выполнить?»."; };
+$("#sfr-one").onclick = () => { const b = $('nav button[data-p="hands"]'); if (b) b.click(); setTimeout(() => { const t = $("#toollist"); if (t) t.scrollIntoView({ block: "start" }); }, 200); };
 
 /* ---------- стоп-кран ---------- */
 function renderStop() {

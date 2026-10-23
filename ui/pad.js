@@ -58,6 +58,18 @@ function drawTabs() {
   }
   const on = box.querySelector(".tab.on"); if (on) on.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
+/* Что писать под листом: правду о синхронизации (№216, 23.10: «блокнот говорит, что синхронизировался с устройствами, а на
+   андроиде ни блокнота, ни записей» — телефон был на своём ключе, в синхронизации компьютер был один). -> строка. */
+let syncSt = null, syncAt = 0;
+async function syncLine() {
+  if (Date.now() - syncAt > 60000) { try { syncSt = await core.call("sync_status"); syncAt = Date.now(); } catch (e) { syncSt = null; } }
+  const st = syncSt;
+  if (!st) return "синхронизируется с вашими устройствами";
+  if (!st.available || !st.on) return "только на этом компьютере — синхронизация выключена (студия → «Dewiar.pro»)";
+  const devs = st.devices || [], phone = devs.some(d => !d.pc);
+  if (!devs.length) return "других устройств пока нет — телефон добавляется кодом: студия → «Мозг» → «Добавить устройство»";
+  return phone ? "на телефоне — «Мой день» → «Заметки», с пометкой «Блокнот»" : "синхронизируется с вашими устройствами";
+}
 async function refresh() {
   try {
     const r = await core.call("pad_tabs");
@@ -72,7 +84,7 @@ async function openTab(name, first) {
     const r = await core.call("pad_read", { name });
     P.active = r.name; P.base = r.mtime; P.dirty = false; P.loaded = true;
     ED.innerHTML = PadMD.md2html(r.text); paint(); drawTabs();
-    status(P.tabs.length > 1 ? `«${r.name}» · сохраняется само, синхронизируется` : "Сохраняется само и синхронизируется с вашими устройствами");
+    status(`${P.tabs.length > 1 ? `«${r.name}» · сохраняется` : "Сохраняется"} само · ${await syncLine()}`);
     if (!first) ED.focus();
   } catch (e) { status(e.message, "bad"); P.loaded = true; }
 }
@@ -114,7 +126,7 @@ async function saveNow() {
     const r = await core.call("pad_write", { name: P.active, text: md, base: P.base });
     P.base = r.mtime;
     if (r.conflict) { status(`Её правили и на другом устройстве — их вариант сохранён во вкладке «${r.conflict}»`, "busy"); refresh(); }
-    else status("Сохранено · синхронизируется с вашими устройствами");
+    else status("Сохранено · " + await syncLine());
   } catch (e) { P.dirty = true; status("Не сохранилось: " + e.message, "bad"); }
   P.saving = false;
   if (P.dirty) changed();

@@ -88,6 +88,7 @@ DEFAULTS = {
         "active": "",
         "profiles": {},             # id -> {name, kind, base_url, api_key, model, disable_thinking, temperature, max_tokens}
         "history_turns": 8,
+        "lean_prompt": False,       # проба: короткая инструкция — навыки только именами, описания — к подходящему вопросу
         "think_auto": True,         # сложная просьба (стих, расчёт, анализ, план, код) — модель думает перед ответом (llm.wants_think)
         "tools_modes": {},          # «адрес|модель» → native | prompt | none: как модель вызывает инструменты (проверяется само)
         "history_reset_seconds": 28800,   # новый разговор — после 8 часов тишины; длинный сворачивается в содержание (conversation.py)

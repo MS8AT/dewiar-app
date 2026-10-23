@@ -1370,6 +1370,18 @@ html.st-light { --sf-g: #1d7f55; --sf-b: #4b5bd6; --sf-a: #b46a08; --sf-x: color
 .sft .h { color: var(--dim); font-size: 12px; margin-left: 8px; }
 .sfempty { color: var(--muted); margin: 4px 0; } .sfempty.lo { color: var(--sf-g); margin-bottom: 8px; }
 html.st-light .sfseg { background: var(--soft2); }
+/* «Что делает сам, а что — с вашего «да»» (safety.js renderRights): три полосы с цветом, как у схемы данных */
+.sfr { padding: 10px 0; border-top: 1px solid var(--line); } .sfr:first-child { border-top: 0; padding-top: 2px; }
+.sfr-h { display: flex; align-items: center; gap: 9px; } .sfr-h b { font-size: 14px; } .sfr-h span { color: var(--dim); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.sfr-h i { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.sfr.g .sfr-h i { background: var(--sf-g); } .sfr.a .sfr-h i { background: var(--sf-a); } .sfr.x .sfr-h i { background: var(--sf-x); }
+.sfr-sub { margin: 4px 0 0 18px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.sfchips { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 0 18px; }
+.sfchip { padding: 3px 9px; border-radius: 999px; background: var(--panel); font-size: 12px; color: var(--ink); }
+.sfr.x .sfchip { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--dim); }
+.sfr-na { margin: 8px 0 0; color: var(--dim); font-size: 12.5px; }
+.sfr-acts { margin: 12px 0 0; flex-wrap: wrap; } .sfr-note { margin: 6px 0 0; min-height: 1em; }
+html.st-light .sfchip { background: var(--soft2); }
 
 /* Студия → «Близкие» → «Встречи» (ui/studio/meet.js): не прибор, как «Рядом», а доска с бейджами «Привет, меня зовут…» —
    как на конференции. Бумажные бейджи с цветной полосой (цвет — у каждого свой), чуть наклонены; кто машет вам —

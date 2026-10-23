@@ -4140,7 +4140,9 @@ function renderDay() {
     const n = notes().slice().sort((a, b) => (+b.time || 0) - (+a.time || 0));          // новые сверху — и с компьютера тоже
     box.innerHTML = `<button class="btn p ntnew" id="nt-new">Новая заметка</button>` + (n.length ? n.map(x => {
       const img = (x.att || []).find(a => a.type === "image"), more = (x.att || []).length;
-      return `<div class="it note" data-id="${esc(x.id)}">${img ? `<img class="nthumb" src="${noteAttGet(img.id)}" alt="">` : ""}<div class="bd"><b>${esc(x.title)}${more ? `<span class="ntc">📎${more}</span>` : ""}</b><small>${esc(noteShown(x.text).slice(0, 220))}</small></div></div>`; }).join("")
+      // папка заметки с компьютера (№216: вкладки блокнота у виджета приходят заметками — «Главное» без пометки не узнать)
+      const fold = x.folder ? `<span class="ntf">${esc(x.folder.split("/").pop())}</span>` : "";
+      return `<div class="it note" data-id="${esc(x.id)}">${img ? `<img class="nthumb" src="${noteAttGet(img.id)}" alt="">` : ""}<div class="bd"><b>${esc(x.title)}${more ? `<span class="ntc">📎${more}</span>` : ""}${fold}</b><small>${esc(noteShown(x.text).slice(0, 220))}</small></div></div>`; }).join("")
       : `<div class="empty">Заметок нет.<br>Скажите: «запиши в заметки: купить хлеб и молоко» — или нажмите «Новая заметка».</div>`);
     $("#nt-new").onclick = () => openNote("");
     $$(".it.note", box).forEach(el => el.onclick = () => openNote(el.dataset.id));
