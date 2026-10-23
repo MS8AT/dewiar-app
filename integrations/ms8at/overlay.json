@@ -7,7 +7,7 @@
     "commit": "24a3d6c22142b623081478a121d396d7e42741c1"
   },
   "fork": {
-    "build": 6
+    "build": 7
   },
   "payload_manifest": "tools/local_codex_manifest.json",
   "integration_prompt": "integrations/ms8at/INTEGRATION_PROMPT_RU.md",
@@ -32,6 +32,7 @@
     "task_observability_v1",
     "codex_task_delegation_v1",
     "human_memory_mcp_v1",
+    "codex_confirmation_recovery_v1",
     "overlay_v1"
   ],
   "required_tests": [
@@ -46,6 +47,7 @@
     "tests/task_observability_ui.test.mjs",
     "tests/human_memory_contour_test.py",
     "tests/task_directory_safety_test.py",
+    "tests/hud_subscription_confirm_test.py",
     "tests/ms8at_overlay_test.py"
   ],
   "update_policy": {

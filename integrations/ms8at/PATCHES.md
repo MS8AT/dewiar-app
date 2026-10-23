@@ -14,5 +14,6 @@ write, publish, call a model, or install. / 每个补丁都是叠加在指定上
 | PATCH-003 | Heartbeat, CLI, API, SLI / 心跳、CLI、API、SLI | [архитектура](../../docs/BRAINS_HEARTBEAT_RU.md) |
 | PATCH-004 | Подтверждаемое продление квоты задач Codex / Confirmed Codex task quota extension / 经确认的 Codex 任务配额扩展 | [ТЗ и промпт](PATCH_004_CODEX_TASK_QUOTA.md) |
 | PATCH-005 | Human Memory, дерево Codex-задач, API/лог / Human Memory, Codex task tree, API/log / Human Memory、Codex 任务树、API/日志 | [ТЗ и промпт](PATCH_005_HUMAN_MEMORY_TASK_TREE.md) |
+| PATCH-006 | Восстановление подтверждения Codex / Codex confirmation recovery / Codex 确认恢复 | [ТЗ и промпт](PATCH_006_CODEX_CONFIRM_RECOVERY.md) |
 
 Шаблон для следующих изменений: [prompts/PATCH_PROMPT_TEMPLATE.md](../../prompts/PATCH_PROMPT_TEMPLATE.md).

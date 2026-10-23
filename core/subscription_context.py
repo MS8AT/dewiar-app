@@ -175,7 +175,8 @@ def confirm_local(host, question, cancel, timeout=120):
     finally:
         if host.pending_confirm is box:
             host.pending_confirm = None
-            host.emit("confirm_done", id=box["id"], ok=box["answer"] is True and not cancel.is_set())
+            host.emit("confirm_done", id=box["id"], source="subscription",
+                      ok=box["answer"] is True and not cancel.is_set())
         _CONFIRM_LOCK.release()
 
 

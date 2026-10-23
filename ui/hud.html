@@ -721,6 +721,71 @@ function reportOffer(e) {
   row.append(yes, no); $("bot").appendChild(row); hideCapLater(45000);
 }
 
+/* Подтверждение локального Codex может прийти, пока карточка скрыта или перезагружается. Событие confirm одноразовое,
+   поэтому виджет также читает только локальное pending-состояние и восстанавливает точные id/source. Это не запускает
+   модель и не обращается к OpenAI. Старый вопрос без pending-состояния закрывается, а не остаётся похожим на активный. */
+let confirmRevision = 0, subscriptionConfirmReading = false;
+function showConfirm(e) {
+  if (!e || (e.source === "subscription" && !e.id)) return;
+  const yn = $("yn");
+  const id = e.id ? String(e.id) : "";
+  if (yn.classList.contains("on") && yn.dataset.confirmId === id && yn.dataset.confirmSource === (e.source || "")) return;
+  yn.dataset.confirmId = id;
+  yn.dataset.confirmSource = e.source || "";
+  delete yn.dataset.answering;
+  showCap(null, e.text || "Нужно подтверждение");
+  yn.classList.add("on");
+  $("y").disabled = false; $("n").disabled = false;
+  $("y").focus(); requestAnimationFrame(fitCap);
+}
+function closeConfirm(e, stale = false) {
+  const yn = $("yn"), id = e && e.id ? String(e.id) : "";
+  if (id && yn.dataset.confirmId && id !== yn.dataset.confirmId) return;
+  const source = yn.dataset.confirmSource;
+  yn.classList.remove("on");
+  delete yn.dataset.confirmId; delete yn.dataset.confirmSource; delete yn.dataset.answering;
+  $("y").disabled = false; $("n").disabled = false;
+  if (stale && source === "subscription") {
+    showCap(null, "Время подтверждения истекло. Запрос Codex не отправлен — продолжите задачу, чтобы запросить разрешение снова.");
+    hideCapLater(12000);
+  }
+  requestAnimationFrame(fitCap);
+}
+async function syncSubscriptionConfirm() {
+  if (subscriptionConfirmReading) return;
+  subscriptionConfirmReading = true;
+  const before = confirmRevision;
+  try {
+    const r = await core.call("subscription_confirm_get");
+    if (before !== confirmRevision) return;
+    if (r && r.ok && r.data) showConfirm({ ...r.data, source: "subscription" });
+    else if ($("yn").classList.contains("on") && $("yn").dataset.confirmSource === "subscription" && !$("yn").dataset.answering)
+      closeConfirm(null, true);
+  } catch (_) { /* ядро ещё запускается: следующий локальный опрос восстановит вопрос */ }
+  finally { subscriptionConfirmReading = false; }
+}
+async function answerConfirm(ok) {
+  const yn = $("yn"), id = yn.dataset.confirmId || "", source = yn.dataset.confirmSource || "";
+  if ((source === "subscription" && !id) || yn.dataset.answering) return;
+  yn.dataset.answering = "1"; $("y").disabled = true; $("n").disabled = true;
+  try {
+    if (source === "subscription") {
+      const r = await core.call("subscription_confirm_answer", { id, ok });
+      if (!r || !r.ok) throw new Error((r && r.error) || "Подтверждение не принято");
+      confirmRevision++; closeConfirm({ id });
+      showCap(null, ok ? "Разрешено. Запускаю задачу через Codex…" : "Отменено. Запрос Codex не отправлен.");
+      hideCapLater(ok ? 5000 : 8000);
+    } else {
+      await core.call("confirm_answer", { ok, id });
+    }
+  } catch (err) {
+    delete yn.dataset.answering; $("y").disabled = false; $("n").disabled = false; showErr(err);
+  }
+}
+window.addEventListener("focus", syncSubscriptionConfirm);
+setInterval(syncSubscriptionConfirm, 2500);
+syncSubscriptionConfirm();
+
 // созвон начался (core/engine_audio._meeting_watch) — предложить суфлёр: молча слушает и подсказывает на экране
 function prompterOffer(e) {
   if (mode !== "card") return;
@@ -872,8 +937,8 @@ core.on("hello", d => {
   a.classList.toggle("fin", e.status === "done" || e.status === "declined");
   showCap(null, null);
 })
-.on("confirm", e => { $("yn").dataset.confirmId = e.id || ''; showCap(null, e.text); $("yn").classList.add("on"); $("y").focus(); requestAnimationFrame(fitCap); })
-.on("confirm_done", () => { $("yn").classList.remove("on"); requestAnimationFrame(fitCap); })
+.on("confirm", e => { confirmRevision++; showConfirm(e); })
+.on("confirm_done", e => { confirmRevision++; closeConfirm(e, !!(e && e.source === "subscription" && e.ok !== true)); })
 .on("handoff", e => { $("act").className = "on"; $("act").textContent = `Отвечает ${e.name}${e.role ? " · " + e.role.toLowerCase() : ""}`; })
 .on("note_saved", e => {
   $("rem-ico").textContent = { list: "🛒", fact: "🧠" }[e.kind] || "📝";
@@ -1072,8 +1137,8 @@ card.addEventListener("pointerup", () => {
 });
 card.addEventListener("pointercancel", () => { if (hold && hold.by === "mouse") holdFinish(true); drag = null; card.classList.remove("dragging"); });
 
-$("y").onclick = () => core.call("confirm_answer", { ok: true, id: $("yn").dataset.confirmId }).catch(showErr);
-$("n").onclick = () => core.call("confirm_answer", { ok: false, id: $("yn").dataset.confirmId }).catch(showErr);
+$("y").onclick = () => answerConfirm(true);
+$("n").onclick = () => answerConfirm(false);
 $("b-mic").onclick = guard($("b-mic"), () => core.call("mute", { on: !muted }).then(m => { muted = m; $("b-mic").classList.toggle("on", m); $("b-mic").title = m ? "Включить микрофон" : "Выключить микрофон"; }).catch(showErr));
 $("b-set").onclick = () => { const a = api(); if (a) a.open_settings(); };
 /* Dewiar Облако: заряд на исходе — мягкая строка в виджете (нажать — студия, «Мозг») */
