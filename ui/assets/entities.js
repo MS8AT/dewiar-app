@@ -1057,7 +1057,12 @@
     if (e.img && e.img.complete && e.img.naturalWidth) {
       // чёткий портрет: заранее уменьшаем фото ступенями до нужного размера в пикселях экрана (кэш на размер)
       const dpr = window.devicePixelRatio || 1, px = Math.max(8, Math.round(2 * R * dpr));
-      if (!e._ph || e._ph.px !== px || e._ph.src !== e.img.src) {
+      // анимация (GIF) — без кэша: кадр берётся каждый раз, иначе застыла бы на первом (письмо пользователя 23.10)
+      const anim = /^data:image\/gif/.test(e.img.src);
+      if (anim) {
+        const iw = e.img.naturalWidth, ih = e.img.naturalHeight, sc = Math.max(px / iw, px / ih);
+        e._ph = { px, src: e.img.src, canvas: e.img, w: iw * sc / px, h: ih * sc / px };
+      } else if (!e._ph || e._ph.px !== px || e._ph.src !== e.img.src) {
         const iw = e.img.naturalWidth, ih = e.img.naturalHeight, sc = Math.max(px / iw, px / ih);
         let src = e.img, w = iw, h = ih;
         while (w / 2 >= iw * sc && w > 4) {             // ступени по половине, пока не дойдём до нужного размера
@@ -1070,13 +1075,16 @@
         oc.drawImage(src, (px - iw * sc) / 2, (px - ih * sc) / 2, iw * sc, ih * sc);
         e._ph = { px, src: e.img.src, canvas: out };
       }
-      const jitter = e.state === "thinking" && Math.sin(t * 23) > 0.85 ? 2 : 0;
+      // «дрожание» фото, пока думает, убрано: выглядело как сбой (письмо пользователя 23.10)
       // фото всегда в полную яркость (без «пелены»); приглушаем только когда микрофон выключен или нет связи
       const sleeping = e.state === "offline";             // микрофон выключен — портрет в полную яркость
       ctx.globalAlpha = sleeping ? 0.6 : 1;
       ctx.imageSmoothingQuality = "high";
       const gk = e.lookGain, z = 1 + 0.035 * gk * e._la, ox = e._lx * R * 0.03 * gk, oy = e._ly * R * 0.025 * gk;   // своё фото: чуть крупнее (плавно) — край не виден
-      ctx.drawImage(e._ph.canvas, -R * z + ox + jitter, -R * z + oy, 2 * R * z, 2 * R * z);
+      if (anim) {
+        const W = 2 * R * z * e._ph.w, H = 2 * R * z * e._ph.h;
+        ctx.drawImage(e._ph.canvas, -W / 2 + ox, -H / 2 + oy, W, H);
+      } else ctx.drawImage(e._ph.canvas, -R * z + ox, -R * z + oy, 2 * R * z, 2 * R * z);
       ctx.globalAlpha = 1;
       if (busy) {                                 // говорит/думает — лёгкий оттенок цвета персонажа
         ctx.globalCompositeOperation = "soft-light"; ctx.fillStyle = rgba(c, 0.14); ctx.fillRect(-R, -R, 2 * R, 2 * R);

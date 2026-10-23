@@ -128,8 +128,15 @@ function chatAttsRender() {
 function chatSend() {
   const t = $("#ch-text"), q = t.value.trim(); if (!q && !chAtts.length) return;
   const files = chAtts.map(a => ({ name: a.name, b64: a.b64 }));
+  const atts = chAtts;
   t.value = ""; t.style.height = ""; chAtts = []; chatAttsRender(); $("#ch-res").textContent = "";
-  core.call("say", { text: q, files }).catch(e => { $("#ch-res").textContent = e.message; });
+  if (!core.connected) $("#ch-res").textContent = "Нет связи с ядром — сообщение не потеряется: отправлю, как только ядро вернётся";
+  core.sendLater("say", { text: q, files }).then(() => { if (/отправлю, как только/.test($("#ch-res").textContent)) $("#ch-res").textContent = ""; })
+    .catch(e => {   // не дошло — текст обратно в поле, набирать заново не нужно (№200)
+      if (!t.value.trim()) { t.value = q; t.dispatchEvent(new Event("input")); }
+      if (!chAtts.length) { chAtts = atts; chatAttsRender(); }
+      $("#ch-res").textContent = e.message + " — текст вернул в поле, отправьте ещё раз";
+    });
 }
 $("#ch-file").onchange = (e) => { chatAddFiles([...e.target.files]); e.target.value = ""; };
 $("#ch-text").addEventListener("paste", (e) => {

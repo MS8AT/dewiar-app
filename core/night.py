@@ -139,8 +139,11 @@ class NightWatch:
         self._save()
         # разработчику — только то, что может быть ошибкой программы: сбои модели и сервера (ключ, страна, баланс, сеть)
         # — это настройки человека, их он видит утром сам (пакет 22.10, №193: «сбоев 4, не решено 0» — все про модель)
-        ours = sum(p["n"] for p in problems if not str(p["text"]).startswith("Модель"))
-        sent = self._report(now, problems, repaired, left) if left or ours >= 3 else None
+        # задачи (застряла, не хватило окна) — поведение и настройки модели; «модель не отвечает» в «не решено» — тоже настройки
+        # (пакет 23.10, №204, №209, №210)
+        ours = sum(p["n"] for p in problems if p.get("kind") != "task" and not str(p["text"]).startswith("Модель"))
+        left_ours = [x for x in left if not x.startswith("Модель")]
+        sent = self._report(now, problems, repaired, left) if left_ours or ours >= 3 else None
         log.info("🌙 Ночной обход: сбоев %d, починила %d, осталось %d%s", sum(p["n"] for p in problems), len(repaired), len(left),
                  f", отчёт №{sent}" if sent else "")
         return {"day": now.date().isoformat(), "problems": problems, "repaired": repaired, "left": left, "note": note,

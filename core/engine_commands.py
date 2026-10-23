@@ -834,6 +834,14 @@ class CommandsMixin:
             return {"id": pid, "gallery": self.personas.gallery()}
         if cmd == "persona_delete":
             self.personas.delete(a["id"])
+            # разговор удалённого — в архив: новый персонаж с тем же именем (и тем же id) начнёт с чистого листа
+            for m in self.history:
+                if m.get("who") == a["id"]:
+                    m["who"] = a["id"] + "~удалён"
+            try:
+                self.conv.save(self.history)
+            except Exception:  # noqa: BLE001
+                pass
             if self.s.get("persona") not in {p["id"] for p in self.personas.all()}:
                 from personas import DEFAULT
                 self.switch_persona(DEFAULT)

@@ -20,6 +20,8 @@ netHealed(1); netRecovered(); out.healed = sent.length; out.left = P.net_inc;
 netIncident({ url: "https://openrouter.ai/x", raw: "timeout" }, false);
 netIncident({ url: "https://openrouter.ai/x", raw: "timeout" }, true);
 netRecovered(); out.real = sent.slice();
+sent.length = 0; P.net_inc = JSON.stringify([{ ts: 1, host: "dewiar.pro", err: 'Unable to resolve host "dewiar.pro": No address associated with hostname', online: false, type: "none" }]);
+netRecovered(); out.offline = sent.length; out.offline_left = P.net_inc;
 out.stale = STALE_CONN.test("unexpected end of stream on com.android.okhttp.Address@d930ece4") && !STALE_CONN.test("timeout");
 console.log(JSON.stringify(out));
 """
@@ -39,6 +41,7 @@ except (ValueError, IndexError):
     print(r.stdout, r.stderr); sys.exit(1)
 ok(o["healed"] == 0 and o["left"] == "[]", f"сбой, который прошёл сам при повторе, — не отчёт разработчику: {o['healed']}, {o['left']}")
 ok(len(o["real"]) == 1 and "2 сбоев" in o["real"][0], f"настоящие сбои (вопрос так и не прошёл) — отчётом, как раньше: {o['real']}")
+ok(o["offline"] == 0 and o["offline_left"] == "[]", "телефон был без интернета (имя сайта не находилось) — не отчёт разработчику (№208)")
 ok(o["stale"], "«unexpected end of stream» узнаётся как оборванное старое соединение")
 ok("STALE_CONN.test(" in js and "? 300 :" in js and "if (tries) netHealed(tries)" in js, "повтор после такого обрыва — сразу; удачный повтор помечает сбои")
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")

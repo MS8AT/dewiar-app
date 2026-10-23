@@ -791,6 +791,8 @@ class Close:
             except CloseError as e:
                 self.error = str(e)
                 log.info("Близкие: %s", e)
+            except ValueError as e:      # ответ сайта оборвался или пришла страница ошибки вместо JSON — повторим (пакет 23.10, №209)
+                log.info("Близкие: сайт ответил не так, как ждали (%s) — повторю", e)
             except Exception:  # noqa: BLE001
                 log.exception("Близкие")
             try:

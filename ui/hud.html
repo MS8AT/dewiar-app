@@ -1339,8 +1339,12 @@ function sendAsk() {
   const files = atts.filter(a => a.kind === "file").map(a => ({ name: a.name, b64: a.b64 }));
   const label = q || atts.map(a => a.name).join(", ");
   tlReset(label);
-  core.call("say", { text: q, images, files }).catch(showErr);
-  showCap(label + (q && atts.length ? `  📎${atts.length}` : ""), WAIT);
+  const kept = atts;
+  core.sendLater("say", { text: q, images, files }).catch(e => {   // не дошло — вопрос обратно в поле (№200)
+    if (!$("askin").value.trim()) { $("askin").value = q; atts = kept; renderAtts(); fitAsk(); }
+    showErr(new Error(errText(e) + " — вопрос вернул в поле, отправьте ещё раз"));
+  });
+  showCap(label + (q && atts.length ? `  📎${atts.length}` : ""), core.connected ? WAIT : "нет связи с ядром — отправлю, как только вернётся");
   $("askin").value = ""; atts = []; renderAtts(); fitAsk(); $("b-type").click();
 }
 /* поле растёт под текст (до ~7 строк, дальше прокрутка); длинный текст — сфера уменьшается, внизу счётчик */

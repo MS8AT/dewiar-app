@@ -577,7 +577,7 @@ class Personas:
                          if (AVATARS_DIR / f"{p.get('id')}{ext}").exists()), None)    # портрет из комплекта
         if path is None:
             return ""
-        mime = "image/png" if path.suffix == ".png" else "image/webp" if path.suffix == ".webp" else "image/jpeg"
+        mime = {".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}.get(path.suffix, "image/jpeg")
         return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode()
 
     def save(self, p: dict) -> str:
@@ -608,7 +608,7 @@ class Personas:
             data_url = p.get("avatar_data") or ""
             if data_url.startswith("data:image/"):
                 header, b64 = data_url.split(",", 1)
-                ext = ".png" if "png" in header else ".webp" if "webp" in header else ".jpg"
+                ext = ".png" if "png" in header else ".webp" if "webp" in header else ".gif" if "gif" in header else ".jpg"
                 raw = base64.b64decode(b64)
                 if len(raw) > 6 * 1024 * 1024:
                     raise ValueError("Картинка больше 6 МБ — уменьшите её")

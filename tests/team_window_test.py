@@ -20,13 +20,15 @@ H = [{"role": "user", "content": "Лира, привет"}, {"role": "assistant"
      {"role": "user", "content": "Патрик, давай обсудим ремонт ванной"}, {"role": "assistant", "content": "План: плитка, сантехника.", "who": "patrik"},
      {"role": "user", "content": "Отлично, завтра начнём"}, {"role": "assistant", "content": "Всё записано, завтра начнём.", "who": "patrik"}]
 w = team_window(H, "lira", NAMES.get)
-ok([m["role"] for m in w] == ["user", "assistant", "user"] and w[0]["content"] == "Лира, привет" and w[1]["content"] == "Привет!",
-   f"свой разговор — дословно: {[m['role'] for m in w]}")
-ok(w[2].get("team") and "не с тобой, а с коллегой по имени Патрик" in w[2]["content"] and "Патрик: План: плитка" in w[2]["content"]
-   and "Пользователь: Отлично, завтра начнём" in w[2]["content"], f"разговор с Патриком — одной справкой: {w[2]['content'][:160]}")
+# 23.10 (письмо пользователя): у каждого персонажа свой разговор — чужой в окно не попадает вовсе
+ok([m["role"] for m in w] == ["user", "assistant"] and w[0]["content"] == "Лира, привет" and w[1]["content"] == "Привет!",
+   f"у Лиры — только её разговор: {[m['content'][:20] for m in w]}")
 w2 = team_window(H, "patrik", NAMES.get)
-ok(w2[0].get("team") and "коллегой по имени Лира" in w2[0]["content"] and [m["role"] for m in w2[1:]] == ["user", "assistant", "user", "assistant"],
-   "для Патрика — наоборот: свой разговор дословно, с Лирой — справкой")
+ok([m["role"] for m in w2] == ["user", "assistant", "user", "assistant"] and not any(m.get("team") for m in w2), "у Патрика — только его")
+H2 = H[:-1] + [dict(H[-1], handoff="lira")]
+w3 = team_window(H2, "lira", NAMES.get)
+ok(w3[-1].get("team") and "передал(а) слово тебе" in w3[-1]["content"] and "Патрик: План: плитка" in w3[-1]["content"],
+   "Патрик сам передал слово Лире («позови Лиру») — его разговор справкой")
 ok(team_window([{"role": "user", "content": "Как дела?"}], "lira", NAMES.get) == [{"role": "user", "content": "Как дела?"}], "без ответа — реплика нынешнего")
 
 
@@ -45,12 +47,15 @@ class C:
 
 import engine_answer as EA  # noqa: E402
 eng = type("E", (), {"s": S(), "conv": C(), "history": H, "personas": P()})()
-msgs = EA.AnswerMixin._messages(eng, "Помоги с поздравлением маме") if hasattr(EA, "AnswerMixin") else None
-if msgs is None:
-    cls = next(v for v in vars(EA).values() if isinstance(v, type) and hasattr(v, "_messages"))
-    msgs = cls._messages(eng, "Помоги с поздравлением маме")
-ok(msgs[-1]["role"] == "user" and "[Теперь пользователь обращается к тебе:]\nПомоги с поздравлением маме" in msgs[-1]["content"]
-   and all("team" not in m for m in msgs), f"вопрос после чужого разговора — явно к Лире: {msgs[-1]['content'][-90:]!r}")
+cls = next(v for v in vars(EA).values() if isinstance(v, type) and "_messages" in vars(v))
+msgs = cls._messages(eng, "Помоги с поздравлением маме")
+ok(msgs[-1] == {"role": "user", "content": "Помоги с поздравлением маме"} and not any("ремонт" in str(m["content"]) for m in msgs),
+   f"Лира не видит разговора о ремонте с Патриком: {[str(m['content'])[:30] for m in msgs]}")
+eng.history = H2
+msgs = cls._messages(eng, "Что думаешь?") if "cls" in dir() else EA.AnswerMixin._messages(eng, "Что думаешь?")
+ok("[Теперь пользователь обращается к тебе:]" in msgs[-1]["content"], "после передачи слова — вопрос явно к Лире")
+src = (ROOT / "core/engine_commands.py").read_text(encoding="utf-8")
+ok('m["who"] = a["id"] + "~удалён"' in src, "удалили персонажа — его разговор в архив, новый с тем же именем начнёт с чистого листа")
 pp = (ROOT / "core/personas.py").read_text(encoding="utf-8")
 app = (ROOT / "android/assets/www/app.js").read_text(encoding="utf-8")
 ok("не продолжай его и не отвечай за коллегу" in pp and "не продолжай его и не отвечай за коллегу" in app, "правило команды — в подсказке на компьютере и телефоне")

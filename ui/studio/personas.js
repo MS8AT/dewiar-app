@@ -104,6 +104,13 @@ function renderColors() {
 }
 $("#e-photo").onchange = (ev) => {
   const f = ev.target.files[0]; if (!f) return;
+  // анимация (GIF) — как есть, без пересжатия: холст оставил бы один кадр (письмо пользователя 23.10: «пропала анимация»).
+  // Хранится в папке настроек (personas/<id>.avatar.gif) — обновления программы её не трогают
+  if (/gif/.test(f.type)) {
+    if (f.size > 5.5 * 1024 * 1024) { toast("Анимация больше 5,5 МБ — уменьшите её", 4000); ev.target.value = ""; return; }
+    const r = new FileReader(); r.onload = () => { ed.avatar_data = r.result; if (ed.style !== "aura") ed.style = "photo"; renderStyles(); updatePreview(); };
+    r.readAsDataURL(f); ev.target.value = ""; return;
+  }
   // фото уходит в ядро data-URL одним сообщением (ядро принимает до 6 МБ) — поэтому уменьшаем до 768 px здесь
   const img = new Image(); img.onload = () => {          // до 768 px, с плавным уменьшением; PNG — с прозрачностью
     const s = Math.min(1, 768 / Math.max(img.width, img.height));

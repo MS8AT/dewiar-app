@@ -996,11 +996,23 @@ class Api:
         return True
 
     def tray_back(self):
-        """Поговорили — спрятаться обратно (только если показались сами, а не по кнопке)."""
+        """Поговорили — спрятаться обратно (только если показались сами, а не по кнопке).
+        23.10, владелец: «ложная сработка — виджет исчез, остался только блокнот, смотрится странно»: виджет показался
+        из трея на имя, а блокнот рядом открыт — человек работает. Остаёмся на экране и выходим из трея насовсем."""
+        if self.in_tray and getattr(self, "_pad_on", False):
+            self._stay()
+            return True
         if self.in_tray and self.popped:
             self.popped = False
             self._hide_now()
         return True
+
+    def _stay(self):
+        """Виджет показался из трея сам, а человек начал с ним работать (открыл блокнот) — он больше не «в трее»:
+        после разговора не прячется, и при следующем запуске начинает на экране."""
+        if self.in_tray:
+            self.in_tray, self.popped = False, False
+            self._js("window.trayLeft && trayLeft()")
 
     def from_tray(self):
         """Значок в трее / меню приложений: вернуть виджет насовсем."""
@@ -1390,6 +1402,7 @@ class Api:
                                             width=sw, height=sh, min_size=(min(820, sw), min(560, sh)), background_color="#e3eaf4" if light else "#0a0a0f",
                                             maximized=bool(ui_settings().get("studio_max", True)),
                                             frameless=own, easy_drag=False,
+                                            text_select=True,    # текст студии можно выделять и копировать (pywebview по умолчанию запрещает; пакет 23.10, №202)
                                             js_api=self)     # без этого в студии нет «Обновить», выбора папки, сохранения
         win = self._studio
         win.events.closed += lambda *a: self._studio_closed(win)
@@ -2098,6 +2111,7 @@ class Api:
         import webview
         if self.mode != "card":
             return False
+        self._stay()                                 # открыл блокнот у показавшегося из трея виджета — он остаётся
         g = self._pad_geom()
         self._pad_g, self._pad_side, self._pad_on = g, g["side"], True
         W = g["w"] + g["gap"]

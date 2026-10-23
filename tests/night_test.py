@@ -95,6 +95,10 @@ ok(not told2 and any("прав на файл или папку" in x for x in r2
 tasks2.clear(); sent2.clear(); nw2.data = {}
 r3 = nw2.run()
 ok(not sent2, "сбои только модели (страна, ключ) — отчёт разработчику не уходит")
+h2.incidents = lambda since: [{"ts": time.time() - 30, "kind": "task", "text": "Задача: застрял: много раз повторил одно и то же"}] * 4
+h2.s = types.SimpleNamespace(get=lambda *k: cfg.get(k), active_llm=lambda: None)
+sent2.clear(); nw2.data = {}; nw2.run()
+ok(not sent2, "задача застряла или не хватило окна модели — это модель, отчёт не уходит (№204, №210)")
 
 # второй обход: та же задача снова упала — повтора нет; согласия на отчёты нет — не шлём; спокойно — молчим
 tasks["a"].data.update(failed_at=dt.datetime.now().isoformat(timespec="seconds"))
