@@ -333,6 +333,13 @@
         <label class="f">Папка проекта (для работы с кодом, необязательно)<input type="text" id="t-proj" placeholder="~/Проекты/сайт"></label>
         <label class="f">Название (необязательно)<input type="text" id="t-title"></label>
       </div>
+      <div id="t-human-box" hidden style="margin-top:12px">
+        <p><label><input type="checkbox" id="t-human-on"> Добавить read-only Human Memory к этой задаче</label></p>
+        <p class="hint">Нужен подключённый MCP <code>human_memory</code>. Значения задаёт человек; Dewiar не угадывает scope и не читает Hermes/Pass.</p>
+        <div class="row"><label class="f">Session ID<input type="text" id="t-human-session" maxlength="80" placeholder="точный session_id"></label><label class="f">Object key<input type="text" id="t-human-object" maxlength="80" placeholder="точный object_key"></label></div>
+        <label class="f">Ключи памяти, через запятую (1–16)<input type="text" id="t-human-keys" placeholder="aspect_a, criteria, decision"></label>
+        <div class="row"><label class="f">Since — ISO 8601 с поясом<input type="text" id="t-human-since" placeholder="2026-10-01T00:00:00+03:00"></label><label class="f">As of — ISO 8601 с поясом<input type="text" id="t-human-asof" placeholder="2026-10-23T14:00:00+03:00"></label></div>
+      </div>
       <div class="actions"><button class="btn primary" id="t-go">Начать</button><button class="btn" id="t-pick">Выбрать папку…</button><button class="btn" id="t-cancel">Отмена</button></div>
     </div>
     <div id="t-ideas">

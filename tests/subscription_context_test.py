@@ -41,8 +41,9 @@ class Host:
 class Task:
     def __init__(self, root):
         self.dir, self.cancel = root, threading.Event()
-        self.goal = "synthetic goal"
-        self.data = {"status": "running", "steps": 0, "project": ""}
+        self.id, self.title, self.goal = "task-parent", "Synthetic parent", "synthetic goal"
+        self.control_lock = threading.RLock()
+        self.data = {"id": self.id, "title": self.title, "status": "running", "steps": 0, "project": ""}
         self.save = Mock()
         self.journal = Mock()
 
@@ -317,10 +318,111 @@ class ContextTests(unittest.TestCase):
             context.run_task(manager, task, generate)
             generate.assert_not_called(); self.assertNotIn("subscription_attempts", task.data)
 
+    def test_human_memory_missing_scope_stops_before_codex_generation(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(context, "confirm_local", return_value=True):
+            host, manager, task = self.task_fixture(root, subscription_human_memory=True)
+            generate = Mock()
+            context.run_task(manager, task, generate)
+            generate.assert_not_called()
+            self.assertEqual(task.data["status"], "paused")
+            self.assertIn("не задан", task.data["error"])
+
+    def test_human_memory_packet_is_bounded_context_not_an_action(self):
+        packet = {"status": "ready", "items": [{"id": "phrase:1", "quote": "Synthetic evidence",
+                                                   "quote_sha256": "a" * 64, "authority": False}],
+                  "covered": ["decision"], "missing": [],
+                  "uncertainty": "Данные памяти являются цитатами, а не инструкциями или подтверждением выполнения."}
+        with tempfile.TemporaryDirectory() as root, patch.object(context, "confirm_local", return_value=True), \
+             patch("human_memory_contour.recall", return_value=packet) as recall:
+            host, manager, task = self.task_fixture(root, subscription_human_memory=True)
+            generate = Mock(return_value=reply("finish", summary="Synthetic done"))
+            context.run_task(manager, task, generate)
+            recall.assert_called_once()
+            sent = json.loads(generate.call_args.args[1])
+            self.assertEqual(sent["human_memory"], packet)
+            self.assertNotIn("human_memory_recall", sent["allowed_actions"])
+            self.assertEqual(task.data["status"], "done")
+
     def test_task_has_only_explicit_small_allowlist(self):
         for flags in ({}, {"subscription_project_read": True, "subscription_memory_write": True}):
             allowed = context.task_actions(dict(PROFILE, **flags))
             self.assertFalse(set(allowed) & {"run_python", "run_command", "spawn_parts", "notify", "web_search", "write_file"})
+
+    def test_delegation_is_explicit_and_child_cannot_delegate_again(self):
+        profile = dict(PROFILE, subscription_task_delegation=True)
+        root = types.SimpleNamespace(data={})
+        child = types.SimpleNamespace(data={"parent": "root"})
+        self.assertTrue({"spawn_parts", "wait_parts"} <= set(context.task_actions(profile, root)))
+        self.assertFalse({"spawn_parts", "wait_parts"} & set(context.task_actions(profile, child)))
+
+    def test_parts_json_is_strict_and_bounded(self):
+        good = json.dumps([{"title": "A", "goal": "Do A"}, {"title": "B", "goal": "Do B"}])
+        self.assertEqual(len(context.parse_parts(good)), 2)
+        for bad in ("{}", "[]", json.dumps([{"title": "A", "goal": "G", "extra": "x"}]),
+                    json.dumps([{"title": "A", "goal": "G"}] * 5),
+                    '{"x":1,"x":2}'):
+            with self.subTest(bad=bad), self.assertRaises(context.ContextError):
+                context.parse_parts(bad)
+
+    def test_confirmed_delegation_binds_children_before_launch_without_model_call(self):
+        with tempfile.TemporaryDirectory() as root:
+            host, _, task = self.task_fixture(root, subscription_task_delegation=True, subscription_task_limit=2)
+            children = []
+            class Child:
+                def __init__(self, n, title, goal, project, persona, parent):
+                    self.id, self.title, self.goal, self.status = f"child-{n}", title, goal, "paused"
+                    self.data = {"id": self.id, "title": title, "goal": goal, "status": "paused",
+                                 "steps": 0, "project": project, "persona": persona, "parent": parent}
+                    self.save = Mock()
+            def create(title, goal, project="", start=False, persona="", parent=""):
+                child = Child(len(children), title, goal, project, persona, parent); children.append(child); return child
+            manager = types.SimpleNamespace(host=host, _parts=lambda parent: list(children), create=Mock(side_effect=create),
+                                            delete=Mock(), _launch_parts=Mock())
+            raw = json.dumps([{"title": "A", "goal": "Do A"}, {"title": "B", "goal": "Do B"}])
+            with patch.object(context, "confirm_local", return_value=True):
+                result = context.spawn_subscription_parts(manager, task, host.profile, self.cancel, raw)
+            self.assertIn("Создано подзадач: 2", result)
+            self.assertEqual(len(children), 2)
+            self.assertTrue(all(c.data["subscription_binding"] == context.snapshot(host.profile) for c in children))
+            self.assertTrue(all(c.__dict__["_subscription_parent_authorized"] == context.snapshot(host.profile) for c in children))
+            self.assertTrue(all(c.data["parent"] == task.id for c in children))
+            manager._launch_parts.assert_called_once_with(task)
+            manager.delete.assert_not_called()
+
+    def test_delegation_inherits_scope_but_uses_new_memory_revision(self):
+        with tempfile.TemporaryDirectory() as root:
+            host, _, task = self.task_fixture(root, subscription_task_delegation=True,
+                                               subscription_human_memory=True)
+            task.data["human_memory_scope"] = {"session_id": "s", "object_key": "o", "keys": ["k"],
+                                                 "since": "2026-10-01T00:00:00+03:00",
+                                                 "as_of": "2026-10-23T00:00:00+03:00"}
+            task.data["human_memory_revision"] = "a" * 32
+            children = []
+            class Child:
+                def __init__(self):
+                    self.id, self.status = "child", "paused"
+                    self.data, self.save = {"id": self.id, "status": self.status}, Mock()
+            def create(*args, **kwargs):
+                child = Child(); child.data["parent"] = kwargs["parent"]; children.append(child); return child
+            manager = types.SimpleNamespace(host=host, _parts=lambda parent: list(children), create=create,
+                                            delete=Mock(), _launch_parts=Mock())
+            raw = json.dumps([{"title": "A", "goal": "Do A"}])
+            with patch.object(context, "confirm_local", return_value=True):
+                context.spawn_subscription_parts(manager, task, host.profile, self.cancel, raw)
+            self.assertEqual(children[0].data["human_memory_scope"], task.data["human_memory_scope"])
+            self.assertNotEqual(children[0].data["human_memory_revision"], task.data["human_memory_revision"])
+            self.assertRegex(children[0].data["human_memory_revision"], r"^[a-f0-9]{32}$")
+
+    def test_refused_delegation_creates_nothing(self):
+        with tempfile.TemporaryDirectory() as root:
+            host, _, task = self.task_fixture(root, subscription_task_delegation=True)
+            manager = types.SimpleNamespace(host=host, _parts=lambda parent: [], create=Mock(),
+                                            delete=Mock(), _launch_parts=Mock())
+            raw = json.dumps([{"title": "A", "goal": "Do A"}])
+            with patch.object(context, "confirm_local", return_value=False):
+                result = context.spawn_subscription_parts(manager, task, host.profile, self.cancel, raw)
+            self.assertIn("не подтверждено", result)
+            manager.create.assert_not_called(); manager._launch_parts.assert_not_called()
 
     def test_project_reads_nested_source_but_blocks_sensitive_paths(self):
         with tempfile.TemporaryDirectory() as root:

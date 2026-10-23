@@ -18,7 +18,7 @@ async function loadTasks() {
     list.forEach(t => {
       const el = document.createElement("div"); el.className = "titem" + (t.id === tCur ? " cur" : "");
       const pr = t.progress && t.progress[1] ? t.progress[0] / t.progress[1] : 0;
-      el.innerHTML = `<b></b><span><i class="badge ${t.status}">${t.status_ru}</i>${tsince(t.created)}${t.project ? " · код" : ""}</span>` +
+      el.innerHTML = `<b></b><span><i class="badge ${t.status}">${t.status_ru}</i>${tsince(t.created)}${t.parent ? " · подзадача" : ""}${t.project ? " · код" : ""}</span>` +
         (["running", "waiting", "sleeping"].includes(t.status) || pr ? `<i class="tbar${t.status === "running" ? " live" : ""}"><b style="width:${Math.max(3, (t.status === "done" ? 1 : pr) * 100)}%"></b></i>` : "");
       $("b", el).textContent = t.title; el.onclick = () => openTask(t.id); box.appendChild(el);
     });
@@ -33,6 +33,30 @@ function renderDiff(d) {
     return c === "file" ? `<div class="file">${escH(l.replace(/^diff --git a\/(.*) b\/.*/, "$1"))}</div>` : (l.startsWith("index ") || l.startsWith("+++") || l.startsWith("---")) ? "" : `<div class="${c}">${escH(l) || " "}</div>`; }).join("")}</div>`;
 }
 let tOpenedFor = "", tOutSel = "";   // для какой задачи уже выбрана вкладка по умолчанию; выбранный файл результата
+function renderTaskObserve(o) {
+  if (!o) return '<div class="fempty">Диагностика пока недоступна.</div>';
+  const q = o.codex && o.codex.quota && o.codex.quota.state === "available" ? o.codex.quota : null;
+  const rows = (o.events || []).map(e => `<tr><td>${new Date(e.at * 1000).toLocaleTimeString("ru-RU")}</td><td>${escH(e.kind)}</td><td>${escH(e.action || e.state || "—")}</td><td>${e.attempt ?? e.steps ?? e.limit ?? "—"}</td></tr>`).join("");
+  return `<div class="row" style="margin-bottom:12px">
+      <div class="prof on" style="flex:1"><b>API</b><p class="hint">read-only · schema ${o.schema} · ${escH(o.coverage)}</p><code>${escH(o.task_ref)}</code></div>
+      <div class="prof on" style="flex:1"><b>Codex</b><p class="hint">${o.codex && o.codex.enabled ? `попыток ${o.codex.attempts ?? 0}${q ? ` · осталось ${q.remaining} из ${q.limit}` : ""}` : "обычный контур"}</p><code>${escH(o.codex && o.codex.profile_ref || "—")}</code></div>
+      <div class="prof on" style="flex:1"><b>Дерево</b><p class="hint">подзадач: ${(o.children || []).length}</p><code>${o.parent_ref ? "есть родитель" : "корневая задача"}</code></div>
+      <div class="prof on" style="flex:1"><b>Human Memory</b><p class="hint">${o.human_memory && o.human_memory.scope && o.human_memory.scope.enabled ? `scope ${escH(o.human_memory.scope.scope_ref)} · keys ${o.human_memory.scope.keys}` : "scope выключен"}</p><code>${escH(o.human_memory && o.human_memory.connector && o.human_memory.connector.state || "unavailable")}</code></div>
+    </div>
+    <h3 style="font-size:15px">Безопасный лог</h3>
+    ${rows ? `<div style="overflow:auto"><table><thead><tr><th>Время</th><th>Событие</th><th>Состояние/действие</th><th>№</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="hint">Событий этой задачи в сохранённом окне пока нет.</p>'}
+    <details style="margin-top:12px"><summary>JSON API</summary><pre class="otext"></pre></details>
+    <p class="hint">Лог не содержит промпты, ответы, аргументы, пути, имена аккаунтов или секреты. «completed» модели не означает приёмку результата.</p>`;
+}
+function renderTaskObserveStrip(o) {
+  if (!o) return '<button class="btn small" id="t-observe-open">API / Лог: недоступно</button>';
+  const quota = o.codex && o.codex.quota && o.codex.quota.state === "available" ? o.codex.quota : null;
+  const codex = o.codex && o.codex.enabled ? `Codex ${o.codex.attempts ?? 0}${quota ? "/" + quota.limit : ""}` : "обычный контур";
+  const observer = o.observer && o.observer.state || "unknown";
+  const memory = o.human_memory && o.human_memory.scope && o.human_memory.scope.enabled ?
+    `Human Memory: ${o.human_memory.connector && o.human_memory.connector.state || "unknown"}` : "Human Memory: off";
+  return `<button class="btn small" id="t-observe-open">API / Лог</button><span class="hint" style="margin-left:8px">${escH(codex)} · лог ${o.events.length} · ${escH(observer)} · частей ${o.children.length} · ${escH(memory)}</span>`;
+}
 /* план — живым чек-листом: сделано ✓, текущий пункт крутится, остальные ждут */
 function renderPlan(text, live, activity) {
   const lines = (text || "").split("\n"), items = [], rest = [];
@@ -106,11 +130,13 @@ async function openTask(id) {
   tCur = id;
   try {
     const t = await core.call("task_get", { id });
+    let observation = null;
+    try { observation = await core.call("task_observe", {id}); } catch (_) { /* задача работает и без диагностики */ }
     // карточка перерисовывается целиком на каждое событие задачи — запоминаем набранный текст и фокус полей
     const keep = tOpenedFor === id ? ["t-msg", "t-ans"].map(k => [k, $("#" + k) ? $("#" + k).value : "", document.activeElement && document.activeElement.id === k]) : [];
     const outs = t.outputs || [];
     const nbFacts = (t.notebook || "").split("\n").filter(l => /^\s*[-*]\s+\S/.test(l)).length;
-    const tabs = [["plan", "План"]].concat(nbFacts ? [["notebook", `Блокнот (${nbFacts})`]] : []).concat(outs.length ? [["results", `Результаты (${outs.length})`]] : []).concat([["journal", "Журнал"]])
+    const tabs = [["plan", "План"]].concat(nbFacts ? [["notebook", `Блокнот (${nbFacts})`]] : []).concat(outs.length ? [["results", `Результаты (${outs.length})`]] : []).concat([["journal", "Журнал"], ["observe", "API / Лог"]])
       .concat(t.project ? [["diff", `Изменения${t.changes ? " (" + t.changes.length + ")" : ""}`]] : []).concat(t.summary ? [["summary", "Итог"]] : []);
     if (tOpenedFor !== id) { tOpenedFor = id; tTab = outs.length && t.status === "done" ? "results" : t.summary ? "summary" : "plan"; }
     if (!tabs.find(x => x[0] === tTab)) tTab = t.summary ? "summary" : "plan";
@@ -131,6 +157,9 @@ async function openTask(id) {
     if (tTab === "results") body = renderOutputs(t);
     if (tTab === "notebook") body = `<div class="md">${md(t.notebook)}</div><p class="hint">Блокнот — память задачи: факты, номера, договорённости. Ассистент ведёт его сам и сверяется с ним на каждом шаге.</p>`;
     if (tTab === "journal") body = `<div class="md">${md(t.journal)}</div>`;
+    if (tTab === "observe") {
+      body = observation ? renderTaskObserve(observation) : '<p class="res bad">Диагностика пока недоступна.</p>';
+    }
     if (tTab === "summary") body = `<div class="md">${md(t.summary)}</div>`;
     if (tTab === "diff") body = t.diff ? renderDiff(t.diff) : `<div class="fempty">${t.code_state === "accepted" ? "Изменения уже перенесены в проект." : t.code_state === "discarded" ? "Изменения отклонены." : "Изменений пока нет."}</div>`;
     const pr = t.status === "done" ? 1 : (t.progress && t.progress[1] ? t.progress[0] / t.progress[1] : 0);
@@ -139,6 +168,7 @@ async function openTask(id) {
     $("#t-view").innerHTML = `<div class="fhead"><div class="t"><b></b><span><i class="badge ${t.status}">${t.status_ru}</i>шагов ${t.steps}${prog}${t.project ? " · " + escH(t.project) : ""}</span></div></div>
       <div class="tprog${live ? " live" : ""}"><div class="bar"><b style="width:${Math.max(2, pr * 100)}%"></b></div>
         <div class="tline">${live ? `<i class="tspin"></i>` : ""}<span>${t.status === "done" ? "готово" : live ? (escH(t.activity) || "думает…") : t.status_ru}</span><em>${t.progress && t.progress[1] ? `${t.progress[0]} из ${t.progress[1]} пунктов плана · ` : ""}${live ? `идёт ${mins} мин` : ""}</em></div></div>
+      <div style="margin:8px 0">${renderTaskObserveStrip(observation)}</div>
       ${t.error ? `<p class="res bad" style="margin-bottom:10px">${escH(t.error)}</p>` : ""}
       ${t.status === "sleeping" ? `<div class="twait">⏳ <b>${escH(t.status_ru)}</b>${t.wait_reason ? " — " + escH(t.wait_reason) : ""}. Напишите задаче ниже — продолжит сразу.</div>` : ""}
       ${t.status === "waiting" ? `<div class="tq"><b>Вопрос:</b> ${escH(t.question)}<div class="actions" style="margin-top:8px"><input type="text" id="t-ans" placeholder="Ваш ответ" style="flex:1"><button class="btn primary" id="t-ansgo">Ответить</button></div></div>` : ""}
@@ -146,6 +176,10 @@ async function openTask(id) {
       ${t.status !== "waiting" ? `<div class="tmsg"><input type="text" id="t-msg" placeholder="${t.status === "done" ? "Дополнить задачу: что ещё сделать…" : "Написать задаче: новые сведения, уточнение, просьба…"}"><button class="btn" id="t-msggo">Отправить</button></div>` : ""}
       <div class="actions">${acts.join("")}</div>`;
     $("#t-view .fhead b").textContent = t.title;
+    if (tTab === "observe" && observation) {
+      const pre = $("#t-view details pre"); if (pre) pre.textContent = JSON.stringify(observation, null, 2);
+    }
+    if ($("#t-observe-open")) $("#t-observe-open").onclick = () => { tTab = "observe"; openTask(id); };
     keep.forEach(([k, v, f]) => { const el = $("#" + k); if (el && v) el.value = v; if (el && f) el.focus(); });
     if ($("#t-msggo")) {
       const send = () => { const v = $("#t-msg").value.trim(); if (!v) return;
@@ -196,15 +230,22 @@ $("#t-cancel").onclick = () => { $("#t-form").style.display = "none"; };
 $("#t-pick").onclick = async () => { const a = api(); if (!a) return toast("Выбор папки доступен в окне студии"); const p = await a.pick_folder(); if (p) $("#t-proj").value = p; };
 $("#t-go").onclick = async () => {
   const goal = $("#t-goal").value.trim(); if (!goal) return toast("Опишите, что сделать");
-  try { const t = await core.call("task_create", { goal, title: $("#t-title").value.trim(), project: $("#t-proj").value.trim() });
+  const args = { goal, title: $("#t-title").value.trim(), project: $("#t-proj").value.trim() };
+  if ($("#t-human-on").checked) {
+    const keys = $("#t-human-keys").value.split(",").map(x => x.trim()).filter(Boolean);
+    args.human_memory = {session_id: $("#t-human-session").value.trim(), object_key: $("#t-human-object").value.trim(), keys,
+      since: $("#t-human-since").value.trim(), as_of: $("#t-human-asof").value.trim()};
+  }
+  try { const t = await core.call("task_create", args);
     $("#t-form").style.display = "none"; $("#t-goal").value = ""; tCur = t.id; tTab = "plan"; loadTasks(); } catch (e) { toast(e.message); }
 };
 function taskSubscriptionInfo() {
   const p = (S.llm.profiles || {})[$('#t-llm').value || S.llm.active] || {};
-  const on = p.kind === 'chatgpt_subscription', info = $('#t-subscription-info');
+  const on = p.kind === 'chatgpt_subscription', info = $('#t-subscription-info'), human = $('#t-human-box');
   if (!info) return;
   info.hidden = !on;
-  info.textContent = on ? `Codex: отдельный режим. Исходный лимит ${p.subscription_task_limit ?? 5} запросов на задачу, включая самопроверку и урок. После исчерпания его можно продлить отдельным подтверждением; задача сама не запустится, общий предел — 100. Разрешения — в профиле «Мозг». Подтверждение запуска появится здесь. Чтение проекта разрешается отдельно; команды, запись кода и подзадачи не поддерживаются. Поля передышек и автозапуска команд ниже к Codex не применяются.` : '';
+  if (human) { human.hidden = !(on && p.subscription_human_memory === true); if (human.hidden) $('#t-human-on').checked = false; }
+  info.textContent = on ? `Codex: отдельный режим. Исходный лимит ${p.subscription_task_limit ?? 5} запросов на задачу, включая самопроверку и урок. После исчерпания его можно продлить отдельным подтверждением; задача сама не запустится, общий предел — 100. Разрешения — в профиле «Мозг». Подтверждение запуска появится здесь. Чтение проекта разрешается отдельно; команды и запись кода не поддерживаются. Делегирование — отдельная галочка: один уровень, 1–4 части, отдельное подтверждение и квота каждой части. Поля передышек и автозапуска команд ниже к Codex не применяются.` : '';
   for (const key of ['tasks.max_steps', 'tasks.cycles', 'tasks.auto_run']) {
     const input = $(`[data-k="${key}"]`); if (input) input.disabled = on;
   }

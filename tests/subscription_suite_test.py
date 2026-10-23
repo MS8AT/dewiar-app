@@ -21,6 +21,8 @@ def main():
              ROOT / "tests" / "subscription_upgrade_test.py",
              ROOT / "tests" / "brain_watch_test.py",
              ROOT / "tests" / "diagnostics_test.py",
+             ROOT / "tests" / "task_observability_test.py",
+             ROOT / "tests" / "human_memory_contour_test.py",
              ROOT / "tests" / "diagnostic_cli_test.py",
              ROOT / "tests" / "fork_update_policy_test.py",
              RUNTIME / "test_codex.py", RUNTIME / "test_windows_store.py"]
@@ -31,7 +33,7 @@ def main():
         raise RuntimeError("Для проверок интерфейса требуется Node.js")
     # Node на Windows объединяет несколько абсолютных UNC-путей в один шаблон.
     # Отдельные относительные запуски одинаково работают с локальной и сетевой копией.
-    node_tests = ["tests/subscription.test.mjs", "tests/brains.test.mjs",
+    node_tests = ["tests/subscription.test.mjs", "tests/brains.test.mjs", "tests/task_observability_ui.test.mjs",
                   "tests/fork_update_ui.test.mjs", "tests/subscription_confirm.test.mjs",
                   "tests/task_quota_ui.test.mjs", "core/subscription_runtime/policy.test.mjs"]
     for test in node_tests:

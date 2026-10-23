@@ -1206,8 +1206,31 @@ class CommandsMixin:
             return self.tasks.list()
         if cmd == "task_get":
             return self.tasks.detail(a.get("id"))
+        if cmd == "task_observe":
+            from task_observability import view
+            return view(self, self.tasks.get(a.get("id")))
         if cmd == "task_create":
-            t = self.tasks.create(a.get("title", ""), a.get("goal", ""), a.get("project", ""), start=a.get("start", True))
+            human = a.get("human_memory")
+            start = a.get("start", True)
+            if human is not None and type(start) is not bool:
+                raise ValueError("Неверный режим запуска задачи")
+            if human is not None:
+                from subscription_context import task_profile, enabled
+                profile = task_profile(self)
+                if profile.get("kind") != "chatgpt_subscription" or not enabled(profile, "human_memory"):
+                    raise ValueError("Human Memory не разрешена в выбранном профиле задач Codex")
+            t = self.tasks.create(a.get("title", ""), a.get("goal", ""), a.get("project", ""),
+                                  start=False if human is not None else start)
+            if human is not None:
+                try:
+                    from human_memory_contour import configure, HumanMemoryError
+                    configure(t, human)
+                    t.save(); self.tasks._emit(t)
+                except HumanMemoryError as exc:
+                    self.tasks.delete(t.id)
+                    raise ValueError(str(exc)) from exc
+                if start:
+                    self.tasks.start(t.id)
             return t.public()
         if cmd in ("task_export", "task_open_result"):        # результат задачи: скачать (HTML/PDF/как есть) или открыть
             import export as X

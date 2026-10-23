@@ -14,7 +14,7 @@ class Element {
   set innerHTML(value) {
     this.children = []; this.html = value;
     if (this.tag === 'div') {
-      for (const key of ['b', '.res', 'small', '.head input', '.head .btn', ...['name', 'transport', 'account', 'model', 'export', 'usage', 'history', 'memory_read', 'memory_write', 'tasks', 'project_read', 'task_limit', 'task_review', 'task_learning', 'auxiliary', 'meeting', 'diary'].map(k => `[data-field="${k}"]`)]) this.fields[key] = new Element(['transport', 'account', 'model'].some(k => key.includes(k)) ? 'select' : 'input');
+      for (const key of ['b', '.res', 'small', '.head input', '.head .btn', ...['name', 'transport', 'account', 'model', 'export', 'usage', 'history', 'memory_read', 'memory_write', 'human_memory', 'tasks', 'project_read', 'task_limit', 'task_review', 'task_learning', 'task_delegation', 'auxiliary', 'meeting', 'diary'].map(k => `[data-field="${k}"]`)]) this.fields[key] = new Element(['transport', 'account', 'model'].some(k => key.includes(k)) ? 'select' : 'input');
       this.buttons = ['profiles', 'login-new', 'login', 'models', 'health', 'disconnect', 'remove', 'use-tasks'].map(op => Object.assign(new Element('button'), {dataset: {op}}));
     }
   }
@@ -105,20 +105,20 @@ test('late login result cannot cross a transport change', async () => {
 
 test('extra grants default off and do not contact the backend', async () => {
   const f = fixture();
-  for (const k of ['history', 'memory_read', 'memory_write', 'tasks', 'project_read']) assert.equal(f.el.fields[`[data-field="${k}"]`].checked, false);
+  for (const k of ['history', 'memory_read', 'memory_write', 'human_memory', 'tasks', 'project_read']) assert.equal(f.el.fields[`[data-field="${k}"]`].checked, false);
   assert.equal(f.calls.length, 0);
 });
 
 test('Codex grants persist independently and reset on account change', async () => {
   const f = fixture();
   await f.el.fields['[data-field="transport"]'].onchange({target: {value: 'codex'}});
-  for (const k of ['history', 'memory_read', 'memory_write', 'tasks', 'project_read']) await f.el.fields[`[data-field="${k}"]`].onchange({target: {checked: true}});
+  for (const k of ['history', 'memory_read', 'memory_write', 'human_memory', 'tasks', 'project_read']) await f.el.fields[`[data-field="${k}"]`].onchange({target: {checked: true}});
   assert.equal(f.context.S.llm.profiles.p.subscription_memory_write, true);
   assert.ok(f.context.S.llm.profiles.p.subscription_scope_revision);
   const select = f.el.fields['[data-field="account"]'];
   select.appendChild(Object.assign(new Element('option'), {value: 'B', textContent: 'B'})); select.value = 'B';
   await select.onchange();
-  for (const k of ['history', 'memory_read', 'memory_write', 'tasks', 'project_read']) assert.equal(f.context.S.llm.profiles.p['subscription_' + k], false);
+  for (const k of ['history', 'memory_read', 'memory_write', 'human_memory', 'tasks', 'project_read']) assert.equal(f.context.S.llm.profiles.p['subscription_' + k], false);
   assert.equal(f.calls.length, 0);
 });
 

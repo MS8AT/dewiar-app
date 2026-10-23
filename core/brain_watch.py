@@ -17,6 +17,9 @@ import uuid
 
 ROLES = {"chat", "tasks", "auxiliary", "meeting", "diary", "exam", "skill_draft", "task_review", "task_learning", "history"}
 STATES = {"queued", "running", "waiting", "paused", "sleeping", "done", "failed", "stopped"}
+TASK_ACTIONS = {"plan", "notebook", "memory_save", "project_list", "project_read",
+                "human_memory_recall", "spawn_parts", "wait_parts", "pause", "finish"}
+ACTION_STATES = {"accepted", "paused", "done", "blocked"}
 _ledger = None
 _current = ContextVar("dewiar_brain_call", default=None)
 
@@ -114,6 +117,16 @@ class Ledger:
             return
         with self.lock, self.db() as db:
             self.event(db, "task_quota_granted", tag(task["id"]), {"amount": amount, "limit": limit})
+
+    def action(self, task, action, attempt, state):
+        """Безопасный след шага Codex: только имя из закрытого списка и числа, без аргументов/ответа."""
+        if (not self.enabled() or not isinstance(task, dict) or not task.get("id")
+                or action not in TASK_ACTIONS or state not in ACTION_STATES
+                or type(attempt) is not int or not 1 <= attempt <= 100):
+            return
+        with self.lock, self.db() as db:
+            self.event(db, "task_action", tag(task["id"]),
+                       {"action": action, "attempt": attempt, "state": state})
 
     def snapshot(self):
         now = self.clock()

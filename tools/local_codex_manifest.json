@@ -15,7 +15,7 @@
     {
       "path": "core/engine_commands.py",
       "before": "3ab5f9b5ec9c2d98b6ded0a585219df807a0c8cd6b910d632d63856933dc615b",
-      "after": "99de81cdf3c3c3ab04d3d5838fa8a1f9aeb12337537210c45e3412d5939d62ce"
+      "after": "f94a4444699d8600c7af135a7e688065993356288f1a8ebeab5ce24b2a6faa3f"
     },
     {
       "path": "core/engine_music.py",
@@ -55,7 +55,7 @@
     {
       "path": "core/subscription_context.py",
       "before": null,
-      "after": "09300e79a540f3a5983e3c85cb49a7f0f507d71f6c7cf1e466cce3ab4ab49e31"
+      "after": "4c80f4b4a1ce5625f47254be725bbebd22102a61b80c3d639e225b72370d6ad0"
     },
     {
       "path": "core/subscription_quota.py",
@@ -130,7 +130,7 @@
     {
       "path": "ui/settings.html",
       "before": "7639f7305fa0cded70b5d16f7226e3cfc4e60b4624c681778e3447c9ce94ca7c",
-      "after": "de8b180d4a042f8abc5dca17a7bd1709a9e96f5ea0fc0ae9b202de113b06fa5b"
+      "after": "a2d049422737763030865f3513b178a87d8f3633c3860ab003b41c5ce59a1b78"
     },
     {
       "path": "ui/studio/brain.js",
@@ -145,12 +145,12 @@
     {
       "path": "ui/studio/subscription.js",
       "before": null,
-      "after": "0355c166fd629cba6dd303df85a2a5479d13ca5a16f9d345ec3a6daecc8eedcd"
+      "after": "71149a3b361e925c3c16a9d9879acc31b335090b377f28bad3ffae2a3d328921"
     },
     {
       "path": "ui/studio/tasks.js",
       "before": "156d09608499edebf1a564a7f07f1677abf7ce832d308e7d62befbc4d8865588",
-      "after": "5adc809e0c5da83320b7522042606c24a3d7ff3380bcb7766b9eba87e800f93d"
+      "after": "e8e391b909265240db08909366ea4245b944ab7a852936c25c1d2f11098559a6"
     },
     {
       "path": "ui/studio/task_quota.js",
@@ -165,7 +165,7 @@
     {
       "path": "core/brain_watch.py",
       "before": null,
-      "after": "fef3cbe7783d760369dee9f1b647ddee8c1e08722f0eacbcfba208b6b738df47"
+      "after": "f18e832b8c3597b0557b0e500a692326f4aae9c82379f613f04bb677537d438d"
     },
     {
       "path": "core/settings.py",
@@ -200,12 +200,22 @@
     {
       "path": "core/diagnostics.py",
       "before": null,
-      "after": "979b398d7034995e65c4109cfb6e041dffe3c45e7f096a36f55f0417ab6fc98b"
+      "after": "36c3f615d73f17c8e7229c49d2d30328825b3887751629be59d5d5bf4b27e320"
     },
     {
       "path": "core/fork_update_policy.py",
       "before": null,
-      "after": "a2607eb335710e0a2226c224b9f37c01e8e376a32657b93a35cf9e2788d23c74"
+      "after": "e24dfb21d39012315d50b6367c161b225241e7584c0de5ac882a90363be488ef"
+    },
+    {
+      "path": "core/task_observability.py",
+      "before": null,
+      "after": "e4d1c9562f80c1cdc92044268366ce71318aed157c9b9e1b2c2e22d00b833d32"
+    },
+    {
+      "path": "core/human_memory_contour.py",
+      "before": null,
+      "after": "f1cfaf78d11a3831151cd9c758e0035edaa780dfcf55df3e6a4f5838b6dd2f14"
     },
     {
       "path": "core/dewiar-cli.cmd",

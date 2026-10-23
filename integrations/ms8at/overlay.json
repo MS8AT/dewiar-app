@@ -7,7 +7,7 @@
     "commit": "4a72b8bdbca52810c42a32a871dd8252d913036e"
   },
   "fork": {
-    "build": 4
+    "build": 5
   },
   "payload_manifest": "tools/local_codex_manifest.json",
   "integration_prompt": "integrations/ms8at/INTEGRATION_PROMPT_RU.md",
@@ -29,6 +29,9 @@
     "brain_routes",
     "brain_watch",
     "diagnostics_v1",
+    "task_observability_v1",
+    "codex_task_delegation_v1",
+    "human_memory_mcp_v1",
     "overlay_v1"
   ],
   "required_tests": [
@@ -39,6 +42,9 @@
     "tests/fork_update_policy_test.py",
     "tests/fork_update_ui.test.mjs",
     "tests/task_quota_ui.test.mjs",
+    "tests/task_observability_test.py",
+    "tests/task_observability_ui.test.mjs",
+    "tests/human_memory_contour_test.py",
     "tests/ms8at_overlay_test.py"
   ],
   "update_policy": {

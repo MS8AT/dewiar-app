@@ -20,10 +20,10 @@ ROLES = ("chat", "tasks", "auxiliary", "meeting", "diary")
 KINDS = {"openai", "ollama", "anthropic", "chatgpt_subscription"}
 TASK_STATES = {"queued", "running", "waiting", "paused", "sleeping", "done", "failed", "stopped"}
 EVENT_KINDS = {"call_start", "call_signal", "call_completed", "call_failed", "call_interrupted",
-               "task_state", "task_quota_granted"}
+               "task_state", "task_quota_granted", "task_action"}
 TERMINAL = {"completed", "failed", "interrupted"}
 PERMISSIONS = ("export", "usage_reviewed", "history", "memory_read", "memory_write", "tasks",
-               "project_read", "task_review", "task_learning", "auxiliary", "meeting", "diary")
+               "human_memory", "project_read", "task_review", "task_learning", "task_delegation", "auxiliary", "meeting", "diary")
 
 
 def _enum(value, allowed, default="unknown"):
@@ -146,6 +146,11 @@ def _journal(snapshot):
             amount, limit = row.get("amount"), row.get("limit")
             event.update(amount=amount if type(amount) is int and 1 <= amount <= 20 else None,
                          limit=limit if type(limit) is int and 1 <= limit <= 100 else None)
+        elif kind == "task_action":
+            attempt = row.get("attempt")
+            event.update(action=_enum(row.get("action"), brain_watch.TASK_ACTIONS),
+                         attempt=attempt if type(attempt) is int and 1 <= attempt <= 100 else None,
+                         state=_enum(row.get("state"), brain_watch.ACTION_STATES))
         events.append(event)
     return {"events": events, "sample_limit": LIMIT, "invalid_records": invalid,
             "window": "latest_retained_events_not_full_history"}

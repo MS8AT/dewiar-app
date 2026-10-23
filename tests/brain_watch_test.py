@@ -211,6 +211,20 @@ class WatchTests(unittest.TestCase):
         self.ledger.quota({"id": secret}, 21, 10)
         self.assertEqual(self.path.read_bytes(), before)
 
+    def test_task_action_contains_only_allowlisted_metadata(self):
+        secret = "PRIVATE-SYNTHETIC-TASK"
+        self.ledger.action({"id": secret, "goal": secret}, "project_read", 3, "accepted")
+        event = self.ledger.snapshot()["events"][0]
+        self.assertEqual(event["kind"], "task_action")
+        self.assertEqual((event["action"], event["attempt"], event["state"]),
+                         ("project_read", 3, "accepted"))
+        self.assertEqual(event["ref"], watch.tag(secret))
+        self.assertNotIn(secret.encode(), self.path.read_bytes())
+        before = self.path.read_bytes()
+        self.ledger.action({"id": secret}, secret, 4, "accepted")
+        self.ledger.action({"id": secret}, "plan", 101, "accepted")
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_threads_have_distinct_runs(self):
         def worker(n):
             with watch.call({"id": str(n)}, "chat"):

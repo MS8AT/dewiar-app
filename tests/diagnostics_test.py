@@ -154,6 +154,16 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual((event["amount"], event["limit"]), (5, 10))
         self.assertNotIn("goal", event)
 
+    def test_journal_projects_task_action_without_arguments_or_response(self):
+        self.data["events"] = [{"seq": 1, "at": 1, "kind": "task_action", "ref": PROFILE,
+                                "action": "project_read", "attempt": 3, "state": "accepted",
+                                "arguments": SECRET, "response": SECRET}]
+        event = self.call("journal")["events"][0]
+        self.assertEqual((event["action"], event["attempt"], event["state"]),
+                         ("project_read", 3, "accepted"))
+        self.assertNotIn("arguments", event)
+        self.assertNotIn("response", event)
+
     def test_zero_calls_is_not_hundred_percent_success(self):
         result = self.call("sli")
         self.assertEqual(result["state"], "no_data")
