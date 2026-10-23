@@ -27,6 +27,8 @@ def main():
              ROOT / "tests" / "task_directory_safety_test.py",
              ROOT / "tests" / "task_doctor_test.py",
              ROOT / "tests" / "task_doctor_flow_test.py",
+             ROOT / "tests" / "tool_call_recovery_test.py",
+             ROOT / "tests" / "tool_call_recovery_flow_test.py",
              ROOT / "tests" / "diagnostic_cli_test.py",
              ROOT / "tests" / "fork_update_policy_test.py",
              ROOT / "tests" / "ms8at_release_gate_test.py",

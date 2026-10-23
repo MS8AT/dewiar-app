@@ -19,6 +19,7 @@ from pathlib import Path
 
 import quality as Q
 import task_doctor
+import tool_call_recovery
 from codework import CodeError, CodeWork
 from llm import LLMError, ctx_full, stream_chat, stream_events, tool_turn_messages
 
@@ -1527,6 +1528,7 @@ class TaskManager:
                 try:
                     normal_system = self._system(t, compact=doctor_mode)
                     normal_specs = self._specs(t, compact=doctor_mode)
+                    active_specs = normal_specs
                     try:
                         events = stream_events(prof, normal_system, msgs, cancel=t.cancel, tools=normal_specs)
                         for kind, val in events:
@@ -1542,6 +1544,7 @@ class TaskManager:
                         # системную подсказку и схемы инструментов; настройки модели и права не меняем.
                         compact_system = self._system(t, compact=True)
                         compact_specs = self._specs(t, compact=True)
+                        active_specs = compact_specs
                         info = task_doctor.report(normal_system, normal_specs, compact_system, compact_specs)
                         doctor_mode = True
                         t.data["doctor"] = dict(info, context_repairs=int((t.data.get("doctor") or {}).get("context_repairs") or 0) + 1,
@@ -1579,6 +1582,14 @@ class TaskManager:
                 t.data["blank_replies"] = 0
                 if t.cancel.is_set():
                     break
+                if not calls:
+                    clean_text, recovered = tool_call_recovery.recover_one(
+                        text, (item["name"] for item in active_specs)
+                    )
+                    if recovered:
+                        text = clean_text
+                        calls = [{"id": "call_markdown_0", **recovered}]
+                        t.journal("🛡 Восстановил один строгий Markdown-вызов модели; напечатанные ею результаты отброшены.")
                 t.data["steps"] += 1
                 run_steps += 1
                 t.data["retries"] = 0                             # модель ответила — счётчик повторов после сбоя сначала
