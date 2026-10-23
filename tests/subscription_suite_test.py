@@ -19,6 +19,7 @@ def main():
              ROOT / "tests" / "subscription_quota_test.py",
              ROOT / "tests" / "subscription_install_test.py",
              ROOT / "tests" / "subscription_upgrade_test.py",
+             ROOT / "tests" / "subscription_brain_probe_test.py",
              ROOT / "tests" / "brain_watch_test.py",
              ROOT / "tests" / "diagnostics_test.py",
              ROOT / "tests" / "task_observability_test.py",
