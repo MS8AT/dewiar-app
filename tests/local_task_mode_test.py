@@ -82,6 +82,21 @@ class LocalTaskTests(unittest.TestCase):
             self.assertFalse(local.is_local({"kind": "openai", "base_url": address}))
         self.assertFalse(local.is_local({"kind": "chatgpt_subscription", "base_url": "http://localhost/v1"}))
 
+    def test_read_limits_keep_small_context_bounded(self):
+        self.assertEqual(local.read_limits({"context_length": 8192})["local_read_chars"], 1200)
+        self.assertEqual(local.read_limits({"context_length": 32768})["local_read_chars"], 4000)
+        self.assertEqual(local.read_limits({})["local_history_chars"], 6000)
+
+    def test_reader_respects_end_and_does_not_count_empty_fragment(self):
+        from unittest.mock import patch
+        task = types.SimpleNamespace(data={"project": "synthetic", "local_read_chars": 1200})
+        with patch("subscription_context.project_action", return_value="1: one\n2: two\n3: three"):
+            self.assertEqual(local.read_project(task, "code_read", {"path": "README.md", "start": 1, "end": 1}), "1: one")
+        empty = types.SimpleNamespace(data={"project": "synthetic"})
+        with patch("subscription_context.project_action", return_value=""):
+            self.assertIn("пуст", local.read_project(empty, "code_read", {"path": "README.md", "start": 999}))
+        self.assertNotIn("local_read_files", empty.data)
+
     def test_local_only_route_blocks_codex_before_dispatch(self):
         settings = Settings()
         self.assertEqual(brain_routes.profile(settings, "tasks")["kind"], "unavailable")

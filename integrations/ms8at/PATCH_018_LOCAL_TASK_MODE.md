@@ -12,6 +12,9 @@
 итог. Смена или удаление привязанного профиля не переносит задачу в облако.
 
 Настройка `tasks.local_only` запрещает облачный маршрут всех обычных задач.
+Для окна 8K порция чтения ограничена 1200 символами, история — 6000;
+для большего окна — 4000 и 20000. Это консервативный лимит символов, не токены.
+`code_read` учитывает `end`; пустой фрагмент не считается успешным чтением.
 В интерфейсе: «Для задач только свои модели» и «Перейти на свою модель
 (изучение)». Обычные задачи разработки сохраняют прежние инструменты.
 
@@ -40,6 +43,9 @@ report. It uses a compact prompt, validates protected paths and blocks writes
 and commands. The main loop, translation and review use the task's local
 profile. A missing profile fails before inference. `tasks.local_only` prevents
 ordinary tasks from inheriting a cloud model.
+Small-context profiles use 1200-character reads and 6000-character history;
+larger contexts use 4000 and 20000. These are character heuristics, not token counts.
+The reader honors `end` and does not count an empty fragment as source evidence.
 
 Integration prompt: wire the local-mode helper into task selection, profile
 resolution and tool dispatch, add the two UI controls and run the focused
@@ -55,6 +61,8 @@ Rollback uses the previous verified overlay backup; preserve task history.
 继续后，仅允许读取项目、更新计划、笔记和最终报告。研究模式使用精简提示词，
 验证受保护路径，并禁止写入项目和执行命令。主循环、翻译和复查都使用该任务绑定的本地模型。
 模型配置缺失时，在推理前停止。`tasks.local_only` 防止普通任务继承云端模型。
+小上下文模型使用 1200 字符读取片段及 6000 字符历史；较大上下文使用 4000 和 20000。
+这是字符启发式限制，不是 token 计数。读取遵守 `end`，空片段不算来源证据。
 
 集成提示词：将本地模式模块接入模型选择、任务循环和工具调用，添加界面开关及切换按钮，
 运行本地任务测试及完整订阅测试。不要增加 Codex 配额。

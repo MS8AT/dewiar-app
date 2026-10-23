@@ -39,6 +39,14 @@ def task_profile(host, task):
     return dict(profile, id=pid, _brain_id=pid, _brain_role="tasks")
 
 
+def read_limits(profile):
+    """Консервативные порции в символах, не точный счётчик токенов."""
+    context = profile.get("context_length")
+    small = type(context) is not int or context <= 8192
+    return {"local_read_chars": 1200 if small else 4000,
+            "local_history_chars": 6000 if small else 20000}
+
+
 def select(manager, task, profile_id):
     """Сменить исполнителя остановленной задачи. Модель этим вызовом не запускается."""
     with task.control_lock:
@@ -56,6 +64,7 @@ def select(manager, task, profile_id):
         task.data.update(local_profile_id=profile_id, local_read_only=True, local_context_reset=True,
                          local_read_files=[], status="paused", error="", question="", wait_reason="",
                          wake_at="", auto_resume=False, finished=False, finish_checked=False, critic_done=False)
+        task.data.update(read_limits(profile))
         try:
             task.save()
         except Exception:
@@ -70,7 +79,7 @@ def select(manager, task, profile_id):
 
 def read_project(task, name, args):
     """Обзор без клонирования всего проекта и без доступа к закрытым корням."""
-    from subscription_context import ContextError, project_action
+    from subscription_context import ContextError, clipped, project_action
     try:
         if name == "code_list":
             pattern = str(args.get("pattern") or ".").replace("\\", "/")
@@ -81,6 +90,14 @@ def read_project(task, name, args):
             return "Ошибка пути: нужен относительный путь от корня проекта, например README_RU.md или Source/AI_MASTER.md. Не добавляйте папку задачи."
         relative = relative.replace("\\", "/")
         result = project_action(task, "project_read", relative, str(args.get("start") or 1))
+        start, end = int(args.get("start") or 1), args.get("end")
+        if type(end) is int and end >= start:
+            result = "\n".join(result.splitlines()[:end - start + 1])
+        cap = task.data.get("local_read_chars", 1200)
+        cap = cap if type(cap) is int and 512 <= cap <= 6000 else 1200
+        result = clipped(result, cap)
+        if not result.strip():
+            return "Фрагмент пуст. Выберите start в пределах файла."
         if relative not in task.data.setdefault("local_read_files", []):
             task.data["local_read_files"] = (task.data["local_read_files"] + [relative])[-32:]
         return result

@@ -1278,6 +1278,9 @@ class TaskManager:
         подробности остаются в журнале. Первое сообщение (цель) остаётся. Режем по сообщению модели, чтобы ответы
         инструментов не остались без своих вызовов — такую историю модели отвергают."""
         budget = budget or BUDGET
+        if t.data.get("local_read_only"):
+            limit = t.data.get("local_history_chars", 6000)
+            budget = min(budget, limit if type(limit) is int and 2000 <= limit <= 30000 else 6000)
         size = lambda m: len(json.dumps(m, ensure_ascii=False))  # noqa: E731
         total = sum(size(m) for m in msgs)
         if len(msgs) <= 3 or total <= budget:
