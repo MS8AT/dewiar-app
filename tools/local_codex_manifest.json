@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "upstream": "24a3d6c22142b623081478a121d396d7e42741c1",
+  "upstream": "62e7446e686dfd9d901e82dee72b5731f6d70829",
   "files": [
     {
       "path": "core/engine_answer.py",
@@ -34,8 +34,8 @@
     },
     {
       "path": "core/llm.py",
-      "before": "577798a912cbf85d3aa38ee9db7f868e47cfd464da538bd926c6cdab39784694",
-      "after": "db63ef610ee9e8ad4c97113ae307057582c20350c390464de2cb073a19c976c8"
+      "before": "0adae36b2b09962769a4232d2ade73934d1ad6a14b5e71338ff919bf83f47431",
+      "after": "f063d461229f5ee5795e3bb3c55942706d3a35b220261675cdf1b7aab6f3485b"
     },
     {
       "path": "core/night.py",
@@ -205,7 +205,7 @@
     {
       "path": "core/fork_update_policy.py",
       "before": null,
-      "after": "23361d3314a46a9212b6d5690c5844b81eb36c8352a3fd5c99f3c24ce4879f07"
+      "after": "841306e4c3005d0ddbabcbbeaa16f75f7de4ebf02d2503754d95c425f8fcdbf7"
     },
     {
       "path": "core/task_observability.py",
