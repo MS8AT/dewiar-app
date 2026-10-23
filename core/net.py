@@ -308,11 +308,28 @@ def _patched_init(self, *a, **kw):
 
 
 def install():
-    """Подменить httpx.Client.__init__ — один раз при запуске ядра (main.py); повторный вызов ничего не делает."""
+    """Подменить httpx.Client.__init__ — один раз при запуске ядра (main.py); повторный вызов ничего не делает.
+    И сертификаты — из хранилища системы (trust_system)."""
     global _installed
     if not _installed:
+        trust_system()
         httpx.Client.__init__ = _patched_init
         _installed = True
+
+
+def trust_system():
+    """Проверять сертификаты сайтов по хранилищу системы (Windows, macOS, Linux), а не только по встроенному списку.
+    Антивирусы с проверкой защищённых соединений (Касперский, ESET) и корпоративные шлюзы подменяют сертификат своим —
+    его корень есть в системе, но не во встроенном списке Python: «CERTIFICATE_VERIFY_FAILED … self-signed certificate
+    in certificate chain», и не работало ничего — вход, облако, обновления, модели (пакеты 22–23.10, №156, №168, №169,
+    №207). Проверка не слабеет: доверяем тому же, чему доверяет браузер этого компьютера. -> True, если включено."""
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+        return True
+    except Exception as e:  # noqa: BLE001 — нет библиотеки (старая установка) — как раньше, встроенный список
+        log.info("Сертификаты — встроенный список (хранилище системы недоступно: %s)", e)
+        return False
 
 
 def _probe_once(url, proxy, timeout):

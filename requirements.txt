@@ -12,3 +12,4 @@ pulsectl>=23.5
 imageio-ffmpeg>=0.5
 pypdf>=4.0
 socksio>=1.0
+truststore>=0.10        # сертификаты из хранилища системы (антивирусы с проверкой HTTPS)

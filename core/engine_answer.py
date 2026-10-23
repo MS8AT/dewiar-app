@@ -7,6 +7,10 @@
 from engine_base import *  # noqa: F401,F403 — общие импорты и помощники движка
 
 # инструменты «узнать» (не «сделать»): после них ответ без слов — не ответ, «Готово.» вместо сути не подставляем
+# вопрос про даты и сроки — тогда к нему справка «ближайшие дни» и «считай calc» (_turn_context)
+DATE_ASK_RX = re.compile(r"дн(я|ей|и|ём)\b|недел|понедельник|вторник|сред[уыа]|четверг|пятниц|суббот|воскресен|завтра|послезавтра|"
+                         r"числ[оа]|дат[аыуе]|когда|сколько.{0,20}(дн|недел|месяц|осталось)|через\s+\d|рождени|праздник|"
+                         r"январ|феврал|март|апрел|ма[йя]\b|июн|июл|август|сентябр|октябр|ноябр|декабр|\d{1,2}[./]\d{1,2}", re.I)
 INFO_TOOLS = {"web_search", "weather", "read_webpage", "find_notes", "read_file", "calc", "list_reminders", "calendar_list", "money_report",
               "read_emails", "read_email", "search_documents", "ask_knowledge", "system_status", "task_status", "look_at_screen",
               "look_through_camera", "app_update"}
@@ -14,16 +18,20 @@ INFO_TOOLS = {"web_search", "weather", "read_webpage", "find_notes", "read_file"
 
 
 def team_window(hist, me, name_of):
-    """Реплики для модели персонажа me. Разговор пользователя с другим персонажем (Патриком) — не её: он сворачивается
-    в одну справку «пользователь говорил с коллегой Патрик, не продолжай их тему». Отзыв 13.10: обсудила задачу с Патриком,
-    переключилась на Лиру — а Лира отвечает про задачу Патрика. Своё — дословно, как раньше. Реплика человека
-    относится к тому, кто на неё ответил; последняя (без ответа) — к me. -> [{role, content[, team]}]"""
+    """Реплики для модели персонажа me: у каждого персонажа свой разговор (письмо пользователя 23.10: «при переключении
+    они нередко продолжали чужую тему — хочется, чтобы мой персонаж помнил разговор со мной, Лира — с Лирой; передавать
+    беседу другому — по моей просьбе»). Разговор пользователя с другим персонажем в окно не попадает вовсе. Исключение —
+    передали слово явно («позови Патрика», инструмент call_persona): ответ коллеги помечен handoff=me, тогда его разговор —
+    одной справкой «для справки, не продолжай их тему». Реплика человека относится к тому, кто на неё ответил; последняя
+    (без ответа) — к me. Общее (память о человеке, заметки, календарь) — в подсказке, у всех. -> [{role, content[, team]}]"""
     msgs = [m for m in hist if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str)]
     owner, nxt = [None] * len(msgs), me
     for i in range(len(msgs) - 1, -1, -1):
         if msgs[i]["role"] == "assistant":
             nxt = msgs[i].get("who") or me
         owner[i] = nxt
+    from engine_base import FACT_TURNS
+    with_facts = [k for k, m in enumerate(msgs) if m["role"] == "assistant" and m.get("facts") and owner[k] == me][-FACT_TURNS:]
     out, i = [], 0
     while i < len(msgs):
         if owner[i] == me:
@@ -32,22 +40,27 @@ def team_window(hist, me, name_of):
                 # что было сделано за этим ответом (съёмка 17.10: в истории оставались одни слова «Звоню», «Включаю»,
                 # «Отправила» — и модель решала, что достаточно сказать их ещё раз, не вызывая действие)
                 c += "\n[в этом ответе выполнено инструментами: " + ", ".join(msgs[i]["acts"]) + "]"
+            if i in with_facts:
+                # и что они узнали — коротко («забывает IP»: на уточнение искала заново или выдумывала); последние ответы
+                c += "\n[узнано инструментами — опирайся на это, не ищи заново: " + "; ".join(msgs[i]["facts"]) + "]"
             out.append({"role": msgs[i]["role"], "content": c})
             i += 1
             continue
         j, who = i, owner[i]
         while j < len(msgs) and owner[j] == who:
             j += 1
-        name = name_of(who)
-        lines = [("Пользователь: " if m["role"] == "user" else f"{name}: ") + " ".join(m["content"].split())[:400] for m in msgs[i:j]][-8:]
-        out.append({"role": "user", "team": True,
-                    "content": f"[До этого пользователь говорил не с тобой, а с коллегой по имени {name}. Это для справки: не продолжай "
-                               "их тему и не отвечай за коллегу, пока пользователь сам тебя об этом не попросит.]\n" + "\n".join(lines)})
+        last = next((m for m in reversed(msgs[i:j]) if m["role"] == "assistant"), {})
+        if last.get("handoff") == me:                  # коллега сам передал слово — его разговор справкой
+            name = name_of(who)
+            lines = [("Пользователь: " if m["role"] == "user" else f"{name}: ") + " ".join(m["content"].split())[:400] for m in msgs[i:j]][-8:]
+            out.append({"role": "user", "team": True,
+                        "content": f"[До этого пользователь говорил не с тобой, а с коллегой по имени {name} — и {name} передал(а) "
+                                   "слово тебе. Это для справки: не отвечай за коллегу, продолжай то, о чём тебя просят.]\n" + "\n".join(lines)})
         i = j
     return out
 
 ATT_DEFAULT_Q = "Посмотри вложения и коротко скажи, что в них."
-ACTS_RX = re.compile(r"\s*\[в этом ответе выполнено[^\]]*\]?")       # пометка в истории (team_window) — не для человека
+ACTS_RX = re.compile(r"\s*\[(?:в этом ответе выполнено|узнано инструментами)[^\]]*\]?")       # пометка в истории (team_window) — не для человека
 
 
 def _norm_answer(t):
@@ -255,8 +268,10 @@ class AnswerMixin:
         turns = int(self.s.get("llm", "history_turns") or 0)
         me = self.s.get("persona")
         out = []
-        for m in team_window(self.conv.window(self.history, turns) if turns > 0 else [], me,
-                             lambda pid: (self.personas.get(pid) or {}).get("name") or "коллега"):     # чужой разговор — справкой
+        # своё окно у каждого персонажа: сначала его разговор из общей истории, потом окно (раньше окно резалось по общей
+        # истории, и после долгого разговора с Патриком Лира не помнила свой)
+        mine = team_window(self.history, me, lambda pid: (self.personas.get(pid) or {}).get("name") or "коллега")
+        for m in (self.conv.window(mine, turns) if turns > 0 else []):
             if out and out[-1]["role"] == m["role"] == "user" and isinstance(out[-1]["content"], str):
                 out[-1] = {"role": "user", "content": out[-1]["content"] + "\n\n" + m["content"]}
             else:
@@ -421,14 +436,17 @@ class AnswerMixin:
                          "словами, что нашёл и что сделал.")
         return base
 
-    def _turn_context(self):
-        """Справка к вопросу (меняется каждую минуту — поэтому не в системной подсказке): дата и время, ближайшая неделя
-        по дням (экзамен 11.10: «в среду», «через сколько дней» не считать в уме), сколько идёт разговор и перерыв."""
+    def _turn_context(self, text=""):
+        """Справка к вопросу (меняется каждую минуту — поэтому не в системной подсказке): дата и время, сколько идёт
+        разговор и перерыв. Ближайшая неделя по дням и «считай даты calc» — только если вопрос про даты и сроки (экзамен
+        11.10: «в среду», «через сколько дней» не считать в уме). Раньше это шло к каждому вопросу, и ассистенты сами
+        заводили речь о днях рождения и подсчёте дней (письмо пользователя 23.10: «навязчивые разговоры про календарь»)."""
         now = datetime.now()
-        week = "; ".join(f"{WEEKDAYS[(now + timedelta(days=i)).weekday()]} — {(now + timedelta(days=i)).day} {MONTHS[(now + timedelta(days=i)).month - 1]}"
-                         for i in range(1, 8))
-        out = (f"Сейчас {WEEKDAYS[now.weekday()]}, {now.day} {MONTHS[now.month - 1]} {now.year} года, {now:%H:%M}. "
-               f"Ближайшие дни: {week}. Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой.")
+        out = f"Сейчас {WEEKDAYS[now.weekday()]}, {now.day} {MONTHS[now.month - 1]} {now.year} года, {now:%H:%M}."
+        if DATE_ASK_RX.search(text or ""):
+            week = "; ".join(f"{WEEKDAYS[(now + timedelta(days=i)).weekday()]} — {(now + timedelta(days=i)).day} {MONTHS[(now + timedelta(days=i)).month - 1]}"
+                             for i in range(1, 8))
+            out += (f" Ближайшие дни: {week}. Сколько дней до даты и какая дата ближе — считай calc days_until, не в уме.")
         try:
             note = self.conv.turn_note()
         except Exception:  # noqa: BLE001
@@ -654,6 +672,13 @@ class AnswerMixin:
         if errs:
             lines += ["== Ошибки (последние)"] + errs[-40:] + [""]
         lines += ["== Журнал (последние строки)"] + tail[-tail_lines:]
+        try:                                    # ядро падало в библиотеке (faulthandler в main.py) — где именно
+            cr = (STATE_DIR / "logs" / "core.crash").read_text(encoding="utf-8", errors="replace")
+            blocks = [b for b in cr.split("\n--- запуск ") if "Fatal Python error" in b or "access violation" in b or "stack overflow" in b]   # 0xe06d7363 (пойманное C++) — шум
+            if blocks:
+                lines += ["", "== Падения ядра (core.crash)"] + ("--- запуск " + blocks[-1]).splitlines()[:80]
+        except OSError:
+            pass
         try:                                    # интерфейс: замирания окон (сторож главного цикла) и ошибки окон
             ui = (STATE_DIR / "logs" / "ui.log").read_text(encoding="utf-8", errors="replace").splitlines()
             if since:
@@ -872,11 +897,15 @@ class AnswerMixin:
         # tools_probe_v 2: проверка первой версии ошибочно записывала «думающие» модели в «не умеет» (none);
         # v3 (22.10): облако Dewiar отклоняло проверку из-за chat_template_kwargs, и модель записывалась в «описанием
         # в тексте» (prompt) — такие записи один раз сбрасываем, чтобы проверить заново; найденные native остаются
-        if self.s.get("llm", "tools_probe_v") != 3:
-            stale = {k: v for k, v in modes.items() if v == "native"}
+        # v4 (22.10, вечер): настоящая причина — сайт превращал пустой объект {} в схеме функции в [] (cloud.php
+        # chat_schema_fix); после обновления сайта — проверить ещё раз
+        # v5 (23.10): «none» больше не выводится из проверки — прежние записи «none» сбрасываем
+        if self.s.get("llm", "tools_probe_v") != 5:
+            keep = ("native",) if self.s.get("llm", "tools_probe_v") != 4 else ("native", "prompt")
+            stale = {k: v for k, v in modes.items() if v in keep}
             with self.s._lock:
                 self.s.data.setdefault("llm", {})["tools_modes"] = stale
-            self.s.update({"llm": {"tools_probe_v": 3}})
+            self.s.update({"llm": {"tools_probe_v": 5}})
             modes = stale
         if key in self._probing or (not force and key in modes):
             return
@@ -1109,6 +1138,9 @@ class AnswerMixin:
             return False
         prev = self.personas.get(self.s.get("persona"))["name"]
         log.info("👥 %s → %s (без модели)", prev, self.personas.get(pid)["name"])
+        last = next((m for m in reversed(self.history) if m.get("role") == "assistant"), None)
+        if last is not None and last.get("who") == self.s.get("persona"):
+            last["handoff"] = pid                     # «позови Лиру» — человек сам передаёт слово: ей — разговор справкой
         self.emit("heard", text=text)
         with self._turn_lock:
             self._cancel_locked()
@@ -1219,7 +1251,7 @@ class AnswerMixin:
                 recalled = self.recall.context(text.split("\n\nВложения:")[0])
             except Exception as e:  # noqa: BLE001
                 log.info("Поиск по записям: %s", e)
-            ctx = [self._turn_context()]               # меняющееся — в справку к вопросу, подсказка остаётся прежней
+            ctx = [self._turn_context(text)]           # меняющееся — в справку к вопросу, подсказка остаётся прежней
             if recalled:
                 log.info("📎 Вспомнил из записей: %s", ", ".join(re.findall(r"^\[([^\]]+)\]", recalled, re.M)))
                 ctx.append("Из записей пользователя в твоей папке (нашлось по словам вопроса). Если это отвечает на "
@@ -1576,8 +1608,13 @@ class AnswerMixin:
         if turn.full.strip():
             said = text + (" [к сообщению была приложена картинка]" if images else "")
             acts = list(dict.fromkeys(getattr(turn, "tools_ok", None) or []))
+            facts = list(getattr(turn, "facts", None) or [])
+            # передал слово явно (call_persona) или специалист, позванный на вопрос, возвращает слово главному — тому
+            # его разговор справкой; просто переключились — нет
+            hand = getattr(turn, "switch_to", None) or getattr(turn, "back_to", None)
             self.history += [{"role": "user", "content": said},
-                             {"role": "assistant", "content": turn.full.strip(), "who": self.s.get("persona"), **({"acts": acts} if acts else {})}]
+                             {"role": "assistant", "content": turn.full.strip(), "who": self.s.get("persona"),
+                              **({"acts": acts} if acts else {}), **({"facts": facts} if facts else {}), **({"handoff": hand} if hand else {})}]
             self.last_turn_time = time.monotonic()
             self._conv_after()
             if not turn.via:

@@ -758,8 +758,11 @@ def probe_tools(p):
                 return None                        # сервер недоступен или молчит — ничего не решаем, проверим позже
     if not answered:
         return None
-    log.info("Модель %s не вызывает инструменты ни одним способом", p.get("model") or p.get("base_url"))
-    return "none"
+    # Модель ответила словами и так, и так («Который час?» — «Не знаю точного времени»). Это не значит, что действий нет:
+    # сервер функции принял. Раньше здесь было "none" — и программа переставала давать модели действия вовсе, а в виджете
+    # висело «Эта модель не умеет выполнять действия» (23.10, владелец: «что это за бред»). Теперь — функции полем, как есть.
+    log.info("Модель %s на проверке ответила словами, без вызова — функции оставляю полем", p.get("model") or p.get("base_url"))
+    return "native"
 
 
 @contextlib.contextmanager
@@ -1486,7 +1489,7 @@ class CodeFilter:
 
     NOTE = "Команды и код — на экране. "
     _CMD = re.compile(r"^\s*(\$ |sudo |>>> |#!/)")
-    _ACTS = "[в этом ответе выполнено"
+    _ACTS = ("[в этом ответе выполнено", "[узнано инструментами")   # пометки истории (engine_answer.team_window)
 
     def __init__(self):
         self.pend, self.code, self.told, self.skip, self.start = "", False, False, False, True
@@ -1522,7 +1525,7 @@ class CodeFilter:
                     self.start, self.skip, self.pend = False, True, ""
                     continue
                 if lead and ("```".startswith(lead) or "$ ".startswith(lead) or "sudo ".startswith(lead)
-                             or ">>> ".startswith(lead) or "#!/".startswith(lead) or self._ACTS.startswith(lead)):
+                             or ">>> ".startswith(lead) or "#!/".startswith(lead) or any(a.startswith(lead) for a in self._ACTS)):
                     continue                              # ещё не ясно — ждём пару символов
                 if self._CMD.match(self.pend):
                     out += self._note()

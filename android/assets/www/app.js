@@ -365,7 +365,8 @@ let S = (() => { try { return Object.assign({}, DEF, JSON.parse(prefGet("setting
 for (const k of ["llm", "stt", "tts", "home", "account", "net", "tg"]) S[k] = Object.assign({}, DEF[k], S[k] || {});
 // 22.10: облако отклоняло chat_template_kwargs, а телефон сразу переходил на функции текстом и запоминал это — один раз
 // проверим заново: теперь сначала пробуется запрос без chat_template_kwargs, с функциями полем (так они работают лучше)
-if (S.llm.tools_prompt && !S.llm.rej_v2) { delete S.llm.tools_prompt; S.llm.rej_v2 = 1; }
+// 22.10, вечер: настоящая причина — сайт превращал пустой {} в схеме функции в [] (cloud.php chat_schema_fix): ещё раз
+if (S.llm.tools_prompt && !S.llm.rej_v3) { delete S.llm.tools_prompt; S.llm.rej_v3 = 1; }
 applyProxy();                                      // прокси для серверов Dewiar — с первого запроса
 function saveS() { llmRemember(); prefSet("settings", JSON.stringify(S)); applyProxy(); setTimeout(startCardCheck, 0); }
 /* Прежние мозги (отчёт №117, 19.10: «отправил настройки с компьютера — телефон не подключается, и на Dewiar не вернуться; на
@@ -466,8 +467,11 @@ function netHealed(n) {
 }
 function netRecovered() {
   let l = []; try { l = JSON.parse(prefGet("net_inc") || "[]") || []; } catch (x) { }
-  if (l.length && l.every(x => x.ok)) { prefSet("net_inc", "[]"); return; }
-  l = l.filter(x => !x.ok);
+  // прошло само при повторе, телефон был без сети или имя сайта не находилось (нет интернета) — это не сбой программы
+  // (пакет 23.10, №208: «7 сбоев: Unable to resolve host … [none, офлайн]»)
+  const own = (x) => x.ok || x.online === false || x.type === "none" || /Unable to resolve host|No address associated/i.test(x.err || "");
+  if (l.length && l.every(own)) { prefSet("net_inc", "[]"); return; }
+  l = l.filter(x => !own(x));
   if (!l.length || !(S.report || {}).auto) return;
   if (Date.now() - (+prefGet("net_rep") || 0) < 6 * 36e5) return;
   prefSet("net_rep", String(Date.now())); prefSet("net_inc", "[]");
@@ -853,11 +857,18 @@ function convNote() {                           // сколько идёт ра�
 }
 /* Справка к вопросу: время, ближайшая неделя (экзамен 11.10: «в среду» не считать в уме), разговор, найденное. Кладётся
    в начало последнего сообщения пользователя (putContext), не в подсказку и не в историю. */
-function turnContext() {
-  const week = [1, 2, 3, 4, 5, 6, 7].map(i => { const d = new Date(Date.now() + i * 864e5); return `${WD[d.getDay()]} — ${d.getDate()} ${MON[d.getMonth()]}`; }).join("; ");
+/* Ближайшая неделя и «считай calc» — только к вопросу про даты и сроки: раньше шли к каждому, и ассистенты сами заводили
+   речь о днях рождения и подсчёте дней (письмо пользователя 23.10; то же — core/engine_answer DATE_ASK_RX). */
+const DATE_ASK = /дн(я|ей|и|ём)(?![а-яё])|недел|понедельник|вторник|сред[уыа]|четверг|пятниц|суббот|воскресен|завтра|послезавтра|числ[оа]|дат[аыуе]|когда|сколько.{0,20}(дн|недел|месяц|осталось)|через\s+\d|рождени|праздник|январ|феврал|март|апрел|ма[йя](?![а-яё])|июн|июл|август|сентябр|октябр|ноябр|декабр|\d{1,2}[./]\d{1,2}/i;
+function turnContext(text) {
   const n = convNote();
   let rp = ""; try { rp = recentPrompt() || ""; } catch (e) { }
-  return (rp ? rp.trim() + "\n\n" : "") + `Сейчас ${nowText()}. Ближайшие дни: ${week}. Какая дата ближе («чей день рождения ближайший») — посчитай calc days_until для каждой и сравни.` + (n ? " " + n : "");
+  let t = `Сейчас ${nowText()}.`;
+  if (DATE_ASK.test(String(text || ""))) {
+    const week = [1, 2, 3, 4, 5, 6, 7].map(i => { const d = new Date(Date.now() + i * 864e5); return `${WD[d.getDay()]} — ${d.getDate()} ${MON[d.getMonth()]}`; }).join("; ");
+    t += ` Ближайшие дни: ${week}. Сколько дней до даты и какая дата ближе — считай calc days_until, не в уме.`;
+  }
+  return (rp ? rp.trim() + "\n\n" : "") + t + (n ? " " + n : "");
 }
 function putContext(msgs, ctx) {
   const last = msgs[msgs.length - 1];
@@ -1157,7 +1168,18 @@ function showPhotoCard(url) { showCard(photoCard(url)); cardSticky = Date.now() 
 function clearCard() { if (Date.now() < cardSticky) return; showCard(""); }
 let photoTurn = false;              // в этом ходе показан снимок — пометим в истории для модели
 // на экране ничего не сказано и не показано — #stage.quiet: лёжа облик встаёт по центру (app.css)
-function quietCheck() { $("#stage").classList.toggle("quiet", !$("#you").textContent && !$("#bot").textContent && !$("#bot").className && !$("#card").innerHTML); }
+function quietCheck() {
+  const quiet = !$("#you").textContent && !$("#bot").textContent && !$("#bot").className && !$("#card").innerHTML;
+  $("#stage").classList.toggle("quiet", quiet);
+  if ($("#talk-x")) $("#talk-x").hidden = quiet || $("#bot").classList.contains("wait");   // пока отвечает — не убираем
+}
+/* Убрать сказанное с экрана: крестик или смахнуть вбок. Разговор не забывается — только экран (23.10). */
+function talkDismiss(dx) {
+  const t = $("#talk"); t.style.setProperty("--dx", (dx || 60) + "px"); t.classList.add("away");
+  setTimeout(() => { $("#you").textContent = ""; $("#bot").textContent = ""; $("#bot").className = ""; cardSticky = 0; showCard("");
+    $("#stage").classList.remove("long"); t.classList.remove("away"); t.scrollTop = 0; quietCheck(); }, RM.matches ? 0 : 220);
+}
+const RM = matchMedia("(prefers-reduced-motion: reduce)");
 
 /* ---------- разрешения ---------- */
 const permWait = {};
@@ -2096,7 +2118,7 @@ async function ask(text, opts = {}) {
   let final = "", switchTo = null;
   lastDone = "";
   try {
-    const ctxParts = [turnContext()];                   // меняющееся — в справку к вопросу, подсказка остаётся прежней
+    const ctxParts = [turnContext(text)];                   // меняющееся — в справку к вопросу, подсказка остаётся прежней
     if (!opts.hidden) {
       const kb = await personaKnowledge(text);
       if (turnAbort !== ctl) return;
@@ -6438,6 +6460,16 @@ $("#orbwrap").onclick = () => $("#mic").onclick();
 new MutationObserver(() => document.body.classList.toggle("typing", $("#typebox").classList.contains("on")))
   .observe($("#typebox"), { attributes: true, attributeFilter: ["class"] });     // поле ввода открыто — сцена выше него (app.css)
 $("#b-kb").onclick = () => { const b = $("#typebox"); b.classList.toggle("on"); if (b.classList.contains("on")) $("#typed").focus(); };
+$("#talk-x").onclick = (e) => { e.stopPropagation(); talkDismiss(60); };
+(() => {                                                  // смахнуть сказанное вбок — тоже убрать (вертикально — прокрутка, как была)
+  const t = $("#talk"); let sw = null;
+  t.addEventListener("touchstart", (e) => { const p = e.touches[0]; sw = p && !$("#talk-x").hidden ? { x: p.clientX, y: p.clientY } : null; }, { passive: true });
+  t.addEventListener("touchmove", (e) => { if (!sw) return; const p = e.touches[0], dx = p.clientX - sw.x, dy = p.clientY - sw.y;
+    if (Math.abs(dy) > 24 && Math.abs(dy) > Math.abs(dx)) { sw = null; t.style.transform = ""; return; }
+    if (Math.abs(dx) > 12) { t.style.transform = `translateX(${dx}px)`; t.style.opacity = String(Math.max(.25, 1 - Math.abs(dx) / 260)); } }, { passive: true });
+  t.addEventListener("touchend", (e) => { if (!sw) return; const p = e.changedTouches[0], dx = p.clientX - sw.x; sw = null;
+    t.style.transform = ""; t.style.opacity = ""; if (Math.abs(dx) > 90) talkDismiss(dx > 0 ? 80 : -80); });
+})();
 /* Вложения: фото из галереи (уменьшается до 1280 точек) и текстовые файлы (до 30 000 знаков) — уходят модели вместе
    с вопросом (ask opts.attach). PDF и документы Word телефон пока не читает — честно говорим. */
 let attached = [];

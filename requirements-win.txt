@@ -21,3 +21,4 @@ imageio-ffmpeg>=0.5
 pypdf>=4.0
 tzdata>=2024.1
 soundcard>=0.4.3      # звук компьютера для суфлёра (WASAPI loopback)
+truststore>=0.10        # сертификаты из хранилища Windows (Касперский с проверкой HTTPS — net.trust_system)

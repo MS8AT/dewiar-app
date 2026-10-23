@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "upstream": "4b6e2af26829fc693b451e6af5601c426fb1bc95",
+  "upstream": "4a72b8bdbca52810c42a32a871dd8252d913036e",
   "files": [
     {
       "path": "core/engine_answer.py",
-      "before": "a19561639b8e0d72f4051fa728c8a53e9ba458609d1963402c93c1fe4cef35fa",
-      "after": "630385b0bee5ea29c7388231a69b9563d5ceddcdf3df40376000b332af247ae9"
+      "before": "92f44d1f91fa83570323ab1294e987bbfc0abdc72a728afe60efad819473cd2b",
+      "after": "bf738b1b019eaacb408e8f216f15c7a7eaba379aa0d7ff8639cd92f6bfbc4a92"
     },
     {
       "path": "core/engine_brain.py",
@@ -14,8 +14,8 @@
     },
     {
       "path": "core/engine_commands.py",
-      "before": "bdbfe3d2c59ed108d9a9bf2e75e964d25524e084793bd8cc9f2cdfbe59cecd37",
-      "after": "ffe969b2be2e57c089d2c25b9deba0fcc0576f0335e165332e5d9146db4b455d"
+      "before": "3ab5f9b5ec9c2d98b6ded0a585219df807a0c8cd6b910d632d63856933dc615b",
+      "after": "c15b392774e5e63926fe17fd70465108d3ac98659f159f3d49ddeb09a38731c7"
     },
     {
       "path": "core/engine_music.py",
@@ -34,13 +34,13 @@
     },
     {
       "path": "core/llm.py",
-      "before": "862713465774a3fd9fd09bdc576cdffc4fbd91db2c023adf94e9a4c24929091c",
-      "after": "cc0be6fe643f06783d3727abf6a2435bd0fe078ea6e0ece72b9b6acf7dd413ac"
+      "before": "26ce116f7cc112e4cb3fea0b71e68a9f62ad3ddc6fe6769c2d42eb423da39dbc",
+      "after": "ba49a4e0aa3cea2367a53778f016b0e4ccdc21827dbd68effe6e7c3d1b1dd338"
     },
     {
       "path": "core/night.py",
-      "before": "e486d9fa3a77947601692b5d2322623252841272f8968551c6371b5d4c7e29cd",
-      "after": "2e0aa5b1077936f4b86d1ca4754eba1ea12dcea3e4a4be82bcc0292b99fe08e5"
+      "before": "f08a311d2489d720ecb098f3029e65efbe4d131b4f446ac48a777b26d04157df",
+      "after": "a9a5f66ce83489fb04e1fe000ac03d302edf27a273b624b6bc095b0dd3fe2b4b"
     },
     {
       "path": "core/prompter.py",
@@ -80,7 +80,7 @@
     {
       "path": "core/subscription_runtime/codex-dependency.json",
       "before": null,
-      "after": "66900753bea99a1cdcfe2d56af81e2d9973bb6ab819b8696bafa1ad67c1e8eaa"
+      "after": "5d89bfeeae45e2aaa4dea71669e56ac1982e88b315df801c5bb6296250370abc"
     },
     {
       "path": "core/subscription_runtime/dependency.json",
@@ -114,18 +114,18 @@
     },
     {
       "path": "core/tasks.py",
-      "before": "4c5c180da988349c5fe3df7189b72252c2aa3ba174eebd59994a7519db113e6a",
-      "after": "4bf27c6b0feb958a4ce2f47fbd38a948eefd2b3cc0dff8e2a6c3ab71ffe70962"
+      "before": "02ea0218c60ffc37b304360b1cd258ec52ca972a92dbb3b9003d48286c2b27bb",
+      "after": "0026310faae348bedb663a82831be1d5003009e1371766325495c76233b6a236"
     },
     {
       "path": "ui/hud.html",
-      "before": "85f07591e40058b2c00e0be79c7cee3d3dbb50b0d4e9034e07af1fd6c6443cd1",
-      "after": "a47ac0a71100b7d754e81250d88d516a89df8ab12d63fd9214453a2a6d962dd7"
+      "before": "aa48a9174cc990670b656b782e2f11689c2b440e1f6d855ed6618e28a77f2138",
+      "after": "c96dacfbffc3847a7d21bda0c194cf25ac13841c892b98672ea13792fdbe6db7"
     },
     {
       "path": "ui/settings.html",
-      "before": "22a58bb82570d5c3c8008b09fc8644c2611a390792bbfc848383d7e5deb0753f",
-      "after": "1b5683f0218ba71dcc74c44c8034997794c096fd1ab9e42b36a2590f27097789"
+      "before": "7639f7305fa0cded70b5d16f7226e3cfc4e60b4624c681778e3447c9ce94ca7c",
+      "after": "4644bced30df4a99228f4a0174d77e1255412a5b97aa98967f958dab65c12c39"
     },
     {
       "path": "ui/studio/brain.js",
@@ -179,8 +179,8 @@
     },
     {
       "path": "ui/app.py",
-      "before": "b736a94331706f90a21c9cf3c2bf3c2d4b5f82fde51f0653f84a29e8650cbe01",
-      "after": "82a7bea1677f027ced5c8a71b0640236d38018aced352b2258c26cfd6612689a"
+      "before": "1e46b8a14e7ce5e7292fed89f997fe5eaaf79e95400a50ff7e83347a5404ff2d",
+      "after": "20e7c05b1e332d5435b506388bfcd9b1383d81b09929d1c0a23d4d13aa00d71a"
     },
     {
       "path": "core/diagnostic_cli.py",
@@ -195,7 +195,7 @@
     {
       "path": "core/fork_update_policy.py",
       "before": null,
-      "after": "ad8f9cc01137372cd0480b6bc1bae3cd4de3668047aee865e7fffb5ed94c5f63"
+      "after": "3d0e4b150224cf200cb25cb688bd3a0db82cd7011bd4e44da5fd6b288ec2495f"
     },
     {
       "path": "core/dewiar-cli.cmd",

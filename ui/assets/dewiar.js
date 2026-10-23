@@ -11,6 +11,7 @@
     constructor() {
       this.token = q.get("token") || ""; this.port = q.get("port") || "8765";
       this.handlers = {}; this.pending = {}; this.n = 0; this.snapshot = null; this.connected = false;
+      this.later = [];                   // сообщения, написанные без связи (sendLater) — уйдут, когда ядро вернётся
       this.connect();
     }
     on(type, fn) { (this.handlers[type] = this.handlers[type] || []).push(fn); return this; }
@@ -22,7 +23,7 @@
       ws.onopen = () => ws.send(JSON.stringify({ cmd: "hello", token: this.token }));
       ws.onmessage = (m) => {
         const e = JSON.parse(m.data);
-        if (e.type === "hello") { this.snapshot = e.data; this.connected = true; this.emit("hello", e.data); return; }
+        if (e.type === "hello") { this.snapshot = e.data; this.connected = true; this.emit("hello", e.data); this._flush(); return; }
         if (e.type === "reply") {
           const p = this.pending[e.id]; delete this.pending[e.id];
           if (p) e.ok ? p.resolve(e.data) : p.reject(new Error(e.error || "ошибка"));
@@ -39,6 +40,18 @@
       ws.onerror = () => {};
     }
     retry() { clearTimeout(this._rt); this._rt = setTimeout(() => this.connect(), 1500); }
+    /* Сообщение человека (виджет, чат студии): нет связи — не теряем, а отправляем, как только ядро вернётся (пакет 23.10,
+       №200: «теряется связь с ядром — большое сообщение пропадает, набираю заново»). Старше 10 минут — уже не отправляем. */
+    sendLater(cmd, args = {}) {
+      if (this.connected) return this.call(cmd, args);
+      return new Promise((resolve, reject) => { this.later.push({ cmd, args, resolve, reject, t: Date.now() }); });
+    }
+    _flush() {
+      const q = this.later; this.later = [];
+      q.forEach(x => Date.now() - x.t < 600000 ? this.call(x.cmd, x.args).then(x.resolve, x.reject)
+        : x.reject(Object.assign(new Error("не отправлено: ядро долго не отвечало"), { stale: true })));
+    }
+    get waiting() { return this.later.length; }
     call(cmd, args = {}) {
       return new Promise((resolve, reject) => {
         if (!this.connected) return reject(new Error("нет связи с ядром"));

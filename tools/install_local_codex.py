@@ -167,7 +167,7 @@ def main():
         print("PASS: " + args.mode + "; настройки, аккаунты и сеть не затронуты")
         return 0
     except (ValueError, TypeError, KeyError, OSError, subprocess.SubprocessError):
-        print("REFUSED: проверка не пройдена. Требуется чистая база 0.39.2, локальные пути, "
+        print("REFUSED: проверка не пройдена. Требуется чистая база 0.39.6, локальные пути, "
               "неизменённый комплект и закрытый Dewiar; детали см. docs/LOCAL_CODEX_RU.md. "
               "После прерванной записи используйте --mode rollback с той же копией.")
         return 2

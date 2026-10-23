@@ -29,7 +29,7 @@ from settings import STATE_DIR
 
 log = logging.getLogger("dewiar.night")
 KIND_RU = {"error": "ошибки программы", "task": "задачи", "job": "дела по расписанию", "llm": "связь с моделью"}
-NO_RETRY = ("bug", "loop", "idle_model")
+NO_RETRY = ("bug", "loop", "idle_model", "access")
 
 
 class NightWatch:
@@ -94,7 +94,9 @@ class NightWatch:
                     continue
                 if d.get("status") == "failed" and str(d.get("failed_at") or d.get("updated") or "") >= dt.datetime.fromtimestamp(since).isoformat(timespec="seconds"):
                     if d.get("fail_kind") in NO_RETRY or d.get("night_retry"):
-                        left.append(f"Задача «{t.title}» остановилась: {str(d.get('error') or '')[:160]}")
+                        hint = (" — ей не хватает прав на файл или папку: дайте доступ (или выберите другую папку) и запустите "
+                                "задачу снова" if d.get("fail_kind") == "access" else "")
+                        left.append(f"Задача «{t.title}» остановилась: {str(d.get('error') or '')[:160]}{hint}")
                         continue
                     d["night_retry"] = True
                     t.save()
@@ -135,7 +137,13 @@ class NightWatch:
         self.data.update(last_day=now.date().isoformat(), last_ts=time.time(), morning_note=note,
                          last={"problems": problems, "repaired": repaired, "left": left, "path": path})
         self._save()
-        sent = self._report(now, problems, repaired, left) if left or sum(p["n"] for p in problems) >= 3 else None
+        # разработчику — только то, что может быть ошибкой программы: сбои модели и сервера (ключ, страна, баланс, сеть)
+        # — это настройки человека, их он видит утром сам (пакет 22.10, №193: «сбоев 4, не решено 0» — все про модель)
+        # задачи (застряла, не хватило окна) — поведение и настройки модели; «модель не отвечает» в «не решено» — тоже настройки
+        # (пакет 23.10, №204, №209, №210)
+        ours = sum(p["n"] for p in problems if p.get("kind") != "task" and not str(p["text"]).startswith("Модель"))
+        left_ours = [x for x in left if not x.startswith("Модель")]
+        sent = self._report(now, problems, repaired, left) if left_ours or ours >= 3 else None
         log.info("🌙 Ночной обход: сбоев %d, починила %d, осталось %d%s", sum(p["n"] for p in problems), len(repaired), len(left),
                  f", отчёт №{sent}" if sent else "")
         return {"day": now.date().isoformat(), "problems": problems, "repaired": repaired, "left": left, "note": note,

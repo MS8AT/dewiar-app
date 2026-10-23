@@ -1,8 +1,38 @@
 # Проверка кандидата локального Codex
 
-Срез: 22 октября 2026 года. База — Dewiar 0.39.2,
-`4b6e2af26829fc693b451e6af5601c426fb1bc95`. Это отчёт о локальных проверках
-кандидата, не подтверждение успешного live-запроса или готовности upstream-релиза.
+Текущий срез: 23 октября 2026 года. База кандидата — Dewiar 0.39.6,
+`4a72b8bdbca52810c42a32a871dd8252d913036e`. Это отчёт о локальных проверках,
+не подтверждение успешного live-запроса, публикации или установки на рабочий app.
+Исторические этапы 0.39.2 сохранены ниже отдельно.
+
+## Интеграция upstream 0.39.3–0.39.6 — 23 октября 2026
+
+База кандидата обновлена до Dewiar 0.39.6,
+`4a72b8bdbca52810c42a32a871dd8252d913036e`; fork build 3. Исторические
+результаты для установленной 0.39.2 ниже сохранены и не считаются проверкой новой базы.
+Источник объединён без текстовых конфликтов. Наши 40 runtime-файлов отделены
+`integrations/ms8at/overlay.json` и манифестом SHA; интеграционный промпт не является
+полномочием на запись. Статус исходников: SOURCE_READY / LOCAL_TESTED.
+
+- PASS: `tools/verify_ms8at_overlay.py` — exact upstream/version/build, 40 payload
+  SHA и полный runtime diff совпали; traversal и неизвестные директивы отклонены;
+  model calls 0.
+- PASS: `subscription_suite_test.py` — 180 Python + 44 JS. Codex, контуры мозгов,
+  heartbeat, CLI/API/SLI и защита updater совместимы с новой базой.
+- PASS: официальный Codex CLI `0.163.0-alpha.11.2` закреплён по SHA после offline
+  app-server probe: initialize/config policy подтверждены, вход и запросы модели 0,
+  внешний HTTP заблокирован loopback proxy.
+- PASS: upstream `facts1022_test.py`, `tts_en1022_test.py`, `tray_pad1023_test.py`,
+  `night_test.py`, `update_now1022_test.py`, `task_watch_test.py` на bundled Python.
+- PARTIAL: `meet_pc1022_test.py` — 5 core-проверок PASS, UI-часть NOT_RUN из-за
+  отсутствующего Playwright. Полный `run_quick.sh` остановлен как невалидный:
+  системному Python не хватало httpx/numpy/playwright; зависимости не устанавливались.
+- PASS: Python compileall, JavaScript syntax и `git diff --check`.
+- NOT_RUN: live inference, личный вход, визуальная приёмка, установка 0.39.6,
+  подписанный helper, GitHub push/release. Установленный app остаётся 0.39.2 build 2.
+- BLOCKED: `requirements-win.lock` 0.39.6 добавляет `truststore`, которого нет в
+  установленном bundled Python. Защитный upgrade script правильно требует отдельный
+  dependency-compatible пакет; исходники поверх 0.39.2 не устанавливать.
 
 ## CLI/API/SLI и защита обновления — 22 октября, 15:27 +03:00
 

@@ -273,6 +273,28 @@ class Close:
             me = self.st.get("mygeo")
             return {"people": dict(geo), "me": me if me and now - me.get("ts", 0) < 7 * 864e5 else None}
 
+    MEET = {"/meet/state": "GET", "/meet/rules": "POST", "/meet/here": "POST", "/meet/leave": "POST", "/meet/wave": "POST",
+            "/meet/block": "POST", "/meet/report": "POST"}
+    MEET_FRESH = 30 * 60 * 1000                   # место телефона свежее — можно отметиться с компьютера
+
+    def meet(self, path, body=None):
+        """«Встречи» из студии (22.10, владелец: «добавить и на компе, но чтобы работало с телефона»): то же пространство,
+        что у телефона, — его отметка и люди рядом. Отметиться с компьютера — по месту телефона (свежее 30 минут); уже
+        отмечены — изменить и продлить можно и без места (сайт берёт прежнее). -> ответ сайта (meet_state)."""
+        if path not in self.MEET:
+            raise CloseError("такого действия во Встречах нет")
+        body = {k: v for k, v in dict(body or {}).items() if k not in ("lat", "lon")}
+        if path == "/meet/here" and not body.pop("keep", False):
+            g = self.geo_state().get("me")
+            if not g or time.time() * 1000 - float(g.get("ts") or 0) > self.MEET_FRESH:
+                raise CloseError("Компьютер не знает, где вы: отметьтесь на телефоне («Близкие» → «Встречи») или откройте там "
+                                 "«Рядом» — место телефона появится здесь, и можно будет отметиться отсюда.")
+            body.update(lat=float(g["lat"]), lon=float(g["lon"]))
+        d = self._req(self.MEET[path], path, None if self.MEET[path] == "GET" else body).json()
+        if isinstance(d.get("state"), dict):          # помахали друг другу — новый человек в «Близких»
+            self._people(d["state"])
+        return d
+
     def wave(self, who):
         """👋 близкому: обычное сообщение {wave: 1, t: "👋"} — у него волны, «… машет вам» и голос."""
         return self.send(who, "👋", payload={"wave": 1})
@@ -769,6 +791,8 @@ class Close:
             except CloseError as e:
                 self.error = str(e)
                 log.info("Близкие: %s", e)
+            except ValueError as e:      # ответ сайта оборвался или пришла страница ошибки вместо JSON — повторим (пакет 23.10, №209)
+                log.info("Близкие: сайт ответил не так, как ждали (%s) — повторю", e)
             except Exception:  # noqa: BLE001
                 log.exception("Близкие")
             try:

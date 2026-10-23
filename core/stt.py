@@ -188,6 +188,11 @@ class GigaAMSTT:
         return self.model is not None
 
     def transcribe(self, pcm: bytes) -> str:
+        if self.model is None:
+            # пакет 22.10, №194: «'NoneType' object has no attribute 'recognize'» — модель ещё грузится (или не скачалась),
+            # а запасного Vosk нет; говорим это словами
+            raise RuntimeError("точное распознавание речи ещё загружается — скажите ещё раз через минуту" if self.loading
+                               else f"точное распознавание речи не загрузилось{': ' + self.error[:120] if self.error else ''}")
         a = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
         res = self.model.recognize(a, sample_rate=16000)
         return res if isinstance(res, str) else getattr(res, "text", str(res))

@@ -26,7 +26,8 @@ src = app[app.index("    def _pad_geom(self):"):app.index("    def pad_size(self
 consts = re.search(r"^PAD_W, PAD_MIN_H.*$", app, re.M).group(0) + "\n" + re.search(r"^PAD_W_MIN.*$", app, re.M).group(0) + "\n" + \
     re.search(r"^PAD_CLIP = .*$", app, re.M).group(0)
 code = "import textwrap\nWIN = True\n" + consts + "\nclass winshell:\n    @staticmethod\n    def work_area(h=None):\n        return (0, 0, 1920, 1040) if h == 7 else (0, 0, 0, 0)\n" \
-    "ZOOM = [1.0]\nSIZES = {'card': (340, 420)}\nclass A:\n" + src + "\n    def get_pos(self, m):\n        return (1500, 300)\n    def _hwnd(self, m):\n        return 7\n"
+    "    @staticmethod\n    def rect(h):\n        return (1500, 300, 340, REAL[0])\n    @staticmethod\n    def scale(h):\n        return 1.0\n" \
+    "REAL = [420]\nZOOM = [1.0]\nSIZES = {'card': (340, 420)}\nclass A:\n" + src + "\n    def get_pos(self, m):\n        return (1500, 300)\n    def _hwnd(self, m):\n        return 7\n"
 exec(code, ns)
 a = ns["A"]()
 a._pad_size = [None, None]
@@ -38,6 +39,18 @@ ok(g1["w"] == 600 and g1["h"] == 700 and g1["x"] + g1["w"] + g1["gap"] == 1500, 
 a._pad_size = [5000, 100]
 g2 = a._pad_geom()
 ok(g2["w"] == 1100 and g2["h"] == 300, f"в пределах: не шире 1100 и не ниже 300: {g2['w']}×{g2['h']}")
+# 22.10, владелец: «растянул лист — нижний крепёж смотрится оторванным»: крепления — только там, где рядом виджет
+a._pad_size = [700, 1000]; ns["SIZES"]["card"] = (340, 1000); ns["REAL"][0] = 493
+g3 = a._pad_geom()
+t3 = 300 - g3["y"]                                         # где верх виджета в окне листа (высокий лист приподнят над краем экрана)
+ok(g3["clips"] and all(t3 + 6 <= y and y + c <= t3 + 493 - 6 for y, c in g3["clips"]),
+   f"виджет на деле 493 px (в SIZES — 1000), лист 1000 px — крепления на высоте виджета: {g3['clips']}")
+ns["SIZES"]["card"] = (340, 420); ns["REAL"][0] = 420
+a._pad_size = [600, 1000]
+g4 = a._pad_geom()
+t4 = 300 - g4["y"]
+ok(all(t4 + 6 <= y and y + c <= t4 + 420 - 6 for y, c in g4["clips"]) and len(g4["clips"]) == 2, f"высокий лист у обычного виджета — оба крепления у виджета: {g4['clips']}")
+ok("_pad_on" in app[app.index("def resize_card"):app.index("def set_mode")], "виджет растянули при открытом блокноте — крепления встают заново")
 ok("def pad_resize" in app and "def pad_size" in app and '"pad_w"' in (ROOT / "core/settings.py").read_text(encoding="utf-8"),
    "Api.pad_resize / pad_size есть, ui.pad_w / pad_h / pad_text — в настройках")
 

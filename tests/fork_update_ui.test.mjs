@@ -14,14 +14,14 @@ function fixture() {
   return {els, context};
 }
 test('unconfigured fork does not claim latest and has no installer action', () => {
-  const f = fixture(); f.context.renderUpdate({current: '0.39.2', fork: {product: 'MS8AT8DWiar', build: 2, message: 'Не настроен'}});
+  const f = fixture(); f.context.renderUpdate({current: '0.39.6', fork: {product: 'MS8AT8DWiar', build: 3, message: 'Не настроен'}});
   assert.match(f.els['#up-state'].textContent, /Не настроен/);
   assert.match(f.els['#up-state'].textContent, /ещё не выполнялась/);
   assert.equal(f.els['#up-install'].style.display, 'none');
   assert.equal(f.els['#up-install'].onclick, null);
 });
 test('cached discovery is labeled stale after failed check; notes stay text', () => {
-  const f = fixture(); f.context.renderUpdate({current: '0.39.2', fork: {product: 'MS8AT8DWiar', build: 2,
+  const f = fixture(); f.context.renderUpdate({current: '0.39.6', fork: {product: 'MS8AT8DWiar', build: 3,
     message: 'Не настроен', discovery: {attempted_at: 2000, error: 'network_or_manifest_error'}},
     upstream: {version: '0.40.0', checked_at: 1000, newer: true, notes: '<img onerror=bad>'}});
   assert.match(f.els['#up-state'].textContent, /устаревшими/);

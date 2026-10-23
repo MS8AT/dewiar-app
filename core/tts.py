@@ -25,8 +25,65 @@ from settings import VOICES_DIR
 
 log = logging.getLogger("dewiar.tts")
 
-PIPER_URL = ("https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/{name}/{quality}/"
-             "ru_RU-{name}-{quality}{ext}?download=true")
+PIPER_URL = ("https://huggingface.co/rhasspy/piper-voices/resolve/main/{lang}/{loc}/{name}/{quality}/"
+             "{loc}-{name}-{quality}{ext}?download=true")
+# английские фразы — английским голосом Piper (пакет 22.10, №194: «произношение на английском — жесть, хуже школьника»:
+# русский голос читал их по буквам русскими звуками). Женский и мужской — под голос персонажа.
+EN_VOICES = {"female": "en_US-amy-medium", "male": "en_US-ryan-medium"}
+_EN_RUN = re.compile(r"[A-Za-z][A-Za-z'’]*(?:-[A-Za-z]+)*(?:[ \t]*[,;:]?[ \t]+[A-Za-z][A-Za-z'’]*(?:-[A-Za-z]+)*)+[.!?]?")
+
+
+_EN_WORD = re.compile(r"(?<![A-Za-z])[a-z][a-z'’]+(?![A-Za-z])")
+
+
+def _en_spans(text):
+    """Где в тексте английское: обороты от двух слов и отдельные слова строчными (apple, weather) — кроме известных
+    программ и сервисов (их русское чтение — speechnorm._KNOWN). Слово с большой буквы (Linux, Telegram) — по-русски."""
+    from speechnorm import _KNOWN
+    spans = [(m.start(), m.end()) for m in _EN_RUN.finditer(text)]
+    for m in _EN_WORD.finditer(text):
+        if m.group(0).lower() not in _KNOWN and not any(a <= m.start() < b for a, b in spans):
+            spans.append((m.start(), m.end()))
+    return sorted(spans)
+
+
+def split_en(text):
+    """Фраза → [(язык, кусок)]: английское (см. _en_spans) — "en", остальное — "ru"."""
+    out, pos = [], 0
+    for m in [_Span(a, b, text) for a, b in _en_spans(text or "")]:
+        if m.start() > pos and text[pos:m.start()].strip(" ,;:—-«»\"()"):
+            out.append(("ru", text[pos:m.start()]))
+        out.append(("en", m.group(0)))
+        pos = m.end()
+    if pos < len(text or "") and text[pos:].strip(" ,;:—-«»\"().!?"):
+        out.append(("ru", text[pos:]))
+    return out or [("ru", text or "")]
+
+
+class _Span:
+    """Найденный кусок — как re.Match (start, end, group) для split_en."""
+    __slots__ = ("a", "b", "t")
+
+    def __init__(self, a, b, t):
+        self.a, self.b, self.t = a, b, t
+
+    def start(self):
+        return self.a
+
+    def end(self):
+        return self.b
+
+    def group(self, _=0):
+        return self.t[self.a:self.b]
+
+
+def resample(pcm, src, dst):
+    """PCM s16le mono из частоты src в dst (линейно; голоса Piper и Vosk обычно и так 22050 Гц)."""
+    if src == dst or not pcm:
+        return pcm
+    a = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
+    n = max(1, int(round(len(a) * dst / src)))
+    return np.interp(np.linspace(0, len(a) - 1, n), np.arange(len(a)), a).astype(np.int16).tobytes()
 
 
 def _download(url, path, on_progress=None):
@@ -54,7 +111,7 @@ class PiperTTS:
         иначе с Hugging Face. Конфиг — первым: голос считается скачанным, только когда есть оба файла."""
         if self.has(voice_id):
             return True
-        _, name, quality = voice_id.split("-", 2)
+        loc, name, quality = voice_id.split("-", 2)
         VOICES_DIR.mkdir(parents=True, exist_ok=True)
         m, c = self.paths(voice_id)
         log.info("Скачиваю голос %s ...", voice_id)
@@ -68,8 +125,9 @@ class PiperTTS:
                 return True
             except Exception as e:  # noqa: BLE001
                 log.warning("Голос %s со своего сайта не скачался (%s) — беру с Hugging Face", voice_id, e)
-        _download(PIPER_URL.format(name=name, quality=quality, ext=".onnx.json"), c)
-        _download(PIPER_URL.format(name=name, quality=quality, ext=".onnx"), m, on_progress)
+        lang = loc.split("_")[0]
+        _download(PIPER_URL.format(lang=lang, loc=loc, name=name, quality=quality, ext=".onnx.json"), c)
+        _download(PIPER_URL.format(lang=lang, loc=loc, name=name, quality=quality, ext=".onnx"), m, on_progress)
         return True
 
     def _voice(self, voice_id):
@@ -80,12 +138,13 @@ class PiperTTS:
                 self.voices[voice_id] = PiperVoice.load(str(m), config_path=str(c))
             return self.voices[voice_id]
 
-    def synth(self, text, voice_cfg, speed=1.0):
+    def synth(self, text, voice_cfg, speed=1.0, norm=True):
         from piper import SynthesisConfig
         v = self._voice(voice_cfg.get("piper", "ru_RU-denis-medium"))
         cfg = SynthesisConfig(length_scale=float(voice_cfg.get("length_scale", 1.0)) / max(0.5, speed))
-        from speechnorm import speech_norm
-        text = speech_norm(text, latin=False) or text          # 1437,50 руб. → «тысяча … рублей пятьдесят копеек»
+        if norm:                                                # английскому голосу числа по-русски не нужны (norm=False)
+            from speechnorm import speech_norm
+            text = speech_norm(text, latin=False) or text      # 1437,50 руб. → «тысяча … рублей пятьдесят копеек»
         for chunk in v.synthesize(text, syn_config=cfg):
             yield chunk.sample_rate, chunk.audio_int16_bytes
 

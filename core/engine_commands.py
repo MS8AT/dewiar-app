@@ -854,6 +854,14 @@ class CommandsMixin:
             return {"id": pid, "gallery": self.personas.gallery()}
         if cmd == "persona_delete":
             self.personas.delete(a["id"])
+            # разговор удалённого — в архив: новый персонаж с тем же именем (и тем же id) начнёт с чистого листа
+            for m in self.history:
+                if m.get("who") == a["id"]:
+                    m["who"] = a["id"] + "~удалён"
+            try:
+                self.conv.save(self.history)
+            except Exception:  # noqa: BLE001
+                pass
             if self.s.get("persona") not in {p["id"] for p in self.personas.all()}:
                 from personas import DEFAULT
                 self.switch_persona(DEFAULT)
@@ -982,6 +990,8 @@ class CommandsMixin:
                             (out / name).write_bytes(_b64.b64decode(f.get("b64") or ""))
                             files.append(str(out / name))
                     return c.send(a.get("pid", ""), a.get("text", ""), files)
+                if cmd == "close_meet":             # «Встречи» в студии (studio/meet.js) — через то же пространство, что телефон
+                    return c.meet(a.get("path", ""), a.get("body") or {})
                 if cmd == "close_wave":             # 👋 с радара «Рядом»
                     return c.wave(a.get("pid", ""))
                 if cmd == "close_react":            # реакция на сообщение (👍 ❤️ …)

@@ -108,8 +108,11 @@ if len(reqs) >= 3:
        "компьютер: в подсказке нет ни времени, ни недели, ни найденного в записях")
     last = [r["messages"][-1] for r in reqs[:3]]
     txt = [m["content"] if isinstance(m["content"], str) else "" for m in last]
-    ok(all(re.search(r"Сейчас .*\d{1,2}:\d{2}", t) and "Ближайшие дни" in t for t in txt) and txt[0].rstrip().endswith("Привет, как дела?"),
-       "компьютер: время и неделя — справкой в начале последнего сообщения, сам вопрос — в конце")
+    ok(all(re.search(r"Сейчас .*\d{1,2}:\d{2}", t) for t in txt) and txt[0].rstrip().endswith("Привет, как дела?"),
+       "компьютер: время — справкой в начале последнего сообщения, сам вопрос — в конце")
+    # 23.10 (письмо пользователя: «навязчивые разговоры про календарь и дни рождения»): неделя и «считай calc» — только к
+    # вопросам про даты, не к «как дела»
+    ok("Ближайшие дни" not in txt[0] and "день рождения" not in txt[0], "компьютер: к «как дела» — без недели и без «дней рождения»")
     ok("3 бара" in txt[1] or "давление" in txt[1].split("(Сообщение пользователя)")[0], "компьютер: найденное в записях — в справке к своему вопросу")
     hist = [m for m in reqs[2]["messages"][1:-1] if m.get("role") == "user"]
     ok(hist and not any("(Справка к этому сообщению" in (m["content"] if isinstance(m["content"], str) else "") for m in hist),
@@ -150,7 +153,7 @@ if len(chat) >= 2:
        "телефон: подсказка та же и без времени (и без растущего «что было недавно»)")
     lt = chat[1]["messages"][-1]["content"]
     lt = lt if isinstance(lt, str) else ""
-    ok("Сейчас " in lt and "Ближайшие дни" in lt and lt.rstrip().endswith("Что нового?"), "телефон: время — справкой в последнем сообщении")
+    ok("Сейчас " in lt and "Ближайшие дни" not in lt and lt.rstrip().endswith("Что нового?"), "телефон: время — справкой в последнем сообщении, неделя — только к вопросам о датах")
     ok(not any("(Справка к этому сообщению" in str(m.get("content")) for m in chat[1]["messages"][1:-1]), "телефон: в истории справки нет")
 ok(not errs, f"телефон без ошибок: {errs[:2]}")
 shutil.rmtree(tmp, ignore_errors=True)

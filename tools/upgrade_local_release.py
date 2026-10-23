@@ -13,8 +13,8 @@ import subprocess
 import install_local_codex as installer
 
 SOURCE = Path(__file__).resolve().parents[1]
-BASE = "4b6e2af26829fc693b451e6af5601c426fb1bc95"
-RELEASE = "0.39.2"
+BASE = "4a72b8bdbca52810c42a32a871dd8252d913036e"
+RELEASE = "0.39.6"
 ROOTS = ("core", "ui", "data", "icons", "requirements-win.lock")
 REQUIRED = {"core/version.py", "core/main.py", "ui/app.py", "ui/settings.html", "requirements-win.lock"}
 TESTS = {"core/subscription_runtime/policy.test.mjs", "core/subscription_runtime/test_codex.py",
@@ -41,7 +41,7 @@ def payload(source):
     if not REQUIRED <= names:
         raise ValueError("Неполный выпуск")
     version = (source / "core/version.py").read_text(encoding="utf-8")
-    if not re.search(r'^VERSION\s*=\s*[\'"]0[.]39[.]2[\'"]', version, re.MULTILINE):
+    if not re.search(r'^VERSION\s*=\s*[\'"]0[.]39[.]6[\'"]', version, re.MULTILINE):
         raise ValueError("Неверная версия")
     # Маркер версии меняется последним: незавершённая запись не выдаётся за новый выпуск.
     return sorted(names - {"core/version.py"}) + ["core/version.py"]

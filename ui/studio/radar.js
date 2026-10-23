@@ -21,8 +21,10 @@ const RD_REDUCE = matchMedia("(prefers-reduced-motion: reduce)");
 function rdTab(t) {
   RD.tab = t;
   $$("#cl-tabs button").forEach(b => { b.classList.toggle("on", b.dataset.t === t); b.setAttribute("aria-selected", String(b.dataset.t === t)); });
-  $("#cl-near").hidden = t !== "near"; $(".cl-box").style.display = t === "near" ? "none" : "";
+  $("#cl-near").hidden = t !== "near"; $(".cl-box").style.display = t === "chat" ? "" : "none";
+  if ($("#cl-meet")) $("#cl-meet").hidden = t !== "meet";
   if (t === "near") nearRender();
+  if (t === "meet" && window.meetOpen) meetOpen();
 }
 $$("#cl-tabs button").forEach(b => b.onclick = () => rdTab(b.dataset.t));
 

@@ -70,6 +70,18 @@ def main():
             print(f"{d['kind']:6}  {d['name']}\n        {d['description']}")
         return
 
+    try:   # падение в библиотеке (звук, голоса, onnxruntime) убивает процесс без строчки в журнале — пусть останется след
+        # (пакет 23.10, №200: «постоянно теряется связь с ядром», а в журнале ядро просто обрывается). Отчёт берёт его отсюда.
+        import faulthandler
+        crash = (Path(args.log).parent if args.log else STATE_DIR / "logs") / "core.crash"
+        if crash.exists() and crash.stat().st_size > 200_000:
+            crash.unlink()
+        _crash_fh = open(crash, "a", encoding="utf-8")
+        _crash_fh.write(f"\n--- запуск {__import__('time').strftime('%Y-%m-%d %H:%M:%S')} · {VERSION}\n")
+        _crash_fh.flush()
+        faulthandler.enable(file=_crash_fh, all_threads=True)
+    except Exception:  # noqa: BLE001
+        pass
     import ortcfg
     ortcfg.limit()                             # DEWIAR_ORT_THREADS — своё число потоков ONNX (голоса), иначе как есть
     fail = STATE_DIR / "core.fail"            # почему ядро не запустилось — интерфейс прочтёт и объяснит (антивирус?); удачный запуск его стирает
