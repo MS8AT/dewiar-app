@@ -5,8 +5,8 @@
 Состояние доступно API/интерфейсу; никакой фоновой задачи этот модуль не создаёт.
 """
 PRODUCT = "MS8AT8DWiar"
-BUILD = 3
-REQUIRED_FEATURES = ("codex_local", "brain_routes", "brain_watch", "diagnostics_v1", "overlay_v1")
+BUILD = 4
+REQUIRED_FEATURES = ("codex_local", "codex_task_quota_grants", "brain_routes", "brain_watch", "diagnostics_v1", "overlay_v1")
 BLOCK_REASON = "Канал обновления форка ещё не настроен. Обычный установщик Dewiar может удалить дополнения; автоматическая установка заблокирована."
 
 

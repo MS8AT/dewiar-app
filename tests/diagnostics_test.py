@@ -146,6 +146,14 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(events[1]["state"], "unknown")
         self.assertIsNone(events[1]["steps"])
 
+    def test_journal_projects_quota_event_without_task_content(self):
+        self.data["events"] = [{"seq": 1, "at": 1, "kind": "task_quota_granted", "ref": PROFILE,
+                                "amount": 5, "limit": 10, "goal": SECRET}]
+        event = self.call("journal")["events"][0]
+        self.assertEqual(event["kind"], "task_quota_granted")
+        self.assertEqual((event["amount"], event["limit"]), (5, 10))
+        self.assertNotIn("goal", event)
+
     def test_zero_calls_is_not_hundred_percent_success(self):
         result = self.call("sli")
         self.assertEqual(result["state"], "no_data")

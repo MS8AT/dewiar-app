@@ -1229,7 +1229,7 @@ class CommandsMixin:
             if a.get("reveal", True) and not os.environ.get("DEWIAR_DRY_TOOLS"):
                 X.reveal(out)
             return {"path": str(out), "name": out.name, "dir": str(out.parent)}
-        if cmd in ("task_stop", "task_resume", "task_answer", "task_tell", "task_accept", "task_discard", "task_delete"):
+        if cmd in ("task_stop", "task_resume", "task_grant", "task_answer", "task_tell", "task_accept", "task_discard", "task_delete"):
             tid = a.get("id")
             if cmd == "task_tell":
                 return self.tasks.tell(tid, a.get("text", "")).public()
@@ -1237,6 +1237,11 @@ class CommandsMixin:
                 return self.tasks.stop(tid).public()
             if cmd == "task_resume":
                 return self.tasks.start(tid).public()
+            if cmd == "task_grant":
+                from subscription_quota import grant
+                task = self.tasks.get(tid)
+                grant(self.tasks, task, a.get("count", 5))
+                return task.public()
             if cmd == "task_answer":
                 return self.tasks.answer(tid, a.get("text", "")).public()
             if cmd == "task_accept":

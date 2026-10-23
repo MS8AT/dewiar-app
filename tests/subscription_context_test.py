@@ -16,6 +16,7 @@ CORE = Path(__file__).resolve().parents[1] / "core"
 sys.path.insert(0, str(CORE))
 import subscription_context as context
 import subscription_adapter as adapter
+import subscription_quota as quota
 
 PROFILE = {"kind": "chatgpt_subscription", "subscription_transport": "codex", "model": "test-model",
            "subscription_profile_id": "codex-" + "a" * 32, "subscription_export": True, "subscription_usage_reviewed": True}
@@ -255,6 +256,35 @@ class ContextTests(unittest.TestCase):
             context.run_task(manager, task, generate)
             self.assertEqual(generate.call_count, 2)
             self.assertFalse(task.data["auto_resume"])
+
+    def test_imported_profile_cannot_bypass_base_limit_with_21_to_100(self):
+        for amount in (21, 100):
+            with self.subTest(amount=amount), tempfile.TemporaryDirectory() as root:
+                host, manager, task = self.task_fixture(root, subscription_task_limit=amount)
+                generate = Mock()
+                with patch.object(context, "confirm_local", side_effect=AssertionError("must not confirm")):
+                    context.run_task(manager, task, generate)
+                generate.assert_not_called()
+                self.assertEqual(task.data["status"], "paused")
+                self.assertNotIn("subscription_attempts", task.data)
+
+    def test_confirmed_quota_extension_allows_separate_manual_resume(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(context, "confirm_local", return_value=True):
+            host, manager, task = self.task_fixture(root, subscription_task_limit=2)
+            generate = Mock(return_value=reply("notebook", text="synthetic note"))
+            context.run_task(manager, task, generate)
+            self.assertEqual(generate.call_count, 2)
+            self.assertEqual(task.data["subscription_attempts"], 2)
+            self.assertEqual(task.data["status"], "paused")
+            quota.grant(manager, task, 2)
+            self.assertEqual(generate.call_count, 2)  # выдача квоты не вызывает модель
+            self.assertEqual(task.data["status"], "paused")
+            generate.return_value = reply("finish", summary="Synthetic done")
+            context.run_task(manager, task, generate)
+            self.assertEqual(generate.call_count, 3)
+            self.assertEqual(task.data["subscription_attempts"], 3)
+            self.assertEqual(task.data["subscription_request_limit"], 4)
+            self.assertEqual(task.data["status"], "done")
 
     def test_unknown_outcome_is_counted_and_not_retried(self):
         with tempfile.TemporaryDirectory() as root, patch.object(context, "confirm_local", return_value=True):

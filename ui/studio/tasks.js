@@ -1,7 +1,7 @@
 /* Студия Dewiar, разделы «Задачи» и обновление в «О программе».
    Задачи — долгие поручения мастерской (core/tasks.py): список, карточка с вкладками (план, блокнот, результаты, журнал,
    изменения кода, итог), просмотр и выгрузка результатов, «идеи» для пустой страницы. Команды ядра: tasks_list, task_get,
-   task_create, task_tell, task_answer, task_resume/stop/accept/discard/delete, task_export, ws_open, ws_read;
+   task_create, task_tell, task_answer, task_resume/stop/grant/accept/discard/delete, task_export, ws_open, ws_read;
    событие "task" перерисовывает раздел, пока он открыт. Обновление: renderUpdate() показывает update_status,
    ставит его окно (api().install_update), экран хода установки — updShow/updPoll в day.js.
    Файлы студии подключаются по порядку из ui/settings.html и делят одну глобальную область: при загрузке здесь
@@ -115,9 +115,14 @@ async function openTask(id) {
     if (tOpenedFor !== id) { tOpenedFor = id; tTab = outs.length && t.status === "done" ? "results" : t.summary ? "summary" : "plan"; }
     if (!tabs.find(x => x[0] === tTab)) tTab = t.summary ? "summary" : "plan";
     const acts = [];
+    const quotaAction = taskQuotaAction(t);
     if (t.status === "sleeping") acts.push(`<button class="btn primary" data-a="task_resume">Продолжить сейчас</button>`);
     if (["running", "waiting", "sleeping"].includes(t.status)) acts.push(`<button class="btn" data-a="task_stop">Остановить</button>`);
-    if (["paused", "stopped", "failed"].includes(t.status)) acts.push(`<button class="btn primary" data-a="task_resume">Продолжить</button>`);
+    if (["paused", "stopped", "failed"].includes(t.status)) {
+      if (quotaAction && quotaAction.kind === "grant") acts.push(`<button class="btn primary" data-a="task_grant" data-count="${quotaAction.count}">${escH(quotaAction.label)}</button>`);
+      else if (quotaAction && quotaAction.kind === "blocked") acts.push(`<span class="hint">${escH(quotaAction.label)}</span>`);
+      else acts.push(`<button class="btn primary" data-a="task_resume">Продолжить</button>`);
+    }
     if (t.project && t.changes && t.changes.length && !["running", "waiting", "sleeping"].includes(t.status)) acts.push(`<button class="btn primary" data-a="task_accept">Принять изменения</button><button class="btn" data-a="task_discard">Отклонить</button>`);
     acts.push(`<button class="btn danger" data-a="task_delete">Удалить</button>`);
     const prog = t.progress && t.progress[1] ? ` · план ${t.progress[0]}/${t.progress[1]}` : "";
@@ -152,7 +157,14 @@ async function openTask(id) {
     $$("#t-view [data-a]").forEach(b => b.onclick = async () => {
       if (b.dataset.a === "task_delete" && !await ask("Удалить задачу вместе с её папкой?")) return;
       if (b.dataset.a === "task_discard" && !await ask("Отклонить изменения? Рабочая копия будет удалена.")) return;
-      try { const r = await core.call(b.dataset.a, { id }); if (typeof r === "string") toast(r); if (b.dataset.a === "task_delete") tCur = ""; loadTasks(); if (b.dataset.a !== "task_delete") openTask(id); else $("#t-view").innerHTML = ""; } catch (e) { toast(e.message); }
+      try {
+        const args = {id}; if (b.dataset.a === "task_grant") args.count = Number(b.dataset.count);
+        const r = await core.call(b.dataset.a, args);
+        if (b.dataset.a === "task_grant") toast("Квота продлена. Теперь нажмите «Продолжить».", 5000);
+        else if (typeof r === "string") toast(r);
+        if (b.dataset.a === "task_delete") tCur = "";
+        loadTasks(); if (b.dataset.a !== "task_delete") openTask(id); else $("#t-view").innerHTML = "";
+      } catch (e) { toast(e.message); }
     });
     if ($("#t-ansgo")) $("#t-ansgo").onclick = () => core.call("task_answer", { id, text: $("#t-ans").value }).then(() => openTask(id)).catch(e => toast(e.message));
     $$("#t-list .titem").forEach(el => el.classList.toggle("cur", $("b", el).textContent === t.title));
@@ -192,7 +204,7 @@ function taskSubscriptionInfo() {
   const on = p.kind === 'chatgpt_subscription', info = $('#t-subscription-info');
   if (!info) return;
   info.hidden = !on;
-  info.textContent = on ? `Codex: отдельный режим. Лимит ${p.subscription_task_limit ?? 5} запросов на задачу, включая самопроверку и урок. Разрешения — в профиле «Мозг». Подтверждение запуска появится здесь. Чтение проекта разрешается отдельно; команды, запись кода и подзадачи не поддерживаются. Поля передышек и автозапуска команд ниже к Codex не применяются.` : '';
+  info.textContent = on ? `Codex: отдельный режим. Исходный лимит ${p.subscription_task_limit ?? 5} запросов на задачу, включая самопроверку и урок. После исчерпания его можно продлить отдельным подтверждением; задача сама не запустится, общий предел — 100. Разрешения — в профиле «Мозг». Подтверждение запуска появится здесь. Чтение проекта разрешается отдельно; команды, запись кода и подзадачи не поддерживаются. Поля передышек и автозапуска команд ниже к Codex не применяются.` : '';
   for (const key of ['tasks.max_steps', 'tasks.cycles', 'tasks.auto_run']) {
     const input = $(`[data-k="${key}"]`); if (input) input.disabled = on;
   }

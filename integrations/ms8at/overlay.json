@@ -7,7 +7,7 @@
     "commit": "4a72b8bdbca52810c42a32a871dd8252d913036e"
   },
   "fork": {
-    "build": 3
+    "build": 4
   },
   "payload_manifest": "tools/local_codex_manifest.json",
   "integration_prompt": "integrations/ms8at/INTEGRATION_PROMPT_RU.md",
@@ -25,6 +25,7 @@
   ],
   "features": [
     "codex_local",
+    "codex_task_quota_grants",
     "brain_routes",
     "brain_watch",
     "diagnostics_v1",
@@ -32,10 +33,12 @@
   ],
   "required_tests": [
     "tests/subscription_suite_test.py",
+    "tests/subscription_quota_test.py",
     "tests/brain_watch_test.py",
     "tests/diagnostic_cli_test.py",
     "tests/fork_update_policy_test.py",
     "tests/fork_update_ui.test.mjs",
+    "tests/task_quota_ui.test.mjs",
     "tests/ms8at_overlay_test.py"
   ],
   "update_policy": {

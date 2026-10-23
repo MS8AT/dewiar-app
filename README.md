@@ -1,3 +1,26 @@
+## Что такое Dewiar · What is Dewiar · 什么是 Dewiar
+
+**RU.** Dewiar — голосовой AI-помощник с персонажами, памятью и фоновыми задачами. Он умеет подключать локальные
+и облачные модели, вести план и журнал работы, но опасные действия оставляет под подтверждением человека. Эта
+ветка `MS8AT8DWiar` хранит наши интеграции отдельным проверяемым слоем поверх официального Dewiar.
+
+**EN.** Dewiar is a voice AI assistant with characters, memory, and background tasks. It can route work to local
+or cloud models and keep plans and journals, while risky actions remain subject to human confirmation. This
+`MS8AT8DWiar` branch keeps our integrations as a separately verifiable layer over upstream Dewiar.
+
+**中文.** Dewiar 是一款具有角色、记忆和后台任务能力的语音 AI 助手。它可以连接本地或云端模型，记录计划与日志，
+同时把高风险操作交给用户确认。`MS8AT8DWiar` 分支把我们的集成作为可独立验证的补丁层叠加在官方 Dewiar 之上。
+
+[Идея проекта / Project idea / 项目理念](IDEA.md) ·
+[Патчи и ТЗ / Patches and specifications / 补丁与规格](integrations/ms8at/PATCHES.md) ·
+[Промпты интеграции / Integration prompts / 集成提示词](prompts/README.md)
+
+<p align="center">
+<img src="assets/project-reality-branch-map-ru.png" width="880" alt="Карта проекта: ветка реальности">
+</p>
+
+[Все иллюстрации проекта / Project artwork / 项目插图](assets/README.md)
+
 <div align="center">
 
 Эксперимент этой ветки: [локальный режим Codex — установка и ограничения](docs/LOCAL_CODEX_RU.md).

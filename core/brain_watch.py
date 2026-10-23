@@ -106,6 +106,15 @@ class Ledger:
             if len(self.tasks) > 1000:
                 self.tasks.pop(next(iter(self.tasks)))
 
+    def quota(self, task, amount, limit):
+        """Записать только факт продления, без имени, цели, профиля и текста задачи."""
+        if (not self.enabled() or not isinstance(task, dict) or not task.get("id")
+                or type(amount) is not int or not 1 <= amount <= 20
+                or type(limit) is not int or not 1 <= limit <= 100):
+            return
+        with self.lock, self.db() as db:
+            self.event(db, "task_quota_granted", tag(task["id"]), {"amount": amount, "limit": limit})
+
     def snapshot(self):
         now = self.clock()
         stale = self.settings.get("brain_watch", "stale_seconds") if self.settings else 90

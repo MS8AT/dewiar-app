@@ -15,7 +15,7 @@
     {
       "path": "core/engine_commands.py",
       "before": "3ab5f9b5ec9c2d98b6ded0a585219df807a0c8cd6b910d632d63856933dc615b",
-      "after": "c15b392774e5e63926fe17fd70465108d3ac98659f159f3d49ddeb09a38731c7"
+      "after": "99de81cdf3c3c3ab04d3d5838fa8a1f9aeb12337537210c45e3412d5939d62ce"
     },
     {
       "path": "core/engine_music.py",
@@ -55,7 +55,12 @@
     {
       "path": "core/subscription_context.py",
       "before": null,
-      "after": "e3fabd440e792b310d3517f1533b1302924f9e58da0f94c83608975262367a7f"
+      "after": "09300e79a540f3a5983e3c85cb49a7f0f507d71f6c7cf1e466cce3ab4ab49e31"
+    },
+    {
+      "path": "core/subscription_quota.py",
+      "before": null,
+      "after": "911f7fb86429363b7ab8c5a8669636b777bffe2dae706b3c95284bd64f93f58d"
     },
     {
       "path": "core/subscription_runtime/client.py",
@@ -115,7 +120,7 @@
     {
       "path": "core/tasks.py",
       "before": "02ea0218c60ffc37b304360b1cd258ec52ca972a92dbb3b9003d48286c2b27bb",
-      "after": "0026310faae348bedb663a82831be1d5003009e1371766325495c76233b6a236"
+      "after": "eca95fb96922db635e9c68e18f887c88cd689c9476aec9f0046860eb853490a5"
     },
     {
       "path": "ui/hud.html",
@@ -125,7 +130,7 @@
     {
       "path": "ui/settings.html",
       "before": "7639f7305fa0cded70b5d16f7226e3cfc4e60b4624c681778e3447c9ce94ca7c",
-      "after": "4644bced30df4a99228f4a0174d77e1255412a5b97aa98967f958dab65c12c39"
+      "after": "de8b180d4a042f8abc5dca17a7bd1709a9e96f5ea0fc0ae9b202de113b06fa5b"
     },
     {
       "path": "ui/studio/brain.js",
@@ -145,7 +150,12 @@
     {
       "path": "ui/studio/tasks.js",
       "before": "156d09608499edebf1a564a7f07f1677abf7ce832d308e7d62befbc4d8865588",
-      "after": "e7310ca251ecc7d9d6d68aa2071fc03bd6f8bd314811bd7703099ed2d830e3af"
+      "after": "5adc809e0c5da83320b7522042606c24a3d7ff3380bcb7766b9eba87e800f93d"
+    },
+    {
+      "path": "ui/studio/task_quota.js",
+      "before": null,
+      "after": "396b7052cce01227dc1a9c9d047f307571340bb27d0b761d892aca613967cd9a"
     },
     {
       "path": "core/brain_routes.py",
@@ -155,7 +165,7 @@
     {
       "path": "core/brain_watch.py",
       "before": null,
-      "after": "c73a275084426c11b101b1ea522ae148d32976d61f92da41d4da6e583cb9ce57"
+      "after": "fef3cbe7783d760369dee9f1b647ddee8c1e08722f0eacbcfba208b6b738df47"
     },
     {
       "path": "core/settings.py",
@@ -190,12 +200,12 @@
     {
       "path": "core/diagnostics.py",
       "before": null,
-      "after": "2423dbe657d9a557b4be2aa63fff1bbc42a69841835b1f4f3f62764ae1802f04"
+      "after": "979b398d7034995e65c4109cfb6e041dffe3c45e7f096a36f55f0417ab6fc98b"
     },
     {
       "path": "core/fork_update_policy.py",
       "before": null,
-      "after": "3d0e4b150224cf200cb25cb688bd3a0db82cd7011bd4e44da5fd6b288ec2495f"
+      "after": "a2607eb335710e0a2226c224b9f37c01e8e376a32657b93a35cf9e2788d23c74"
     },
     {
       "path": "core/dewiar-cli.cmd",

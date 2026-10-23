@@ -199,6 +199,18 @@ class WatchTests(unittest.TestCase):
         self.assertEqual(len(self.ledger.snapshot()["events"]), 2)
         self.assertNotIn(b"secret", self.path.read_bytes())
 
+    def test_quota_event_contains_only_bounded_numbers_and_hashed_task(self):
+        secret = "PRIVATE-SYNTHETIC-TASK"
+        self.ledger.quota({"id": secret, "goal": secret}, 5, 10)
+        event = self.ledger.snapshot()["events"][0]
+        self.assertEqual(event["kind"], "task_quota_granted")
+        self.assertEqual((event["amount"], event["limit"]), (5, 10))
+        self.assertEqual(event["ref"], watch.tag(secret))
+        self.assertNotIn(secret.encode(), self.path.read_bytes())
+        before = self.path.read_bytes()
+        self.ledger.quota({"id": secret}, 21, 10)
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_threads_have_distinct_runs(self):
         def worker(n):
             with watch.call({"id": str(n)}, "chat"):

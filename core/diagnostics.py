@@ -19,7 +19,8 @@ ACTIONS = {"status", "brains", "journal", "sli"}
 ROLES = ("chat", "tasks", "auxiliary", "meeting", "diary")
 KINDS = {"openai", "ollama", "anthropic", "chatgpt_subscription"}
 TASK_STATES = {"queued", "running", "waiting", "paused", "sleeping", "done", "failed", "stopped"}
-EVENT_KINDS = {"call_start", "call_signal", "call_completed", "call_failed", "call_interrupted", "task_state"}
+EVENT_KINDS = {"call_start", "call_signal", "call_completed", "call_failed", "call_interrupted",
+               "task_state", "task_quota_granted"}
 TERMINAL = {"completed", "failed", "interrupted"}
 PERMISSIONS = ("export", "usage_reviewed", "history", "memory_read", "memory_write", "tasks",
                "project_read", "task_review", "task_learning", "auxiliary", "meeting", "diary")
@@ -141,6 +142,10 @@ def _journal(snapshot):
             steps = row.get("steps")
             event.update(state=_enum(row.get("state"), TASK_STATES),
                          steps=steps if type(steps) is int and 0 <= steps <= 1000000 else None)
+        elif kind == "task_quota_granted":
+            amount, limit = row.get("amount"), row.get("limit")
+            event.update(amount=amount if type(amount) is int and 1 <= amount <= 20 else None,
+                         limit=limit if type(limit) is int and 1 <= limit <= 100 else None)
         events.append(event)
     return {"events": events, "sample_limit": LIMIT, "invalid_records": invalid,
             "window": "latest_retained_events_not_full_history"}

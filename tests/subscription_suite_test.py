@@ -16,6 +16,7 @@ def main():
     tests = [ROOT / "tests" / "subscription_adapter_test.py",
              ROOT / "tests" / "subscription_routing_test.py",
              ROOT / "tests" / "subscription_context_test.py",
+             ROOT / "tests" / "subscription_quota_test.py",
              ROOT / "tests" / "subscription_install_test.py",
              ROOT / "tests" / "subscription_upgrade_test.py",
              ROOT / "tests" / "brain_watch_test.py",
@@ -28,11 +29,13 @@ def main():
     node = shutil.which("node")
     if not node:
         raise RuntimeError("Для проверок интерфейса требуется Node.js")
-    subprocess.run([node, "--test", str(ROOT / "tests" / "subscription.test.mjs"),
-                    str(ROOT / "tests" / "brains.test.mjs"),
-                    str(ROOT / "tests" / "fork_update_ui.test.mjs"),
-                    str(ROOT / "tests" / "subscription_confirm.test.mjs"),
-                    str(RUNTIME / "policy.test.mjs")], check=True, cwd=ROOT)
+    # Node на Windows объединяет несколько абсолютных UNC-путей в один шаблон.
+    # Отдельные относительные запуски одинаково работают с локальной и сетевой копией.
+    node_tests = ["tests/subscription.test.mjs", "tests/brains.test.mjs",
+                  "tests/fork_update_ui.test.mjs", "tests/subscription_confirm.test.mjs",
+                  "tests/task_quota_ui.test.mjs", "core/subscription_runtime/policy.test.mjs"]
+    for test in node_tests:
+        subprocess.run([node, "--test", test], check=True, cwd=ROOT)
     print("ALL OK")
 
 

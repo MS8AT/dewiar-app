@@ -178,6 +178,7 @@ class Task:
         self.answer_ev = threading.Event()
         self.answer = None
         self.thread = None
+        self.control_lock = threading.RLock()  # атомарные ручные переходы start/tell/stop/quota/delete
         self.beat = 0.0           # monotonic последнего признака жизни шага (кусок ответа модели, начало и конец инструмента)
         self.beat_tool = ""       # какой инструмент сейчас работает ("" — ждём модель)
         self.run_t0 = 0.0         # monotonic запуска потока — для весточек долгой задачи
@@ -230,6 +231,11 @@ class Task:
                 d["status_ru"] = "вернётся " + (f"в {w:%H:%M}" if w.date() == dt.date.today() else f"{w:%d.%m} в {w:%H:%M}")
             except ValueError:
                 pass
+        if d.get("subscription_binding"):
+            from subscription_quota import status as subscription_quota_status
+            quota = subscription_quota_status(self)
+            if quota is not None:
+                d["subscription_quota"] = quota
         return d
 
 
@@ -403,22 +409,23 @@ class TaskManager:
         wake — причина пробуждения (wait_reason): по ней _run решает, что сказать модели. Без wake (запустил человек
         или пришло сообщение) счёт кругов CYCLES начинается заново."""
         t = self.get(tid)
-        if t.thread and t.thread.is_alive():
-            return t
-        t.cancel.clear()
-        if wake:
-            t.data["wake_note"] = wake
-        else:
-            t.data["cycles"] = 0
-        t.data.pop("auto_resume", None)
-        t.data.update(status="running", error="", wake_at="", sleep_now=False)
-        for k in ("hung_told", "progress_told_at", "progress_told_sig"):
-            t.data.pop(k, None)
-        import time as _t
-        t.beat, t.beat_tool, t.run_t0 = _t.monotonic(), "", _t.monotonic()
-        t.save()
-        t.thread = threading.Thread(target=self._run, args=(t,), name=f"task-{t.id}", daemon=True)
-        t.thread.start()
+        with t.control_lock:
+            if t.thread and t.thread.is_alive():
+                return t
+            t.cancel.clear()
+            if wake:
+                t.data["wake_note"] = wake
+            else:
+                t.data["cycles"] = 0
+            t.data.pop("auto_resume", None)
+            t.data.update(status="running", error="", wake_at="", sleep_now=False)
+            for k in ("hung_told", "progress_told_at", "progress_told_sig"):
+                t.data.pop(k, None)
+            import time as _t
+            t.beat, t.beat_tool, t.run_t0 = _t.monotonic(), "", _t.monotonic()
+            t.save()
+            t.thread = threading.Thread(target=self._run, args=(t,), name=f"task-{t.id}", daemon=True)
+            t.thread.start()
         self._emit(t)
         return t
 
@@ -429,30 +436,32 @@ class TaskManager:
         if not text:
             raise ValueError("пустое сообщение")
         t = self.get(tid)
-        if t.status == "waiting" and t.thread and t.thread.is_alive():
-            return self.answer(t.id, text)
-        t.data.setdefault("inbox", []).append({"time": _now(), "text": text})
-        t.journal(f"💬 Пользователь: {text}")
-        t.save()
-        if not (t.thread and t.thread.is_alive()):
-            if t.status == "done":
-                t.data.update(finished=False, finish_checked=False, force_finish=False, verified=False, critic_done=False, refusal_nudged=False, tests_gate=0)
-                t.journal("↺ Новое сообщение после итога — продолжаю работу.")
-            self.start(t.id)
+        with t.control_lock:
+            if t.status == "waiting" and t.thread and t.thread.is_alive():
+                return self.answer(t.id, text)
+            t.data.setdefault("inbox", []).append({"time": _now(), "text": text})
+            t.journal(f"💬 Пользователь: {text}")
+            t.save()
+            if not (t.thread and t.thread.is_alive()):
+                if t.status == "done":
+                    t.data.update(finished=False, finish_checked=False, force_finish=False, verified=False, critic_done=False, refusal_nudged=False, tests_gate=0)
+                    t.journal("↺ Новое сообщение после итога — продолжаю работу.")
+                self.start(t.id)
         self._emit(t)
         return t
 
     def stop(self, tid):
         """Остановить: поток выйдет на ближайшей проверке cancel (ожидание ответа тоже прерывается)."""
         t = self.get(tid)
-        t.cancel.set()
-        t.answer_ev.set()
-        for c in self.tasks.values():                     # остановили задачу — и её части
-            if c.data.get("parent") == t.id and (c.status in ALIVE or c.status == "paused"):
-                self.stop(c.id)
-        if t.status in ALIVE or t.status == "paused":
-            t.data.update(status="stopped", wake_at="", auto_resume=False)
-            t.save()
+        with t.control_lock:
+            t.cancel.set()
+            t.answer_ev.set()
+            for c in self.tasks.values():                 # остановили задачу — и её части
+                if c.data.get("parent") == t.id and (c.status in ALIVE or c.status == "paused"):
+                    self.stop(c.id)
+            if t.status in ALIVE or t.status == "paused":
+                t.data.update(status="stopped", wake_at="", auto_resume=False)
+                t.save()
         self._emit(t)
         return t
 
@@ -476,13 +485,14 @@ class TaskManager:
     def delete(self, tid):
         """Остановить и удалить задачу вместе с папкой и рабочей копией (git worktree тоже убирается)."""
         t = self.get(tid)
-        self.stop(t.id)
-        c = t.code()
-        if c:
-            c.discard()
-        import shutil
-        shutil.rmtree(t.dir, ignore_errors=True)
-        self.tasks.pop(t.id, None)
+        with t.control_lock:
+            self.stop(t.id)
+            c = t.code()
+            if c:
+                c.discard()
+            import shutil
+            shutil.rmtree(t.dir, ignore_errors=True)
+            self.tasks.pop(t.id, None)
         self.host.emit("tasks", tasks=self.list())
 
     def accept(self, tid):

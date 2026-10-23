@@ -378,9 +378,12 @@ def run_task(manager, task, generate=None):
             raise ContextError("В настройках этого профиля Codex выключены фоновые задачи.")
         if bound and snapshot(bound) != sig:
             raise ContextError("Задача привязана к другому профилю или набору разрешений. Создайте новую задачу; автоматического переноса данных нет.")
-        limit = profile.get("subscription_task_limit", 5)
-        if type(limit) is not int or not 1 <= limit <= 20:
-            raise ContextError("Лимит Codex должен быть целым числом от 1 до 20 запросов на задачу.")
+        from subscription_quota import MAX_TOTAL, effective_limit, profile_limit
+        if profile_limit(profile) is None:
+            raise ContextError("Исходный лимит Codex должен быть целым числом от 1 до 20 запросов на задачу.")
+        limit = effective_limit(task, profile)
+        if type(limit) is not int or not 1 <= limit <= MAX_TOTAL:
+            raise ContextError("Лимит Codex должен быть целым числом от 1 до 100 запросов на задачу с учётом продлений.")
         used = task.data.get("subscription_attempts", 0)
         if type(used) is not int or used < 0 or used >= limit:
             raise ContextError("Лимит запросов Codex для этой задачи исчерпан. Автоматического сброса и повтора нет.")
