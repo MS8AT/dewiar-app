@@ -135,7 +135,7 @@
     {
       "path": "core/tasks.py",
       "before": "03462618d7005793b0c1c1fab1e4d03c15a58074955c25300f472fb38fc2b854",
-      "after": "ef6265c308606b38d91116908ec43af7bfac02ae92915f4e5f1251706106c600"
+      "after": "83f48ad7aa7d1065767a7edabe888c829459d377d4c0c2560506a5d52643ae16"
     },
     {
       "path": "ui/hud.html",
@@ -220,7 +220,12 @@
     {
       "path": "core/fork_update_policy.py",
       "before": null,
-      "after": "ad69627fc9a8fee636c24f1200c11cfe07b530e95926b59f8d5aa9477719f0e2"
+      "after": "32d7e28c152133611e6eac03cffc9d3f6020e7e8ea39bb982fee7e0ef0362b59"
+    },
+    {
+      "path": "core/task_doctor.py",
+      "before": null,
+      "after": "4935064be815898138b54ed50cda12aeea7fa4d7470df3fb55df5c689040191b"
     },
     {
       "path": "core/tts.py",

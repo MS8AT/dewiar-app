@@ -18,8 +18,9 @@ import uuid
 from pathlib import Path
 
 import quality as Q
+import task_doctor
 from codework import CodeError, CodeWork
-from llm import LLMError, stream_chat, stream_events, tool_turn_messages
+from llm import LLMError, ctx_full, stream_chat, stream_events, tool_turn_messages
 
 log = logging.getLogger("dewiar.tasks")
 
@@ -588,9 +589,14 @@ class TaskManager:
             log.info("Итог не перевёлся: %s", e)
             return text
 
-    def _system(self, t):
+    def _system(self, t, compact=False):
         """Подсказка модели на каждый шаг: задача, правила, блокнот, план, проект, память, уроки, навыки.
         Собирается заново каждый шаг — блокнот и план всегда свежие."""
+        if compact:
+            return task_doctor.compact_system(
+                persona=t.persona, title=t.title, goal=t.goal, notebook=t.notebook(), plan=t.plan(),
+                project=t.data.get("project") or "", task_dir=t.dir, parent=bool(t.data.get("parent")),
+                now=dt.datetime.now().strftime("%d.%m.%Y %H:%M"))
         code = t.code()
         now = dt.datetime.now()
         s = (f"Ты — {t.persona}, голосовой ассистент. Сейчас ты выполняешь задачу В ФОНЕ: пользователь занят своими "
@@ -802,7 +808,7 @@ class TaskManager:
                 log.info("Уроки задач не получились: %s", e)
         threading.Thread(target=run, name="task-reflect", daemon=True).start()
 
-    def _specs(self, t):
+    def _specs(self, t, compact=False):
         """Инструменты задачи: инструменты чата (кроме SKIP_IN_TASK) + TASK_TOOLS + WORK_TOOLS (+ CODE_TOOLS для проекта)."""
         specs = [s for s in self.host.toolbox.specs() if s["name"] not in SKIP_IN_TASK]
         specs += [{"name": n, "description": d, "parameters": p} for n, (d, p) in TASK_TOOLS.items()]
@@ -812,7 +818,7 @@ class TaskManager:
             specs += [{"name": n, "description": d, "parameters": p} for n, (d, p) in CODE_TOOLS.items()]
         if not t.data.get("parent"):                       # часть сама частей не раздаёт
             specs += [{"name": n, "description": d, "parameters": p} for n, (d, p) in PART_TOOLS.items()]
-        return specs
+        return task_doctor.compact_specs(specs, project=bool(t.data.get("project"))) if compact else specs
 
     def _coerce(self, t, name, args):
         """Привести аргументы к схеме инструмента (слабые модели шлют список вместо строки и т. п.), см. tools.coerce_args."""
@@ -1478,6 +1484,7 @@ class TaskManager:
             t.journal("▶ Продолжаю работу.")
         max_steps = self.host.max_steps()
         idle, acted, run_steps = 0, False, 0
+        doctor_mode = False                                  # после одного переполнения весь этот запуск идёт компактно
         guard = Q.LoopGuard()                                     # живёт один запуск потока
         self.__dict__.setdefault("_asks", {}).pop(t.id, None)    # отказы и вопросы без ответа — счёт заново на каждый запуск
         t.data.pop("pause_now", None)
@@ -1518,12 +1525,48 @@ class TaskManager:
                 text, calls = "", []
                 self._beat(t)
                 try:
-                    for kind, val in stream_events(prof, self._system(t), msgs, cancel=t.cancel, tools=self._specs(t)):
-                        self._beat(t)
-                        if kind == "tools":
-                            calls = val
-                        else:
-                            text += val
+                    normal_system = self._system(t, compact=doctor_mode)
+                    normal_specs = self._specs(t, compact=doctor_mode)
+                    try:
+                        events = stream_events(prof, normal_system, msgs, cancel=t.cancel, tools=normal_specs)
+                        for kind, val in events:
+                            self._beat(t)
+                            if kind == "tools":
+                                calls = val
+                            else:
+                                text += val
+                    except LLMError as e:
+                        if doctor_mode or not ctx_full(e):
+                            raise
+                        # llm.py уже попробовал убрать старую историю. Если этого мало, один раз сокращаем
+                        # системную подсказку и схемы инструментов; настройки модели и права не меняем.
+                        compact_system = self._system(t, compact=True)
+                        compact_specs = self._specs(t, compact=True)
+                        info = task_doctor.report(normal_system, normal_specs, compact_system, compact_specs)
+                        doctor_mode = True
+                        t.data["doctor"] = dict(info, context_repairs=int((t.data.get("doctor") or {}).get("context_repairs") or 0) + 1,
+                                                last_at=_now(), last_result="retrying")
+                        t.journal("🩺 AI-доктор: окно контекста переполнено. Сокращаю только служебную подсказку и набор "
+                                  f"инструментов ({info['system_chars_before']}→{info['system_chars_after']} знаков; "
+                                  f"{info['tools_before']}→{info['tools_after']} инструментов) и повторяю один раз.")
+                        t.save()
+                        self._emit(t)
+                        text, calls = "", []
+                        try:
+                            for kind, val in stream_events(prof, compact_system, msgs, cancel=t.cancel, tools=compact_specs):
+                                self._beat(t)
+                                if kind == "tools":
+                                    calls = val
+                                else:
+                                    text += val
+                        except LLMError as repaired:
+                            t.data["doctor"]["last_result"] = "failed"
+                            if ctx_full(repaired):
+                                raise LLMError("AI-доктор сократил подсказку и инструменты, но они всё ещё не помещаются в окно "
+                                               "контекста модели. Увеличьте Context Length или выберите модель с большим окном") from repaired
+                            raise
+                        t.data["doctor"]["last_result"] = "recovered"
+                        t.journal("✅ AI-доктор: компактный запрос принят моделью; задача продолжает работу в компактном режиме.")
                 except LLMError as e:
                     blanks = int(t.data.get("blank_replies") or 0)
                     if "без текста" not in str(e) or blanks >= 3:

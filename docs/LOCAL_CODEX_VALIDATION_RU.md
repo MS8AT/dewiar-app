@@ -8,13 +8,16 @@
 ## Интеграция upstream 0.40.0 — 23 октября 2026
 
 Официальный `upstream/main` обновлён до `0.40.0` (`0e5917a`), после чего overlay
-перепривязан к точной новой базе и поднят до fork build 13. Слияние прошло без
+перепривязан к точной новой базе и поднят до fork build 15. Слияние прошло без
 текстовых конфликтов; установленное приложение и аккаунты не затрагивались.
 
-- PASS: `verify_ms8at_overlay.py` и `ms8at_overlay_test.py` — 48 runtime-файлов,
+- PASS: `verify_ms8at_overlay.py` и `ms8at_overlay_test.py` — 49 runtime-файлов,
   exact upstream/version/build и SHA совпали; model calls 0.
-- PASS: `subscription_suite_test.py` — 224 Python + 49 Node.js проверки; install/upgrade
+- PASS: `subscription_suite_test.py` — 231 Python + 49 Node.js проверок; install/upgrade
   policy, release gate, brain routing, API/log/SLI, квоты и подтверждения Codex.
+- PASS: PATCH-013 — синтетический сервер дважды отклонил полный запрос как переполненный,
+  после чего один компактный повтор AI-доктора был принят; задача завершилась, диагноз
+  и безопасные размеры записались в журнал/API, модель и внешняя сеть не вызывались.
 - PASS: PATCH-007 — `RU → ENG → CH`, общая настройка для обычного чата и Codex,
   выбор локальных Piper-голосов; автономные тесты не загружали голоса и не вызывали модель.
 - PASS: PATCH-008 — Windows-путь из tool JSON восстановлен, `python3` использует

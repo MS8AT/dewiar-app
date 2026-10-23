@@ -18,5 +18,6 @@ write, publish, call a model, or install. / 每个补丁都是叠加在指定上
 | PATCH-007 | Язык ответа и голоса RU/ENG/CH / Response and voice language / 回答和语音语言 | [ТЗ и промпт](PATCH_007_LANGUAGE_VOICES.md) |
 | PATCH-008 | Команды задач Windows / Windows task commands / Windows 任务命令 | [ТЗ и промпт](PATCH_008_WINDOWS_TASK_COMMANDS.md) |
 | PATCH-009 | Локальные окна подтверждения / Local confirmation dialogs / 本地确认对话框 | [ТЗ и промпт](PATCH_009_CUSTOM_DIALOGS.md) |
+| PATCH-013 | AI-доктор переполнения контекста / Context overflow AI doctor / 上下文溢出 AI 医生 | [ТЗ и промпт](PATCH_013_TASK_CONTEXT_DOCTOR.md) |
 
 Шаблон для следующих изменений: [prompts/PATCH_PROMPT_TEMPLATE.md](../../prompts/PATCH_PROMPT_TEMPLATE.md).
