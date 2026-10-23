@@ -2444,6 +2444,13 @@ TOOLS = {
 NET_TOOLS = {"web_search", "weather", "read_webpage", "send_email", "read_emails", "read_email", "send_telegram", "close_send",
              "close_call", "close_read", "ask_knowledge", "play_radio", "smart_home", "show_images", "server_run", "app_update"}
 DEFAULT_OFF = set()          # команды терминала включены, но каждая — только после «Выполнить?»
+# «Только безопасное» (студия → «Безопасность», отзыв 18.10: «лучше чтоб пользователь мог выбрать, что можно делать, а не
+# что нельзя — разрешаю только калькулятор»): разговор, напоминания, заметки, деньги, поиск и чтение — ничего на компьютере
+# не трогают и ничего не отправляют от вашего имени. Остальное кнопка выключает; включить по одному — «Руки» → «Умения».
+SAFE_CORE = {"calc", "world_time", "weather", "web_search", "read_webpage", "show_images", "set_reminder", "list_reminders",
+             "cancel_reminder", "mark_done", "done_report", "save_note", "find_notes", "read_file", "remember", "write_diary",
+             "money_add", "money_report", "calendar_list", "app_help", "call_persona", "widget", "play_radio", "media_control",
+             "set_volume", "system_status", "task_status", "search_documents", "ask_knowledge"}
 
 
 # инструменты навыков (skills.py): есть, только когда навыки включены; выполняет Toolbox.run
@@ -2548,8 +2555,16 @@ class Toolbox:
 
     def catalog(self):
         """Список инструментов для студии (включён, нужно ли подтверждение)."""
-        return [{"name": n, "title": v[4], "description": v[0], "risk": v[2], "enabled": self.policy(n)[0],
-                 "confirm": self.policy(n)[1]} for n, v in TOOLS.items()]
+        en = ((self.s.get("tools") or {}).get("enabled") or {}) if getattr(self, "s", None) is not None else {}
+        out = []
+        for n, v in TOOLS.items():
+            on, conf = self.policy(n)
+            want = en.get(n, n not in DEFAULT_OFF)
+            # почему выключено: user — сами в студии; service — служба не подключена или замок/стоп-кран
+            off_by = "" if on else ("user" if not want else "service")
+            out.append({"name": n, "title": v[4], "description": v[0], "risk": v[2], "enabled": on, "confirm": conf,
+                        "off_by": off_by, "core": n in SAFE_CORE})
+        return out
 
     def guard(self, name, args):
         """Защита до вопроса «Выполнить?»: -> (причина запрета | None, подтверждение обязательно, текст вопроса | None).

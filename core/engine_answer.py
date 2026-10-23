@@ -357,7 +357,7 @@ class AnswerMixin:
                  "появляешься на имя; «покажись» — вернуть виджет; «отключись» — выйти из Dewiar совсем (включить снова — "
                  "Dewiar в меню приложений).")
         if with_tools:
-            base += self.skills.prompt()
+            base += self.skills.prompt_lean() if self.s.get("llm", "lean_prompt") else self.skills.prompt()
             base += self.toolbox.off_note()            # выключенные человеком умения — «выключено», а не «не умею»
             try:
                 import done as _done
@@ -454,6 +454,13 @@ class AnswerMixin:
             note = self.conv.turn_note()
         except Exception:  # noqa: BLE001
             note = ""
+        if self.s.get("llm", "lean_prompt") and text:      # короткая инструкция: описания навыков — к подходящему вопросу
+            try:
+                hint = self.skills.hint_for(text)
+            except Exception:  # noqa: BLE001
+                hint = ""
+            if hint:
+                out += " " + hint
         return out + (" " + note if note else "")
 
     # ---------- для фоновых задач (TaskManager.host) ----------

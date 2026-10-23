@@ -466,8 +466,8 @@ def run_tests(folder, extra=None):
 class Core:
     """Ядро Dewiar в режиме сервера во временных папках; команды и события — по WebSocket, как у студии."""
 
-    def __init__(self, profile, tmp, log=print):
-        self.profile, self.tmp, self.log = profile, Path(tmp), log
+    def __init__(self, profile, tmp, log=print, lean=False):
+        self.profile, self.tmp, self.log, self.lean = profile, Path(tmp), log, bool(lean)
         self.port = _free_port()
         self.proc = None
         self.ws = None
@@ -488,7 +488,7 @@ class Core:
             # и «дни рождения Ани и Пети» оказались в «Обо мне» настоящего человека)
             "sync": {"enabled": False},
             "tasks": {"auto_run": True, "self_check": True},
-            "llm": {"active": "exam", "profiles": {"exam": self.profile}}}, ensure_ascii=False), encoding="utf-8")
+            "llm": {"active": "exam", "profiles": {"exam": self.profile}, "lean_prompt": self.lean}}, ensure_ascii=False), encoding="utf-8")
         env = dict(os.environ, DEWIAR_CONFIG_DIR=str(cfg), DEWIAR_STATE_DIR=str(st), DEWIAR_WORKSPACE_DIR=str(ws),
                    DEWIAR_PORT=str(self.port), DEWIAR_ASSUME_AEC="1")
         env.pop("DEWIAR_PROMPTER_WAV", None)
@@ -1085,12 +1085,12 @@ def markdown(rep):
     return "\n".join(lines) + "\n"
 
 
-async def run_exam(profile, judge_prof=None, only=None, long=False, log=print, keep=None):
+async def run_exam(profile, judge_prof=None, only=None, long=False, log=print, keep=None, lean=False):
     from version import VERSION
     data = json.loads(SCEN.read_text(encoding="utf-8"))
     scs = [s for s in data["scenarios"] if (not only or s["id"] in only) and (long or not s.get("long") or (only and s["id"] in only))]
     tmp = Path(keep) if keep else Path(tempfile.mkdtemp(prefix="dewiar-exam-"))
-    core = Core(profile, tmp / "core", log)
+    core = Core(profile, tmp / "core", log, lean=lean)
     started = dt.datetime.now()
     log(f"Экзамен Dewiar {VERSION}: {len(scs)} сценариев, модель {profile.get('title') or profile.get('model')}")
     results = []
@@ -1108,7 +1108,9 @@ async def run_exam(profile, judge_prof=None, only=None, long=False, log=print, k
         if not keep:
             shutil.rmtree(tmp, ignore_errors=True)
     rep = {"version": VERSION, "started": started.isoformat(timespec="seconds"), "duration_s": round((dt.datetime.now() - started).total_seconds()),
-           "model": profile.get("title") or profile.get("model") or "?", "host": platform.node()[:40],
+           # проба короткой инструкции — в подписи модели: в кабинете и отчёте сразу видно, какой прогон с чем сравнивать
+           "model": (profile.get("title") or profile.get("model") or "?") + (" · короткая инструкция" if lean else ""), "lean": bool(lean),
+           "host": platform.node()[:40],
            "os": f"{platform.system()} {platform.release()}"[:60], "long": bool(long), "scenarios": results}
     rep["summary"] = summary(results)
     return rep
@@ -1141,6 +1143,7 @@ def main():
     ap.add_argument("--out", default=".", help="куда положить отчёт")
     ap.add_argument("--upload", action="store_true", help="отправить отчёт в кабинет (тем же ключом)")
     ap.add_argument("--keep", help="папка для временных файлов ядра (не удалять — для разбора)")
+    ap.add_argument("--lean", action="store_true", help="короткая инструкция модели (llm.lean_prompt) — проба")
     ap.add_argument("--json-out", help="записать отчёт JSON (с md) ещё и в этот файл — так его забирает исполнитель")
     a = ap.parse_args()
     env_llm = os.environ.get("DEWIAR_EXAM_LLM")           # исполнитель на сервере: профиль с доверенностью — не в командной строке
@@ -1158,7 +1161,7 @@ def main():
     else:
         ap.error("нужен --key или --llm")
     jp = json.loads(a.judge) if a.judge else None
-    rep = asyncio.run(run_exam(prof, jp, set(a.only.split(",")) if a.only else None, a.long, keep=a.keep,
+    rep = asyncio.run(run_exam(prof, jp, set(a.only.split(",")) if a.only else None, a.long, keep=a.keep, lean=a.lean,
                                log=lambda t: print(t, flush=True)))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)

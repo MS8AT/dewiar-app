@@ -46,7 +46,7 @@ def descriptor(path=OVERLAY):
     upstream = data.get("upstream")
     fork = data.get("fork")
     if (not isinstance(upstream, dict) or set(upstream) != {"version", "commit"}
-            or not re.fullmatch(r"0[.]39[.]\d+", upstream.get("version", ""))
+            or not re.fullmatch(r"0[.]\d+[.]\d+", upstream.get("version", ""))
             or not re.fullmatch(r"[a-f0-9]{40}", upstream.get("commit", ""))
             or not isinstance(fork, dict) or set(fork) != {"build"}
             or type(fork.get("build")) is not int or fork["build"] < 1):

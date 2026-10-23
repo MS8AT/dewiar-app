@@ -5,7 +5,7 @@
 Состояние доступно API/интерфейсу; никакой фоновой задачи этот модуль не создаёт.
 """
 PRODUCT = "MS8AT8DWiar"
-BUILD = 11
+BUILD = 12
 REQUIRED_FEATURES = ("codex_local", "codex_task_quota_grants", "brain_routes", "brain_watch", "diagnostics_v1",
                      "task_observability_v1", "codex_task_delegation_v1", "human_memory_mcp_v1",
                      "codex_confirmation_recovery_v1", "language_voice_switch_v1", "windows_task_commands_v1",

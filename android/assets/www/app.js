@@ -1957,9 +1957,12 @@ function chatHistory(hist, text) {
   for (let i = 0; i < msgs.length;) {
     if (owner[i] === me) { const m = msgs[i++]; push({ role: m.role, content: String(m.content) + (m.note ? "\n" + m.note : "") }); continue; }
     let j = i; const who = owner[i]; while (j < msgs.length && owner[j] === who) j++;
-    const name = (PERSONAS.find(p => p.id === who) || {}).name || "коллега";
-    const lines = msgs.slice(i, j).map(m => (m.role === "user" ? "Пользователь: " : name + ": ") + String(m.content).replace(/\s+/g, " ").slice(0, 400)).slice(-8);
-    push({ role: "user", team: true, content: `[До этого пользователь говорил не с тобой, а с коллегой по имени ${name}. Это для справки: не продолжай их тему и не отвечай за коллегу, пока пользователь сам тебя об этом не попросит.]\n` + lines.join("\n") });
+    const lastA = msgs.slice(i, j).reverse().find(m => m.role === "assistant") || {};
+    if (lastA.handoff === me) {                      // коллега передал слово — его разговор справкой; иначе не наш разговор
+      const name = (PERSONAS.find(p => p.id === who) || {}).name || "коллега";
+      const lines = msgs.slice(i, j).map(m => (m.role === "user" ? "Пользователь: " : name + ": ") + String(m.content).replace(/\s+/g, " ").slice(0, 400)).slice(-8);
+      push({ role: "user", team: true, content: `[До этого пользователь говорил не с тобой, а с коллегой по имени ${name} — и ${name} передал(а) слово тебе. Это для справки: не отвечай за коллегу, продолжай то, о чём тебя просят.]\n` + lines.join("\n") });
+    }
     i = j;
   }
   const lastT = out[out.length - 1];
@@ -2329,7 +2332,7 @@ async function ask(text, opts = {}) {
   } finally {
     if (turnAbort === ctl) { busy = false; turnAbort = null; }
   }
-  if (switchTo) afterSpeak = () => { S.persona = switchTo; saveS(); applyPersona(); ask("(Тебя позвали в разговор. Откликнись одной-двумя фразами от себя и продолжи то, о чём просил пользователь.)", { hidden: true }); };
+  if (switchTo) afterSpeak = () => { markHandoff(switchTo); S.persona = switchTo; saveS(); applyPersona(); ask("(Тебя позвали в разговор. Откликнись одной-двумя фразами от себя и продолжи то, о чём просил пользователь.)", { hidden: true }); };
   else if ((S.follow === "always" || (S.follow === "ask" && /\?\s*$/.test(sink.text()))) && (D.recognizer() || (S.stt.engine === "server" && S.stt.url)))
     afterSpeak = () => listen();
   if (sayLeft === 0 && state !== "listening") finishTurn();
@@ -2347,7 +2350,14 @@ function findPersona(word, exact) {
   const short = (n) => n.length === 3 && /[аяео]$/.test(n) && new RegExp("^" + n.slice(0, 2) + "(?:а|у|ы|е|и|ой|ою|ей|я|ю)$").test(w0);
   return PERSONAS.find(x => names(x).some(n => short(n) || (w0.startsWith(stem(n)) && w0.length - n.length <= 2))) || null;
 }
+/* Слово передали явно («позови Патрика», call_persona): последний ответ помечаем handoff — новому персонажу разговор
+   придёт справкой (chatHistory). Просто выбрали другого персонажа — пометки нет: у каждого свой разговор (как на
+   компьютере с 0.39.6; письмо пользователя 23.10: «при переключении они продолжали чужую тему»). */
+function markHandoff(to) {
+  for (let i = history.length - 1; i >= 0; i--) if (history[i] && history[i].role === "assistant") { history[i].handoff = to; saveH(); return; }
+}
 function switchPersona(id, question) {             // «позови Патрика» — без модели: переключаемся, и новый персонаж отвечает сам
+  markHandoff(id);
   S.persona = id; saveS(); applyPersona();
   ask(question || "(Тебя позвали в разговор. Откликнись одной-двумя фразами от себя и спроси, чем помочь.)", { hidden: !question });
 }
@@ -3172,7 +3182,7 @@ function toolSpecs() {
       parameters: O({ camera: { type: "string", enum: ["front", "back"] }, question: STR }) },
     { name: "set_volume", description: "Громкость: action up|down|set|mute|unmute, percent для set.", parameters: O({ action: { type: "string", enum: ["up", "down", "set", "mute", "unmute"] }, percent: NUM }, ["action"]) },
     { name: "battery", description: "Заряд батареи телефона.", parameters: O({}) },
-    { name: "save_note", description: "Записать заметку или список (title — коротко, text — содержимое).", parameters: O({ title: STR, text: STR }, ["title", "text"]) },
+    { name: "save_note", description: "Записать заметку или список (title — коротко, text — содержимое). folder — папка, только если её назвали («в папку Работа»).", parameters: O({ title: STR, text: STR, folder: STR }, ["title", "text"]) },
     { name: "find_notes", description: "Найти в заметках по словам.", parameters: O({ query: STR }, ["query"]) },
     { name: "recall", description: "Вспомнить, о чём говорили и что делали за последние дни (журнал разговоров на телефоне и сделанное): «что мы делали на этой неделе», «о чём я спрашивал вчера». days — за сколько дней (1–14), query — слова для поиска (можно пусто).", parameters: O({ days: NUM, query: STR }) },
     { name: "open_made", description: "Открыть на экране то, что ты уже сделал на телефоне (make_app: калькулятор, игра, страница): «покажи калькулятор», «где программа, которую ты сделал». title — часть названия; пусто — последнее.", parameters: O({ title: STR }) },
@@ -3377,8 +3387,9 @@ async function runTool(name, a) {
       if (turnAsk && !/запиш|записать|сохран|запомн|занеси|зафиксир|в\s+файл|конспект|(?:в|во)\s+заметк|заметк[уа](?![а-яё])|созда\w*\s+заметк|нов\w+\s+заметк|допиши|добавь\s+в/i.test(turnAsk))
         return "Записывать не нужно: пользователь не просил сохранять. Это не ошибка — ничего о записи и сбоях не говори, просто ответь на вопрос прямо в чате (список — пунктами в самом ответе).";
       const att = noteAttSave(turnAtt); turnAtt = [];             // фото и файлы этого хода — в заметку
-      const n = notes(); n.push(Object.assign({ id: "n" + Date.now(), title: a.title, text: a.text, time: Date.now() }, att.length ? { att } : {})); saveNotes(n);
-      return `Записано: «${a.title}»` + (att.length ? ` (вложений: ${att.length})` : "") + "."; }
+      const fold = folderName(a.folder);
+      const n = notes(); n.push(Object.assign({ id: "n" + Date.now(), title: a.title, text: a.text, time: Date.now() }, att.length ? { att } : {}, fold ? { folder: fold } : {})); saveNotes(n);
+      return `Записано: «${a.title}»` + (fold ? ` в папку «${fold}»` : "") + (att.length ? ` (вложений: ${att.length})` : "") + "."; }
     case "recall": return recall(a.days, a.query);
     case "open_made": {
       const l = apps(), q = String(a.title || "").toLowerCase().trim();
@@ -3785,20 +3796,37 @@ function ideaNote(text, att) {
   plog("info", "💡 идея без модели: " + clip(title, 60));
   return `${persona().gender === "female" ? "Записала" : "Записал"} в «Идеи».`;
 }
+/* Папки заметок (№195, 22.10: «было бы удобно, если бы в заметках был функционал создания папок, особенно в мобильной
+   версии»). Папка — поле folder заметки: с компьютера оно приходит путём («Заметки/Работа/…»), отсюда уходит туда же —
+   компьютер переносит файл в эту папку (core/sync.py). Одна ступень: «Работа», «Блокнот», «Идеи». */
+let ntFolder = "";                               // фильтр «Заметок»: "" — все
+function noteFolders() {
+  const set = new Set(notes().map(x => String(x.folder || "").trim()).filter(Boolean));
+  return [...set].sort((a, b) => (a === "Блокнот" ? -1 : b === "Блокнот" ? 1 : a.localeCompare(b, "ru")));
+}
+function folderName(raw) {
+  let f = String(raw || "").replace(/[\\/:*?"<>|«»]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 40);
+  if (!f) return "";
+  const same = noteFolders().find(x => x.toLowerCase() === f.toLowerCase() || (f.length >= 5 && x.toLowerCase().slice(0, 5) === f.toLowerCase().slice(0, 5)));
+  return same || f.charAt(0).toUpperCase() + f.slice(1);     // «в папку работу» → уже есть «Работа»
+}
+const NOTE_FOLDER_RX = /^(?:запиши|запишите|сохрани|добавь|занеси|положи)(?:\s+(?:мне|себе|пожалуйста))*\s+(?:в\s+)?(?:заметк[уи]\s+)?(?:в\s+)?папк[уеи]\s+«?([^:«»"\n]{1,40}?)»?\s*[:,—–-]\s*(\S[\s\S]{2,})$/i;
 function noteQuick(text, att) {
   const t = String(text || "").trim().replace(/^[А-ЯЁA-Z][а-яёa-z-]+\s*,\s*(?=\S)/, (m) => findPersona(m.replace(/[\s,]/g, ""), true) ? "" : m);
-  const m = NOTE_RX.exec(t); if (!m) return "";
+  const mf = NOTE_FOLDER_RX.exec(t);
+  const m = mf ? [mf[0], mf[2]] : NOTE_RX.exec(t); if (!m) return "";
+  const folder = mf ? folderName(mf[1]) : "";
   let body = m[1].trim().replace(/^[«"]|[»"]$/g, "");
   if (!/[а-яёa-z0-9]/i.test(body) || /^(?:что|как|где|сколько|покажи|прочитай)(?:\s|$)/i.test(body)) return "";   // «в заметках что?» — не запись
   body = body.charAt(0).toUpperCase() + body.slice(1);
   const words = body.replace(/[.!?…].*$/s, "").split(/\s+/), title = words.slice(0, 6).join(" ").replace(/[,:;—–-]+$/, "") + (words.length > 6 ? "…" : "");
   const files = noteAttSave(att || []); turnAtt = [];
-  const n = notes(); n.push(Object.assign({ id: "n" + Date.now(), title, text: body, time: Date.now() }, files.length ? { att: files } : {})); saveNotes(n);
-  plog("info", "📝 заметка без модели: " + clip(title, 60) + (files.length ? ` + вложений ${files.length}` : ""));
+  const n = notes(); n.push(Object.assign({ id: "n" + Date.now(), title, text: body, time: Date.now() }, files.length ? { att: files } : {}, folder ? { folder } : {})); saveNotes(n);
+  plog("info", "📝 заметка без модели: " + clip(title, 60) + (folder ? ` → папка «${folder}»` : "") + (files.length ? ` + вложений ${files.length}` : ""));
   if (SANDBOX) SANDBOX.dev.push({ name: "save_note", args: title, t: Date.now() });      // экзамен: действие видно, как фонарик
   // без пересказа: название обрезано («…»), и вслух это звучало как оборванная фраза (отзыв 11.10)
   const pics = files.filter(f => f.type === "image").length;
-  return `${persona().gender === "female" ? "Записала" : "Записал"} в заметки` + (!files.length ? "." : files.length === 1 ? (pics ? " вместе с фото." : " вместе с файлом.") : ` — вложений: ${files.length}.`);
+  return `${persona().gender === "female" ? "Записала" : "Записал"} ${folder ? `в папку «${folder}»` : "в заметки"}` + (!files.length ? "." : files.length === 1 ? (pics ? " вместе с фото." : " вместе с файлом.") : ` — вложений: ${files.length}.`);
 }
 /* Напоминание с вложениями (идея 16.10: «на завтра напоминание, и чтобы там пара скриншотов, и удобно сразу посмотреть»):
    «напомни завтра в 10» + фото (скрепка или «Поделиться» из галереи) — заметка «Напоминания» с этими фото и напоминание
@@ -3882,6 +3910,7 @@ function renderNote() {
   $("#nt-h").textContent = n ? "Заметка" : "Новая заметка";
   $("#note-body").innerHTML = `<input id="nt-title" placeholder="Заголовок" maxlength="120" value="${esc(n ? n.title : "")}">
     <textarea id="nt-text" placeholder="Текст заметки…">${esc(n ? noteShown(n.text) : "")}</textarea>
+    <label class="ntfold"><span>Папка</span><input id="nt-folder" list="nt-folders" placeholder="без папки" maxlength="40" value="${esc(n ? n.folder || "" : ntFolder)}"><datalist id="nt-folders">${noteFolders().map(f => `<option value="${esc(f)}">`).join("")}</datalist></label>
     <div class="ntatt">${att.map(a => a.type === "image" ? `<button class="ntimg" data-id="${esc(a.id)}"><img src="${a.data || noteAttGet(a.id)}" alt="${esc(a.name)}"></button>`
       : `<button class="ntf" data-id="${esc(a.id)}">📎 ${esc(a.name)}<small>${fsize(a.size)}</small></button>`).join("")}</div>
     <div class="ntadd"><label class="btn"><input type="file" id="nt-photo" accept="image/*" multiple hidden>Добавить фото</label><label class="btn"><input type="file" id="nt-file" multiple hidden>Добавить файл</label></div>
@@ -3900,16 +3929,16 @@ function renderNote() {
     }
     keepTyped(); renderNote(); restoreTyped();
   };
-  let typed = null; const keepTyped = () => { typed = { t: $("#nt-title").value, x: $("#nt-text").value }; };
-  const restoreTyped = () => { if (typed) { $("#nt-title").value = typed.t; $("#nt-text").value = typed.x; } };
+  let typed = null; const keepTyped = () => { typed = { t: $("#nt-title").value, x: $("#nt-text").value, f: $("#nt-folder").value }; };
+  const restoreTyped = () => { if (typed) { $("#nt-title").value = typed.t; $("#nt-text").value = typed.x; $("#nt-folder").value = typed.f; } };
   $("#nt-photo").onchange = (e) => add(e.target.files, true);
   $("#nt-file").onchange = (e) => add(e.target.files, false);
   $("#nt-save").onclick = () => {
     const title = $("#nt-title").value.trim(), text = $("#nt-text").value.trim();
     if (!title && !text && !notePend.length) { toast("Пустая заметка"); return; }
-    const all = notes(), t0 = title || text.split(/\n/)[0].slice(0, 60) || "Фото";
-    if (n) { const x = all.find(y => y.id === n.id), ln = noteLinks(x && x.text); if (x) { x.title = t0; x.text = text + (ln.length ? "\n\n" + ln.join("\n") : ""); x.time = Date.now(); } }
-    else all.push(Object.assign({ id: "n" + Date.now(), title: t0, text, time: Date.now() }, notePend.length ? { att: noteAttSave(notePend.map(p => p.src)) } : {}));
+    const all = notes(), t0 = title || text.split(/\n/)[0].slice(0, 60) || "Фото", fold = folderName($("#nt-folder").value);
+    if (n) { const x = all.find(y => y.id === n.id), ln = noteLinks(x && x.text); if (x) { x.title = t0; x.text = text + (ln.length ? "\n\n" + ln.join("\n") : ""); x.time = Date.now(); x.folder = fold; } }
+    else all.push(Object.assign({ id: "n" + Date.now(), title: t0, text, time: Date.now() }, notePend.length ? { att: noteAttSave(notePend.map(p => p.src)) } : {}, fold ? { folder: fold } : {}));
     notePend = []; saveNotes(all); closeSheets(); renderDay(); openSheet("#sh-day"); toast("Заметка сохранена");
   };
   if (n) {
@@ -4173,12 +4202,17 @@ function renderDay() {
     const f = $("#done-add", box);
     f.onsubmit = (e) => { e.preventDefault(); const t = $("input", f).value.trim(); if (!t) { $("input", f).focus(); return; } markDone([t], "tap"); renderDay(); };
   } else if (dayTab === "notes") {
-    const n = notes().slice().sort((a, b) => (+b.time || 0) - (+a.time || 0));          // новые сверху — и с компьютера тоже
-    box.innerHTML = `<button class="btn p ntnew" id="nt-new">Новая заметка</button>` + (n.length ? n.map(x => {
+    const folds = noteFolders(); if (ntFolder && !folds.includes(ntFolder)) ntFolder = "";
+    const n = notes().filter(x => !ntFolder || String(x.folder || "").trim() === ntFolder).sort((a, b) => (+b.time || 0) - (+a.time || 0));   // новые сверху — и с компьютера тоже
+    const chips = folds.length ? `<div class="ntfolds" role="tablist" aria-label="Папки">${["", ...folds].map(f => `<button role="tab" data-f="${esc(f)}" class="${f === ntFolder ? "on" : ""}" aria-selected="${f === ntFolder}">${f ? esc(f) : "Все"}</button>`).join("")}</div>` : "";
+    box.innerHTML = `<button class="btn p ntnew" id="nt-new">Новая заметка</button>` + chips + (n.length ? n.map(x => {
       const img = (x.att || []).find(a => a.type === "image"), more = (x.att || []).length;
-      return `<div class="it note" data-id="${esc(x.id)}">${img ? `<img class="nthumb" src="${noteAttGet(img.id)}" alt="">` : ""}<div class="bd"><b>${esc(x.title)}${more ? `<span class="ntc">📎${more}</span>` : ""}</b><small>${esc(noteShown(x.text).slice(0, 220))}</small></div></div>`; }).join("")
+      // папка заметки с компьютера (№216: вкладки блокнота у виджета приходят заметками — «Главное» без пометки не узнать)
+      const fold = x.folder && !ntFolder ? `<span class="ntf">${esc(x.folder.split("/").pop())}</span>` : "";
+      return `<div class="it note" data-id="${esc(x.id)}">${img ? `<img class="nthumb" src="${noteAttGet(img.id)}" alt="">` : ""}<div class="bd"><b>${esc(x.title)}${more ? `<span class="ntc">📎${more}</span>` : ""}${fold}</b><small>${esc(noteShown(x.text).slice(0, 220))}</small></div></div>`; }).join("")
       : `<div class="empty">Заметок нет.<br>Скажите: «запиши в заметки: купить хлеб и молоко» — или нажмите «Новая заметка».</div>`);
     $("#nt-new").onclick = () => openNote("");
+    $$(".ntfolds button", box).forEach(b => b.onclick = () => { ntFolder = b.dataset.f; renderDay(); });
     $$(".it.note", box).forEach(el => el.onclick = () => openNote(el.dataset.id));
   } else if (dayTab === "made") {
     const l = apps().slice().reverse();
@@ -6305,12 +6339,15 @@ function wizard(kind) {
     $("#w-go").onclick = go; $("#w-pass").onkeydown = (e) => { if (e.key === "Enter") go(); };
     setTimeout(() => $("#w-login").focus(), 200);
   } else if (kind === "join") {
-    w.innerHTML = `<div class="card"><b>Подключить бесплатно</b><p class="hint" style="margin:4px 0 8px">Без регистрации: напишите, как к вам обращаться и как связаться. Обычно всё подключается сразу; если заявку проверяют вручную — я сама скажу, когда готово. На счёте будет подарок, чтобы попробовать.</p>
+    // №216: на втором устройстве — не новая заявка (второй ключ — и ни заметок, ни блокнота друг у друга), а код
+    w.innerHTML = `<div class="card have"><b>Dewiar уже есть на компьютере или другом телефоне?</b><p class="hint" style="margin:4px 0 10px">Не отправляйте новую заявку — введите код с того устройства: память, заметки, блокнот и счёт будут общими. Код там: «Мозг» → «Добавить устройство».</p><button class="btn w" id="w-have">Ввести код</button></div>
+      <div class="card"><b>Подключить бесплатно</b><p class="hint" style="margin:4px 0 8px">Без регистрации: напишите, как к вам обращаться и как связаться. Обычно всё подключается сразу; если заявку проверяют вручную — я сама скажу, когда готово. На счёте будет подарок, чтобы попробовать.</p>
       <label class="f"><span>Как к вам обращаться</span><input id="w-name" autocomplete="name"></label>
       <label class="f"><span>Как связаться: почта, Telegram или телефон</span><input id="w-contact" autocapitalize="off" spellcheck="false" placeholder="@ник или почта"></label>
       <label class="f"><span>Пара слов, зачем (необязательно)</span><input id="w-note" placeholder="например: попробовать помощника"></label>
       <button class="btn p w" id="w-go">Подключить</button><div class="res" id="w-res"></div>
       <p class="hint">Потом так же подключатся компьютер и другие телефоны — кодом из 6 цифр, данные и счёт будут общими.</p></div>`;
+    $("#w-have").onclick = () => openBrain("dwkey");
     $("#w-go").onclick = async () => { const r = $("#w-res"); r.className = "res"; r.textContent = "отправляю…"; $("#w-go").disabled = true;
       try { const d = await joinSend($("#w-name").value, $("#w-contact").value, $("#w-note").value);
         r.className = "res ok"; r.textContent = d.text || "Заявка отправлена."; if (d.key) setTimeout(renderSettings, 1400); else setTimeout(renderSettings, 2500); }
@@ -7779,7 +7816,7 @@ setInterval(() => { if (!document.hidden) welcomeSeen(); }, 60000);     // по�
     if (S.join) { showBot(gfix(`Привет! Я ${persona().name}. Заявка отправлена — как только её одобрят, я подключусь сама и скажу. Обычно это быстро.`)); setTimeout(() => joinPoll(false).catch(() => {}), 2500); }
     else showBot(gfix(`Привет! Я ${persona().name}. Чтобы мы могли поговорить, меня нужно один раз подключить — это бесплатно и займёт минуту.`));
     showCard(S.join ? `<div class="row2"><button class="btn p" onclick="joinPoll(true).then(d => d && !d.key && toast((d && d.text) || 'Пока ждёт проверки')).catch(e => toast(e.message))" style="flex:1">Проверить</button><button class="btn" onclick="openBrain()" style="flex:1">Другие способы</button></div>`
-      : `<div class="start"><button class="btn p w" onclick="openBrain('join')">Подключить бесплатно</button><button class="btn w" onclick="openBrain()">У меня есть код или свой ключ</button></div>`); }
+      : `<div class="start"><button class="btn p w" onclick="openBrain('join')">Подключить бесплатно</button><button class="btn w" onclick="openBrain('dwkey')">Dewiar уже есть на компьютере — ввести код</button><button class="btn w ghost" onclick="openBrain()">Свой ключ или своя модель</button></div>`); }
   // последний ответ — только свежий (до 20 минут): старый («С возвращением. В 15:00 встреча…» с утра) после каждого
   // запуска и обновления выглядел как новое сообщение (отчёты №52, №53). Он в истории разговора — там его и видно.
   else if (last && last.t && Date.now() - last.t < 20 * 60e3) showBot(last.content.slice(0, 400));

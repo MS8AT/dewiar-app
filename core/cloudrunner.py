@@ -184,6 +184,8 @@ class ExamJob(threading.Thread):
         args = [str(py), str(Path(__file__).resolve().parent / "exam.py"), "--out", str(out), "--json-out", str(rep_f)]
         if j.get("long"):
             args.append("--long")
+        if j.get("lean"):                       # проба короткой инструкции (кабинет → «Экзамен» → галочка)
+            args.append("--lean")
         if j.get("only"):
             args += ["--only", ",".join(j["only"])]
         self.post("running", note="Экзамен идёт")

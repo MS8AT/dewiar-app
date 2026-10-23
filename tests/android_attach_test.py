@@ -64,7 +64,8 @@ try:
 
         # первый запуск: одна главная кнопка — бесплатно; остальное — второй кнопкой
         first = pg.evaluate("() => [...document.querySelectorAll('#card .start button')].map(b => b.textContent)")
-        ok(first == ["Подключить бесплатно", "У меня есть код или свой ключ"], f"первый запуск — понятные кнопки: {first}")
+        # 23.10 (№216): второе устройство — код, а не вторая заявка
+        ok(first == ["Подключить бесплатно", "Dewiar уже есть на компьютере — ввести код", "Свой ключ или своя модель"], f"первый запуск — понятные кнопки: {first}")
         ok("подключить" in pg.evaluate("document.querySelector('#bot').textContent") and "Ollama" not in pg.content().split('id="sheet')[0],
            "приветствие простыми словами, без названий моделей")
         pg.evaluate("openBrain()"); pg.wait_for_timeout(400)

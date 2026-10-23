@@ -537,3 +537,7 @@ document.addEventListener("click", (e) => {
   $('nav button[data-p="brain"]').click();
   setTimeout(() => { const t = $('#wz [data-w="dwkey"]'); if (t) { t.click(); t.scrollIntoView({ block: "center", behavior: "smooth" }); } }, 80);
 });
+
+/* «Dewiar уже есть на другом устройстве?» (№216, 23.10: компьютер и телефон — каждый со своей заявкой «Подключить
+   бесплатно», два ключа — и ни заметок, ни блокнота друг у друга): не новая заявка, а код с того устройства */
+if ($("#dk-have-go")) $("#dk-have-go").onclick = () => { const k = $("#dk-key"); if (k) { k.scrollIntoView({ block: "center" }); k.focus(); } };

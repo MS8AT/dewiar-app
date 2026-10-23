@@ -900,6 +900,9 @@
 
     <div class="wpanel" id="w-dwkey">
       <h3>Модели Dewiar</h3>
+      <div class="dk-have" id="dk-have"><b>Dewiar уже есть на телефоне или другом компьютере?</b>
+        <span>Не отправляйте новую заявку — введите код с того устройства: тогда память, заметки, блокнот и счёт будут общими. Код там: «Мозг» → «Добавить устройство».</span>
+        <button class="btn small" id="dk-have-go">Ввести код</button></div>
       <div class="dk-join" id="dk-join" style="margin-bottom:14px">
         <p class="hint" style="margin:0 0 8px"><b>Попробовать без регистрации.</b> Напишите, как к вам обращаться и как связаться — как только заявку одобрят,
           всё подключится само, с подарком на счёте; если заявку проверяют вручную — придёт чуть позже. На другие устройства ключ переносится кодом из 6 цифр.</p>
@@ -992,6 +995,7 @@
       <div class="chips" id="presets" style="margin-top:10px"></div>
     </details>
     <div class="switch"><div>Думать над сложными просьбами<span>Стихи, расчёты, анализ, планы, код — модель сначала обдумывает ответ: дольше, зато лучше. Простые вопросы — как раньше, сразу.</span></div><label class="tg"><input type="checkbox" data-k="llm.think_auto"><i></i></label></div>
+    <div class="switch"><div>Короткая инструкция для модели — проба<span>Описания навыков (около четверти инструкции) идут не к каждому вопросу, а только к подходящему. Своей модели на компьютере — меньше читать перед каждым ответом. Включите, прогоните экзамен и сравните оценки и время с выключенным.</span></div><label class="tg"><input type="checkbox" data-k="llm.lean_prompt"><i></i></label></div>
     <h2>Память разговора</h2>
     <div class="row">
       <label class="f">Последних реплик — дословно (раньше — кратко)<input type="number" min="0" max="50" data-k="llm.history_turns"></label>
@@ -1284,6 +1288,12 @@
         <h3>Замки</h3><p class="hint">Что ассистенту можно трогать на этом компьютере.</p>
         <div id="sf-locks"></div>
       </div>
+    </div>
+    <div class="prof on sfcard" id="sf-rights-card">
+      <h3>Что ассистент делает сам, а что — только с вашего «да»</h3><p class="hint">По вашим настройкам сейчас. Чего он не сделает никогда — внизу страницы.</p>
+      <div id="sf-rights"></div>
+      <div class="actions sfr-acts"><button class="btn" id="sfr-safe">Только безопасное</button><button class="btn" id="sfr-all">Включить всё</button><button class="btn" id="sfr-one">Настроить по одному</button></div>
+      <p class="hint sfr-note" id="sfr-note" aria-live="polite"></p>
     </div>
     <div class="prof on sfcard">
       <h3>Что уходило наружу сегодня</h3><p class="hint">Каждое соединение из программы — куда и что это. Тексты разговоров, ключи и адреса страниц сюда не пишутся: только узел и вид. Пароли из сейфа наружу не уходят никогда.</p>

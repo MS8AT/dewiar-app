@@ -3,11 +3,11 @@
   "product": "MS8AT8DWiar",
   "overlay_id": "ms8at-dewiar-integrations",
   "upstream": {
-    "version": "0.39.8",
-    "commit": "62e7446e686dfd9d901e82dee72b5731f6d70829"
+    "version": "0.40.0",
+    "commit": "0e5917abf71e6d92a67b013c6fe5031f22a8af74"
   },
   "fork": {
-    "build": 11
+    "build": 12
   },
   "payload_manifest": "tools/local_codex_manifest.json",
   "integration_prompt": "integrations/ms8at/INTEGRATION_PROMPT_RU.md",
