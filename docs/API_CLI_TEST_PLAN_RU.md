@@ -60,5 +60,5 @@ PASS: `read_only=true`; ID хеширован; видны статус, шаги
 - PASS: три круга `status/brains/journal/sli`; события журнала не изменились.
 - PASS: T6; в сохранённой выборке 100 вызовов: 25 completed, 72 failed, 3 interrupted; `success_ratio=25/97`.
 - PASS: ответ `self_check` получен по корреляционному `id` после четырёх push-событий.
-- FIXED IN SOURCE: T7 выявил ложный FAIL «Мозга» для подписки; добавлена локальная проверка без inference.
+- PASS: T7 выявил ложный FAIL «Мозга» для подписки; в build 13 установлена и живым API подтверждена локальная проверка без inference.
 - NOT_RUN: T9; платный запрос и live Human Memory MCP не выполнялись.
