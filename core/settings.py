@@ -80,6 +80,7 @@ LLM_PRESETS = {
 DEFAULTS = {
     "brain_watch": {"journal": True, "stale_seconds": 90},
     "version": 1,
+    "language": "ru",              # язык ответа и голоса в HUD: ru | en | zh
     "persona": "lira",
     "all_names": True,              # отзываться на имя любого персонажа и переключаться на него
     "team": {"route": True,         # главный (Агент) сам передаёт вопрос специалисту: код — Кодеру, письмо — Лире…

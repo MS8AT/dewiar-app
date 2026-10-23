@@ -762,7 +762,18 @@ def parse_tool_call(raw):
         try:
             obj = json.loads(j.group(0))
         except ValueError:
-            obj = None
+            # Слабые модели часто возвращают абсолютный Windows-путь как C:\Users\...
+            # внутри JSON, не удваивая обратные слеши. Исправляем только строку,
+            # которая явно начинается с буквы диска; остальной JSON не трогаем.
+            def repair_path(match):
+                value = re.sub(r"\\+", lambda run: "\\" * (len(run.group(0)) + len(run.group(0)) % 2), match.group(1))
+                return '"' + value + '"'
+
+            repaired = re.sub(r'"([A-Za-z]:\\[^"\r\n]*)"', repair_path, j.group(0))
+            try:
+                obj = json.loads(repaired) if repaired != j.group(0) else None
+            except ValueError:
+                obj = None
     if isinstance(obj, dict):
         if m and j.start() > 0 and re.fullmatch(r"[A-Za-z_][\w.\-]*\s*", raw[:j.start()]):
             return {"name": m.group(1), "args": obj}       # f {"k": "v"} — имя впереди важнее ключей внутри

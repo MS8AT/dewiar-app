@@ -307,7 +307,9 @@ class RemoteMixin:
         same = [x["id"] for x in self.personas.all() if x.get("gender") == p.get("gender")
                 and (x.get("voice") or {}).get("prefer") != "piper"]
         slot = same.index(p["id"]) if p.get("id") in same else 0      # по порядку — разным персонажам разные голоса
-        return dict(p.get("voice") or {}, _gender=p.get("gender"), _pid=p.get("id"), _slot=slot)
+        from language_mode import voice_config
+        voice = dict(p.get("voice") or {}, _gender=p.get("gender"), _pid=p.get("id"), _slot=slot)
+        return voice_config(self.s.get("language"), voice)
 
     def _wait_vosk_tts(self, voice, limit=20.0):
         """Перед первой фразой ответа: если основной голос (Vosk TTS) уже скачан, но ещё загружается — подождать его
@@ -354,12 +356,15 @@ class RemoteMixin:
         voice = voice or self._voice_cfg()
         if eng in ("remote", "elevenlabs") and self.tts_remote:
             chain.append(self.tts_remote)
-        if eng == "vosk" and self.vosk_tts.ready and not self.vosk_tts.error and voice.get("prefer") != "piper":
+        language = voice.get("_language", "ru")
+        if eng == "vosk" and language == "ru" and self.vosk_tts.ready and not self.vosk_tts.error and voice.get("prefer") != "piper":
             return [self.vosk_tts]                 # голос персонажа один: Vosk не справился с фразой — пропуск, не Piper
         vid = voice.get("piper", "ru_RU-denis-medium")
         if eng in ("piper", "remote", "elevenlabs", "vosk") and self.piper.has(vid):
             chain.append(self.piper)
-        if self.espeak.available():
+        # Аварийные системные голоса здесь русские. Для ENG/CH лучше дождаться правильного
+        # локального Piper, чем произнести текст русским голосом.
+        if language == "ru" and self.espeak.available():
             chain.append(self.espeak)
         return chain
 
@@ -382,6 +387,12 @@ class RemoteMixin:
         №194: «произношение фраз на английском — жесть»: русский голос читал их русскими звуками). Голос сервера и
         ElevenLabs многоязычные — им как раньше. Английского голоса ещё нет — один раз скачиваем в фоне, а пока читаем
         по-русски. Частота — как у первого куска (иначе плеер перезапускался бы между кусками)."""
+        from language_mode import voice_config
+        voice = voice_config(self.s.get("language"), voice)
+        language = voice.get("_language", "ru")
+        if language != "ru":
+            yield from eng.synth(text, voice, sp)
+            return
         from tts import EN_VOICES, resample, split_en
         parts = split_en(text) if not isinstance(eng, RemoteTTS) and self.s.get("tts", "english") is not False else [("ru", text)]
         en_id = EN_VOICES["male" if voice.get("_gender") == "male" else "female"]
@@ -416,6 +427,31 @@ class RemoteMixin:
             except Exception as e:  # noqa: BLE001
                 log.info("🗣 Английский голос %s не скачался: %s", en_id, e)
         threading.Thread(target=run, name="en-voice", daemon=True).start()
+
+    def _language_voice_fetch(self, voice_id, language):
+        """Явно выбранный ENG/CH: подготовить соответствующий Piper, не обходя local_only."""
+        key = (language, voice_id)
+        if getattr(self, "_language_fetching", None) == key:
+            return
+        self._language_fetching = key
+        import egress
+        if egress.local_only():
+            self.note("Локальный режим запрещает загрузку голоса. Текстовый язык уже переключён.")
+            self._language_fetching = None
+            return
+        try:
+            if getattr(self.piper, "mirror", None) is None and hasattr(self, "_mirror"):
+                self.piper.mirror = self._mirror("piper")
+            self.piper.ensure(voice_id)
+            from language_mode import status_text
+            self.note(status_text(language, True))
+            log.info("🗣 Языковой голос %s готов", voice_id)
+        except Exception as e:  # noqa: BLE001
+            log.info("🗣 Языковой голос %s не скачался: %s", voice_id, e)
+            self.note("Не удалось подготовить выбранный голос. Текстовый язык сохранён; подробности — в журнале.")
+        finally:
+            if getattr(self, "_language_fetching", None) == key:
+                self._language_fetching = None
 
     def _fx_name(self, voice):
         """Обработка голоса: общая настройка «Голос → Эффекты» или своя у персонажа."""

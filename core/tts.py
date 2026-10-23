@@ -581,6 +581,10 @@ class RemoteTTS:
         if voice_cfg.get("_pid"):                         # служба голосов Dewiar даёт персонажу его собственный голос
             body["persona"] = voice_cfg["_pid"]
         body.update(c.get("extra") or {})
+        # Настройка сервера может содержать language=Russian по умолчанию. Явный
+        # переключатель HUD имеет приоритет для текущей фразы.
+        if voice_cfg.get("_language_name") and "language" in body:
+            body["language"] = voice_cfg["_language_name"]
         headers = {"Content-Type": "application/json"}
         if c.get("api_key"):
             headers["Authorization"] = f"Bearer {c['api_key']}"

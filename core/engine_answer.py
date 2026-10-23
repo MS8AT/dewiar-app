@@ -434,6 +434,9 @@ class AnswerMixin:
                 base += ("\n\nСЕРВЕРЫ пользователя (команды — server_run, по SSH): " + self.servers.names() +
                          ". Сначала диагностика (место, память, службы, логи), потом исправление; объясняй простыми "
                          "словами, что нашёл и что сделал.")
+        # Язык — последнее правило, чтобы память, душа или навык не могли незаметно вернуть другой язык.
+        from language_mode import prompt as language_prompt
+        base += "\n\nЯЗЫК ТЕКУЩЕГО ОТВЕТА / RESPONSE LANGUAGE / 当前回答语言:\n" + language_prompt(self.s.get("language"))
         return base
 
     def _turn_context(self, text=""):

@@ -3,9 +3,14 @@
   "upstream": "62e7446e686dfd9d901e82dee72b5731f6d70829",
   "files": [
     {
+      "path": "core/codework.py",
+      "before": "2dc256c90f2db9326888529a38a6903783c8c38450eb9cedb268ef12102cacb9",
+      "after": "fdc29e53fddd108d46f5bee9f78d2ad9e839a9fa0d6e8bf5e6f83a310fa12184"
+    },
+    {
       "path": "core/engine_answer.py",
       "before": "92f44d1f91fa83570323ab1294e987bbfc0abdc72a728afe60efad819473cd2b",
-      "after": "bf738b1b019eaacb408e8f216f15c7a7eaba379aa0d7ff8639cd92f6bfbc4a92"
+      "after": "f1ef3cf1f4da908a458fe5a121ac9c6c8a9b5a5942be030f2dea56a2b8a7adf6"
     },
     {
       "path": "core/engine_brain.py",
@@ -15,7 +20,12 @@
     {
       "path": "core/engine_commands.py",
       "before": "3ab5f9b5ec9c2d98b6ded0a585219df807a0c8cd6b910d632d63856933dc615b",
-      "after": "eb1ab009f9c39e5f0e81b49e2142aa4daea9464458639357475754f0c2fbc243"
+      "after": "011a2df9ecb2e02d7f068353d64c58b6b9f53dde235fcafb3bc6ad371c427f8b"
+    },
+    {
+      "path": "core/engine_remote.py",
+      "before": "d77d3b44615268189fe43d58ed743a47816ff84b0931d9a52ccc25da95e82fcf",
+      "after": "89afefa77b4e0934ebd35c030dd33075994409c4d23740291dc9f28a1b1c670b"
     },
     {
       "path": "core/engine_music.py",
@@ -33,9 +43,14 @@
       "after": "5de543a4cd9d8dc6e18e345becd24233a976505c0a01c14c45ae5f8bcf0e096a"
     },
     {
+      "path": "core/language_mode.py",
+      "before": null,
+      "after": "97b9015aebcc54ff9c3fdef8c12ae32f02e379c383742651829ed4555e6a08b4"
+    },
+    {
       "path": "core/llm.py",
       "before": "0adae36b2b09962769a4232d2ade73934d1ad6a14b5e71338ff919bf83f47431",
-      "after": "f063d461229f5ee5795e3bb3c55942706d3a35b220261675cdf1b7aab6f3485b"
+      "after": "7f34d4d417d792260b0fc28e92e17d3695f230cd032352829b36e9cd0815345a"
     },
     {
       "path": "core/night.py",
@@ -55,7 +70,7 @@
     {
       "path": "core/subscription_context.py",
       "before": null,
-      "after": "02a6dcd905dc945a93b18b6330d933fe032083256b4fda4fe3f747b7b934bf9f"
+      "after": "07dd7b51ecfceff93288f28328e6632f0e923a30ece185263c3975f7742b4cbf"
     },
     {
       "path": "core/subscription_quota.py",
@@ -125,7 +140,7 @@
     {
       "path": "ui/hud.html",
       "before": "aa48a9174cc990670b656b782e2f11689c2b440e1f6d855ed6618e28a77f2138",
-      "after": "60d96207115d87adab30fae80c69157a550be88804d8944f6aad74b75548c06d"
+      "after": "65a0fe7958f77561329e921820696acd4acfcbfaead08d4790f34bd838f484d1"
     },
     {
       "path": "ui/settings.html",
@@ -145,7 +160,7 @@
     {
       "path": "ui/studio/subscription.js",
       "before": null,
-      "after": "b44d940345787e35361a43ada0fae522adb01612e19bc93e33ea46ab834db826"
+      "after": "e9864d74df3069971ccd9cb5adfaa50a83b41f4f0ce1ac274c5233405c045a14"
     },
     {
       "path": "ui/studio/tasks.js",
@@ -170,7 +185,7 @@
     {
       "path": "core/settings.py",
       "before": "e88cf8e6c3660eecf6b57406a0050590908e212f11ed0ba5a2e9035b311e214d",
-      "after": "a15d54f22bc5abd0daf066465dde7a2e4681255afbb20544400230ab16d7b9fa"
+      "after": "2ac378455069731057b8898d3bf324f24043f27de45d6d171f31c5ceab9f8ba1"
     },
     {
       "path": "ui/studio/brains.js",
@@ -205,7 +220,12 @@
     {
       "path": "core/fork_update_policy.py",
       "before": null,
-      "after": "841306e4c3005d0ddbabcbbeaa16f75f7de4ebf02d2503754d95c425f8fcdbf7"
+      "after": "310f6c7fbf2116aedfba9e2e04f30e51d8a4b873690d521488b0352e9969dd02"
+    },
+    {
+      "path": "core/tts.py",
+      "before": "e2e33a989b3ca815a4fc9766a38a9d5b3bfc9a7039bfe6d84994e0299b395726",
+      "after": "c128f6be3892126d307a80008433f577960174a3f155df7de28bd8609566e990"
     },
     {
       "path": "core/task_observability.py",

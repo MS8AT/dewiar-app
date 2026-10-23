@@ -297,6 +297,7 @@
   .btn:hover, .btn:focus-visible { color: #fff; background: rgba(255,255,255,.1); outline: none; }
   .btn.on { color: #ff7a93; }
   .btn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  #b-lang { width: 34px; border-radius: 10px; font: 700 9px/1 "Manrope", sans-serif; letter-spacing: -.02em; }
   #b-voice .x { display: none; } #b-voice.on .x { display: inline; } #b-voice.on .w1 { display: none; }
   .sep { width: 1px; height: 16px; background: rgba(255,255,255,.1); margin: 0 3px; }
   #b-team { width: auto; padding: 0 4px 0 6px; gap: 1px; display: inline-flex; align-items: center; }
@@ -464,6 +465,7 @@
   <div id="bar">
     <button class="btn" id="b-mic" title="Выключить микрофон"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
     <button class="btn" id="b-voice" title="Отвечать только текстом"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
+    <button class="btn" id="b-lang" title="Язык ответа и голоса: русский">RU</button>
     <button class="btn" id="b-type" title="Написать вопрос"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
     <span class="sep"></span><button class="btn" id="b-team" title="Кто отвечает — выбрать персонажа"><i id="team-dot" class="gi"></i><svg class="chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button><span class="sep"></span>
     <button class="btn" id="b-cal" title="Календарь: дела, деньги, напоминания"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/></svg></button>
@@ -483,6 +485,18 @@
 <script src="assets/zoom.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
+const LANGS = [
+  { code: "ru", label: "RU", title: "Язык ответа и голоса: русский" },
+  { code: "en", label: "ENG", title: "Response and voice language: English" },
+  { code: "zh", label: "CH", title: "回答和语音语言：简体中文" }
+];
+let languageNow = "ru";
+function setLanguage(code) {
+  const item = LANGS.find(x => x.code === code) || LANGS[0];
+  languageNow = item.code;
+  $("b-lang").textContent = item.label;
+  $("b-lang").title = item.title;
+}
 // карточка сама непрозрачная — диск-подложка не нужен; портрет сдержанный (белый край), голос — лучами (ui.voice_fx)
 // voiceLevels: ядро шлёт уровень своего голоса, пока звук играет, — рот и лучи «говорят» только под звук, а не всё время
 // «speaking» (голос с сервера приходит через несколько секунд после начала ответа)
@@ -822,6 +836,14 @@ let textOnly = false;
 function setTextOnly(on) { textOnly = !!on; $("b-voice").classList.toggle("on", textOnly); $("b-voice").title = textOnly ? "Отвечать голосом" : "Отвечать только текстом"; }
 $("b-voice").onclick = guard($("b-voice"), () => core.call("settings_save", { patch: { tts: { text_only: !textOnly } } })
   .then(s => { setTextOnly(s.tts.text_only); showCap("", textOnly ? "Отвечаю только текстом — голос молчит." : "Снова отвечаю голосом."); hideCapLater(2500); }).catch(showErr));
+$("b-lang").onclick = guard($("b-lang"), () => {
+  const index = LANGS.findIndex(x => x.code === languageNow);
+  const next = LANGS[(index + 1) % LANGS.length];
+  return core.call("language_set", { code: next.code }).then(result => {
+    setLanguage((result || {}).code || next.code);
+    if (result && result.status) note(result.status);
+  }).catch(showErr);
+});
 /* ---------- таймеры: обратный отсчёт ---------- */
 let TMR = [], tmrTick = 0;
 const tmrAt = (x) => new Date(x.at).getTime(), tmrFrom = (x) => new Date(x.created || x.at).getTime();
@@ -859,6 +881,7 @@ core.on("hello", d => {
   tmrSet(d.reminders);
   applyLook(d.settings.ui);
   setLocal(d.settings.privacy && d.settings.privacy.local_only);
+  setLanguage(d.settings.language);
   personas = d.personas; muted = d.muted; $("b-mic").classList.toggle("on", muted); setTextOnly(d.settings.tts && d.settings.tts.text_only);
   applyPersona(d.persona); setRadio(d.radio); setState(d.state); note(d.status);
   if (!d.settings.llm.active && (d.settings.ui || {}).intro !== "") { showCap("", "Чтобы я могла отвечать, меня нужно один раз подключить — бесплатно: студия → «Мозг» → «Подключить бесплатно».", true); }
@@ -878,7 +901,7 @@ core.on("hello", d => {
   clearTimeout(window._turnT);                    // полоса дотаяла — надпись обычная, даже если ядро ещё не сказало «покой»
   window._turnT = setTimeout(() => { if (Date.now() >= turnUntil - 50) setState(state); }, (e.seconds || 0) * 1000 + 100);
 })
-.on("settings", e => { applyLook((e.settings || {}).ui); setLocal(((e.settings || {}).privacy || {}).local_only); })   // студия → «Оформление» и «Безопасность»
+.on("settings", e => { applyLook((e.settings || {}).ui); setLocal(((e.settings || {}).privacy || {}).local_only); setLanguage((e.settings || {}).language); })   // студия → «Оформление», «Безопасность» и язык
 .on("persona", e => applyPersona(e.persona))
 .on("personas", e => { personas = e.personas; applyPersona(current ? current.id : personas[0].id); })
 .on("level", e => entity.set({ level: e.v, voice: e.src === "voice" }))

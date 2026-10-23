@@ -7,7 +7,7 @@
     "commit": "62e7446e686dfd9d901e82dee72b5731f6d70829"
   },
   "fork": {
-    "build": 8
+    "build": 11
   },
   "payload_manifest": "tools/local_codex_manifest.json",
   "integration_prompt": "integrations/ms8at/INTEGRATION_PROMPT_RU.md",
@@ -33,6 +33,9 @@
     "codex_task_delegation_v1",
     "human_memory_mcp_v1",
     "codex_confirmation_recovery_v1",
+    "language_voice_switch_v1",
+    "windows_task_commands_v1",
+    "custom_dialogs_v1",
     "overlay_v1"
   ],
   "required_tests": [
@@ -48,6 +51,12 @@
     "tests/human_memory_contour_test.py",
     "tests/task_directory_safety_test.py",
     "tests/hud_subscription_confirm_test.py",
+    "tests/language_mode_test.py",
+    "tests/hud_language_test.py",
+    "tests/bare_calls_test.py",
+    "tests/tasks_test.py",
+    "tests/dialogs1021_test.py",
+    "tests/hold_dictation_test.py",
     "tests/ms8at_overlay_test.py"
   ],
   "update_policy": {

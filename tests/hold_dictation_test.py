@@ -220,25 +220,25 @@ with sync_playwright() as p:
     box = pg.locator("#orb").bounding_box(); cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
     # короткое нажатие — как раньше
     pg.mouse.move(cx, cy); pg.mouse.down(); pg.wait_for_timeout(120); pg.mouse.up(); pg.wait_for_timeout(200)
-    c1 = pg.evaluate("() => window.__calls.map(c => c[0])")
+    c1 = pg.evaluate("() => window.__calls.filter(c => c[0] !== 'subscription_confirm_get').map(c => c[0])")
     # удержание 1,4 с — hold_start, подпись с таймером, отпустили — hold_end
     pg.evaluate("() => { window.__calls = []; }")
     pg.mouse.down(); pg.wait_for_timeout(1400)
     say = pg.inner_text("#say"); cls = pg.get_attribute("#bubble", "class")
     pg.mouse.up(); pg.wait_for_timeout(200)
-    c2 = pg.evaluate("() => window.__calls")
+    c2 = pg.evaluate("() => window.__calls.filter(c => c[0] !== 'subscription_confirm_get')")
     # удержание и увели в сторону — отмена
     pg.evaluate("() => { window.__calls = []; }")
     pg.mouse.move(cx, cy); pg.mouse.down(); pg.wait_for_timeout(600); pg.mouse.move(cx + 140, cy + 20, steps=4); pg.wait_for_timeout(150)
     say_far = pg.inner_text("#say"); pg.mouse.up(); pg.wait_for_timeout(200)
-    c3 = pg.evaluate("() => window.__calls")
+    c3 = pg.evaluate("() => window.__calls.filter(c => c[0] !== 'subscription_confirm_get')")
     # пробел
     pg.evaluate("() => { window.__calls = []; document.activeElement && document.activeElement.blur && document.activeElement.blur(); }")
     pg.keyboard.down("Space"); pg.wait_for_timeout(800); pg.keyboard.up("Space"); pg.wait_for_timeout(200)
-    c4 = pg.evaluate("() => window.__calls.map(c => c[0])")
+    c4 = pg.evaluate("() => window.__calls.filter(c => c[0] !== 'subscription_confirm_get').map(c => c[0])")
     pg.evaluate("() => { window.__calls = []; }")
     pg.keyboard.down("Space"); pg.wait_for_timeout(100); pg.keyboard.up("Space"); pg.wait_for_timeout(200)
-    c5 = pg.evaluate("() => window.__calls.map(c => c[0])")
+    c5 = pg.evaluate("() => window.__calls.filter(c => c[0] !== 'subscription_confirm_get').map(c => c[0])")
     after = pg.inner_text("#say")
     b.close()
 ok(c1 == ["ptt"], f"короткое нажатие на облик — как раньше (ptt): {c1}")

@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path, PurePosixPath
 
@@ -463,7 +464,14 @@ class CodeWork:
         timeout = max(5, min(900, int(timeout or 180)))
         try:
             if os.name == "nt":                    # Windows: PowerShell; вывод переключаем на UTF-8, иначе кириллица — кракозябры
-                ps = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " + command
+                # Встроенная среда Dewiar уже работает на проверенном Python, но команды моделей часто
+                # используют Linux-имя python3, которого в Windows PATH нет. Для команды в начале строки
+                # используем этот же интерпретатор; подтверждение и guard уже проверили исходную команду.
+                command = re.sub(r"^\s*(?:python3|python)(?=\s|$)",
+                                 lambda _m: '& "' + str(Path(sys.executable)) + '"', command, flags=re.I)
+                work = str(self.work).replace("'", "''")
+                ps = ("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+                      f"Set-Location -LiteralPath '{work}'; " + command)
                 r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], cwd=self.work,
                                    capture_output=True, text=True, timeout=timeout, encoding="utf-8", errors="replace",
                                    env=dict(os.environ, PYTHONIOENCODING="utf-8", **GIT_ENV), stdin=subprocess.DEVNULL,
@@ -579,7 +587,9 @@ class CodeWork:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         out = open(log_path, "wb")
         if os.name == "nt":
-            ps = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " + command
+            work = str(self.work).replace("'", "''")
+            ps = ("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+                  f"Set-Location -LiteralPath '{work}'; " + command)
             pr = subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], cwd=self.work, stdout=out,
                                   stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=dict(os.environ, PYTHONIOENCODING="utf-8", **GIT_ENV),
                                   creationflags=0x08000000 | 0x00000200)

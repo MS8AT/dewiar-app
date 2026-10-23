@@ -220,9 +220,11 @@ def chat_answer(host, profile, text, cancel, generate):
         allowed["memory_save"] = ["fact"]
     if enabled(profile, "tasks"):
         allowed["create_task"] = ["title", "goal"]
+    from language_mode import prompt as language_prompt
     prompt = pack({"request": text, "session_history": history, "memory_about_me": memory(host, profile, cancel),
                    "allowed_actions": allowed, "response_format": response_format(),
-                   "rules": "Не выдавай предложение за выполненное действие. create_task создаёт приостановленную задачу без доступа к проекту; запуск вручную в разделе Задачи. memory_save только по просьбе пользователя."})
+                   "rules": "Не выдавай предложение за выполненное действие. create_task создаёт приостановленную задачу без доступа к проекту; запуск вручную в разделе Задачи. memory_save только по просьбе пользователя. "
+                            + language_prompt(host.s.get("language"))})
     answer, actions = decode(generate(profile, prompt, cancel, response_schema="dewiar-actions-v1"), allowed)
     ready(profile, cancel)
     receipts = []

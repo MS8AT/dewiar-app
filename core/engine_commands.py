@@ -868,6 +868,21 @@ class CommandsMixin:
             self.build_spotter()
             self.emit("personas", personas=self.personas.public())
             return True
+        if cmd == "language_set":
+            # Отдельная команда: HUD не может подмешать произвольный patch настроек.
+            from language_mode import normalize, public, status_text, voice_id
+            code = normalize(a.get("code"), strict=True)
+            self.s.update({"language": code})
+            gender = (self.personas.get(self.s.get("persona")) or {}).get("gender")
+            vid = voice_id(code, gender)
+            ready = not vid or self.piper.has(vid)
+            if vid and not ready:
+                threading.Thread(target=self._language_voice_fetch, args=(vid, code),
+                                 name="language-voice", daemon=True).start()
+            result = public(code, ready, gender)
+            result["status"] = status_text(code, ready)
+            self.emit("settings", settings=self.s.snapshot())
+            return result
         if cmd == "settings_save":
             before = self.s.snapshot()
             self.s.update(a["patch"])

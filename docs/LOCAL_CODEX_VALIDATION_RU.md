@@ -8,20 +8,30 @@
 ## Интеграция upstream 0.39.8 — 23 октября 2026
 
 Официальный `upstream/main` обновлён до `0.39.8` (`62e7446`), после чего overlay
-перепривязан к точной новой базе и поднят до fork build 8. Слияние прошло без
+перепривязан к точной новой базе и поднят до fork build 11. Слияние прошло без
 текстовых конфликтов; установленное приложение и аккаунты не затрагивались.
 
-- PASS: `verify_ms8at_overlay.py` и `ms8at_overlay_test.py` — 44 runtime-файла,
+- PASS: `verify_ms8at_overlay.py` и `ms8at_overlay_test.py` — 48 runtime-файлов,
   exact upstream/version/build и SHA совпали; model calls 0.
-- PASS: `subscription_suite_test.py`, install/upgrade policy, release gate,
-  `llm_compat_test.py`, браузерные проверки подтверждения Codex и тесного HUD,
-  JS-контракты brain routing/API-log и официальный `tts_en1023_test.py`.
+- PASS: `subscription_suite_test.py` — 224 Python + 49 Node.js проверки; install/upgrade
+  policy, release gate, brain routing, API/log/SLI, квоты и подтверждения Codex.
+- PASS: PATCH-007 — `RU → ENG → CH`, общая настройка для обычного чата и Codex,
+  выбор локальных Piper-голосов; автономные тесты не загружали голоса и не вызывали модель.
+- PASS: PATCH-008 — Windows-путь из tool JSON восстановлен, `python3` использует
+  текущий проверенный интерпретатор и запускается в рабочей копии; `bare_calls_test.py`
+  и `tasks_test.py` теперь подтверждают файл результата и вывод теста в журнале.
+- PASS: PATCH-009 — в студии нет системных `confirm/prompt/alert`; удержание,
+  отмена и короткое нажатие диктовки прошли браузерную и core-проверку.
+- PASS: 64 проверки diagnostics/CLI/heartbeat/task observability; `studio_chat_test.py`,
+  `task_honest_test.py`, Android hands/safety, HUD paste/tight/confirm, JavaScript syntax,
+  Python compileall и `git diff --check`.
 - PARTIAL: официальный `brain_hint1023_test.py` прошёл первые шесть проверок,
   затем среда Windows вернула `ConnectTimeout` для заведомо свободного localhost-порта
   вместо ожидаемого тестом `ConnectError`. Это ограничение среды проверки, а не
   доказательство дефекта интеграции; повтор в GitHub CI ещё не выполнен.
-- NOT_RUN: live-вход Codex, inference, Human Memory MCP, установка/rollback рабочего
-  приложения и физический Android. Локальный PASS не равен приёмке upstream.
+- NOT_RUN: полный `run_quick.sh`, live-вход Codex, inference, загрузка ENG/CH голосов,
+  Human Memory MCP, установка/rollback рабочего приложения и физический Android.
+  Локальный PASS не равен приёмке upstream.
 
 ## Интеграция upstream 0.39.3–0.39.6 — 23 октября 2026
 

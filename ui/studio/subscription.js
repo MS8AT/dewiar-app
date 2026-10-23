@@ -118,7 +118,7 @@ function renderSubscriptionProfile(box, id, p) {
       await save(patch); renderProfiles(); return;
     }
     if (['models', 'login', 'disconnect'].includes(op) && !p.subscription_profile_id) { toast('Сначала выберите аккаунт.'); return; }
-    if (op === 'disconnect' && !confirm(codex ? 'Выйти только из выбранного локального профиля Codex? Основной Codex и Hermes не изменятся.' : 'Отозвать доступ выбранного аккаунта для этого локального приложения?')) return;
+    if (op === 'disconnect' && !await ask(codex ? 'Выйти только из выбранного локального профиля Codex? Основной Codex и Hermes не изменятся.' : 'Отозвать доступ выбранного аккаунта для этого локального приложения?')) return;
     $$('[data-op]', el).forEach(b => { b.disabled = true; });
     res.textContent = op.startsWith('login') ? 'Завершите вход в открывшемся браузере…' : 'Выполняю…';
     try {
