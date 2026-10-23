@@ -598,6 +598,18 @@ class AnswerMixin:
         prof = self.s.active_llm()
         if not prof:
             add("Мозг", False, "модель не подключена", "Выберите в «Мозге», где будет думать ассистент.", "brain")
+        elif prof.get("kind") == "chatgpt_subscription":
+            # У подписки нет общего /models: аккаунт и модель выбираются в отдельном контуре.
+            # «Проверить всё» не должна незаметно тратить лимит: проверяем только локальный контракт.
+            try:
+                from subscription_context import ContextError, ready
+                ready(prof, threading.Event())
+                add("Мозг", True, "Codex по подписке настроен; тестовый запрос не отправлялся.")
+            except ContextError as e:
+                add("Мозг", False, str(e), "Проверьте аккаунт, модель и разрешения отдельного режима Codex.", "brain")
+            except Exception:  # внутреннее исключение может содержать данные профиля — не показываем его
+                add("Мозг", False, "локальная проверка Codex недоступна",
+                    "Проверьте аккаунт, модель и разрешения отдельного режима Codex.", "brain")
         else:
             try:
                 t0 = time.monotonic()
