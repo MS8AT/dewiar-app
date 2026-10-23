@@ -33,16 +33,38 @@ EN_VOICES = {"female": "en_US-amy-medium", "male": "en_US-ryan-medium"}
 _EN_RUN = re.compile(r"[A-Za-z][A-Za-z'’]*(?:-[A-Za-z]+)*(?:[ \t]*[,;:]?[ \t]+[A-Za-z][A-Za-z'’]*(?:-[A-Za-z]+)*)+[.!?]?")
 
 
-_EN_WORD = re.compile(r"(?<![A-Za-z])[a-z][a-z'’]+(?![A-Za-z])")
+# отдельное слово строчными; часть имени модели, адреса или файла (deepseek-chat, gpt-4o, site.ru, a/b) — не слово
+_EN_WORD = re.compile(r"(?<![A-Za-z\-/_.\d])[a-z][a-z'’]+(?![A-Za-z\-/_\d])(?!\.[A-Za-z\d])")
+
+
+# форматы файлов и техника — в русской речи это не английский, а названия (№213: «PDF, DOCX» читал другой голос)
+_EN_TECH = {"pdf", "doc", "docx", "txt", "rtf", "odt", "xls", "xlsx", "csv", "ppt", "pptx", "jpg", "jpeg", "png", "gif", "webp",
+            "svg", "mp3", "mp4", "wav", "ogg", "zip", "rar", "exe", "deb", "apk", "json", "xml", "html", "md", "http", "https",
+            "www", "api", "url", "usb", "wifi", "ok", "okay", "email", "e-mail", "id", "vpn", "gpu", "cpu"}
+_EN_TOKEN = re.compile(r"[A-Za-z][A-Za-z'’]*(?:-[A-Za-z]+)*")
+
+
+def _real_english(run, known):
+    """Оборот латиницей — настоящий английский, а не названия подряд? Не считаем аббревиатуры (PDF, DOCX), известные
+    программы (Telegram) и форматы; из остального нужно два слова и хотя бы одно строчное или «I» (I live, Drag and
+    drop). «Telegram Desktop», «Google Chrome», «PDF, DOCX» — названия: их читает голос персонажа (№213, 23.10: «когда
+    Лира говорит, слышен какой-то ещё голос на английском»)."""
+    words = [w for w in _EN_TOKEN.findall(run) if not (w.isupper() and len(w) > 1) and w.lower() not in known
+             and w.lower() not in _EN_TECH]
+    return len(words) >= 2 and any(w[0].islower() or w == "I" for w in words)
 
 
 def _en_spans(text):
-    """Где в тексте английское: обороты от двух слов и отдельные слова строчными (apple, weather) — кроме известных
-    программ и сервисов (их русское чтение — speechnorm._KNOWN). Слово с большой буквы (Linux, Telegram) — по-русски."""
+    """Где в тексте английское: настоящие обороты (_real_english) и отдельные слова строчными (apple, weather) — кроме
+    известных программ и сервисов (их русское чтение — speechnorm._KNOWN) и форматов (_EN_TECH). Слово с большой буквы
+    (Linux, Telegram) и аббревиатуры — по-русски."""
     from speechnorm import _KNOWN
-    spans = [(m.start(), m.end()) for m in _EN_RUN.finditer(text)]
+    spans, names = [], []
+    for m in _EN_RUN.finditer(text):
+        (spans if _real_english(m.group(0), _KNOWN) else names).append((m.start(), m.end()))
     for m in _EN_WORD.finditer(text):
-        if m.group(0).lower() not in _KNOWN and not any(a <= m.start() < b for a, b in spans):
+        w = m.group(0).lower()
+        if w not in _KNOWN and w not in _EN_TECH and not any(a <= m.start() < b for a, b in spans + names):
             spans.append((m.start(), m.end()))
     return sorted(spans)
 
