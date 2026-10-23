@@ -35,18 +35,19 @@ class InstallerTests(unittest.TestCase):
         self.manifest.write_text(json.dumps({"version": 1, "files": self.files}), encoding="utf-8")
 
     def call(self, mode):
-        installer.transfer(mode, self.app, self.backup, self.source, self.manifest)
+        return installer.transfer(mode, self.app, self.backup, self.source, self.manifest)
 
     def test_check_does_not_write(self):
-        self.call("check")
+        self.assertEqual(self.call("check"), "base")
         self.assertFalse(self.backup.exists())
         self.assertEqual((self.app / "core/a.py").read_bytes(), b"before")
 
     def test_install_and_rollback_preserve_unlisted_files(self):
-        self.call("install")
+        self.assertEqual(self.call("install"), "installed")
+        self.assertEqual(self.call("check"), "installed")
         self.assertEqual((self.app / "core/a.py").read_bytes(), b"after")
         self.assertTrue((self.app / "core/b.py").exists())
-        self.call("rollback")
+        self.assertEqual(self.call("rollback"), "base")
         self.assertEqual((self.app / "core/a.py").read_bytes(), b"before")
         self.assertFalse((self.app / "core/b.py").exists())
         self.assertEqual((self.app / "settings.json").read_bytes(), b"must not change")
@@ -73,6 +74,8 @@ class InstallerTests(unittest.TestCase):
     def test_partial_install_is_recoverable(self):
         self.call("install")
         (self.app / "core/a.py").write_bytes(b"before")
+        with self.assertRaises(ValueError):
+            self.call("check")
         self.call("rollback")
         self.assertFalse((self.app / "core/b.py").exists())
 

@@ -28,11 +28,17 @@
   отсутствующего Playwright. Полный `run_quick.sh` остановлен как невалидный:
   системному Python не хватало httpx/numpy/playwright; зависимости не устанавливались.
 - PASS: Python compileall, JavaScript syntax и `git diff --check`.
-- NOT_RUN: live inference, личный вход, визуальная приёмка, установка 0.39.6,
-  подписанный helper, GitHub push/release. Установленный app остаётся 0.39.2 build 2.
-- BLOCKED: `requirements-win.lock` 0.39.6 добавляет `truststore`, которого нет в
-  установленном bundled Python. Защитный upgrade script правильно требует отдельный
-  dependency-compatible пакет; исходники поверх 0.39.2 не устанавливать.
+- INSTALLED: официальный полный пакет 0.39.6 проверен по SHA GitHub Release API и
+  установлен при закрытом Dewiar, затем наложен MS8AT build 3. `truststore 0.10.5`
+  импортируется; приложение установщиком не запускалось.
+- PASS: 40/40 итоговых overlay SHA и 40/40 SHA резервной копии совпали; installed
+  CLI test/API, импорты отдельных модулей и offline Codex probe прошли, model/network
+  calls 0. Полная копия прежней установки сохранена в
+  `%LOCALAPPDATA%\DewiarModBackups\full-before-0396-20261023-1318`, отдельный
+  overlay backup — `overlay-0396-build3-20261023-1320`; SHA receipt:
+  `88c48baff19c4e4e3001c20f0207e02804624ea649ce6c155fb3cca07a126e1f`.
+- NOT_RUN: live inference, личный вход, визуальная приёмка, подписанный helper,
+  GitHub push/release.
 
 ## CLI/API/SLI и защита обновления — 22 октября, 15:27 +03:00
 

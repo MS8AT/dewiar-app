@@ -119,14 +119,21 @@ def transfer(mode, app, backup, source=SOURCE, manifest=MANIFEST, *, files=None)
                     target.unlink()
             else:
                 replace(backup / item["path"], target)
-        return
+        return "base"
     for item in files:
         if digest(plain(source / item["path"])) != item["after"]:
             raise ValueError("Комплект исходников не соответствует манифесту")
-        if digest(plain(app / item["path"])) != item["before"]:
-            raise ValueError("Неизвестная версия или локальные правки; установка запрещена")
+    current = [digest(plain(app / item["path"])) for item in files]
+    is_base = all(value == item["before"] for value, item in zip(current, files))
+    is_installed = all(value == item["after"] for value, item in zip(current, files))
     if mode == "check":
-        return
+        if is_base:
+            return "base"
+        if is_installed:
+            return "installed"
+        raise ValueError("Смешанная, неизвестная или локально изменённая версия")
+    if not is_base:
+        raise ValueError("Неизвестная версия или локальные правки; установка запрещена")
     if mode != "install" or backup is None or backup.exists():
         raise ValueError("Для установки нужен новый каталог резервной копии")
     backup.mkdir(parents=True)
@@ -146,6 +153,7 @@ def transfer(mode, app, backup, source=SOURCE, manifest=MANIFEST, *, files=None)
         replace(source / item["path"], app / item["path"])
         if digest(app / item["path"]) != item["after"]:
             raise ValueError("Проверка установленного файла не прошла")
+    return "installed"
 
 
 def main():
@@ -163,8 +171,8 @@ def main():
             if not args.closed:
                 raise ValueError("Сначала закройте Dewiar и передайте --closed")
             stopped()
-        transfer(args.mode, app, backup)
-        print("PASS: " + args.mode + "; настройки, аккаунты и сеть не затронуты")
+        state = transfer(args.mode, app, backup)
+        print("PASS: " + args.mode + "; state=" + state + "; настройки, аккаунты и сеть не затронуты")
         return 0
     except (ValueError, TypeError, KeyError, OSError, subprocess.SubprocessError):
         print("REFUSED: проверка не пройдена. Требуется чистая база 0.39.6, локальные пути, "
