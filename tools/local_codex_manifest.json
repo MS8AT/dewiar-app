@@ -55,7 +55,7 @@
     {
       "path": "core/model_purpose.py",
       "before": null,
-      "after": "bcebf2a8e49d7cab14ec0582ce692055a9b310db0d4638beec3a5e3ee940f078"
+      "after": "2a5f194b395bf501c3669859228b17f121824bc0c9cc78a47e047b936ec93d9f"
     },
     {
       "path": "core/night.py",
@@ -225,7 +225,7 @@
     {
       "path": "core/fork_update_policy.py",
       "before": null,
-      "after": "5b4c2815b9c6f54e5aab6dd78e2c5930efe57a9742cc9f86a73e45d45d280324"
+      "after": "3c6c690eb7cf2938d1aafb5eb65b93beb4c866da153298fb5def06f8da170121"
     },
     {
       "path": "core/task_doctor.py",

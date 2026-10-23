@@ -9,25 +9,28 @@
 3. не выбирать embedding, speech, rerank и другие неразговорные модели;
 4. никогда не заменять явно выбранную человеком модель;
 5. разделять кэш автоматического выбора по адресу сервера и назначению контура;
-6. не запускать probe/inference внутри чистого алгоритма выбора;
-7. подтвердить отдельно offline-алгоритм и короткий live tool-probe выбранных кандидатов.
+6. при одинаковой модели предпочесть явный алиас рабочего узла `wb-nodeN`, а не нестабильный порядок списка;
+7. не запускать probe/inference внутри чистого алгоритма выбора;
+8. подтвердить отдельно offline-алгоритм и короткий live tool-probe выбранных кандидатов.
 
 ## Integration prompt (EN)
 
 Add purpose-aware automatic model selection for profiles without an explicit model. Preserve the existing lightweight
 chat choice. For background tasks, prefer a tool-friendly 7–14B family over a tiny 1–2B instruct model or a heavy model
 by default. Exclude embedding, speech, rerank, and moderation models. Never override an explicit user selection. Cache
-automatic choices by both server endpoint and purpose. Keep selection pure; capability probes remain explicit tests.
+automatic choices by both server endpoint and purpose. Prefer an explicit `wb-nodeN` worker alias when the underlying
+model score is otherwise equal. Keep selection pure; capability probes remain explicit tests.
 
 ## 集成提示词 (ZH)
 
 为未明确选择模型的配置增加按用途自动选择。普通聊天继续使用原来的轻量选择；后台任务优先选择支持工具、规模在
 7–14B 左右的模型，而不是默认使用 1–2B 小模型或过重模型。排除 embedding、语音、rerank 和审核模型。绝不覆盖
-用户明确选择的模型；自动选择缓存必须同时按服务器地址和用途隔离。选择算法保持纯函数，能力探测只能作为显式测试。
+用户明确选择的模型；自动选择缓存必须同时按服务器地址和用途隔离。同分时优先明确的 `wb-nodeN` 工作节点别名。
+选择算法保持纯函数，能力探测只能作为显式测试。
 
 ## Файлы и проверка
 
 - Runtime: `core/model_purpose.py`, `core/llm.py`.
 - Tests: `tests/model_purpose_test.py`, `tests/llm_compat_test.py`, `tests/subscription_suite_test.py`.
-- Feature: `purpose_model_routing_v1`; fork build 17.
+- Feature: `purpose_model_routing_v1`; fork build 18.
 - Rollback: вернуть эти файлы к build 16 и удалить feature из overlay/update policy.

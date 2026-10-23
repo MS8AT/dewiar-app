@@ -25,6 +25,10 @@ class ModelPurposeTest(unittest.TestCase):
         self.assertEqual(choose(MODELS, "tasks"), "wb-node21-qwen3.5-9b")
         self.assertNotIn("embed", choose(MODELS, "tasks"))
 
+    def test_routed_worker_wins_same_model_regardless_of_list_order(self):
+        models = ["qwen3.5-9b", "wb-node21-qwen3.5-9b"]
+        self.assertEqual(choose(models, "tasks"), "wb-node21-qwen3.5-9b")
+
     def test_small_model_is_not_preferred_for_tasks(self):
         models = ["qwen2.5-1.5b-instruct", "qwen3.5-9b"]
         self.assertEqual(choose(models, "tasks"), "qwen3.5-9b")

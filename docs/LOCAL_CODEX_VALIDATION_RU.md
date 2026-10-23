@@ -8,12 +8,12 @@
 ## Интеграция upstream 0.40.0 — 23 октября 2026
 
 Официальный `upstream/main` обновлён до `0.40.0` (`0e5917a`), после чего overlay
-перепривязан к точной новой базе и поднят до fork build 17. Слияние прошло без
+перепривязан к точной новой базе и поднят до fork build 18. Слияние прошло без
 текстовых конфликтов; установленное приложение и аккаунты не затрагивались.
 
 - PASS: `verify_ms8at_overlay.py` и `ms8at_overlay_test.py` — 51 runtime-файл,
   exact upstream/version/build и SHA совпали; model calls 0.
-- PASS: `subscription_suite_test.py` — 241 Python + 49 Node.js проверок; install/upgrade
+- PASS: `subscription_suite_test.py` — 242 Python + 49 Node.js проверок; install/upgrade
   policy, release gate, brain routing, API/log/SLI, квоты и подтверждения Codex.
 - PASS: PATCH-013 — синтетический сервер дважды отклонил полный запрос как переполненный,
   после чего один компактный повтор AI-доктора был принят; задача завершилась, диагноз
@@ -23,7 +23,9 @@
   Unit и синтетический flow `Markdown → code_list → finish` прошли без модели и сети.
 - PASS: PATCH-015 — текущий автоматический выбор задач определён как ошибочный
   `qwen2.5-1.5b-instruct`; обе доступные Qwen 3.5 9B в коротком live-probe вернули native
-  `get_time`. Чистый алгоритм выбирает 9B для задач и сохраняет 1.5B для обычного чата.
+  `get_time`. Локальный алиас позже не ответил за 60 с, а `wb-node21-qwen3.5-9b` вернул
+  native `code_list` за 3 с; стабильный tie-break выбирает этот рабочий узел независимо
+  от порядка списка. Для обычного чата сохраняется лёгкий 1.5B.
 - INSTALLED: fork build 15 установлен поверх закрытого Dewiar 0.40.0 по плану из 307 файлов;
   повторная проверка плана PASS. Backup: `full-before-0400-build15-20261023-195115`,
   receipt SHA-256 `ac6d85601117d1be43c07858989576f30d29e043135418f0cb7b4e37ad9cb9aa`.
@@ -34,7 +36,8 @@
   самостоятельную работу над проектом; завершение самой цели не проверялось.
 - INSTALLED: build 16 с PATCH-014 установлен по проверенному плану из 308 файлов; live-повтор
   подтвердил, что оставшаяся ошибка — отказ автоматически выбранной 1.5B модели, а не парсер.
-- NOT_INSTALLED: source build 17 с PATCH-015 ещё не наложен на запущенный Dewiar.
+- INSTALLED: build 17 подтвердил выбор 9B, но при смене порядка списка взял медленный локальный алиас.
+- NOT_INSTALLED: source build 18 с устойчивым worker tie-break ещё не наложен на запущенный Dewiar.
 - PASS: установленный CLI `test/status/brains/api/sli/journal`, listener `127.0.0.1:8765`
   и feature `task_context_doctor_v1`; build=15, API read-only, секреты не выводились.
 - PASS: PATCH-007 — `RU → ENG → CH`, общая настройка для обычного чата и Codex,
