@@ -232,6 +232,13 @@ class Task:
                 pass
         return d
 
+def _write_hist(path, msgs):
+    """история.json — через временный файл и замену: прерванная запись (падение, выключение) оставляет прежнюю историю
+    целой, а читающий одновременно не видит пустой файл (GitHub, task_parts_test: JSONDecodeError на «готовой» задаче)."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(msgs, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
 
 class TaskManager:
     """Все задачи ассистента. Запускает фоновый поток-будильник (_scheduler) и по потоку на каждую работающую задачу."""
@@ -1030,7 +1037,7 @@ class TaskManager:
             out = []
             for p in sorted(t.dir.rglob("*")):
                 rel = p.relative_to(t.dir)
-                if p.is_file() and not rel.parts[0].startswith(("рабочая копия", "_run")) and p.name not in ("задача.json", "история.json", "журнал.md"):
+                if p.is_file() and not rel.parts[0].startswith(("рабочая копия", "_run")) and p.name not in ("задача.json", "история.json", "история.json.tmp", "журнал.md"):
                     out.append(f"{rel.as_posix()} — {p.stat().st_size} байт")
             return "\n".join(out[:300]) or "Папка пуста."
         if name == "run_python":
@@ -1311,7 +1318,7 @@ class TaskManager:
         import hashlib
         try:
             files = sorted(f"{p.relative_to(t.dir)}:{p.stat().st_size}" for p in t.dir.rglob("*")
-                           if p.is_file() and p.name not in ("журнал.md", "задача.json", "история.json") and "рабочая копия" not in p.parts)
+                           if p.is_file() and p.name not in ("журнал.md", "задача.json", "история.json", "история.json.tmp") and "рабочая копия" not in p.parts)
         except OSError:
             files = []
         h = hashlib.sha1("\n".join([t.plan(), t.notebook(), json.dumps(t.data.get("outputs") or []), *files[:2000]]).encode()).hexdigest()
@@ -1566,7 +1573,7 @@ class TaskManager:
                 results += ["(не выполнено: задача ушла ждать — повтори после пробуждения, если нужно)"] * (len(calls) - len(results))
                 msgs += tool_turn_messages(prof, text, calls, results)
                 msgs = self._compact(t, prof, msgs)
-                hist.write_text(json.dumps(msgs, ensure_ascii=False), encoding="utf-8")
+                _write_hist(hist, msgs)
                 t.save()
                 self._emit(t)
                 if t.data.get("finished") or t.data.get("sleep_now"):
@@ -1635,9 +1642,9 @@ class TaskManager:
                 # пользователь написал, пока задача заканчивала круг, — не теряем: проснётся сразу
                 t.data.update(finished=False, finish_checked=False, force_finish=False, verified=False, critic_done=False, status="sleeping", wake_at=_now(),
                               wait_reason="пришло сообщение пользователя")
-            t.save()
-            try:
-                hist.write_text(json.dumps(msgs, ensure_ascii=False), encoding="utf-8")
+            try:                                              # история — раньше состояния: увидевший «готово» читает её целой
+                _write_hist(hist, msgs)
             except (OSError, NameError):                      # NameError: msgs не успели прочитать
                 pass
+            t.save()
             self._emit(t)

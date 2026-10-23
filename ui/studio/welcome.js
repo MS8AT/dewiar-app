@@ -19,6 +19,7 @@ async function wlcRefresh() {
     wlcSet(1, false, `Проверяю «${prof.name || prof.model}»…`);
     // настоящий запрос к модели: проверяем, что она отвечает, а не только что настроена
     const r = await core.call("llm_test", { profile: prof }).catch(e => ({ error: e.message }));
+    wlcBrainOk = !!r.ok;
     wlcSet(1, !!r.ok, r.ok ? `Подключён: ${prof.name || r.model} — отвечает за ${((r.total_ms || 0) / 1000).toFixed(1)} с.` : "Модель не отвечает — выберите другую или проверьте сервер.");
   }
   if (wlcHeard) wlcSet(2, true, "Слышу вас — имя работает.");
@@ -30,6 +31,7 @@ async function wlcRefresh() {
 function wlcPersona() {
   const p = (typeof personas !== "undefined" && personas || []).find(x => x.id === S.persona) || {};
   $$("#wlc .wn").forEach(el => el.textContent = p.name || "Лира");
+  wlcTries(p.name || "Лира");
   if (!$('.wst[data-s="2"]').classList.contains("ok")) $("#wlc-s2").textContent = `Скажите: «${p.name || "Лира"}, привет». Не откликается — научите имени.`;
   return p;
 }
@@ -60,7 +62,19 @@ $("#wlc-chip").onclick = () => wlcOpen();
 $("#wlc-intro").onclick = () => { wlcClose(false); introGo(); };
 $("#ab-intro").onclick = introGo;
 core.on("intro", e => { if (wlcEnt && e && e.step) wlcEnt.set({ state: e.step === "done" ? "idle" : "speaking" }); });
-$("#wlc-play").onclick = () => core.call("say", { text: ($("#wlc .wn") || {}).textContent + ", что ты умеешь?" }).then(() => toast("Отправил ассистенту — смотрите виджет")).catch(e => toast(e.message));
+/* «Попробуйте сказать»: то, что работает сразу после подключения мозга, без настроек (отзыв 18.10: «сказал привет — а что
+   делать дальше, ума не приложу»). {n} — имя персонажа. Нажали — фраза уходит ассистенту, ответ в виджете. */
+const WLC_TRIES = ["{n}, что ты умеешь?", "Напомни через 10 минут позвонить маме", "Какая погода завтра?",
+  "Включи спокойное радио", "Что нового в мире сегодня?", "Запиши заметку: купить хлеб"];
+let wlcBrainOk = false;
+function wlcTries(name) {
+  const box = $("#wlc-tlist"); if (!box) return;
+  box.innerHTML = WLC_TRIES.map(t => { const q = t.replace("{n}", name); return `<button class="tq" data-q="${escH(q)}" title="Отправить ассистенту"><i><svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg></i>${escH(q)}</button>`; }).join("");
+  $$(".tq", box).forEach(b => b.onclick = () => {
+    if (!wlcBrainOk) { toast("Сначала шаг 1 — выберите, кто будет думать"); return; }
+    core.call("say", { text: b.dataset.q }).then(() => { b.classList.add("sent"); toast("Отправил ассистенту — ответ в виджете"); }).catch(e => toast(e.message));
+  });
+}
 core.on("wake", e => { if (e && !wlcHeard) { wlcHeard = true; if ($("#wlc").classList.contains("on")) wlcSet(2, true, "Слышу вас — имя работает."); } });
 core.on("telegram", e => { if (e && e.paired) wlcSet(3, true, `Подключён: @${e.bot}.`); });
 

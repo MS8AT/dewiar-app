@@ -146,6 +146,12 @@ ok("без продвижения" in (tb.dir / "журнал.md").read_text(enc
 host.s.v[("tasks", "cycles")] = 2
 ok(tm._cycles() == 2, "число кругов — из настроек tasks.cycles")
 
+# GitHub, 23.10: «готово» записывалось раньше истории, история — не атомарно: проверка читала пустой файл (JSONDecodeError)
+src = (ROOT / "core/tasks.py").read_text(encoding="utf-8")
+ok("hist.write_text" not in src and "os.replace(tmp, path)" in src[src.index("def _write_hist"):], "история задачи пишется через временный файл и замену")
+end = src[src.index("пользователь написал, пока задача заканчивала круг"):]
+ok(end.index("_write_hist(hist, msgs)") < end.index("t.save()"), "в конце круга история пишется раньше состояния «готово»")
+
 host.stopping.set()
 print("ALL OK" if not FAILS else f"ошибок: {len(FAILS)}")
 sys.exit(1 if FAILS else 0)

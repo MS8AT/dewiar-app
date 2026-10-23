@@ -363,6 +363,20 @@ class RemoteMixin:
             chain.append(self.espeak)
         return chain
 
+    def _remote_voice_down(self, eng, e):
+        """Голос сервера не ответил, и фраза ушла запасному голосу. 23.10, владелец: «голос ужасен, что случилось?» —
+        служба голосов на сервере молчала полдня, а программа меняла голос молча: человек думал, что сломал что-то у себя.
+        Теперь один раз в 2 часа — строка в виджете: голос сервера недоступен, вернётся сам. «Заняты, много людей» —
+        дело минут, о нём не пишем."""
+        if eng is not getattr(self, "tts_remote", None) or "заняты" in str(e):
+            return
+        now = time.monotonic()
+        if now - getattr(self, "_remote_down_note", -1e9) < 7200:
+            return
+        self._remote_down_note = now
+        self.note("Голос сервера сейчас не отвечает — говорю запасным голосом. Ваш голос вернётся сам, как только сервер "
+                  "снова ответит; ничего переключать не нужно.")
+
     def _synth_mixed(self, eng, text, voice, sp):
         """Синтез фразы: английские обороты и слова — английским голосом Piper, остальное — голосом персонажа (пакет 22.10,
         №194: «произношение фраз на английском — жесть»: русский голос читал их русскими звуками). Голос сервера и
@@ -557,6 +571,7 @@ class RemoteMixin:
                                 locked = eng
                                 break
                             log.warning("Синтез %s не удался: %s — пробую следующий", getattr(eng, "name", eng), e)
+                            self._remote_voice_down(eng, e)
                     chunks.put(None)
                     if turn.cancel.is_set():
                         return

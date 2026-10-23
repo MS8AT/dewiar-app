@@ -61,7 +61,60 @@ NO_MONEY_RX = re.compile(r"insufficient (balance|quota|funds)|no resource packag
 LOCATION_RX = re.compile(r"location is not supported|unsupported_country|not available in your (country|region)", re.I)
 
 
-def _humanize(e, base_url):
+LOCAL_HOST_RX = re.compile(r"^(localhost|127\.|0\.0\.0\.0|\[?::1)")
+LAN_HOST_RX = re.compile(r"^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)|\.local$")
+LOCAL_APPS = (("Ollama", 11434), ("LM Studio", 1234), ("vLLM", 8000), ("llama.cpp", 8080))
+# модели с таким именем у сервиса нет (OpenRouter: «… is not a valid model ID», Ollama: «model "x" not found»)
+NO_MODEL_RX = re.compile(r"not a valid model|model\b[^\n]{0,80}?\b(not found|does not exist|not exist)|unknown model|invalid model|"
+                         r"no such model|model_not_found", re.I)
+
+
+def _port_open(host, port, timeout=0.35):
+    import socket
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+def ollama_installed():
+    """Стоит ли Ollama на этом компьютере (запущена или нет)."""
+    import shutil
+    from pathlib import Path
+    if shutil.which("ollama"):
+        return True
+    la = os.environ.get("LOCALAPPDATA")
+    return bool(la) and (Path(la) / "Programs" / "Ollama").is_dir()
+
+
+def connect_hint(base_url):
+    """Не подключились к своей модели — что именно не так и что сделать (отзыв 19.10: «сервер добавлен, проверен,
+    доступен, но ассистент не хочет» — в ответ было только «сервер запущен и адрес верный?»). -> текст или ""."""
+    from urllib.parse import urlparse
+    u = urlparse(str(base_url or ""))
+    host, port = (u.hostname or ""), (u.port or (443 if u.scheme == "https" else 80))
+    if LOCAL_HOST_RX.match(host):
+        other = [(n, pt) for n, pt in LOCAL_APPS if pt != port and _port_open("127.0.0.1", pt)]
+        if other:
+            n, pt = other[0]
+            return (f"по адресу {base_url} никто не отвечает, а на этом компьютере работает {n} (порт {pt}) — в «Мозге» нажмите "
+                    "«Найти»: адрес подставится сам")
+        if port == 11434 and ollama_installed():
+            return ("Ollama установлена, но не запущена — откройте её (меню приложений; в Windows — значок у часов) и "
+                    "нажмите «Проверить» ещё раз")
+        if port == 1234 and lmstudio_installed():
+            return LMSTUDIO_HOW.rstrip(".").replace("«Найти»", "«Проверить»")
+        return ("на этом компьютере не запущена программа с моделью (Ollama или LM Studio). Если модель на другом компьютере "
+                "или сервере — впишите в «Мозге» его адрес (например 192.168.1.5:11434): 127.0.0.1 — это сам этот компьютер")
+    if LAN_HOST_RX.search(host):
+        return (f"компьютер {host} не отвечает на порту {port}. На нём должна быть запущена программа с моделью и открыт "
+                "доступ из сети: в Ollama — переменная OLLAMA_HOST=0.0.0.0, в LM Studio — «Serve on Local Network». "
+                "Ещё порт может закрывать брандмауэр того компьютера")
+    return ""
+
+
+def _humanize(e, base_url, model=""):
     """Ошибка сети или HTTP → короткое объяснение по-русски для окна и голоса."""
     if "Ничего не уходит в интернет" in str(e):           # стоп-кран (core/egress.py): модель в интернете — на паузе
         host = (re.match(r"^\w+://([^/:?#]+)", str(base_url or "")) or [None, "сервис"])[1]
@@ -73,7 +126,11 @@ def _humanize(e, base_url):
             # облачный сервис (пакет 20.10, №140: «openrouter.ai — сервер запущен?» — человеку непонятно, что делать)
             return (f"не могу подключиться к {host} — нет интернета или сайт недоступен из вашей сети (провайдер бывает, что "
                     "блокирует). Помогут прокси («Подключение» → «Прокси») или облако Dewiar («Мозг» → «Dewiar Облако»)")
-        return f"не могу подключиться к {base_url} — сервер запущен и адрес верный?"
+        try:
+            hint = connect_hint(base_url)
+        except Exception:  # noqa: BLE001 — подсказка не главное: без неё — как раньше
+            hint = ""
+        return f"не могу подключиться к {base_url}: {hint}" if hint else f"не могу подключиться к {base_url} — сервер запущен и адрес верный?"
     if isinstance(e, httpx.TimeoutException):
         return "сервер модели не ответил вовремя"
     if isinstance(e, httpx.HTTPStatusError):
@@ -101,6 +158,13 @@ def _humanize(e, base_url):
             return msg.rstrip(".")
         if code == 402:
             return "на ключе закончились средства — пополните баланс"
+        if code in (400, 404) and NO_MODEL_RX.search(body + " " + msg):
+            name = f"«{model}»" if model else "с таким именем"
+            if ":11434" in str(base_url or "") or "pulling" in body + msg:
+                # №211, 23.10: Ollama работала, а llama3.2 в ней не скачана — человек час слышал «проверьте адрес»
+                return (f"в Ollama нет модели {name} — её нужно сначала скачать: откройте приложение Ollama, выберите модель "
+                        "внизу окна и напишите ей что-нибудь — она скачается. Уже скачанные — в «Мозге» → «Список моделей»")
+            return f"у сервиса нет модели {name} — в «Мозге» нажмите «Список моделей» и выберите из списка"
         if code in (401, 403):
             return "сервер отклонил ключ доступа (проверьте API-ключ)"
         if code == 404:
@@ -1189,7 +1253,7 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
                            "отчёт для разработчика: студия → «О программе» → «Сохранить отчёт»") from e
         raise
     except Exception as e:  # noqa: BLE001
-        msg = _humanize(e, base)
+        msg = _humanize(e, base, p.get("model") or "")
         if msg == CTX_TEXT and not locals().get("got_text"):
             yield from _ctx_retry(p, system, messages, cancel, tools, _retry, e)
             return

@@ -355,6 +355,7 @@ const DEF = {
   tts: { engine: "system", url: "", key: "", model: "", voice: "", voice_m: "", rate: 1.0, sys_voice: "", sys_voice_m: "",
          el_key: "", el_model: "eleven_flash_v2_5", el_voice_f: "", el_voice_m: "" },
   home: { token: "", client_id: "", at: 0 },
+  tries: null,                   // «Попробуйте сказать» на пустом экране у новичка: {n — сколько раз спросил сам, off — скрыл}
   memory: [], onboarded: false, textMode: false,   // textMode — отвечать только текстом (значок динамика вверху)
   relations: {},                 // кто есть кто в контактах: {жена: {name, number}} — «позвони жене» (doCall, REL)
   report: { auto: null },        // отчёты разработчику при сбое: null — ещё не спрашивали
@@ -1078,6 +1079,7 @@ function setState(s) {
   $("#state").textContent = holdTalk && s === "listening" ? (holdCancel ? "Отпустите — отменить" : "Говорите · отпустите — отправлю") : STATE_RU[s] || "";
   $("#state").classList.toggle("idle", s === "idle");
   const rb = $("#radiobox"); if (rb) rb.classList.toggle("talking", s !== "idle");   // подсказка про голос — только в покое
+  triesCheck($("#stage").classList.contains("quiet"));                              // слушает или думает — примеры прячутся
   const m = $("#mic"); m.classList.toggle("on", s === "listening"); m.classList.toggle("busy", s === "thinking" || s === "speaking");
   D.keepScreen(s !== "idle" || !!(window.DewiarCall && DewiarCall.active()));     // идёт звонок «Близким» — экран не гаснет
   const duck = radio.on() && s !== "idle";        // пока слушаю и отвечаю — радио тише
@@ -1172,6 +1174,32 @@ function quietCheck() {
   const quiet = !$("#you").textContent && !$("#bot").textContent && !$("#bot").className && !$("#card").innerHTML;
   $("#stage").classList.toggle("quiet", quiet);
   if ($("#talk-x")) $("#talk-x").hidden = quiet || $("#bot").classList.contains("wait");   // пока отвечает — не убираем
+  triesCheck(quiet);
+}
+/* «Попробуйте сказать» (отзыв 18.10: «сказал привет, ответили голосом, а что с ней делать дальше — ума не приложу»): пока
+   человек новичок (сам спросил меньше 4 раз) и экран пуст — фразы-примеры, нажатие спрашивает. Кто пользовался раньше
+   (есть разговор или память) — не показываем: S.tries заводится при первом запуске этой версии. */
+const TRIES_MAX = 4;
+function triesState() {
+  if (!S.tries) S.tries = { n: history.some(m => m.role === "user") || (S.memory || []).length ? TRIES_MAX : 0, off: false };
+  return S.tries;
+}
+function triesList() {
+  return ["Что ты умеешь?", "Включи радио", "Погода на завтра", D.web ? "Что нового в мире?" : "Посвети фонариком",
+    "Напомни через час позвонить маме", "Запиши: купить хлеб"];
+}
+function triesCheck(quiet) {
+  const box = $("#tries"); if (!box) return;
+  const t = triesState(), brain = !!(S.llm.base_url || loggedIn());
+  const show = quiet && brain && !t.off && t.n < TRIES_MAX && state === "idle";
+  if (show && !box.childElementCount) {
+    box.innerHTML = `<p class="th">Попробуйте сказать — или нажмите</p><div class="tlist">${triesList().map(q => `<button class="tq" data-q="${esc(q)}">${esc(q)}</button>`).join("")}</div>`
+      + `<button class="lnk tx" id="tries-x">Больше не показывать</button>`;
+    box.querySelectorAll(".tq").forEach(b => b.onclick = () => ask(b.dataset.q));
+    $("#tries-x").onclick = () => { triesState().off = true; saveS(); quietCheck(); };
+  }
+  box.hidden = !show;
+  $("#stage").classList.toggle("tries", show);
 }
 /* Убрать сказанное с экрана: крестик или смахнуть вбок. Разговор не забывается — только экран (23.10). */
 function talkDismiss(dx) {
@@ -1558,7 +1586,11 @@ function privacyRule() {
 }
 /* Веб-версия (браузер на iPhone, Mac, любом компьютере): чего браузер не умеет — инструментов у модели нет (WEB_NO_TOOLS),
    и она честно говорит, где это есть, а не «звоню» в пустоту. */
-const WEB_NO_TOOLS = new Set(["call", "send_sms", "open_app", "calendar_list", "calendar_add", "flashlight", "set_volume", "battery", "send_message"]);
+const WEB_NO_TOOLS = new Set(["call", "send_sms", "open_app", "calendar_list", "calendar_add", "flashlight", "set_volume", "battery", "send_message", "phone_settings"]);
+/* Экраны настроек телефона (Bridge.openSettings): «включи Bluetooth» — сразу нужный экран, а не поиск по настройкам пальцем
+   (отзыв 19.10, Android 13: «попросил включить блютуз, а она на вкладку вайфай переходит») */
+const PHONE_SET = { bluetooth: "Bluetooth", wifi: "Wi‑Fi", internet: "Интернет", nfc: "NFC", airplane: "Режим полёта", display: "Экран и яркость",
+  sound: "Звук", data: "Мобильная сеть", hotspot: "Точка доступа и сети", location: "Местоположение" };
 const WEB_DEVICE_RULE = "Ты работаешь в браузере пользователя (веб-версия Dewiar — iPhone, Mac или любой компьютер). Напоминания и будильники "
   + "здесь срабатывают, пока страница Dewiar открыта (уведомлением и звуком). Звонить, отправлять SMS и сообщения в мессенджерах, открывать "
   + "приложения, включать фонарик, менять громкость и смотреть календарь телефона браузер не умеет — на такую просьбу честно скажи об этом "
@@ -1585,7 +1617,7 @@ function systemPrompt() {
     + "радио прямо здесь, в приложении (play_radio, radio_control — на любую просьбу про радио или «включи музыку», не сайты и не приложения; просят ПОДОБРАТЬ или посоветовать песни, плейлист — назови конкретные известные песни списком в ответе, радио сам не включай, если не просили включить), "
     + "маршрут на карте — «как дойти», «проложи пешком», геоточка или ссылка на карту (route: карта сама ведёт кратчайшим путём, дворами), "
     + (D.web ? "" : "календарь телефона — «что у меня завтра», «какие встречи на неделе» (calendar_list), «запиши в календарь», «назначь встречу» (calendar_add: сначала спроси «записать?», запиши после «да»), ")
-    + (D.web ? "" : "приложения (open_app), ") + "сайты (open_url), поиск в интернете (web_search, read_webpage), погода (weather), " + (D.web ? "" : "фонарик, громкость, ") + "заметки (save_note, find_notes), "
+    + (D.web ? "" : "приложения (open_app), ") + "сайты (open_url), поиск в интернете (web_search, read_webpage), погода (weather), " + (D.web ? "" : "фонарик, громкость, экраны настроек — Bluetooth, Wi‑Fi, режим полёта (phone_settings), ") + "заметки (save_note, find_notes), "
     + "память о пользователе (remember), деньги (money_add, money_report), " + (D.web ? "" : "сообщения в MAX, Telegram, WhatsApp (send_message), ")
     + "мини-программы, страницы и презентации — калькулятор, игра, конвертер, таймер, слайды (make_app: сделай сам, она сразу откроется здесь; код программы не сохраняй заметкой; никогда не говори «готово», не вызвав make_app)" + (S.home.token && !D.web ? ", умный дом Яндекса (smart_home)" : "")
     + (loggedIn() ? ", документы и базы пользователя на сайте Dewiar (ask_knowledge)" : "") + ". После действия скажи итог одной фразой.",
@@ -1609,6 +1641,7 @@ function systemPrompt() {
   if (!D.web) parts.push(hands === "on"
     ? "Ты умеешь работать в других приложениях телефона, как человек пальцем: open_app, затем phone_screen (что на экране), phone_tap, phone_type, phone_scroll, phone_nav. "
       + "Просьбы вроде «напиши маме в Telegram, что я задержусь», «найди в YouTube…», «включи Bluetooth», «закажи такси» выполняй сам по шагам, глядя на экран после каждого действия; "
+      + "Bluetooth, Wi‑Fi, режим полёта, яркость — сначала phone_settings (сразу нужный экран), потом phone_screen и переключатель; "
       + "send_message — только если пользователь хочет сам выбрать получателя. Перед отправкой, оплатой, покупкой, удалением — спроси подтверждение, если об этом прямо не просили. "
       + "Пароли и коды не вводи. Не получилось за несколько попыток — честно скажи, на чём остановился."
     : "Нажимать в других приложениях (написать в мессенджере конкретному человеку, найти что-то внутри приложения) ты сможешь, если пользователь включит «Управлять приложениями» "
@@ -2052,7 +2085,7 @@ const PHOTO_NOW_RX = /(?:^|[\s,.!])(?:сфотографируй|сфоткай|
 const PHOTO_SELF_RX = /(?:^|[^а-яё])(?:меня|себя|селфи|мо[её]\s+лицо|как\s+я\s+выгляжу)(?![а-яё])/i;
 async function ask(text, opts = {}) {
   text = String(text || "").trim(); if (!text) return;
-  if (!opts.hidden) lastUserAct = Date.now();
+  if (!opts.hidden) { lastUserAct = Date.now(); const t = triesState(); if (t.n < TRIES_MAX) { t.n++; saveS(); } }
   stopListen(); interrupt(true);
   if (!opts.hidden && !(opts.attach || []).length && PHOTO_NOW_RX.test(text)) {
     showYou(text); setState("thinking"); showBot("Включаю камеру — держите телефон ровно", "wait");
@@ -3103,6 +3136,8 @@ function toolSpecs() {
     { name: "world_time", description: "Который час сейчас в другом городе или стране (по часовому поясу). Время в других городах не считай в уме — только этим.", parameters: O({ city: STR }, ["city"]) },
     { name: "weather", description: "Погода сейчас и на ближайшие дни: city — город (если пользователь не назвал — из памяти о нём).", parameters: O({ city: STR, days: NUM }, ["city"]) },
     { name: "flashlight", description: "Фонарик: on true/false.", parameters: O({ on: { type: "boolean" } }, ["on"]) },
+    { name: "phone_settings", description: "Открыть нужный экран настроек телефона: bluetooth, wifi, internet (Wi‑Fi и мобильный интернет), nfc, airplane (режим полёта), display (яркость, экран), sound, data (мобильная сеть), hotspot (точка доступа), location (геолокация). Включить или выключить Bluetooth, Wi‑Fi, режим полёта приложениям Android сам не даёт — открой экран этим инструментом; дальше переключатель нажимают руки (phone_screen, phone_tap) или пользователь.",
+      parameters: O({ section: { type: "string", enum: Object.keys(PHONE_SET) } }, ["section"]) },
     { name: "take_photo", description: "Сфотографировать камерой телефона и посмотреть на снимок: camera front — фронтальная (на пользователя: «сфотографируй меня», «как я выгляжу»), back — основная (на то, что перед телефоном: «что это», «прочитай надпись»). Снимок придёт следующим сообщением — опиши его или ответь на вопрос.",
       parameters: O({ camera: { type: "string", enum: ["front", "back"] }, question: STR }) },
     { name: "set_volume", description: "Громкость: action up|down|set|mute|unmute, percent для set.", parameters: O({ action: { type: "string", enum: ["up", "down", "set", "mute", "unmute"] }, percent: NUM }, ["action"]) },
@@ -3273,6 +3308,15 @@ async function runTool(name, a) {
     case "world_time": { const r = await worldTime(a.city || ""); return r ? r + " [Посчитано по часовому поясу — называй именно это время.]" : `Город «${a.city || ""}» не нашёлся — уточни. Время не считай в уме.`; }
     case "weather": return await weather(a.city || "", a.days || 3);
     case "flashlight": return devTorch(!!a.on) ? (a.on ? "Фонарик включён." : "Фонарик выключен.") : "Фонарика нет.";
+    case "phone_settings": {
+      const sec = PHONE_SET[a.section] ? a.section : "", name = PHONE_SET[sec];
+      if (!sec) return "Такого экрана нет — выбери section из списка.";
+      if (SANDBOX) SANDBOX.dev.push({ name: "phone_settings", args: sec, argsObj: { section: sec }, t: Date.now() });
+      else if (!D.openSettings(sec)) return `Экран «${name}» на этом телефоне не открылся — подскажи пользователю: Настройки → ${name}.`;
+      const hands = typeof D.handsState === "function" && D.handsState() === "on";
+      return hands ? `Открыт экран настроек «${name}». Дальше: phone_screen — посмотри экран и нажми нужный переключатель (phone_tap), потом проверь.`
+        : `Открыт экран настроек «${name}» — скажи пользователю коротко нажать переключатель (сам ты нажать не можешь). Не говори «включила».`;
+    }
     case "take_photo": {
       // камера — только по просьбе (отчёт №92, 19.10: на «ты сказала, что на айфоне можно веб-версией?» сама сфотографировала)
       if (turnAsk && !PHOTO_ASK_RX.test(String(turnAsk))) {
