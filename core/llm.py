@@ -158,6 +158,10 @@ def _humanize(e, base_url, model=""):
             return msg.rstrip(".")
         if code == 402:
             return "на ключе закончились средства — пополните баланс"
+        if code == 400 and re.search(r"does not support (chat|completion|generate)", body + " " + msg, re.I):
+            # пакет 23.10: в Ollama выбрали x/flux2-klein — модель для картинок
+            return ((f"«{model}»" if model else "эта модель") + " не умеет разговаривать — это модель для картинок или поиска. "
+                    "В «Мозге» нажмите «Список моделей» и выберите модель для разговора")
         if code in (400, 404) and NO_MODEL_RX.search(body + " " + msg):
             name = f"«{model}»" if model else "с таким именем"
             if ":11434" in str(base_url or "") or "pulling" in body + msg:
@@ -353,7 +357,8 @@ def list_models(p, timeout=6):
         ids = [m.get("id") for m in data if m.get("id")]
         ids = [x[7:] if x.startswith("models/") else x for x in ids]      # Gemini: «models/gemini-…» — в ответах без «models/»
         # не для разговора: голос, распознавание, картинки, видео, модерация — их выбирали «первой по алфавиту»
-        ids = [x for x in ids if not re.search(r"(^|[-_/])(tts|whisper|transcribe|dall-e|imagen|veo|moderation|aqa)([-_.]|$)|image-|-image\b|audio", x, re.I)] or ids
+        ids = [x for x in ids if not re.search(r"(^|[-_/])(tts|whisper|transcribe|dall-e|imagen|veo|moderation|aqa)([-_.]|$)|image-|-image\b|audio|"
+                                                r"(^|[-_/:])(flux\d*|sdxl|stable-diffusion)", x, re.I)] or ids
         # модели для поиска по смыслу (эмбеддинги, реранкеры) разговаривать не умеют — в конец списка, отдельно (№144:
         # LM Studio отдаёт и их; выбрали text-embedding-nomic… как модель разговора)
         side = [x for x in ids if re.search(r"embed|rerank", x, re.I)]
