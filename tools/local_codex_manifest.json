@@ -50,7 +50,12 @@
     {
       "path": "core/llm.py",
       "before": "0adae36b2b09962769a4232d2ade73934d1ad6a14b5e71338ff919bf83f47431",
-      "after": "7f34d4d417d792260b0fc28e92e17d3695f230cd032352829b36e9cd0815345a"
+      "after": "c3e53353c29f560a2de4e7bf1768ed3c587e2059790f2edcd86555d5bc6f4582"
+    },
+    {
+      "path": "core/model_purpose.py",
+      "before": null,
+      "after": "bcebf2a8e49d7cab14ec0582ce692055a9b310db0d4638beec3a5e3ee940f078"
     },
     {
       "path": "core/night.py",
@@ -220,7 +225,7 @@
     {
       "path": "core/fork_update_policy.py",
       "before": null,
-      "after": "b0ff06b2f43a4fe8c75f590252b4d6c0081430ef3389b57a6bd581cecd7e4edc"
+      "after": "5b4c2815b9c6f54e5aab6dd78e2c5930efe57a9742cc9f86a73e45d45d280324"
     },
     {
       "path": "core/task_doctor.py",

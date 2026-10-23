@@ -5,12 +5,12 @@
 Состояние доступно API/интерфейсу; никакой фоновой задачи этот модуль не создаёт.
 """
 PRODUCT = "MS8AT8DWiar"
-BUILD = 16
+BUILD = 17
 REQUIRED_FEATURES = ("codex_local", "codex_task_quota_grants", "brain_routes", "brain_watch", "diagnostics_v1",
                      "task_observability_v1", "codex_task_delegation_v1", "human_memory_mcp_v1",
                      "codex_confirmation_recovery_v1", "language_voice_switch_v1", "windows_task_commands_v1",
                      "custom_dialogs_v1", "subscription_model_probe_guard_v1", "task_context_doctor_v1",
-                     "markdown_tool_call_recovery_v1", "overlay_v1")
+                     "markdown_tool_call_recovery_v1", "purpose_model_routing_v1", "overlay_v1")
 BLOCK_REASON = "Канал обновления форка ещё не настроен. Обычный установщик Dewiar может удалить дополнения; автоматическая установка заблокирована."
 
 

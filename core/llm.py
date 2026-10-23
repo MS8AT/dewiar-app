@@ -17,6 +17,7 @@ import sys
 import time
 
 import httpx
+import model_purpose
 from brain_watch import observed_stream
 
 from settings import LLM_PRESETS
@@ -302,24 +303,10 @@ def _headers(p):
     return h
 
 
-_NOT_CHAT = re.compile(r"embed|rerank|ocr|whisper|tts|asr|speech|stt|clip|bge|e5-|guard|moderat", re.I)
-
-
-def pick_model(models):
+def pick_model(models, purpose="chat"):
     """Из списка сервера выбрать модель для разговора: не эмбеддинги, не реранкер, не речь.
-    Предпочтение — псевдонимы chat/llm/default, затем названия с chat/instruct, затем известные семейства
-    (qwen, llama, mistral…), затем первая подходящая."""
-    ok = [m for m in models if not _NOT_CHAT.search(m)]
-    if not ok:
-        return models[0] if models else ""
-    for pref in ("chat", "llm", "default"):
-        if pref in ok:
-            return pref
-    for rx in (r"chat|instruct", r"qwen|llama|mistral|gemma|glm|deepseek|phi"):
-        hit = [m for m in ok if re.search(rx, m, re.I)]
-        if hit:
-            return hit[0]
-    return ok[0]
+    Для фоновых задач без явного model — tool-friendly модель умеренного размера."""
+    return model_purpose.choose(models, purpose)
 
 
 def _root(base):
@@ -400,12 +387,13 @@ def resolve_model(p):
     """Модель из профиля, а если не указана — выбранная pick_model (запоминается по адресу до перезапуска)."""
     if p.get("model"):
         return p["model"]
-    key = _base(p)
+    purpose = p.get("_brain_role") or "chat"
+    key = (_base(p), purpose)
     if key not in _model_cache:
         models = list_models(p)
         if not models:
             raise LLMError("сервер не отдал ни одной модели — укажите модель вручную")
-        _model_cache[key] = pick_model(models)
+        _model_cache[key] = pick_model(models, purpose)
         log.info("Модель не указана — из %s выбрал «%s»", models[:12], _model_cache[key])
     return _model_cache[key]
 

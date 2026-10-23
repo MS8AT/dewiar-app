@@ -20,5 +20,6 @@ write, publish, call a model, or install. / 每个补丁都是叠加在指定上
 | PATCH-009 | Локальные окна подтверждения / Local confirmation dialogs / 本地确认对话框 | [ТЗ и промпт](PATCH_009_CUSTOM_DIALOGS.md) |
 | PATCH-013 | AI-доктор переполнения контекста / Context overflow AI doctor / 上下文溢出 AI 医生 | [ТЗ и промпт](PATCH_013_TASK_CONTEXT_DOCTOR.md) |
 | PATCH-014 | Строгое восстановление Markdown-вызова / Strict Markdown tool-call recovery / 严格恢复 Markdown 工具调用 | [ТЗ и промпт](PATCH_014_MARKDOWN_TOOL_CALL_RECOVERY.md) |
+| PATCH-015 | Автовыбор модели по назначению / Purpose-aware model selection / 按用途自动选择模型 | [ТЗ и промпт](PATCH_015_PURPOSE_MODEL_ROUTING.md) |
 
 Шаблон для следующих изменений: [prompts/PATCH_PROMPT_TEMPLATE.md](../../prompts/PATCH_PROMPT_TEMPLATE.md).
