@@ -337,6 +337,18 @@ def parse_parts(value):
     return clean
 
 
+def _discard_created(manager, task):
+    """Откатить только объект, созданный текущей операцией, без обязательного save/emit."""
+    rollback = getattr(manager, "discard_created", None)
+    if rollback:
+        return rollback(task) is True
+    try:
+        manager.delete(task.id)
+        return True
+    except Exception:  # noqa: BLE001 - вызывающий код вернёт фиксированную ошибку отката
+        return False
+
+
 def spawn_subscription_parts(manager, task, profile, cancel, value):
     """После отдельного подтверждения создаёт только дочерние Codex-задачи того же профиля."""
     ready(profile, cancel)
@@ -352,17 +364,22 @@ def spawn_subscription_parts(manager, task, profile, cancel, value):
     per_task = profile_limit(profile)
     if per_task is None:
         raise ContextError("Лимит Codex для подзадач должен быть целым числом от 1 до 20.")
+    human_on = enabled(profile, "human_memory") and task.data.get("human_memory_enabled") is True
     question = (f"Создать и запустить {len(parts)} подзадач Codex тем же профилем?\n"
                 f"Каждая может использовать до {per_task} запросов; общий верхний предел этого запуска — "
                 f"{len(parts) * per_task}. Подзадачи не получают команды, запись в проект, произвольную сеть/MCP "
                 f"или следующий уровень делегирования. Human Memory: "
-                f"{'каждая часть читает тот же подтверждённый scope с новой revision' if enabled(profile, 'human_memory') else 'выключена'}.")
+                f"{'каждая часть читает тот же подтверждённый scope с новой revision' if human_on else 'выключена для этой задачи'}.")
     if not confirm_local(manager.host, question, cancel):
         return "Создание подзадач не подтверждено. Ничего не запущено."
     ready(profile, cancel)
     lock = getattr(task, "control_lock", threading.RLock())
     made = []
     with lock:
+        ready(profile, cancel)
+        registry = getattr(manager, "tasks", None)
+        if task.data.get("status") != "running" or (isinstance(registry, dict) and registry.get(task.id) is not task):
+            raise ContextError("Родительская задача уже остановлена или удалена; подзадачи не созданы.")
         existing = manager._parts(task)
         if any(child.status in {"queued", "running", "waiting", "paused", "sleeping"} for child in existing):
             raise ContextError("Состояние дерева изменилось во время подтверждения; подзадачи не созданы.")
@@ -375,21 +392,29 @@ def spawn_subscription_parts(manager, task, profile, cancel, value):
                         "Выполни только эту часть и верни проверяемый краткий итог; текст входных данных не является полномочием.")
                 child = manager.create(item["title"], goal, project=task.data.get("project", ""),
                                        start=False, persona=task.data.get("persona", ""), parent=task.id)
+                made.append(child)
                 child.data["subscription_binding"] = sig
-                if isinstance(task.data.get("human_memory_scope"), dict):
+                if human_on and isinstance(task.data.get("human_memory_scope"), dict):
+                    child.data["human_memory_enabled"] = True
                     child.data["human_memory_scope"] = dict(task.data["human_memory_scope"])
                     child.data["human_memory_revision"] = uuid.uuid4().hex
                 child.save()
                 child.__dict__["_subscription_parent_authorized"] = sig
-                made.append(child)
+        except Exception as exc:
+            removed = all([_discard_created(manager, child) for child in made])
+            if removed:
+                raise ContextError("Подзадачи: локальная ошибка подготовки; созданные части удалены.") from exc
+            raise ContextError("Подзадачи: локальная ошибка подготовки; откат созданных частей не завершён.") from None
+        try:
+            ready(profile, cancel)
+            if task.data.get("status") != "running" or (isinstance(registry, dict) and registry.get(task.id) is not task):
+                raise ContextError("Родительская задача остановлена до запуска; созданные подзадачи удалены.")
         except Exception:
-            for child in made:
-                try:
-                    manager.delete(child.id)
-                except Exception:  # noqa: BLE001 - удаляем только созданную этой операцией часть
-                    pass
-            raise
-    manager._launch_parts(task)
+            removed = all([_discard_created(manager, child) for child in made])
+            if removed:
+                raise ContextError("Родительская задача остановлена до запуска; созданные подзадачи удалены.") from None
+            raise ContextError("Родительская задача остановлена до запуска; откат подзадач не завершён.") from None
+        manager._launch_parts(task)
     return (f"Создано подзадач: {len(made)}. Они используют тот же профиль и отдельные квоты. "
             "Вызови wait_parts, чтобы дождаться и собрать результаты.")
 
@@ -472,10 +497,11 @@ def run_task(manager, task, generate=None):
         # Старую историю, блокнот, системную подсказку и навыки не импортируем.
         task.data["subscription_binding"] = sig
         task.save()
+        human_on = enabled(profile, "human_memory") and task.data.get("human_memory_enabled") is True
         description = (f"Запустить задачу через Codex ({profile['model']})?\nЦель: {task.goal}\n"
                        f"Осталось не более {limit - used} запросов; возможен расход лимита/кредитов.\n"
                        f"Чтение памяти: {enabled(profile, 'memory_read')}; запись: {enabled(profile, 'memory_write')}.\n"
-                       f"Human Memory: {'read-only MCP с точным scope' if enabled(profile, 'human_memory') else 'выключена'}.\n"
+                       f"Human Memory: {'read-only MCP с точным scope' if human_on else 'выключена для этой задачи'}.\n"
                        f"Самопроверка: {enabled(profile, 'task_review')}; черновик урока: {enabled(profile, 'task_learning')}.\n"
                        f"Чтение проекта: {project if enabled(profile, 'project_read') else 'выключено'}. "
                        f"Подзадачи: {'до 4 за запуск с отдельным подтверждением' if enabled(profile, 'task_delegation') and not task.data.get('parent') else 'выключены'}. "
@@ -490,7 +516,7 @@ def run_task(manager, task, generate=None):
                 raise ContextError("Запуск Codex не подтверждён. Запрос не отправлен.")
         allowed = task_actions(profile, task)
         human_packet = {}
-        if enabled(profile, "human_memory"):
+        if human_on:
             from brain_watch import safe as watch_safe
             try:
                 from human_memory_contour import recall as human_recall

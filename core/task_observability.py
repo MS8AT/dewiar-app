@@ -81,17 +81,19 @@ def view(host, task):
     events = []
     invalid = 0
     if isinstance(rows, list):
-        for row in rows[:LIMIT]:
+        for row in rows:
             if isinstance(row, dict) and row.get("ref") == ref:
                 item = _event(row)
                 if item is None:
                     invalid += 1
                 else:
                     events.append(item)
+                if len(events) + invalid >= LIMIT:
+                    break
     else:
         invalid = 1
-    children = [_child(child) for child in list(getattr(host.tasks, "tasks", {}).values())[:100]
-                if child.data.get("parent") == task.id]
+    children = [_child(child) for child in getattr(host.tasks, "tasks", {}).values()
+                if child.data.get("parent") == task.id][:LIMIT]
     binding = task.data.get("subscription_binding")
     profile_ref = None
     if isinstance(binding, dict):

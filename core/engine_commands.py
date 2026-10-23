@@ -1211,6 +1211,7 @@ class CommandsMixin:
             return view(self, self.tasks.get(a.get("id")))
         if cmd == "task_create":
             human = a.get("human_memory")
+            checked_human = None
             start = a.get("start", True)
             if human is not None and type(start) is not bool:
                 raise ValueError("Неверный режим запуска задачи")
@@ -1219,16 +1220,29 @@ class CommandsMixin:
                 profile = task_profile(self)
                 if profile.get("kind") != "chatgpt_subscription" or not enabled(profile, "human_memory"):
                     raise ValueError("Human Memory не разрешена в выбранном профиле задач Codex")
+                from human_memory_contour import validate_scope, HumanMemoryError
+                try:
+                    checked_human = validate_scope(human)
+                except HumanMemoryError as exc:
+                    raise ValueError(str(exc)) from exc
             t = self.tasks.create(a.get("title", ""), a.get("goal", ""), a.get("project", ""),
                                   start=False if human is not None else start)
             if human is not None:
+                from human_memory_contour import configure, HumanMemoryError
                 try:
-                    from human_memory_contour import configure, HumanMemoryError
-                    configure(t, human)
+                    configure(t, checked_human)
                     t.save(); self.tasks._emit(t)
-                except HumanMemoryError as exc:
-                    self.tasks.delete(t.id)
-                    raise ValueError(str(exc)) from exc
+                except Exception as exc:
+                    try:
+                        rollback = getattr(self.tasks, "discard_created", None)
+                        removed = rollback(t) if rollback else (self.tasks.delete(t.id) is None)
+                    except Exception:  # noqa: BLE001 - откат только что созданной задачи, исходную ошибку не раскрываем
+                        removed = False
+                    if isinstance(exc, HumanMemoryError):
+                        raise ValueError(str(exc)) from exc
+                    if removed:
+                        raise ValueError("Human Memory: локальная ошибка настройки; новая задача удалена") from None
+                    raise ValueError("Human Memory: локальная ошибка настройки; откат новой задачи не завершён") from None
                 if start:
                     self.tasks.start(t.id)
             return t.public()

@@ -318,14 +318,14 @@ class ContextTests(unittest.TestCase):
             context.run_task(manager, task, generate)
             generate.assert_not_called(); self.assertNotIn("subscription_attempts", task.data)
 
-    def test_human_memory_missing_scope_stops_before_codex_generation(self):
-        with tempfile.TemporaryDirectory() as root, patch.object(context, "confirm_local", return_value=True):
+    def test_human_memory_profile_permission_without_task_opt_in_uses_plain_codex(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(context, "confirm_local", return_value=True), \
+             patch("human_memory_contour.recall") as recall:
             host, manager, task = self.task_fixture(root, subscription_human_memory=True)
-            generate = Mock()
+            generate = Mock(return_value=reply("finish", summary="Synthetic done"))
             context.run_task(manager, task, generate)
-            generate.assert_not_called()
-            self.assertEqual(task.data["status"], "paused")
-            self.assertIn("не задан", task.data["error"])
+            generate.assert_called_once(); recall.assert_not_called()
+            self.assertEqual(task.data["status"], "done")
 
     def test_human_memory_packet_is_bounded_context_not_an_action(self):
         packet = {"status": "ready", "items": [{"id": "phrase:1", "quote": "Synthetic evidence",
@@ -335,6 +335,7 @@ class ContextTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root, patch.object(context, "confirm_local", return_value=True), \
              patch("human_memory_contour.recall", return_value=packet) as recall:
             host, manager, task = self.task_fixture(root, subscription_human_memory=True)
+            task.data["human_memory_enabled"] = True
             generate = Mock(return_value=reply("finish", summary="Synthetic done"))
             context.run_task(manager, task, generate)
             recall.assert_called_once()
@@ -397,6 +398,7 @@ class ContextTests(unittest.TestCase):
                                                  "since": "2026-10-01T00:00:00+03:00",
                                                  "as_of": "2026-10-23T00:00:00+03:00"}
             task.data["human_memory_revision"] = "a" * 32
+            task.data["human_memory_enabled"] = True
             children = []
             class Child:
                 def __init__(self):
@@ -412,6 +414,72 @@ class ContextTests(unittest.TestCase):
             self.assertEqual(children[0].data["human_memory_scope"], task.data["human_memory_scope"])
             self.assertNotEqual(children[0].data["human_memory_revision"], task.data["human_memory_revision"])
             self.assertRegex(children[0].data["human_memory_revision"], r"^[a-f0-9]{32}$")
+            self.assertTrue(children[0].data["human_memory_enabled"])
+
+    def test_delegation_save_failure_rolls_back_current_child(self):
+        with tempfile.TemporaryDirectory() as root:
+            host, _, task = self.task_fixture(root, subscription_task_delegation=True)
+            child = types.SimpleNamespace(id="child-fail", data={"id": "child-fail", "status": "paused"},
+                                          status="paused", save=Mock(side_effect=OSError("synthetic")))
+            manager = types.SimpleNamespace(host=host, tasks={task.id: task}, _parts=lambda parent: [],
+                                            create=Mock(return_value=child), delete=Mock(), _launch_parts=Mock())
+            raw = json.dumps([{"title": "A", "goal": "Do A"}])
+            with patch.object(context, "confirm_local", return_value=True), self.assertRaisesRegex(context.ContextError, "части удалены"):
+                context.spawn_subscription_parts(manager, task, host.profile, self.cancel, raw)
+            manager.delete.assert_called_once_with(child.id)
+            manager._launch_parts.assert_not_called()
+
+    def test_stop_between_confirmation_and_parent_lock_creates_nothing(self):
+        with tempfile.TemporaryDirectory() as root:
+            host, _, task = self.task_fixture(root, subscription_task_delegation=True)
+            manager = types.SimpleNamespace(host=host, tasks={task.id: task}, _parts=lambda parent: [],
+                                            create=Mock(), delete=Mock(), _launch_parts=Mock())
+            cancel = self.cancel
+            class StopBeforeEnter:
+                def __enter__(self):
+                    cancel.set(); task.data["status"] = "stopped"; manager.tasks.pop(task.id)
+                    return self
+                def __exit__(self, *args):
+                    return False
+            task.control_lock = StopBeforeEnter()
+            raw = json.dumps([{"title": "A", "goal": "Do A"}])
+            with patch.object(context, "confirm_local", return_value=True), self.assertRaises(context.ContextError):
+                context.spawn_subscription_parts(manager, task, host.profile, cancel, raw)
+            manager.create.assert_not_called(); manager._launch_parts.assert_not_called()
+
+    def test_cancel_after_child_save_rolls_back_before_launch(self):
+        with tempfile.TemporaryDirectory() as root:
+            host, _, task = self.task_fixture(root, subscription_task_delegation=True)
+            child = types.SimpleNamespace(id="child-cancel", data={"id": "child-cancel", "status": "paused"},
+                                          status="paused")
+            child.save = Mock(side_effect=self.cancel.set)
+            manager = types.SimpleNamespace(host=host, tasks={task.id: task}, _parts=lambda parent: [],
+                                            create=Mock(return_value=child), delete=Mock(), _launch_parts=Mock())
+            raw = json.dumps([{"title": "A", "goal": "Do A"}])
+            with patch.object(context, "confirm_local", return_value=True), self.assertRaises(context.ContextError):
+                context.spawn_subscription_parts(manager, task, host.profile, self.cancel, raw)
+            manager.delete.assert_called_once_with(child.id)
+            manager._launch_parts.assert_not_called()
+
+    def test_rollback_attempts_every_created_child_after_one_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            host, _, task = self.task_fixture(root, subscription_task_delegation=True)
+            children = []
+            def create(*args, **kwargs):
+                child = types.SimpleNamespace(id=f"child-{len(children)}", status="paused",
+                                              data={"status": "paused", "parent": task.id})
+                child.save = Mock(side_effect=self.cancel.set if len(children) == 1 else None)
+                children.append(child)
+                return child
+            manager = types.SimpleNamespace(host=host, tasks={task.id: task}, _parts=lambda parent: [],
+                                            create=create, discard_created=Mock(side_effect=[False, True]),
+                                            _launch_parts=Mock())
+            raw = json.dumps([{"title": "A", "goal": "Do A"}, {"title": "B", "goal": "Do B"}])
+            with patch.object(context, "confirm_local", return_value=True), \
+                 self.assertRaisesRegex(context.ContextError, "не завершён"):
+                context.spawn_subscription_parts(manager, task, host.profile, self.cancel, raw)
+            self.assertEqual(2, manager.discard_created.call_count)
+            manager._launch_parts.assert_not_called()
 
     def test_refused_delegation_creates_nothing(self):
         with tempfile.TemporaryDirectory() as root:

@@ -58,6 +58,8 @@ html.st-light :is(#help .try b, #upd li.now) { color: var(--ink); }
 html.st-light :is(h1 svg.hi, .jcard svg, .tidea svg, .wtile svg) { stroke: var(--ink); }
 html.st-light :is(.ritem .ico, .ritem .rbadge, .wst > i, .hbtn) { color: var(--ink); background: var(--soft2); }
 html.st-light :is(#wlc-chip) { color: var(--ink); background: var(--soft2); }
+html.st-light #wlc .tq { background: var(--soft2); } html.st-light #wlc .tq:hover { background: var(--frost-hi); }
+html.st-light #wlc .tq.sent { background: rgba(17,114,75,.14); }
 html.st-light .hbtn:hover { color: #fff; }
 html.st-light :is(.dentry, .dins li, .dw-weak p, .dw-weak ol, .dw-steps, .sv-key, .sv-say span, .jcard .jstate, .pr-demo span, .pr-demo em, .md blockquote) { color: var(--ink); }
 html.st-light :is(.soulpage > h2, .dins h3, .dentry.night .dt, .dentry .tom b, .dpage .dhead .orn) { color: #6a4fc4; }

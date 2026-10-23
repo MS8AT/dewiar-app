@@ -74,6 +74,24 @@ class ObservabilityTests(unittest.TestCase):
         self.assertEqual(out["events"], [])
         self.assertEqual(out["invalid_records"], 1)
 
+    def test_children_and_events_are_filtered_before_limit(self):
+        tasks = {f"noise-{i}": Task(f"noise-{i}", binding=False) for i in range(120)}
+        late_child = Task("late-child", "paused", self.parent.id, binding=False)
+        tasks.update({self.parent.id: self.parent, late_child.id: late_child})
+        self.host.tasks.tasks = tasks
+        events = [{"seq": i + 1, "at": i + 1, "kind": "task_state", "ref": brain_watch.tag(f"noise-{i}"),
+                   "state": "running", "steps": 0} for i in range(120)]
+        events.append({"seq": 121, "at": 121, "kind": "task_state", "ref": brain_watch.tag(self.parent.id),
+                       "state": "running", "steps": 2})
+        snapshot = {"observed_at": 122, "journal": True, "storage_error": False, "events": events}
+        with patch.object(brain_watch, "status", return_value=snapshot), \
+             patch("subscription_quota.status", return_value={"valid": True}):
+            out = api.view(self.host, self.parent)
+        self.assertEqual(1, len(out["children"]))
+        self.assertEqual(brain_watch.tag(late_child.id), out["children"][0]["ref"])
+        self.assertEqual(1, len(out["events"]))
+        self.assertEqual(121, out["events"][0]["seq"])
+
 
 if __name__ == "__main__":
     unittest.main()

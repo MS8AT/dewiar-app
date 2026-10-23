@@ -277,6 +277,19 @@ public final class Bridge {
         else if ("tts".equals(what)) acts = new String[]{"com.android.settings.TTS_SETTINGS"};
         else if ("voice".equals(what)) acts = new String[]{"android.settings.VOICE_INPUT_SETTINGS"};
         else if ("accessibility".equals(what)) acts = new String[]{"android.settings.ACCESSIBILITY_SETTINGS"};
+        // экраны для «включи Bluetooth» и т. п. (отзыв 19.10, Android 13: «попросил включить блютуз, а она на вкладку вайфай»):
+        // сам переключить их Android приложениям не даёт — открываем нужный экран сразу, дальше руки или человек жмут переключатель.
+        // panel.action.* — шторка с переключателем (Android 10+), на старых — обычный экран настроек
+        else if ("bluetooth".equals(what)) acts = new String[]{"android.settings.BLUETOOTH_SETTINGS"};
+        else if ("wifi".equals(what)) acts = new String[]{"android.settings.panel.action.WIFI", "android.settings.WIFI_SETTINGS"};
+        else if ("internet".equals(what)) acts = new String[]{"android.settings.panel.action.INTERNET_CONNECTIVITY", "android.settings.WIRELESS_SETTINGS"};
+        else if ("nfc".equals(what)) acts = new String[]{"android.settings.panel.action.NFC", "android.settings.NFC_SETTINGS"};
+        else if ("airplane".equals(what)) acts = new String[]{"android.settings.AIRPLANE_MODE_SETTINGS", "android.settings.WIRELESS_SETTINGS"};
+        else if ("display".equals(what)) acts = new String[]{"android.settings.DISPLAY_SETTINGS"};
+        else if ("sound".equals(what)) acts = new String[]{"android.settings.panel.action.VOLUME", "android.settings.SOUND_SETTINGS"};
+        else if ("data".equals(what)) acts = new String[]{"android.settings.DATA_ROAMING_SETTINGS", "android.settings.WIRELESS_SETTINGS"};
+        else if ("hotspot".equals(what)) acts = new String[]{"android.settings.WIRELESS_SETTINGS"};
+        else if ("location".equals(what)) acts = new String[]{"android.settings.LOCATION_SOURCE_SETTINGS"};
         else acts = new String[]{"android.settings.APPLICATION_DETAILS_SETTINGS"};
         for (String act : acts) {
             try {

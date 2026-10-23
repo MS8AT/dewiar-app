@@ -238,6 +238,13 @@ class Task:
                 d["subscription_quota"] = quota
         return d
 
+def _write_hist(path, msgs):
+    """история.json — через временный файл и замену: прерванная запись (падение, выключение) оставляет прежнюю историю
+    целой, а читающий одновременно не видит пустой файл (GitHub, task_parts_test: JSONDecodeError на «готовой» задаче)."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(msgs, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
 
 class TaskManager:
     """Все задачи ассистента. Запускает фоновый поток-будильник (_scheduler) и по потоку на каждую работающую задачу."""
@@ -382,8 +389,10 @@ class TaskManager:
         """Создать папку задачи и начальные файлы; project — папка проекта для режима «Код». Нет папки — ValueError."""
         title = _clean(title or goal[:50])
         tid = uuid.uuid4().hex[:8]
-        d = self.root / f"{dt.datetime.now():%Y-%m-%d %H%M} {title}"
-        d.mkdir(parents=True, exist_ok=True)
+        # ID в имени делает каталог действительно уникальным: одинаковые названия в одну минуту
+        # не перезаписывают друг другу состояние, а откат удаляет только свою новую задачу.
+        d = self.root / f"{dt.datetime.now():%Y-%m-%d %H%M} {title} [{tid}]"
+        d.mkdir(parents=True, exist_ok=False)
         if project:
             p = Path(project).expanduser()
             if not p.is_dir():
@@ -494,6 +503,20 @@ class TaskManager:
             shutil.rmtree(t.dir, ignore_errors=True)
             self.tasks.pop(t.id, None)
         self.host.emit("tasks", tasks=self.list())
+
+    def discard_created(self, task):
+        """Без save/emit убрать только ещё не запущенную задачу, созданную текущей операцией."""
+        import shutil
+        with task.control_lock:
+            if self.tasks.get(task.id) is not task or (task.thread and task.thread.is_alive()):
+                return False
+            task.cancel.set()
+            try:
+                shutil.rmtree(task.dir)
+            except OSError:
+                return False
+            self.tasks.pop(task.id, None)
+            return True
 
     def accept(self, tid):
         """Перенести изменения кода из рабочей копии в проект (CodeWork.accept) -> текст для человека."""
@@ -1042,7 +1065,7 @@ class TaskManager:
             out = []
             for p in sorted(t.dir.rglob("*")):
                 rel = p.relative_to(t.dir)
-                if p.is_file() and not rel.parts[0].startswith(("рабочая копия", "_run")) and p.name not in ("задача.json", "история.json", "журнал.md"):
+                if p.is_file() and not rel.parts[0].startswith(("рабочая копия", "_run")) and p.name not in ("задача.json", "история.json", "история.json.tmp", "журнал.md"):
                     out.append(f"{rel.as_posix()} — {p.stat().st_size} байт")
             return "\n".join(out[:300]) or "Папка пуста."
         if name == "run_python":
@@ -1323,7 +1346,7 @@ class TaskManager:
         import hashlib
         try:
             files = sorted(f"{p.relative_to(t.dir)}:{p.stat().st_size}" for p in t.dir.rglob("*")
-                           if p.is_file() and p.name not in ("журнал.md", "задача.json", "история.json") and "рабочая копия" not in p.parts)
+                           if p.is_file() and p.name not in ("журнал.md", "задача.json", "история.json", "история.json.tmp") and "рабочая копия" not in p.parts)
         except OSError:
             files = []
         h = hashlib.sha1("\n".join([t.plan(), t.notebook(), json.dumps(t.data.get("outputs") or []), *files[:2000]]).encode()).hexdigest()
@@ -1399,7 +1422,7 @@ class TaskManager:
                 src = c.dir / "outputs"
                 if src.is_dir():
                     shutil.copytree(src, dst, dirs_exist_ok=True)
-                    files = [str(p.relative_to(t.dir)) for p in dst.rglob("*") if p.is_file()]
+                    files = [p.relative_to(t.dir).as_posix() for p in dst.rglob("*") if p.is_file()]
                     if files:
                         line += "\nФайлы: " + ", ".join(files[:20])
                 line += "\n" + (c.result or "")[:4000]
@@ -1581,7 +1604,7 @@ class TaskManager:
                 results += ["(не выполнено: задача ушла ждать — повтори после пробуждения, если нужно)"] * (len(calls) - len(results))
                 msgs += tool_turn_messages(prof, text, calls, results)
                 msgs = self._compact(t, prof, msgs)
-                hist.write_text(json.dumps(msgs, ensure_ascii=False), encoding="utf-8")
+                _write_hist(hist, msgs)
                 t.save()
                 self._emit(t)
                 if t.data.get("finished") or t.data.get("sleep_now"):
@@ -1650,9 +1673,9 @@ class TaskManager:
                 # пользователь написал, пока задача заканчивала круг, — не теряем: проснётся сразу
                 t.data.update(finished=False, finish_checked=False, force_finish=False, verified=False, critic_done=False, status="sleeping", wake_at=_now(),
                               wait_reason="пришло сообщение пользователя")
-            t.save()
-            try:
-                hist.write_text(json.dumps(msgs, ensure_ascii=False), encoding="utf-8")
+            try:                                              # история — раньше состояния: увидевший «готово» читает её целой
+                _write_hist(hist, msgs)
             except (OSError, NameError):                      # NameError: msgs не успели прочитать
                 pass
+            t.save()
             self._emit(t)

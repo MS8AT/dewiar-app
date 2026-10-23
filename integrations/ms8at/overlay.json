@@ -3,8 +3,8 @@
   "product": "MS8AT8DWiar",
   "overlay_id": "ms8at-dewiar-integrations",
   "upstream": {
-    "version": "0.39.6",
-    "commit": "4a72b8bdbca52810c42a32a871dd8252d913036e"
+    "version": "0.39.7",
+    "commit": "24a3d6c22142b623081478a121d396d7e42741c1"
   },
   "fork": {
     "build": 5
@@ -45,6 +45,7 @@
     "tests/task_observability_test.py",
     "tests/task_observability_ui.test.mjs",
     "tests/human_memory_contour_test.py",
+    "tests/task_directory_safety_test.py",
     "tests/ms8at_overlay_test.py"
   ],
   "update_policy": {

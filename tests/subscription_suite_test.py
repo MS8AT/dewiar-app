@@ -23,6 +23,7 @@ def main():
              ROOT / "tests" / "diagnostics_test.py",
              ROOT / "tests" / "task_observability_test.py",
              ROOT / "tests" / "human_memory_contour_test.py",
+             ROOT / "tests" / "task_directory_safety_test.py",
              ROOT / "tests" / "diagnostic_cli_test.py",
              ROOT / "tests" / "fork_update_policy_test.py",
              RUNTIME / "test_codex.py", RUNTIME / "test_windows_store.py"]
