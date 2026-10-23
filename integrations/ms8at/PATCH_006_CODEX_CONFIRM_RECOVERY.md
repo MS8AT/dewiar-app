@@ -3,6 +3,9 @@
 Этот файл — ТЗ и интеграционный промпт. Он не разрешает установку, публикацию или
 вызов модели. Реализация работает только с локальным ожидающим подтверждением.
 
+[Русский](#ru) · [English](#en) · [中文](#zh)
+
+<a id="ru"></a>
 ## RU · Что делает патч
 
 Если окно агента пропустило одноразовое событие `confirm` при перезагрузке, сворачивании
@@ -13,6 +16,7 @@
 Патч не повторяет задачу, не вызывает модель, не входит в аккаунт и не использует сеть.
 Обычные подтверждения Dewiar продолжают идти через прежний `confirm_answer`.
 
+<a id="en"></a>
 ## EN · What the patch does
 
 If the Agent window misses the one-shot `confirm` event during reload, hide, or mode
@@ -20,6 +24,7 @@ switch, it reads the current local pending state and restores the Yes/No control
 Answers require the exact nonce. An expired question is closed with an explicit status.
 The recovery performs no model call, login, retry, or network request.
 
+<a id="zh"></a>
 ## 中文 · 补丁作用
 
 如果代理窗口在重新加载、隐藏或切换模式时错过一次性的 `confirm` 事件，界面会读取
