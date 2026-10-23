@@ -26,6 +26,7 @@ def main():
              ROOT / "tests" / "task_directory_safety_test.py",
              ROOT / "tests" / "diagnostic_cli_test.py",
              ROOT / "tests" / "fork_update_policy_test.py",
+             ROOT / "tests" / "ms8at_release_gate_test.py",
              RUNTIME / "test_codex.py", RUNTIME / "test_windows_store.py"]
     for test in tests:
         subprocess.run([sys.executable, "-B", str(test)], check=True, cwd=ROOT)

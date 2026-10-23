@@ -249,6 +249,21 @@ def chat_answer(host, profile, text, cancel, generate):
 _DENY = {"pass", "private", "secrets", "credentials", ".git", ".ssh", ".codex", ".hermes",
          "node_modules", "venv", ".venv", "runtime", "__pycache__"}
 _EXT = {".py", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".md", ".txt", ".html", ".css", ".c", ".h", ".cpp", ".rs", ".go"}
+_SECRET_CONTENT = re.compile(r"""(?imx)
+    (?:^|[\s{,])
+    [\"']?(?:
+        api[_-]?key|client[_-]?secret|aws[_-]?secret[_-]?access[_-]?key|secret[_-]?access[_-]?key|
+        password|passwd|pwd|access[_-]?token|refresh[_-]?token|id[_-]?token|private[_-]?key|secret
+    )[\"']?\s*[:=]\s*
+    (?:[\"'][^\"'\r\n]{8,}[\"']|[A-Za-z0-9_./+=:@-]{12,})
+    |
+    (?:^|\s)authorization\s*:\s*(?:bearer|basic)\s+[A-Za-z0-9_./+=:@-]{8,}
+    |
+    -----BEGIN\s+(?:(?:RSA|EC|DSA|OPENSSH)\s+)?PRIVATE\s+KEY-----
+    |
+    \b(?:sk-(?:proj-)?[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|
+        xox[baprs]-[A-Za-z0-9-]{16,}|AKIA[A-Z0-9]{16})\b
+""")
 
 
 def safe_source(root, relative):
@@ -297,7 +312,7 @@ def project_action(task, name, relative, start_line="1"):
         raise ContextError("Файл слишком велик или имеет несколько жёстких ссылок.")
     # Известные признаки секретов блокируем без вывода содержимого в журнал.
     data = path.read_text(encoding="utf-8")
-    if re.search(r"(?i)(?:api[_-]?key|password|access_token|refresh_token)\s*[:=]\s*[\"'][^\"'\s]{8,}|-----BEGIN .*PRIVATE KEY|\bsk-[A-Za-z0-9_-]{16,}", data):
+    if _SECRET_CONTENT.search(data):
         raise ContextError("Файл похож на содержащий секреты; передача запрещена.")
     if not re.fullmatch(r"[1-9][0-9]{0,5}", start_line):
         raise ContextError("start_line должен быть номером строки от 1 до 999999.")
@@ -606,10 +621,16 @@ def run_task(manager, task, generate=None):
         else:
             task.data.update(status="paused", error="Достигнут лимит запросов Codex для задачи. Автоповтора нет.")
     except (ContextError, SubscriptionError) as exc:
-        task.data.update(status="stopped" if task.cancel.is_set() else "paused", error=str(exc))
+        # Автоматически запущенная часть, которая не дошла ни до одного шага, терминальна:
+        # wait_parts не должен запускать её снова каждые две секунды.
+        terminal_child = bool(task.data.get("parent")) and not task.data.get("steps")
+        status = "stopped" if task.cancel.is_set() else "failed" if terminal_child else "paused"
+        task.data.update(status=status, error=str(exc))
         task.journal(str(exc))
     except Exception:
-        task.data.update(status="paused", error="Локальная ошибка контура Codex. Задача остановлена без автоматического повтора.")
+        terminal_child = bool(task.data.get("parent")) and not task.data.get("steps")
+        status = "stopped" if task.cancel.is_set() else "failed" if terminal_child else "paused"
+        task.data.update(status=status, error="Локальная ошибка контура Codex. Задача остановлена без автоматического повтора.")
     finally:
         task.data.update(activity="", wake_at="", auto_resume=False)
         task.data.pop("wake_note", None)

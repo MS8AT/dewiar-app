@@ -12,14 +12,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   tag:
     name: Метка и выпуск
+    permissions:
+      contents: write
     # закрытый репозиторий: Actions выключены (19.10 — без оплаты GitHub задачи не запускаются, решено не платить);
     # в открытой копии (dwr-git/dewiar-app) этот же файл работает как обычно
-    if: github.repository != 'dwr-git/dewiar'
+    # Fail closed: форки и интеграционные ветки не имеют права выпускать полное дерево Dewiar.
+    if: github.repository == 'dwr-git/dewiar-app'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -63,6 +66,9 @@ jobs:
   files:
     name: Файлы к выпуску
     needs: tag
+    permissions:
+      contents: write
+    if: github.repository == 'dwr-git/dewiar-app'
     runs-on: ubuntu-24.04
     env:
       HAS_KEY: ${{ secrets.DEWIAR_KEYSTORE_B64 != '' && '1' || '' }}     # ключ подписи телефона — в секретах (если положили)

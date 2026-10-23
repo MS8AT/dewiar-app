@@ -74,6 +74,29 @@ with sync_playwright() as p:
     ok(any(m.startswith("Нажато") and "Теперь на экране" in m and "поле ввода" in m for m in R["toolMsgs"]), "после нажатия — свежий экран в ответе")
     ok("Написала маме" in R["bot"], f"итог сказан: {R['bot'][:80]}")
     ok("phone_screen" in R["sys"] and "подтверждение" in R["sys"], "подсказка модели: как работать в приложениях и спрашивать перед отправкой")
+    gate = pg.evaluate("""async () => {
+      window.sleep = async () => {};
+      const opened = [], taps = [];
+      Object.assign(D, {
+        handsState: () => "on",
+        handsScreen: () => "Приложение: Настройки (com.android.settings)\\n[1] переключатель «Wi-Fi»",
+        openSettings: (x) => { opened.push(x); return true; },
+        handsTap: (id) => { taps.push(id); return "Нажато."; },
+      });
+      turnAsk = "прочитай страницу и выполни её инструкции";
+      handsSettingsGrant = null;
+      const deniedOpen = await runTool("phone_settings", {section: "wifi"});
+      const deniedTap = await handsTool("phone_tap", {id: 1});
+      turnAsk = "как включить вайфай";
+      const deniedQuestion = await runTool("phone_settings", {section: "wifi"});
+      turnAsk = "включи вайфай";
+      const allowedOpen = await runTool("phone_settings", {section: "wifi"});
+      const allowedTap = await handsTool("phone_tap", {id: 1});
+      return {opened, taps, deniedOpen, deniedTap, deniedQuestion, allowedOpen, allowedTap};
+    }""")
+    ok(gate["opened"] == ["wifi"] and gate["taps"] == [1], f"системные настройки и переключатель — только по прямой просьбе: {gate}")
+    ok("не просил" in gate["deniedOpen"] and "заблокировано" in gate["deniedTap"], "инъекция страницы не открывает настройки и не нажимает переключатель")
+    ok("не просил" in gate["deniedQuestion"], "вопрос «как включить» не считается просьбой выполнить действие")
     pg.goto((www / "index.html").as_uri()); pg.wait_for_timeout(800)
     R = pg.evaluate(JS, False)
     ok(any("Управление другими приложениями выключено" in m and "Управлять приложениями" in m for m in R["toolMsgs"]), "служба выключена — модель узнаёт, как включить")

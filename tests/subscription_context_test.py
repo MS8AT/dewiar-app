@@ -510,6 +510,31 @@ class ContextTests(unittest.TestCase):
             with self.assertRaises(context.ContextError):
                 context.project_action(types.SimpleNamespace(data={}), "project_list", ".")
 
+    def test_project_common_secret_formats_are_refused(self):
+        samples = {
+            "client.py": 'CLIENT_SECRET="synthetic-client-secret"',
+            "aws.txt": "AWS_SECRET_ACCESS_KEY=syntheticAwsSecret12345",
+            "headers.txt": "Authorization: Bearer synthetic-bearer-token-12345",
+        }
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root); task = types.SimpleNamespace(data={"project": root})
+            for name, payload in samples.items():
+                with self.subTest(name=name):
+                    (folder / name).write_text(payload, encoding="utf-8")
+                    with self.assertRaises(context.ContextError):
+                        context.project_action(task, "project_read", name)
+
+    def test_child_preflight_failure_is_terminal_and_not_retried(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(context, "confirm_local", return_value=False):
+            host, manager, task = self.task_fixture(root)
+            task.data["parent"] = "root-task"
+            generate = Mock()
+            context.run_task(manager, task, generate)
+            generate.assert_not_called()
+            self.assertEqual(task.data["status"], "failed")
+            self.assertEqual(task.data["steps"], 0)
+            self.assertFalse(task.data["auto_resume"])
+
     def test_task_hook_precedes_all_legacy_reads(self):
         tree = ast.parse((CORE / "tasks.py").read_text(encoding="utf-8"))
         run = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_run")

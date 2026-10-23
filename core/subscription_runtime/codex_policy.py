@@ -76,7 +76,7 @@ ACTION_SCHEMA = {"type": "object", "properties": {
     "text": {"type": "string"},
     "actions": {"type": "array", "maxItems": 1, "items": {"type": "object", "properties": {
         "name": {"type": "string", "enum": ["plan", "notebook", "finish", "pause", "memory_save",
-                                          "create_task", "project_list", "project_read"]},
+                                          "create_task", "project_list", "project_read", "spawn_parts", "wait_parts"]},
         "arguments": {"type": "string", "description": "JSON object encoded as a string; exact fields from allowed_actions, all values nonempty strings."}},
         "required": ["name", "arguments"], "additionalProperties": False}}},
     "required": ["text", "actions"], "additionalProperties": False}

@@ -7,7 +7,7 @@
     "commit": "24a3d6c22142b623081478a121d396d7e42741c1"
   },
   "fork": {
-    "build": 5
+    "build": 6
   },
   "payload_manifest": "tools/local_codex_manifest.json",
   "integration_prompt": "integrations/ms8at/INTEGRATION_PROMPT_RU.md",

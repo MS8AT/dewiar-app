@@ -89,11 +89,16 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(actions["maxItems"], 1)
         self.assertEqual(set(actions["items"]["properties"]["name"]["enum"]),
                          {"plan", "notebook", "finish", "pause", "memory_save",
-                          "create_task", "project_list", "project_read"})
+                          "create_task", "project_list", "project_read", "spawn_parts", "wait_parts"})
         self.assertEqual(actions["items"]["properties"]["arguments"]["type"], "string")
         instructions = policy.thread_params("test-model", ".", structured=True)["baseInstructions"]
         for required in ("start_line", "8000", "10000", "20000", "actions=[]", "allowed_actions"):
             self.assertIn(required, instructions)
+
+    def test_siwc_does_not_send_host_identifier(self):
+        source = (Path(__file__).resolve().parent / "sidecar.mjs").read_text(encoding="utf-8")
+        self.assertIn("sendHostId: false", source)
+        self.assertNotIn("sendHostId: true", source)
 
     def test_no_memory_history_files_tools_or_unknown_fields(self):
         for key in ("history", "instructions", "tools", "files", "memory", "api_key", "endpoint", "transport"):

@@ -68,7 +68,7 @@ async function run(r) {
     controller.signal.throwIfAborted();
     const {createChatGPT} = await import(pathToFileURL(sdk).href);
     const client = createChatGPT({appName: 'AI WorckBook local subscription', appId: 'ai-worckbook-subscription',
-      redirectPort: 0, storageDir, sendHostId: true,
+      redirectPort: 0, storageDir, sendHostId: false,
       credentialEncryption: {id: 'windows-dpapi-current-user-v1', isAvailable: () => process.platform === 'win32',
         encrypt: value => cryptoCall('encrypt', Buffer.from(value, 'utf8')),
         decrypt: async value => (await cryptoCall('decrypt', value)).toString('utf8')}});
