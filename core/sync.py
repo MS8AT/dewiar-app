@@ -22,6 +22,7 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import socket
@@ -795,6 +796,8 @@ class Sync:
                 rel = (folder + "/" if folder else "") + f"{base} ({n}).md"
                 n += 1
             self.state["map"][sid] = rel
+        else:
+            rel = self._move_to_folder(sid, rel, d, root)
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         text = str(d.get("text") or "")
@@ -803,6 +806,35 @@ class Sync:
             text = f"# {d.get('title') or p.stem}\n\n{text}\n"   # (вкладки блокнота — как есть: заголовок не их)
         p.write_text(text, encoding="utf-8")
         self._pad_event(rel, False)
+
+    def _move_to_folder(self, sid, rel, d, root):
+        """Папку заметки сменили на телефоне (№195, 23.10: папки в заметках) — переносим файл в эту папку, имя то же.
+        Только в непустую папку: старые телефоны присылают folder "" у любой заметки, и всё уехало бы в корень. -> rel."""
+        from workspace import _clean_name
+        want = "/".join(_clean_name(x) for x in str(d.get("folder") or "").split("/") if x.strip() and x not in (".", ".."))
+        cur = str(Path(rel).parent.as_posix())
+        cur = "" if cur == "." else cur
+        if not want or want == cur:
+            return rel
+        src = root / rel
+        base = Path(rel).stem
+        new = f"{want}/{base}.md"
+        n = 2
+        taken = set(self.state["map"].values())
+        while (root / new).exists() or new in taken:
+            new = f"{want}/{base} ({n}).md"
+            n += 1
+        try:
+            (root / new).parent.mkdir(parents=True, exist_ok=True)
+            if src.exists():
+                os.replace(src, root / new)
+        except OSError as e:
+            log.info("Заметка не перенесена в папку «%s»: %s", want, e)
+            return rel
+        self.state["map"][sid] = new
+        log.info("📁 Заметка перенесена с телефона: %s → %s", rel, new)
+        self._pad_event(rel, True)                     # вкладку блокнота унесли в другую папку — блокнот её уберёт
+        return new
 
     def _pad_event(self, rel, deleted):
         """Вкладку блокнота поправили на другом устройстве — открытый блокнот перечитает её (ui/pad.html)."""

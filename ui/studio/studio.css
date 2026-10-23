@@ -1448,3 +1448,7 @@ html.st-light .sfchip { background: var(--soft2); }
 @media (max-width: 720px) { .mt-form { grid-template-columns: 1fr; } .mt-here { flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) { .mt-pin, .mt-tag.in header { animation: none; } .mt-tag, .mt-tag:hover { transition: none; } }
 .mt-tag button:focus-visible, .mt-here button:focus-visible, .mt-hours button:focus-visible { outline: 2px solid var(--c, var(--accent)); outline-offset: 2px; }
+/* «Dewiar уже есть на другом устройстве?» над заявкой «Подключить бесплатно» (№216) */
+.dk-have { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 12px 14px; margin: 0 0 14px; border-radius: 14px; background: var(--panel); }
+.dk-have b { flex: 1 1 100%; font-size: 14px; } .dk-have span { flex: 1 1 320px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+html.st-light .dk-have { background: var(--soft2); }

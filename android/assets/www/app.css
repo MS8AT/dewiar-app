@@ -204,6 +204,9 @@ body.radio-on #state.idle { display: none; }      /* в покое вместо 
 .btn { padding: 12px 18px; border-radius: 14px; background: var(--frost-hi); font-weight: 600; white-space: nowrap; }
 .btn.p { background: var(--brand); color: #fff; box-shadow: 0 8px 22px -12px rgba(118,75,162,.9); }
 .btn.w { width: 100%; white-space: normal; line-height: 1.3; }   /* длинная надпись — в две строки, а не за край кнопки */
+.btn.ghost { background: none; box-shadow: inset 0 0 0 1px var(--frost-hi); color: var(--muted); }
+/* «Dewiar уже есть на компьютере?» над заявкой (№216): тот же ключ кодом, а не второй */
+.card.have { background: linear-gradient(var(--frost), var(--frost)), var(--frost); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
 .row2 .btn { min-width: 0; white-space: normal; line-height: 1.25; }
 .btn:disabled { opacity: .5; }
 .res { font-size: 13.5px; margin: 8px 4px; min-height: 0; }
@@ -925,3 +928,11 @@ body.light .mtp.match .mt-ok { color: #1d7f55; } body.light .mtp .mt-in { color:
 body.light .mt-rules li::before, body.light .mt-me .dot { background: #1d7f55; }
 /* папка заметки с компьютера (Блокнот, Работа…) — пометкой рядом с названием (№216) */
 .it.note .ntf { margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--frost); color: var(--muted); font-size: 11.5px; font-weight: 500; vertical-align: 1px; }
+/* папки заметок (№195): полоска «Все · Блокнот · Работа…» над списком и поле «Папка» в заметке */
+.ntfolds { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 10px 0 4px; padding-bottom: 2px; }
+.ntfolds::-webkit-scrollbar { display: none; }
+.ntfolds button { flex: none; border: 0; padding: 7px 13px; border-radius: 999px; background: var(--frost); color: var(--muted); font: 600 13px "Manrope", sans-serif; }
+.ntfolds button.on { background: var(--frost-hi); color: var(--ink); }
+.ntfold { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.ntfold span { color: var(--muted); font-size: 13.5px; flex: none; }
+.ntfold input { flex: 1; min-width: 0; }

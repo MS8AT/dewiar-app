@@ -57,8 +57,12 @@ with sync_playwright() as p:
         { role: "assistant", content: "Привет! Я на связи." },
         { role: "user", content: "Привет" },
         { role: "user", content: "Как дела?" },
-        { role: "assistant", content: "Хорошо!", who: "patrik" },
+        { role: "assistant", content: "Хорошо!", who: "patrik", handoff: persona().id },
         { role: "assistant", content: "А у тебя?", who: persona().id }], "Отлично")""")
+    # 23.10: без явной передачи слова чужой разговор в окно не попадает вовсе (у каждого персонажа свой)
+    H2 = pg.evaluate("""() => chatHistory([
+        { role: "user", content: "Обсудим ремонт ванной" },
+        { role: "assistant", content: "План из трёх пунктов…", who: "patrik" }], "Помоги с поздравлением маме")""")
     b.close()
 I = R["instream"]
 ok(I["text"].strip() == "Привет! Всё хорошо." and I["n"] == 2 and not I["second_tools"] and I["prompt"],
@@ -66,11 +70,15 @@ ok(I["text"].strip() == "Привет! Всё хорошо." and I["n"] == 2 and
 roles = [m["role"] for m in H]
 ok(roles == ["user", "assistant", "user"] and H[0]["content"].startswith("[До этого пользователь говорил не с тобой, а с коллегой по имени Патрик")
    and "Пользователь: Привет" in H[0]["content"] and "Патрик: Хорошо!" in H[0]["content"] and H[-1]["content"] == "Отлично",
-   f"история: роли чередуются, начинается с пользователя, разговор с коллегой — справкой (отзыв 13.10): {H}")
+   f"история: роли чередуются, начинается с пользователя, переданный разговор коллеги — справкой (отзыв 13.10): {H}")
+ok(H2 == [{"role": "user", "content": "Помоги с поздравлением маме"}], f"разговор с Патриком без передачи слова — не в окне Лиры: {H2}")
 
 seen = R["seen"]
-ok(seen[0].get("tools") and not seen[1].get("tools"), "сервер отклонил функции полем — повтор без поля tools")
-ok("# Инструменты" in seen[1]["messages"][0]["content"] and "get_time" in seen[1]["messages"][0]["content"], "функции описаны в системном сообщении")
+# с 0.39.1 первый повтор — без chat_template_kwargs (облако Ollama за шлюзом отклоняет это поле), функции ещё полем
+k = next((i for i, x in enumerate(seen) if not x.get("tools")), None)
+ok(seen[0].get("tools") and k is not None and all(x.get("tools") and "chat_template_kwargs" not in x for x in seen[1:k]),
+   f"сервер отклонил функции полем — сперва повтор без chat_template_kwargs, потом без поля tools (запрос {k})")
+ok(k is not None and "# Инструменты" in seen[k]["messages"][0]["content"] and "get_time" in seen[k]["messages"][0]["content"], "функции описаны в системном сообщении")
 ok([c["name"] for c in R["r1"]["calls"]] == ["get_time"] and not R["r1"]["text"].strip(), f"вызов <tool_call> распознан, на экран не попал: {R['r1']}")
 ok(R["mode"] == "https://dewiar.pro/dwrapp/cloud.php?p=", "режим «функции текстом» запомнен для этого сервера")
 last = seen[-1]
