@@ -51,7 +51,8 @@ function renderTaskObserve(o) {
 function renderTaskObserveStrip(o) {
   if (!o) return '<button class="btn small" id="t-observe-open">API / Лог: недоступно</button>';
   const quota = o.codex && o.codex.quota && o.codex.quota.state === "available" ? o.codex.quota : null;
-  const codex = o.codex && o.codex.enabled ? `Codex ${o.codex.attempts ?? 0}${quota ? "/" + quota.limit : ""}` : "обычный контур";
+  const codex = o.local && o.local.enabled ? `своя модель${o.local.read_only ? " · изучение" : ""}` :
+    o.codex && o.codex.enabled ? `Codex ${o.codex.attempts ?? 0}${quota ? "/" + quota.limit : ""}` : "обычный контур";
   const observer = o.observer && o.observer.state || "unknown";
   const memory = o.human_memory && o.human_memory.scope && o.human_memory.scope.enabled ?
     `Human Memory: ${o.human_memory.connector && o.human_memory.connector.state || "unknown"}` : "Human Memory: off";
@@ -145,6 +146,9 @@ async function openTask(id) {
     if (t.status === "sleeping") acts.push(`<button class="btn primary" data-a="task_resume">Продолжить сейчас</button>`);
     if (["running", "waiting", "sleeping"].includes(t.status)) acts.push(`<button class="btn" data-a="task_stop">Остановить</button>`);
     if (["paused", "stopped", "failed"].includes(t.status)) {
+      const localProfile = (S.llm.profiles || {})[(S.tasks || {}).llm] || {};
+      if (t.subscription_binding && localProfile.kind !== "chatgpt_subscription" && (S.tasks || {}).llm)
+        acts.push(`<button class="btn primary" data-a="task_use_local">Перейти на свою модель (изучение)</button>`);
       if (quotaAction && quotaAction.kind === "grant") acts.push(`<button class="btn primary" data-a="task_grant" data-count="${quotaAction.count}">${escH(quotaAction.label)}</button>`);
       else if (quotaAction && quotaAction.kind === "blocked") acts.push(`<span class="hint">${escH(quotaAction.label)}</span>`);
       else acts.push(`<button class="btn primary" data-a="task_resume">Продолжить</button>`);
@@ -195,6 +199,7 @@ async function openTask(id) {
         const args = {id}; if (b.dataset.a === "task_grant") args.count = Number(b.dataset.count);
         const r = await core.call(b.dataset.a, args);
         if (b.dataset.a === "task_grant") toast("Квота продлена. Теперь нажмите «Продолжить».", 5000);
+        else if (b.dataset.a === "task_use_local") toast("Своя модель выбрана, история сохранена. Нажмите «Продолжить».", 5000);
         else if (typeof r === "string") toast(r);
         if (b.dataset.a === "task_delete") tCur = "";
         loadTasks(); if (b.dataset.a !== "task_delete") openTask(id); else $("#t-view").innerHTML = "";

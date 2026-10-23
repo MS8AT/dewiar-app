@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path, PurePosixPath
+from project_scope import PROTECTED_ROOTS, protected as _protected, walk as project_walk
 
 log = logging.getLogger("dewiar.code")
 
@@ -51,15 +52,8 @@ def _git(cwd, *args, check=True, input_=None):
 
 
 def _walk(root: Path, limit=5000):
-    """Файлы проекта -> [PurePosixPath относительно root], отсортированные, без IGNORE_DIRS; не больше limit."""
-    out = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in IGNORE_DIRS and not d.startswith(".dewiar"))
-        for f in sorted(filenames):
-            out.append(PurePosixPath(Path(dirpath, f).relative_to(root).as_posix()))   # «/» и в Windows
-            if len(out) >= limit:
-                return out
-    return out
+    """Файлы проекта -> относительные пути без кэшей и закрытых корней; недоступная ветка не ломает весь обзор."""
+    return project_walk(root, limit=limit, ignored=IGNORE_DIRS)
 
 
 MAX_PROCS = 4
@@ -291,34 +285,61 @@ class CodeWork:
 
     # ---------- подготовка ----------
 
+    def _copy_untracked(self):
+        """Перенести доступные незатреканные файлы, не заходя в закрытые корни проекта."""
+        for text in _git(self.project, "ls-files", "--others", "--exclude-standard").splitlines():
+            rel = PurePosixPath(text)
+            if _protected(rel):
+                continue
+            src, dst = self.project / Path(*rel.parts), self.work / Path(*rel.parts)
+            try:
+                if not src.is_file():
+                    continue
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+            except OSError as e:
+                log.warning("Недоступный незатреканный файл пропущен: %s (%s)", rel, type(e).__name__)
+
+    def _finish_git_prepare(self):
+        self._copy_untracked()
+        _git(self.work, "add", "-A")
+        _git(self.work, "commit", "-q", "--allow-empty", "--no-verify", "-m", "dewiar: исходное состояние")
+        base = _git(self.work, "rev-parse", "HEAD").strip()
+        self.meta.write_text(f'{{"mode": "git", "base": "{base}"}}', encoding="utf-8")
+
     def prepare(self):
         """Создать рабочую копию, если её ещё нет (пишет «код.json»). Проект без единого коммита копируется как без git."""
         if not self.project.is_dir():
             raise CodeError(f"папки проекта нет: {self.project}")
         if self.work.exists():
-            return
+            if self.meta.is_file():
+                return
+            if self.git and _git(self.work, "rev-parse", "--verify", "HEAD", check=False).strip():
+                self._finish_git_prepare()
+                return
+            raise CodeError("рабочая копия создана не полностью; удалите задачу и запустите её снова")
         self.work.parent.mkdir(parents=True, exist_ok=True)
         if self.git and _git(self.project, "rev-parse", "--verify", "HEAD", check=False).strip():
             _git(self.project, "worktree", "add", "--detach", str(self.work), "HEAD")
             patch = subprocess.run(["git", "-C", str(self.project), "diff", "HEAD", "--binary"], capture_output=True).stdout
             if patch.strip():
                 subprocess.run(["git", "-C", str(self.work), "apply", "--whitespace=nowarn"], input=patch, capture_output=True)
-            for rel in _git(self.project, "ls-files", "--others", "--exclude-standard").splitlines():
-                src, dst = self.project / rel, self.work / rel
-                if src.is_file():
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, dst)
-            _git(self.work, "add", "-A")
-            _git(self.work, "commit", "-q", "--allow-empty", "--no-verify", "-m", "dewiar: исходное состояние")
-            base = _git(self.work, "rev-parse", "HEAD").strip()
-            self.meta.write_text(f'{{"mode": "git", "base": "{base}"}}', encoding="utf-8")
+            self._finish_git_prepare()
         else:
             size = 0
             for rel in _walk(self.project, limit=200000):
-                size += (self.project / rel).stat().st_size
+                try:
+                    size += (self.project / rel).stat().st_size
+                except OSError:
+                    continue
                 if size > MAX_COPY:
                     raise CodeError("проект без git больше 400 МБ — инициализируйте git (git init), и я возьму его рабочей копией")
-            shutil.copytree(self.project, self.work, ignore=shutil.ignore_patterns(*IGNORE_DIRS), symlinks=True)
+            def ignore(path, names):
+                blocked = set(shutil.ignore_patterns(*IGNORE_DIRS)(path, names))
+                if Path(path) == self.project:
+                    blocked.update(n for n in names if n.casefold() in PROTECTED_ROOTS)
+                return blocked
+            shutil.copytree(self.project, self.work, ignore=ignore, symlinks=True)
             self.meta.write_text('{"mode": "copy"}', encoding="utf-8")
         log.info("Рабочая копия: %s → %s", self.project, self.work)
 

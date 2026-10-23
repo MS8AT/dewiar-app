@@ -1281,8 +1281,11 @@ class CommandsMixin:
             if a.get("reveal", True) and not os.environ.get("DEWIAR_DRY_TOOLS"):
                 X.reveal(out)
             return {"path": str(out), "name": out.name, "dir": str(out.parent)}
-        if cmd in ("task_stop", "task_resume", "task_grant", "task_answer", "task_tell", "task_accept", "task_discard", "task_delete"):
+        if cmd in ("task_stop", "task_resume", "task_grant", "task_use_local", "task_answer", "task_tell", "task_accept", "task_discard", "task_delete"):
             tid = a.get("id")
+            if cmd == "task_use_local":
+                from local_task_mode import select
+                return select(self.tasks, self.tasks.get(tid), a.get("profile") or self.s.get("tasks", "llm"))
             if cmd == "task_tell":
                 return self.tasks.tell(tid, a.get("text", "")).public()
             if cmd == "task_stop":

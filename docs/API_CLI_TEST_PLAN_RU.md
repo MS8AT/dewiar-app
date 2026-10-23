@@ -77,3 +77,30 @@ PASS: список получен только по кнопке; выбранн
 - PASS build 18 smoke — установленный CLI `test/status/brains/api/sli/journal` вернул exit code 0; `status` показал build 18 и все три новые feature-флага, `brains` — отдельные привязки chat/tasks без раскрытия секретов. В хвосте после последнего запуска ядра: 18 строк, 0 `ERROR`, 0 `CRITICAL/FATAL`, 0 traceback; единственный warning — ожидаемое включение AI-доктора при переполнении контекста.
 - PARTIAL SLI — последние 100 сохранённых запусков: 41 completed, 52 failed, 6 interrupted, 1 unknown; p50 0,23 с, p95 11,45 с. Это историческое окно, `availability=not_measured`, `acceptance=unknown`, поэтому оно не считается приёмкой build 18.
 - NOT_RUN: T9; платный запрос и live Human Memory MCP не выполнялись.
+
+## Обновление build 22 — PATCH-016…019
+
+- PASS T15: подготовка рабочей копии исключает закрытые корни; untracked-файл
+  с отказом доступа не прерывает обзор. Проверены git baseline и non-git обход.
+- PASS T16: бюджет Codex резервирует finish, включённую самопроверку и урок;
+  синтетический сценарий с двумя чтениями завершается ровно за 5 запросов.
+- PASS T17: та же задача переключается на LAN-профиль отдельной командой,
+  прежний расход Codex остаётся в аудите; cloud fallback запрещён при
+  tasks.local_only. История перед переключением архивируется. Изучение не
+  допускает запись/команды; finish требует чтения источника и закрытого плана.
+- PASS: subscription_suite — ALL OK; 49 Node-проверок; overlay — build 22,
+  55 runtime-файлов. Установлены и повторно сверены 313 файлов; backup сохранён.
+- LIVE PASS T18: Human Memory MCP прошёл initialize/tools/list/health в
+  настоящем клиенте Dewiar. Локально staged 14 файлов с SHA-256, без копии ключей
+  или БД. У существующего snapshot integrity=ok, 31 фраза, SHA не изменился.
+  Пользовательский recall без точного scope не запускался.
+- LIVE FINDING: краткий tool-result probe прошёл у GPT-OSS 20B, Qwen 14B и
+  Qwen 3.5 9B. В длинной задаче GPT-OSS дал server peg-native error, а prompt
+  mode — пустой final; поэтому выбран Qwen 3.5 9B с окном 32K. Qwen 14B
+  назначен auxiliary/meeting/diary. Попытка расширить его контекст дала HTTP 500;
+  профиль сохраняет фактическое окно 8K, выгрузка чужих instances не выполнялась.
+- LIVE PASS: task_observe показывает local.enabled=true, codex.enabled=false,
+  human_memory.connector.state=ready и scope.enabled=false. Счётчик предыдущих
+  Codex-попыток сохранился: новых платных запросов в этом прогоне нет.
+- PARTIAL: SLI остаётся историческим окном со старыми ошибками; availability
+  и SLA не измерены. Полная ручная проверка UI и физический Android — NOT_RUN.

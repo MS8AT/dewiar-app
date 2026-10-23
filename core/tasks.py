@@ -574,7 +574,7 @@ class TaskManager:
 
     # ---------- работа ----------
 
-    def _russian(self, text):
+    def _russian(self, text, task=None):
         """Итог — по-русски: если в тексте больше 60% латиницы, просим ту же модель перевести (не вышло — как есть).
         Некоторые модели после долгой работы с англоязычными страницами и кодом пишут итог по-английски."""
         letters = re.findall(r"[A-Za-zА-Яа-яЁё]", text[:3000])
@@ -582,7 +582,8 @@ class TaskManager:
             return text
         try:
             from llm import stream_chat
-            prof = self.host.llm_profile()
+            from local_task_mode import task_profile
+            prof = task_profile(self.host, task) if task is not None else self.host.llm_profile()
             out = "".join(stream_chat(prof, "Переведи текст на русский язык. Сохрани Markdown, пути к файлам, команды и "
                                             "имена как есть. Ответь только переводом.", [{"role": "user", "content": text[:6000]}]))
             return out.strip() or text
@@ -593,6 +594,14 @@ class TaskManager:
     def _system(self, t, compact=False):
         """Подсказка модели на каждый шаг: задача, правила, блокнот, план, проект, память, уроки, навыки.
         Собирается заново каждый шаг — блокнот и план всегда свежие."""
+        if t.data.get("local_read_only"):
+            return task_doctor.compact_system(
+                persona=t.persona, title=t.title, goal=t.goal, notebook=t.notebook(), plan=t.plan(),
+                project=t.data.get("project") or "", task_dir=t.dir,
+                now=dt.datetime.now().strftime("%d.%m.%Y %H:%M")) + (
+                "\nТолько изучение: разрешены code_list/code_read, план, блокнот и итог. "
+                "code_list pattern — относительный каталог ('.' для корня); code_read path — относительный файл. "
+                "Не меняй проект. В итоге укажи прочитанные источники и ограничения проверки.")
         if compact:
             return task_doctor.compact_system(
                 persona=t.persona, title=t.title, goal=t.goal, notebook=t.notebook(), plan=t.plan(),
@@ -680,9 +689,10 @@ class TaskManager:
         Идут в след задачи (_trace) для уроков."""
         return t.data.setdefault("quality", {"tools": {}, "errors": [], "loop_warns": 0, "refusal": 0, "verify_fail": 0, "critic": 0})
 
-    def _ask(self, system, messages):
+    def _ask(self, system, messages, task=None):
         """Короткий служебный запрос к модели (самопроверка, уроки): низкая температура, ответ до 900 токенов."""
-        prof = self.host.llm_profile()
+        from local_task_mode import task_profile
+        prof = task_profile(self.host, task) if task is not None else self.host.llm_profile()
         if not prof:
             return ""
         return "".join(stream_chat(dict(prof, max_tokens=900, temperature=0.1), system, messages))
@@ -722,7 +732,7 @@ class TaskManager:
                 return ("Файлы в outputs/ готовы, но ты не показал их пользователю — он их не увидит. Вызови show для главных "
                         "файлов (страница, таблица, документ…), затем снова finish.")
         code = t.code()
-        if code is not None and int(t.data.get("tests_gate") or 0) < 2 and self.host.code_auto_run():
+        if code is not None and not t.data.get("local_read_only") and int(t.data.get("tests_gate") or 0) < 2 and self.host.code_auto_run():
             from codework import test_command
             try:
                 code.prepare()                            # finish без единого code_* — копии ещё нет
@@ -746,7 +756,7 @@ class TaskManager:
             files = []
             for p in sorted(t.dir.rglob("*")):
                 rel = p.relative_to(t.dir)
-                if p.is_file() and rel.parts[0] not in Q.SERVICE and not rel.parts[0].startswith("рабочая копия"):
+                if p.is_file() and rel.parts[0] not in Q.SERVICE and rel.parts[0] != "_history" and not rel.parts[0].startswith("рабочая копия"):
                     files.append(f"{rel.as_posix()} — {p.stat().st_size} байт")
             facts = (f"Шагов: {t.data.get('steps', 0)}. Инструменты: " +
                      ", ".join(f"{k}×{v}" for k, v in sorted(q["tools"].items(), key=lambda x: -x[1])[:12]) +
@@ -758,7 +768,13 @@ class TaskManager:
                     diff = code.diff(limit=20000)
                 except Exception:  # noqa: BLE001
                     log.debug("diff для самопроверки", exc_info=True)
-            problems = Q.critic(self._ask, f"{t.title}\n{t.goal}", summary, files, facts, diff=diff)
+            def review(system, messages):
+                if t.data.get("local_read_only"):
+                    from local_task_mode import STUDY_REVIEW
+                    system = STUDY_REVIEW
+                return self._ask(system, messages, t)
+            problems = Q.critic(review,
+                                f"{t.title}\n{t.goal}", summary, files, facts, diff=diff)
             if problems:
                 q["critic"] += 1
                 t.journal(f"🧐 Самопроверка вернула итог на доработку: {problems}")
@@ -819,6 +835,9 @@ class TaskManager:
             specs += [{"name": n, "description": d, "parameters": p} for n, (d, p) in CODE_TOOLS.items()]
         if not t.data.get("parent"):                       # часть сама частей не раздаёт
             specs += [{"name": n, "description": d, "parameters": p} for n, (d, p) in PART_TOOLS.items()]
+        if t.data.get("local_read_only"):
+            from local_task_mode import READ_TOOLS
+            specs = [spec for spec in specs if spec["name"] in READ_TOOLS]
         return task_doctor.compact_specs(specs, project=bool(t.data.get("project"))) if compact else specs
 
     def _coerce(self, t, name, args):
@@ -853,6 +872,16 @@ class TaskManager:
         """Собственно выполнение. Сначала свои инструменты задачи, потом инструменты ассистента — с теми же
         включателями, защитой и подтверждениями, что в чате (toolbox.policy/guard, host.confirm).
         Может надолго блокировать поток: ask_user ждёт ответа, confirm — решения человека."""
+        if t.data.get("local_read_only"):
+            from local_task_mode import READ_TOOLS, read_project
+            if name not in READ_TOOLS:
+                return "Защита Dewiar: эта локальная задача разрешает только изучение проекта."
+            if name in {"code_list", "code_read"}:
+                return read_project(t, name, args)
+            if name == "finish" and t.data.get("project") and not t.data.get("local_read_files"):
+                return "Итог не принят: ещё не прочитан ни один источник проекта. Вызовите code_read с относительным путём из code_list; при настоящем отказе доступа задайте вопрос через ask_user."
+            if name == "finish" and re.search(r"^\s*[-*]\s*\[ \]\s*\S", t.plan(), re.M):
+                return "Итог не принят: в плане остались невыполненные пункты. Проверь результат и обнови план перед finish."
         if name == "update_plan":
             plan = (args.get("plan") or "").strip()
             if not plan.startswith("#"):
@@ -954,7 +983,7 @@ class TaskManager:
             note = self._finish_gates(t, (args.get("summary") or "").strip())
             if note:
                 return note
-            summary = self._russian((args.get("summary") or "").strip()) or "Готово."
+            summary = self._russian((args.get("summary") or "").strip(), t) or "Готово."
             (t.dir / "итог.md").write_text(f"# Итог: {t.title}\n\n{summary}\n", encoding="utf-8")
             t.data.update(result=summary, finished=True)
             return "Задача завершена."
@@ -1462,7 +1491,15 @@ class TaskManager:
             return
         hist = t.dir / "история.json"
         try:
-            msgs = json.loads(hist.read_text(encoding="utf-8")) if hist.exists() else []
+            if t.data.pop("local_context_reset", False):
+                if hist.is_file():
+                    archive = t.dir / "_history"
+                    archive.mkdir(exist_ok=True)
+                    (archive / ("before-local-" + uuid.uuid4().hex + ".json")).write_bytes(hist.read_bytes())
+                msgs = []
+                t.journal("🧠 Новый локальный контекст: прежняя история сохранена в _history; цель, план и блокнот остаются.")
+            else:
+                msgs = json.loads(hist.read_text(encoding="utf-8")) if hist.exists() else []
         except ValueError:
             msgs = []
         wake = t.data.pop("wake_note", "")
@@ -1492,7 +1529,8 @@ class TaskManager:
         prog_sig, prog_step = self._progress_sig(t), int(t.data.get("steps") or 0)   # «буксует»: шагов без продвижения
         q = self._q(t)
         try:
-            prof = self.host.llm_profile()
+            from local_task_mode import task_profile
+            prof = task_profile(self.host, t)
             if not prof:
                 raise LLMError("не выбрана языковая модель")
             while not t.cancel.is_set():

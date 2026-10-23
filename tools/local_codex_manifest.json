@@ -5,7 +5,7 @@
     {
       "path": "core/codework.py",
       "before": "2dc256c90f2db9326888529a38a6903783c8c38450eb9cedb268ef12102cacb9",
-      "after": "fdc29e53fddd108d46f5bee9f78d2ad9e839a9fa0d6e8bf5e6f83a310fa12184"
+      "after": "ae3b172f301b7ac3aacbb5c6fca3e468f56b1f8d0f1094019b88c1717bf83910"
     },
     {
       "path": "core/engine_answer.py",
@@ -20,7 +20,7 @@
     {
       "path": "core/engine_commands.py",
       "before": "3ab5f9b5ec9c2d98b6ded0a585219df807a0c8cd6b910d632d63856933dc615b",
-      "after": "011a2df9ecb2e02d7f068353d64c58b6b9f53dde235fcafb3bc6ad371c427f8b"
+      "after": "fd0ec2aefc5ff36945b22295ecad6c926051f92b26f99086647110f9e0a9cf0d"
     },
     {
       "path": "core/engine_remote.py",
@@ -75,7 +75,7 @@
     {
       "path": "core/subscription_context.py",
       "before": null,
-      "after": "07dd7b51ecfceff93288f28328e6632f0e923a30ece185263c3975f7742b4cbf"
+      "after": "4826ac025a7cde1a381911481dd4a1065658d0b2710fbf79f06dab2ada6748d8"
     },
     {
       "path": "core/subscription_quota.py",
@@ -140,7 +140,7 @@
     {
       "path": "core/tasks.py",
       "before": "03462618d7005793b0c1c1fab1e4d03c15a58074955c25300f472fb38fc2b854",
-      "after": "7b9e7115e94dcfe1f647381dc98285bd1c9c8bb19ecfa1251a3ee0fa9160b90d"
+      "after": "3e4d8e623303cdde39f35eec1606f1f206a6323f732055783a98ac26ba6d4fd5"
     },
     {
       "path": "ui/hud.html",
@@ -150,7 +150,7 @@
     {
       "path": "ui/settings.html",
       "before": "06800c78ec326e73eaab1bb16ea73ddfd38d0874475f5ce9627af27f76129242",
-      "after": "b2fd4345d4d0351a01ad17a59b41a9a396bced7a91af9f249e73ccfba4a70ef0"
+      "after": "ff12b547f9f1a196dc70600b95b75fdda57af6ba74393a85ba6e9560b8f09291"
     },
     {
       "path": "ui/studio/brain.js",
@@ -170,7 +170,7 @@
     {
       "path": "ui/studio/tasks.js",
       "before": "156d09608499edebf1a564a7f07f1677abf7ce832d308e7d62befbc4d8865588",
-      "after": "e8e391b909265240db08909366ea4245b944ab7a852936c25c1d2f11098559a6"
+      "after": "56113ab5025f79527e7fc87505f408f6f1a668965d6e4e9165ce1d77f53acc8f"
     },
     {
       "path": "ui/studio/task_quota.js",
@@ -180,7 +180,7 @@
     {
       "path": "core/brain_routes.py",
       "before": null,
-      "after": "92453be5c7091c9d856245b59d17a998b0f40477e0a29543ccf1e1b1eea9ca26"
+      "after": "8735582fc919797ccd5f94c7dae826fa502a8edb617c79150ba17a6d50a7a43b"
     },
     {
       "path": "core/brain_watch.py",
@@ -190,7 +190,7 @@
     {
       "path": "core/settings.py",
       "before": "8901be798fb9f96d5866b01d650943c5d609c7ff5c6008c3c81a2ec9195837bf",
-      "after": "b197abffabc2f5a1259d09a6b36e0f7d701bd6de7065cb3818f00b612d07e401"
+      "after": "c7eedd47984608027ef15c5af760e0362ad7cd8c267ed8b1bec41a8307118cd2"
     },
     {
       "path": "ui/studio/brains.js",
@@ -225,7 +225,7 @@
     {
       "path": "core/fork_update_policy.py",
       "before": null,
-      "after": "3c6c690eb7cf2938d1aafb5eb65b93beb4c866da153298fb5def06f8da170121"
+      "after": "b4fcb09bb0f7a140688896f40a1e01f49c5d582cbb9f3f7bde8726054d349bcf"
     },
     {
       "path": "core/task_doctor.py",
@@ -245,7 +245,7 @@
     {
       "path": "core/task_observability.py",
       "before": null,
-      "after": "665a972ffe99b27810fb32f2ac83809274dee34e5ae06d338e49ab484a84118a"
+      "after": "7809eb6ff3ab9560cd12d11e26eb10af93d48565c698886cafce65fc858ef2c9"
     },
     {
       "path": "core/human_memory_contour.py",
@@ -256,6 +256,26 @@
       "path": "core/dewiar-cli.cmd",
       "before": null,
       "after": "538276463cc614fc4425bcd1ae154d03344b220e472968a3c40d02567aa66f3b"
+    },
+    {
+      "path": "core/local_task_mode.py",
+      "before": null,
+      "after": "d763dbe32190c42f0b6d14956291dd8771588e5150ff4a0c5be310130aafad2b"
+    },
+    {
+      "path": "core/project_scope.py",
+      "before": null,
+      "after": "8fc4aedda410e66247f1ca0f2cef0b47a94cadb96ee34c789437541a98eb5024"
+    },
+    {
+      "path": "core/task_budget.py",
+      "before": null,
+      "after": "da1f18feb916fafbf8a678f62e37fe3c7543ae19493713160a21b852650877a3"
+    },
+    {
+      "path": "core/human_memory_stdio.py",
+      "before": null,
+      "after": "318f9760b87638c719a83b21534cee1b3d911d3688dd1fc126e5e850e18cd0f0"
     }
   ]
 }

@@ -258,6 +258,29 @@ class ContextTests(unittest.TestCase):
             self.assertEqual(generate.call_count, 2)
             self.assertFalse(task.data["auto_resume"])
 
+    def test_task_reserves_requests_for_finish_review_and_lesson(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(context, "confirm_local", return_value=True), \
+             patch.object(context, "project_action", return_value="synthetic project evidence"):
+            host, manager, task = self.task_fixture(
+                root, subscription_task_limit=5, subscription_project_read=True,
+                subscription_task_review=True, subscription_task_learning=True)
+            generate = Mock(side_effect=[
+                reply("project_list", path="."),
+                reply("project_read", path="README.md", start_line="1"),
+                reply("finish", summary="Synthetic done"),
+                reply("finish", summary="Synthetic review passed"),
+                "Synthetic lesson",
+            ])
+            context.run_task(manager, task, generate)
+            self.assertEqual(generate.call_count, 5)
+            final_prompt = json.loads(generate.call_args_list[2].args[1])
+            self.assertEqual(set(final_prompt["allowed_actions"]), {"finish", "pause"})
+            self.assertEqual(final_prompt["requests_remaining"], 3)
+            self.assertEqual(final_prompt["finalization_reserve"], 3)
+            self.assertEqual(task.data["status"], "done")
+            self.assertEqual((task.dir / "итог.md").read_text(encoding="utf-8"), "Synthetic done")
+            self.assertEqual((task.dir / "урок Codex.md").read_text(encoding="utf-8"), "Synthetic lesson")
+
     def test_imported_profile_cannot_bypass_base_limit_with_21_to_100(self):
         for amount in (21, 100):
             with self.subTest(amount=amount), tempfile.TemporaryDirectory() as root:

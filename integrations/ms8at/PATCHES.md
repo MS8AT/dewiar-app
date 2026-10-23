@@ -21,5 +21,9 @@ write, publish, call a model, or install. / 每个补丁都是叠加在指定上
 | PATCH-013 | AI-доктор переполнения контекста / Context overflow AI doctor / 上下文溢出 AI 医生 | [ТЗ и промпт](PATCH_013_TASK_CONTEXT_DOCTOR.md) |
 | PATCH-014 | Строгое восстановление Markdown-вызова / Strict Markdown tool-call recovery / 严格恢复 Markdown 工具调用 | [ТЗ и промпт](PATCH_014_MARKDOWN_TOOL_CALL_RECOVERY.md) |
 | PATCH-015 | Автовыбор модели по назначению / Purpose-aware model selection / 按用途自动选择模型 | [ТЗ и промпт](PATCH_015_PURPOSE_MODEL_ROUTING.md) |
+| PATCH-016 | Закрытые корни проекта / Protected project roots / 受保护的项目根目录 | [ТЗ и промпт](PATCH_016_PROTECTED_PROJECT_ROOTS.md) |
+| PATCH-017 | Резерв финального запроса Codex / Codex final-request reserve / Codex 最终请求预留 | [ТЗ и промпт](PATCH_017_CODEX_FINAL_REQUEST_RESERVE.md) |
+| PATCH-018 | Продолжение изучения на своей модели / Continue study with a local model / 用本地模型继续研究 | [ТЗ и промпт](PATCH_018_LOCAL_TASK_MODE.md) |
+| PATCH-019 | Локальный транспорт Human Memory / Local Human Memory transport / Human Memory 本地传输 | [ТЗ и промпт](PATCH_019_HUMAN_MEMORY_STDIO.md) |
 
 Шаблон для следующих изменений: [prompts/PATCH_PROMPT_TEMPLATE.md](../../prompts/PATCH_PROMPT_TEMPLATE.md).

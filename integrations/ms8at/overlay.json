@@ -7,7 +7,7 @@
     "commit": "0e5917abf71e6d92a67b013c6fe5031f22a8af74"
   },
   "fork": {
-    "build": 18
+    "build": 22
   },
   "payload_manifest": "tools/local_codex_manifest.json",
   "integration_prompt": "integrations/ms8at/INTEGRATION_PROMPT_RU.md",
@@ -40,6 +40,10 @@
     "task_context_doctor_v1",
     "markdown_tool_call_recovery_v1",
     "purpose_model_routing_v1",
+    "protected_project_roots_v1",
+    "codex_final_request_reserve_v1",
+    "local_task_mode_v1",
+    "human_memory_stdio_v1",
     "overlay_v1"
   ],
   "required_tests": [
@@ -61,6 +65,10 @@
     "tests/tool_call_recovery_test.py",
     "tests/tool_call_recovery_flow_test.py",
     "tests/model_purpose_test.py",
+    "tests/codework_protected_test.py",
+    "tests/local_task_mode_test.py",
+    "tests/human_memory_stdio_test.py",
+    "tests/stage_human_memory_test.py",
     "tests/hud_subscription_confirm_test.py",
     "tests/language_mode_test.py",
     "tests/hud_language_test.py",

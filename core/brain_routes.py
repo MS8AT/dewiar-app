@@ -29,6 +29,10 @@ def profile(settings, role):
     if not pid:
         return None
     result = copy.deepcopy(profiles[pid])
+    if role == "tasks" and settings.get("tasks", "local_only") is True:
+        from local_task_mode import is_local
+        if not is_local(result):
+            return {"kind": "unavailable", "_route_missing": True, "_brain_id": pid, "_brain_role": role}
     result.update(id=pid, _brain_id=pid, _brain_role=role)
     result["_subscription_current"] = lambda: profile(settings, role) or {}
     return result
@@ -43,6 +47,11 @@ def update(settings, routes):
         if not isinstance(pid, str) or (pid and pid not in profiles):
             raise ValueError("Выбранный профиль отсутствует")
         p = profiles.get(pid, {})
+        if role == "tasks" and settings.get("tasks", "local_only") is True:
+            from local_task_mode import is_local
+            chosen = p if pid else profiles.get(settings.get("llm", "active"), {})
+            if not is_local(chosen):
+                raise ValueError("Для задач включены только локальные модели. Выберите свой сервер.")
         if p.get("kind") == "chatgpt_subscription":
             if (p.get("subscription_transport") != "codex" or not p.get("model") or not p.get("subscription_profile_id")
                     or p.get("subscription_export") is not True or p.get("subscription_usage_reviewed") is not True
