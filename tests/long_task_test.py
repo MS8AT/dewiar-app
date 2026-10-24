@@ -172,7 +172,8 @@ TK.BUDGET = 60000
 
 # ---------- 3. сбой модели — не падаем, повторяем позже ----------
 C = "Сбой модели"
-fail_left[0] = 2
+fail_left[0] = 4                  # 24.10: на 503 ядро само один раз тихо повторяет — две попытки задачи = четыре отказа
+os.environ["DEWIAR_BUSY_WAIT"] = "0.1"
 tc_ = tm.create(C, "Проверка повтора")
 ok(wait_for(lambda: tc_.status == "sleeping"), f"сбой → ждёт повтора, а не «не получилось» ({tc_.status} {tc_.error})")
 ok(wait_for(lambda: tc_.status == "done", 25), f"после двух сбоев задача выполнена ({tc_.status} {tc_.error})")

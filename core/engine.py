@@ -104,8 +104,9 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.toolbox = Toolbox(settings, self.reminders, self.skills, self.mcp)
         if self.s.get("tts", "engine") == "piper" and not self.s.get("tts", "v2"):
             # разовый перенос старых настроек: русские голоса Vosk TTS заметно лучше Piper (Piper остаётся запасным);
-            # метка v2 — чтобы не перебить выбор Piper, сделанный позже вручную
-            self.s.update({"tts": {"engine": "vosk", "v2": True}})
+            # метка v2 — чтобы не перебить выбор Piper, сделанный позже вручную. №226 (24.10): на слабом компьютере
+            # (лёгкий режим) Vosk TTS синтезирует фразу 17–36 с — там Piper оставляем
+            self.s.update({"tts": {"engine": "piper" if self.s.get("device", "light") else "vosk", "v2": True}})
         if self.s.get("audio", "barge_in") == "wakeword" and not self.s.get("audio", "barge_v2"):
             # разовый перенос: перебивать можно просто речью, а не только именем; метка barge_v2 — сделано один раз
             self.s.update({"audio": {"barge_in": "smart", "barge_v2": True}})

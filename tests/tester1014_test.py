@@ -27,12 +27,18 @@ def free():
 
 # ── 1. сторож обновления (с 0.38.91 — cmd, не скрытый PowerShell: антивирусы видели в нём вирус) ──
 sc = A.relaunch_script(4242)
-ok(sc.isascii() and 'tasklist /FI "PID eq 4242"' in sc and "goto wait" in sc and "ping -n 11 127.0.0.1" in sc, "ждёт конца установщика и ещё 10 с")
-ok('set /p P=<"%DW_PID%"' in sc and 'find " %P% "' in sc and "goto end" in sc, "запускает, только если Dewiar так и не поднялся (живой номер в ui.pid)")
+# №225 (24.10): tasklist Kaspersky останавливал вопросом — сторож ждёт метку update.run, которую убирает установщик
+ok(sc.isascii() and "tasklist" not in sc and 'if exist "%DW_FLAG%" goto wait' in sc and "if %N% GEQ 200 goto done" in sc
+   and "ping -n 11 127.0.0.1" in sc, "ждёт конца установщика (метка, не список процессов; не дольше ~10 мин) и ещё 10 с")
+ok('set /p P0=<"%DW_PID%"' in sc and 'set /p P=<"%DW_PID%"' in sc and 'if defined P if not "%P%"=="%P0%" goto end' in sc,
+   "запускает, только если Dewiar так и не поднялся (номер в ui.pid не сменился)")
+nsi = (ROOT / "packaging/windows/dewiar.nsi").read_text(encoding="utf-8")
+ok(nsi.count('Delete "$LOCALAPPDATA\\Dewiar\\update.run"') == 2 and "Function .onInstFailed" in nsi, "установщик убирает метку в конце и при сбое")
 ok('start "" "%DW_EXE%" -X utf8 "%DW_APP%"' in sc and 'del "%~f0"' in sc, "пути — переменными окружения (кириллица не мешает), сценарий удаляет себя")
 src = (ROOT / "ui/app.py").read_text(encoding="utf-8")
 ok("relaunch_after(inst.pid," in src and '["cmd.exe", "/d", "/c", str(f)]' in src and "EncodedCommand" not in src.split("def relaunch_after")[1][:900],
    "«Обновить» на Windows — установщик и сторож (cmd без окна)")
+ok('DW_FLAG=str(STATE_DIR / "update.run")' in src and '(STATE_DIR / "update.run").write_text' in src, "метку кладёт программа перед установщиком")
 
 # ── 2. лицо персонажа вместо кружка ──
 tmp = Path(tempfile.mkdtemp()); (tmp / "cfg").mkdir()

@@ -1,8 +1,8 @@
 {
-  "version": "0.163.0-alpha.11.2",
-  "sha256": "c81ed464e5e7cafd09a5fa26af390c480bed8e9fab2a87a54b285fbd56e7122a",
+  "version": "0.164.0-alpha.11.1",
+  "sha256": "1103e9e09c71fa2cd0afd6d8f3b9a2d63174fe8efd7cb5bd09f1cb14ef58a098",
   "distribution": "Installed official Codex desktop CLI; not copied or modified",
-  "protocol": "stdio JSON-RPC v2, schema generated locally 2026-10-22; offline probe repeated 2026-10-23",
+  "protocol": "stdio JSON-RPC v2, schema generated locally 2026-10-22; offline probe repeated 2026-10-24",
   "auth": "ChatGPT managed, OS keyring required, dedicated CODEX_HOME per profile",
   "docs": "https://learn.chatgpt.com/docs/app-server"
 }

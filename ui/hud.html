@@ -378,7 +378,7 @@
   #cap.tight2 .you { display: none; }
   #act { cursor: pointer; }
   #reader { position: absolute; inset: 0; z-index: 30; display: none; flex-direction: column; padding: 12px 10px 10px 14px;
-            background: radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--persona) 12%, transparent) 0%, transparent 55%), #0d0d12; }
+            background: radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--persona) 12%, transparent) 0%, transparent 55%), var(--skin-bg, #0d0d12); }
   #reader.on { display: flex; }
   #reader .rh { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding-right: 2px; }
   #reader .rh b { flex: 1; font: 600 14px "Unbounded", "Ubuntu", sans-serif; letter-spacing: .02em; }
@@ -408,6 +408,19 @@
   pre .cp { position: sticky; float: right; left: 100%; top: 0; margin: -4px -6px 0 8px; border: 0; border-radius: 8px; padding: 3px 8px;
             background: rgba(255,255,255,.1); color: var(--ink); font: 11px "Manrope", sans-serif; cursor: pointer; }
   pre .cp:hover { background: rgba(255,255,255,.18); }
+  /* «Ответ целиком» и ход работы в светлых темах (№233, 24.10: «при нажатии „ответ целиком“ текст плохо различим» —
+     тёмный лист #0d0d12 и тёмные чернила «Небесного»): лист — цвет темы, чернила, приглушённые линии и код */
+  body.light #reader .rh b, body.light #rd-body { color: var(--ink); }
+  body.light #rd-body { scrollbar-color: rgba(20,30,60,.22) transparent; }
+  body.light #rd-body h4 { color: var(--muted); }
+  body.light .md .h { color: var(--ink); }
+  body.light .md code { background: rgba(20,30,60,.07); }
+  body.light pre { background: rgba(20,30,60,.06); }
+  body.light pre .cp { background: rgba(20,30,60,.08); } body.light pre .cp:hover { background: rgba(20,30,60,.14); }
+  body.light .steps .sd { color: #3c4a64; } body.light .steps li.run::before { background: #6f8bb3; }
+  body.light .steps li::after { background: rgba(20,30,60,.12); } body.light .steps li.declined::before { background: rgba(20,30,60,.3); }
+  body.light .steps li.error::before { background: #d2486a; } body.light .steps .se { color: #b8304f; }
+  body.light .steps li::before { background: #1f9d6a; }
   /* Подсказки кнопок — свои, внутри карточки (отзыв 17.10: системная подсказка у портрета вылезала за края виджета и
      обрезалась). title переезжает в data-tip при наведении; подсказка переносится по словам и не выходит за окно. */
   #htip { position: fixed; z-index: 99; max-width: calc(100vw - 20px); padding: 7px 11px; border-radius: 12px; pointer-events: none;

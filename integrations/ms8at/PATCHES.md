@@ -1,5 +1,8 @@
 # Патчи MS8AT · MS8AT patches · MS8AT 补丁
 
+Текущая совместимость / Current compatibility / 当前兼容性:
+[Dewiar 0.40.1, MS8AT build 24](UPGRADE_0401.md).
+
 Каждый патч — отдельный модуль поверх указанной версии upstream. Он обязан иметь ТЗ, интеграционный промпт,
 перечень runtime-файлов, автономные тесты и способ отката. Промпт не является разрешением на запись, публикацию,
 запуск модели или установку. / Every patch is a separate module over an exact upstream version and must include a

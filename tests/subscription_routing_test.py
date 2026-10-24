@@ -78,6 +78,22 @@ class RoutingTests(unittest.TestCase):
             with self.assertRaises(llm.LLMError):
                 list(llm.stream_events(p, "s", []))
 
+    def test_llm_subscription_errors_never_enter_generic_retry(self):
+        with patch.dict(sys.modules, {"settings": types.SimpleNamespace(LLM_PRESETS={}), "httpx": types.SimpleNamespace()}):
+            import llm
+        p = dict(PROFILE, subscription_auxiliary=True)
+        for error in (adapter.SubscriptionError("HTTP 503 overloaded"), context.ContextError("scope revoked")):
+            with self.subTest(error=type(error).__name__), \
+                    patch.object(adapter, "text_events", side_effect=error) as events, \
+                    patch.object(llm, "_base", side_effect=AssertionError("generic HTTP")) as base, \
+                    patch.object(llm, "_stream_retry", side_effect=AssertionError("generic retry")) as retry:
+                with self.assertRaises(llm.LLMError) as caught:
+                    list(llm.stream_events(p, "s", [], purpose="exam"))
+                self.assertEqual(str(caught.exception), str(error))
+                events.assert_called_once_with(p, "s", [], None, purpose="exam", tools=None)
+                base.assert_not_called()
+                retry.assert_not_called()
+
     def test_confirmation_nonce_and_replay(self):
         host = Host()
         host.pending_confirm = {"source": "subscription", "id": "nonce", "text": "synthetic", "answer": False, "event": threading.Event()}

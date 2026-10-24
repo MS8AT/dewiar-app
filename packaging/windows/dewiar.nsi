@@ -234,6 +234,7 @@ Section "-Завершение"
   ${IfNot} ${SectionIsSelected} ${SecDesk}
     Delete "$DESKTOP\Dewiar.lnk"
   ${EndIf}
+  Delete "$LOCALAPPDATA\Dewiar\update.run"       ; метка «идёт установка» для сторожа обновления (ui/app.py relaunch_script)
   ${If} $IsUpdate == "1"
     Call LaunchApp                              ; обновили из виджета — запускаемся новой версией
   ${EndIf}
@@ -265,6 +266,11 @@ Function .onInit
       !insertmacro UnselectSection ${SecDesk}
     ${EndIf}
   ${EndIf}
+FunctionEnd
+
+; установка не удалась — метку сторожа убираем: пусть он вернёт прежнюю версию, а не ждёт 10 минут
+Function .onInstFailed
+  Delete "$LOCALAPPDATA\Dewiar\update.run"
 FunctionEnd
 
 ; ---------- WebView2 (окно виджета и студии). В Windows 11 есть всегда, в Windows 10 — почти всегда ----------

@@ -20,7 +20,7 @@ public class CaptureWidget extends AppWidgetProvider {
     }
 
     static RemoteViews views(Context c) {
-        RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_capture);
+        RemoteViews v = new RemoteViews(c.getPackageName(), light(c) ? R.layout.widget_capture_light : R.layout.widget_capture);
         v.setTextViewText(R.id.w_sub, nextLine(c));
         Intent i = new Intent(c, MainActivity.class).setAction("pro.dewiar.CAPTURE")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -29,6 +29,14 @@ public class CaptureWidget extends AppWidgetProvider {
     }
 
     static ComponentName cn(Context c) { return new ComponentName(c, CaptureWidget.class); }
+
+    /** Светлая тема приложения? (app.js applyLook пишет её в pref look_body: «neusky light neu») — значок светлый
+     *  (24.10, владелец: «Лира оформлена красиво в белом — можно ли так же красиво эту кнопку?»). */
+    static boolean light(Context c) {
+        try {
+            return (" " + c.getSharedPreferences("dewiar", Context.MODE_PRIVATE).getString("look_body", "") + " ").contains(" light ");
+        } catch (Throwable e) { return false; }
+    }
 
     /** Подпись значка (отзыв 17.10: «может туда вывести что-то полезное»): ближайшее напоминание или будильник в
      *  ближайшие 7 дней — «⏰ 18:00 · Позвонить маме», «⏰ завтра 9:00 · …», «⏰ пт 9:00 · …»; нет — «идея или напоминание».

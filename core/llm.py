@@ -171,6 +171,10 @@ def _humanize(e, base_url, model=""):
                 return (f"в Ollama нет модели {name} — её нужно сначала скачать: откройте приложение Ollama, выберите модель "
                         "внизу окна и напишите ей что-нибудь — она скачается. Уже скачанные — в «Мозге» → «Список моделей»")
             return f"у сервиса нет модели {name} — в «Мозге» нажмите «Список моделей» и выберите из списка"
+        if code in (503, 529) or (code >= 500 and BUSY_RX.search(body + " " + msg)):
+            # пакет 24.10: «503 … This model is currently experiencing high demand» (Gemini) — 7 раз сырым JSON
+            return ("сервис модели сейчас перегружен — это у него, не у вас. Повторите через минуту или выберите в «Мозге» "
+                    "другую модель")
         if code in (401, 403):
             return "сервер отклонил ключ доступа (проверьте API-ключ)"
         if code == 404:
@@ -1012,6 +1016,7 @@ def repair_json(raw):
     return None
 
 
+BUSY_RX = re.compile(r"high demand|overloaded|over capacity|temporarily unavailable|\bUNAVAILABLE\b|try again later", re.I)
 RATE_WAIT = [float(x) for x in (os.environ.get("DEWIAR_RATE_WAIT") or "15,30,60").split(",")]   # 429: пауза перед повтором, с
 
 
@@ -1114,6 +1119,11 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0, *, pur
             body = {"model": model, "stream": True,
                     "messages": [{"role": "system", "content": system}] + hist,
                     "max_tokens": max_tokens, "temperature": float(p.get("temperature", 0.7))}
+            # №226 (24.10): OpenAI напрямую, GPT-5 и o-модели — ошибка 400: им нужен max_completion_tokens, а temperature
+            # они не принимают (только 1). Через OpenRouter работало — там поле переводят сами.
+            if p.get("_mct") or (re.search(r"api\.openai\.com", base) and re.match(r"(?:gpt-5|o\d)", str(model).lower())):
+                body["max_completion_tokens"] = body.pop("max_tokens")
+                body.pop("temperature", None)
             # chat_template_kwargs понимают vLLM/SGLang (Qwen3 и др.); облачные API на незнакомое поле отвечают ошибкой
             if no_think and not p.get("_no_kwargs") and base not in _no_kw and not re.search(r"openai\.com|openrouter|deepseek\.com|anthropic|googleapis", base):
                 body["chat_template_kwargs"] = {"enable_thinking": False}
@@ -1129,6 +1139,16 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0, *, pur
                 r.read()
                 err = r.text.lower()
                 n = int(p.get("_rl") or 0)
+                if r.status_code in (503, 529) and not p.get("_busy") and (cancel is None or not cancel.is_set()):
+                    # перегружен (Gemini «high demand») — часто проходит через пару секунд: один тихий повтор
+                    log.info("Сервер %s перегружен (%s) — повторяю через 3 с", base, r.status_code)
+                    end = time.monotonic() + float(os.environ.get("DEWIAR_BUSY_WAIT") or 3)
+                    while time.monotonic() < end:
+                        if cancel is not None and cancel.is_set():
+                            return
+                        time.sleep(0.2)
+                    yield from stream_events(dict(p, _busy=True), system, messages, cancel, tools, _retry)
+                    return
                 if r.status_code == 429 and n < len(RATE_WAIT) and not NO_MONEY_RX.search(err):   # «много запросов» — подождать (денег нет — не ждать)
                     try:
                         wait = min(90.0, float(r.headers.get("retry-after") or RATE_WAIT[n]))
@@ -1141,6 +1161,11 @@ def stream_events(p, system, messages, cancel=None, tools=None, _retry=0, *, pur
                             return
                         time.sleep(0.5)
                     yield from stream_events(dict(p, _rl=n + 1), system, messages, cancel, tools, _retry)
+                    return
+                if r.status_code == 400 and not p.get("_mct") and ("max_completion_tokens" in err or
+                                                                 ("temperature" in err and "unsupported" in err)):
+                    log.info("Сервер %s просит max_completion_tokens и температуру по умолчанию — повторяю так", base)
+                    yield from stream_events(dict(p, _mct=True), system, messages, cancel, tools, _retry)
                     return
                 if "image" in err and any(isinstance(m.get("content"), list) for m in messages):
                     raise LLMError("эта модель не принимает изображения — выберите в «Мозге» модель со зрением")

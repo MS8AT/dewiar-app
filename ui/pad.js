@@ -57,7 +57,46 @@ function drawTabs() {
     box.appendChild(el);
   }
   const on = box.querySelector(".tab.on"); if (on) on.scrollIntoView({ block: "nearest", inline: "nearest" });
+  tabsFit();
 }
+/* Не все вкладки влезли (24.10, владелец: «перед „Щитом“ ещё вкладка, но её не вижу и не понимаю, как на неё промотать…
+   может, возле плюсика выпадающий список с вкладками»): край ряда тает там, где есть ещё вкладки, колёсико листает ряд,
+   а у «+» появляется «⌄» — список всех вкладок; выбрали — она открылась и видна в ряду. */
+function tabsFit() {
+  const box = $("#tabs"), over = box.scrollWidth > box.clientWidth + 1;
+  box.classList.toggle("more-l", over && box.scrollLeft > 1);
+  box.classList.toggle("more-r", over && box.scrollLeft + box.clientWidth < box.scrollWidth - 1);
+  $("#b-list").hidden = !over; $("#b-list").title = `Все вкладки (${P.tabs.length})`;
+  if (!over) tlOpen(false);
+}
+function tlOpen(on) {
+  const m = $("#tl"); m.classList.toggle("on", on); $("#b-list").classList.toggle("on", on); $("#b-list").setAttribute("aria-expanded", String(on));
+  if (!on) return;
+  m.innerHTML = "";
+  for (const t of P.tabs) {
+    const b = document.createElement("button"); b.setAttribute("role", "menuitem"); b.setAttribute("aria-current", String(t.name === P.active));
+    b.innerHTML = "<i></i><span></span>"; b.querySelector("span").textContent = t.name; b.title = t.name;
+    b.onmousedown = (e) => e.preventDefault();
+    b.onclick = () => { tlOpen(false); if (t.name !== P.active) openTab(t.name); else ED.focus(); };
+    m.appendChild(b);
+  }
+  const cur = m.querySelector('[aria-current="true"]'); if (cur) cur.scrollIntoView({ block: "nearest" });
+}
+$("#b-list").onmousedown = (e) => e.preventDefault();
+$("#b-list").onclick = () => tlOpen(!$("#tl").classList.contains("on"));
+$("#tl").addEventListener("keydown", (e) => {
+  const items = [...$("#tl").querySelectorAll("button")], i = items.indexOf(document.activeElement);
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); const n = items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]; if (n) n.focus(); }
+  if (e.key === "Escape") { e.stopPropagation(); tlOpen(false); $("#b-list").focus(); }
+});
+document.addEventListener("mousedown", (e) => { if ($("#tl").classList.contains("on") && !e.target.closest("#tl, #b-list")) tlOpen(false); });
+$("#tabs").addEventListener("scroll", () => tabsFit(), { passive: true });
+$("#tabs").addEventListener("wheel", (e) => {                 // колёсико над вкладками листает их вбок
+  const box = $("#tabs"); if (box.scrollWidth <= box.clientWidth + 1 || e.ctrlKey) return;
+  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY; if (!d) return;
+  e.preventDefault(); box.scrollLeft += d;
+}, { passive: false });
+try { new ResizeObserver(() => tabsFit()).observe($("#tabs")); } catch (e) { window.addEventListener("resize", () => tabsFit()); }
 /* Что писать под листом: правду о синхронизации (№216, 23.10: «блокнот говорит, что синхронизировался с устройствами, а на
    андроиде ни блокнота, ни записей» — телефон был на своём ключе, в синхронизации компьютер был один). -> строка. */
 let syncSt = null, syncAt = 0;
@@ -257,7 +296,7 @@ function shortcut(b, t) {
 }
 document.addEventListener("keydown", (e) => {
   document.body.classList.toggle("ctrl", e.ctrlKey || e.metaKey);
-  if (e.key === "Escape") { if ($("#ask").classList.contains("on")) $("#ask").classList.remove("on"); else padClose(); }
+  if (e.key === "Escape") { if ($("#tl").classList.contains("on")) tlOpen(false); else if ($("#ask").classList.contains("on")) $("#ask").classList.remove("on"); else padClose(); }
   if ((e.ctrlKey || e.metaKey) && (e.key === "t" || e.key === "е")) { e.preventDefault(); newTab(); }
   if ((e.ctrlKey || e.metaKey) && e.key === "Tab") { e.preventDefault(); const i = P.tabs.findIndex(t => t.name === P.active); const n = P.tabs[(i + (e.shiftKey ? -1 : 1) + P.tabs.length) % P.tabs.length]; if (n) openTab(n.name); }
 });
@@ -378,7 +417,7 @@ textSize(1, true);
    виджета (Api.move_to / на Windows drag_step — окно за курсором), блокнот едет за ней сам (_pad_follow_at). */
 (() => {
   let mv = null, raf = 0;
-  const free = (t) => !t.closest("button, input, select, a, .tab, [role=tab], #sz, #ed, #grip");
+  const free = (t) => !t.closest("button, input, select, a, .tab, [role=tab], #sz, #tl, #ed, #grip");
   for (const el of [$("#top"), $("#tools")]) {
     el.addEventListener("pointerdown", async (ev) => {
       if (ev.button !== 0 || !free(ev.target)) return;

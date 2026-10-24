@@ -65,6 +65,23 @@
   .tab:hover .x, .tab.on .x { opacity: .7; } .tab .x:hover { opacity: 1; background: var(--chip2); }
   .tab.drop { box-shadow: inset 2px 0 0 var(--acc); }
   .tab input { font: inherit; color: var(--ink); background: transparent; border: 0; outline: none; width: 120px; }
+  /* не все вкладки влезли (24.10, владелец: «перед Щитом ещё вкладка, но её не вижу и не понимаю, как на неё промотать»):
+     край ряда тает с той стороны, где есть ещё вкладки; колёсико мыши листает ряд; «⌄» у «+» — список всех вкладок */
+  #tabs.more-l { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px); mask-image: linear-gradient(90deg, transparent, #000 28px); }
+  #tabs.more-r { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+  #tabs.more-l.more-r { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+                        mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+  #b-list[hidden] { display: none; }
+  #b-list.on { background: var(--chip2); color: var(--ink); }
+  #tl { position: absolute; top: 44px; right: 46px; z-index: 6; display: none; flex-direction: column; gap: 1px; min-width: 190px; max-width: min(300px, calc(100% - 24px));
+        max-height: min(340px, calc(100% - 70px)); overflow-y: auto; padding: 6px; border-radius: 14px; background: var(--paper);
+        box-shadow: 0 12px 30px -10px rgba(0,0,0,.5), inset 0 0 0 1px var(--line); }
+  #tl.on { display: flex; }
+  #tl button { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 9px; text-align: left; color: var(--muted); }
+  #tl button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  #tl button i { width: 6px; height: 6px; flex: none; border-radius: 50%; }
+  #tl button[aria-current="true"] { color: var(--ink); font-weight: 700; } #tl button[aria-current="true"] i { background: var(--acc); }
+  #tl button:hover, #tl button:focus-visible { background: var(--chip); color: var(--ink); outline: none; }
   .ib { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 10px; color: var(--muted); }
   .ib:hover { background: var(--chip); color: var(--ink); }
   .ib svg, .tool svg, .tab .x svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -159,9 +176,11 @@
 <div id="wrap" class="away">
   <div id="top">
     <div id="tabs" role="tablist" aria-label="Вкладки блокнота"></div>
+    <button class="ib" id="b-list" hidden title="Все вкладки" aria-label="Все вкладки" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
     <button class="ib" id="b-new" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
     <button class="ib" id="b-close" title="Убрать блокнот (Esc)" aria-label="Убрать блокнот"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
   </div>
+  <div id="tl" role="menu" aria-label="Все вкладки"></div>
   <div id="tools" aria-label="Оформление">
     <button class="tool" data-c="h1" title="Заголовок (# пробел)">H1</button>
     <button class="tool" data-c="h2" title="Подзаголовок (## пробел)">H2</button>

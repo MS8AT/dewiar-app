@@ -13,8 +13,8 @@ import subprocess
 import install_local_codex as installer
 
 SOURCE = Path(__file__).resolve().parents[1]
-BASE = "0e5917abf71e6d92a67b013c6fe5031f22a8af74"
-RELEASE = "0.40.0"
+BASE = "616e70afada2ca3ebe95d894cb7d836592366aed"
+RELEASE = "0.40.1"
 ROOTS = ("core", "ui", "data", "icons", "requirements-win.lock")
 REQUIRED = {"core/version.py", "core/main.py", "ui/app.py", "ui/settings.html", "requirements-win.lock"}
 TESTS = {"core/subscription_runtime/policy.test.mjs", "core/subscription_runtime/test_codex.py",

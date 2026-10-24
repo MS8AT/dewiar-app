@@ -52,24 +52,79 @@ CARD_MIN, CARD_MAX = (280, 360), (640, 1000)   # её можно растяну�
 TRANSPARENT = [False]                   # Linux с композитором: окно прозрачное, углы скругляет страница — гладко
 
 
+ABOVE_TITLES = None          # заголовки окон, которые должны быть «поверх всех» (виджет, значок, блокнот) — см. keep_above_guard
+
+
+def keep_above_guard():
+    """Linux, раз в 3 с (GLib): виджет и блокнот — оба «поверх окон». Владелец 24.10: «открыл папку — она перекрыла
+    Лиру, но не блокнот; они должны быть на одном уровне». Окно, у которого оконный менеджер снял «поверх» (бывает после
+    скрытия в трей и показа, смены вида), поднимаем обратно: снять и снова поставить keep_above — GTK иначе считает,
+    что флаг и так стоит, и ничего не шлёт. Фокус не трогаем. -> True (GLib повторит)."""
+    global ABOVE_TITLES
+    try:
+        from gi.repository import Gdk, Gtk
+        try:
+            from gi.repository import GdkX11
+        except Exception:  # noqa: BLE001 — без X11 (чистый Wayland) «поверх» решает композитор: не трогаем
+            return False
+        if ABOVE_TITLES is None:
+            ABOVE_TITLES = {TITLES["card"], TITLES["mini"], PAD_TITLE}
+        for gw in Gtk.Window.list_toplevels():
+            if gw.get_title() not in ABOVE_TITLES or not gw.get_visible():
+                continue
+            gdw = gw.get_window()
+            if gdw is None or not gw.get_mapped() or not isinstance(gdw, GdkX11.X11Window):
+                continue
+            if not gdw.get_state() & Gdk.WindowState.ABOVE:
+                gw.set_keep_above(False)
+                gw.set_keep_above(True)
+    except Exception as e:  # noqa: BLE001 — сторож не должен ронять интерфейс
+        print(f"поверх окон: {e}", file=sys.stderr, flush=True)
+    return True
+
+
 def relaunch_script(installer_pid, wait_s=10):
-    """Сторож обновления (cmd): дождаться конца установщика, подождать wait_s и, если Dewiar так и не запущен (нет
-    живого номера в ui.pid), запустить его. Установщик сам запускает новую версию (NSIS LaunchApp), но у тестировщика
+    """Сторож обновления (cmd): дождаться конца установщика, подождать wait_s и, если Dewiar так и не запущен заново
+    (номер в ui.pid не сменился), запустить его. Установщик сам запускает новую версию (NSIS LaunchApp), но у тестировщика
     14.10 после «Обновить» программа не открылась — сторож страхует. Раньше это был скрытый PowerShell с
     -EncodedCommand — антивирусы (Kaspersky, PDM:Trojan.Win32.Generic) видели в нём вирус и убирали Dewiar (20.10).
-    Пути — в переменных окружения DW_EXE, DW_APP, DW_PID (кириллица и пробелы в имени пользователя не мешают,
-    сам сценарий — только латиница). -> текст сценария."""
-    pid, w = int(installer_pid), int(wait_s) + 1
+    №225 (24.10): и tasklist.exe Kaspersky останавливал вопросом «пытается прочитать защищённый файл»; откажи человек —
+    сторож считал установщик законченным и запускал старую версию посреди установки. Теперь без списка процессов:
+    перед установщиком программа кладёт метку DW_FLAG (update.run рядом с ui.pid), установщик убирает её в конце
+    (dewiar.nsi, «-Завершение» и .onInstFailed). Ждём, пока метка есть, но не дольше ~10 минут.
+    Пути — в переменных окружения DW_EXE, DW_APP, DW_PID, DW_FLAG (кириллица и пробелы в имени пользователя не мешают,
+    сам сценарий — только латиница). installer_pid — только для имени файла. -> текст сценария."""
+    w = int(wait_s) + 1
     return ("@echo off\r\n"
+            "set P0=\r\n"
+            'if exist "%DW_PID%" set /p P0=<"%DW_PID%"\r\n'
+            "set N=0\r\n"
             ":wait\r\n"
-            f'tasklist /FI "PID eq {pid}" /NH 2>nul | find " {pid} " >nul && (ping -n 3 127.0.0.1 >nul & goto wait)\r\n'
+            "set /a N+=1\r\n"
+            "if %N% GEQ 200 goto done\r\n"
+            "ping -n 4 127.0.0.1 >nul\r\n"
+            'if exist "%DW_FLAG%" goto wait\r\n'
+            ":done\r\n"
             f"ping -n {w} 127.0.0.1 >nul\r\n"
             "set P=\r\n"
             'if exist "%DW_PID%" set /p P=<"%DW_PID%"\r\n'
-            'if defined P tasklist /FI "PID eq %P%" /NH 2>nul | find " %P% " >nul && goto end\r\n'
+            'if defined P if not "%P%"=="%P0%" goto end\r\n'
             'start "" "%DW_EXE%" -X utf8 "%DW_APP%"\r\n'
             ":end\r\n"
             '(goto) 2>nul & del "%~f0"\r\n')
+
+
+def _update_cmd(p, here=None):
+    """Командная строка тихого обновления Windows. №226 (24.10): «Обновить» ставил новую версию в
+    %LOCALAPPDATA%\Programs\Dewiar, даже если Dewiar стоит в другой папке, — передаём установщику ту папку, где
+    работаем сейчас (/D=…: у NSIS это последний ключ и без кавычек, даже с пробелами; поэтому строка, а не список)."""
+    try:
+        here = Path(here) if here else Path(winshell.pythonw()).resolve().parent.parent
+    except Exception:  # noqa: BLE001
+        here = None
+    if here and (here / "app" / "ui" / "app.py").is_file() and '"' not in str(here):
+        return f'"{p}" /S /UPDATE /D={here}'
+    return [str(p), "/S", "/UPDATE"]
 
 
 def relaunch_after(installer_pid, inst_dir, exe, app):
@@ -78,7 +133,7 @@ def relaunch_after(installer_pid, inst_dir, exe, app):
     from settings import STATE_DIR
     f = Path(tempfile.gettempdir()) / f"dewiar-relaunch-{int(installer_pid)}.cmd"
     f.write_text(relaunch_script(installer_pid), encoding="ascii")
-    env = dict(os.environ, DW_EXE=str(exe), DW_APP=str(app), DW_PID=str(STATE_DIR / "ui.pid"))
+    env = dict(os.environ, DW_EXE=str(exe), DW_APP=str(app), DW_PID=str(STATE_DIR / "ui.pid"), DW_FLAG=str(STATE_DIR / "update.run"))
     subprocess.Popen(["cmd.exe", "/d", "/c", str(f)], env=env, close_fds=True,
                      creationflags=winshell.NO_WINDOW | 0x00000200)       # без окна; своя группа — живёт без нас
 
@@ -1219,8 +1274,13 @@ class Api:
             (allowed / "pending.json").write_text(json.dumps({"file": p.name, "ts": time.time()}), encoding="utf-8")
         except OSError:
             pass
+        try:                                     # метка «идёт установка» для сторожа; убирает её сам установщик
+            from settings import STATE_DIR
+            (STATE_DIR / "update.run").write_text(p.name, encoding="utf-8")
+        except OSError:
+            pass
         try:
-            inst = subprocess.Popen([str(p), "/S", "/UPDATE"], creationflags=winshell.DETACHED, close_fds=True)
+            inst = subprocess.Popen(_update_cmd(p), creationflags=winshell.DETACHED, close_fds=True)
         except OSError as e:
             return {"ok": False, "error": f"установщик не запустился: {e}"}
         try:                                     # страховка: установщик не запустил новую версию — запустит сторож
@@ -2737,6 +2797,11 @@ def main():
         threading.Thread(target=watch, daemon=True).start()
         threading.Thread(target=watch_version, args=(api,), daemon=True).start()
         threading.Thread(target=_loop_watchdog, args=(api,), name="ui-watchdog", daemon=True).start()
+        try:
+            from gi.repository import GLib
+            GLib.timeout_add_seconds(3, keep_above_guard)
+        except Exception as e:  # noqa: BLE001
+            _ui_log(f"сторож «поверх окон» не запущен: {e}")
 
     _raise_idle_priority()
     webview.start(on_start, gui="gtk", debug=bool(os.environ.get("DEWIAR_UI_DEBUG")))

@@ -1035,6 +1035,8 @@ class TaskManager:
                     return c.run(cmd, args.get("timeout") or 180)
             except CodeError as e:
                 return f"Ошибка: {e}"
+            except OSError as e:                     # №222: «Access is denied» на сетевой папке — ошибка шага, а не сбой программы
+                return f"Ошибка: нет доступа к файлу {getattr(e, 'filename', '') or ''} ({e.strerror or e}). Обойди этот файл или выбери другую папку."
         # обычные инструменты ассистента
         on, need = self.host.toolbox.policy(name)
         if not on:
