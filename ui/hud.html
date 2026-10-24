@@ -297,10 +297,18 @@
   .btn:hover, .btn:focus-visible { color: #fff; background: rgba(255,255,255,.1); outline: none; }
   .btn.on { color: #ff7a93; }
   .btn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-  #b-lang { width: 34px; border-radius: 10px; font: 700 9px/1 "Manrope", sans-serif; letter-spacing: -.02em; }
+  #b-lang { width: 34px; border-radius: 10px; color: var(--ink); font: 700 9px/1 "Manrope", sans-serif; letter-spacing: -.02em; }
   #b-voice .x { display: none; } #b-voice.on .x { display: inline; } #b-voice.on .w1 { display: none; }
   .sep { width: 1px; height: 16px; background: rgba(255,255,255,.1); margin: 0 3px; }
   #b-team { width: auto; padding: 0 4px 0 6px; gap: 1px; display: inline-flex; align-items: center; }
+  /* RU/ENG/CH остаётся доступной и в минимальном окне 280 px. */
+  @media (max-width: 320px) {
+    #bar { max-width: 100%; gap: 0; padding: 4px; }
+    #bar .btn { width: 26px; padding: 0; }
+    #bar #b-lang { width: 30px; }
+    #bar #b-team { width: auto; padding: 0 2px; }
+    #bar .sep { margin: 0 1px; }
+  }
   /* кто отвечает — контурный силуэт героини или героя в стиле остальных значков: цветной кружок читался как
      «в сети / не в сети» (тестировщик 14.10), а лицо в 20 px — как пятно рядом с большим портретом (14.10) */
   .gi { display: grid; place-items: center; flex: none; }

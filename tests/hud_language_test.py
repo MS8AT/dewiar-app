@@ -61,6 +61,17 @@ with sync_playwright() as p:
     page.evaluate("core.emit('settings', {settings: {language: 'ru', ui: {}, privacy: {local_only: false}}})")
     page.wait_for_function("document.querySelector('#b-lang').textContent === 'RU'")
     ok("русский" in (button.get_attribute("title") or ""), "событие settings возвращает RU и русскую подсказку")
+    for width in (280, 300, 440):
+        page.set_viewport_size({"width": width, "height": 640})
+        for label in ("ENG", "CH", "RU"):
+            button.click()
+            page.wait_for_function("document.querySelector('#b-lang').textContent === " + repr(label))
+            fits = page.evaluate("""() => [...document.querySelectorAll('#bar, #bar .btn')].every(e => {
+              const r = e.getBoundingClientRect();
+              return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight
+                && e.scrollWidth <= e.clientWidth;
+            })""")
+            ok(fits, f"{width}px: панель и кнопки целиком видны, язык {label} переключается")
     ok(not errors, f"страница без JS-ошибок: {errors[:3]}")
     browser.close()
 

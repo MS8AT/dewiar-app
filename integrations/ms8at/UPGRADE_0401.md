@@ -23,6 +23,8 @@ Overlay: `overlay.json`; exact runtime hashes: `../../tools/local_codex_manifest
   Проверка протокола использует пустой профиль и закрытый HTTP proxy.
 - Новый регрессионный тест подтверждает: ошибка подписки 503 или отозванный
   scope не попадает в общий механизм HTTP-повторов.
+- Исправлена панель узкого HUD: ENG/CH/RU и остальные кнопки помещаются
+  в окно шириной 280 px; переключение проверяется на 280, 300 и 440 px.
 
 Порядок интеграции: новая локальная копия → точный upstream commit → перенос
 адаптеров → пересчёт manifest → offline tests → review → установка при закрытом
@@ -48,6 +50,8 @@ readable files; protected roots must never enter the copy. The CLI pin is update
 to verified `0.164.0-alpha.11.1`, retaining exact SHA-256 enforcement. The offline
 protocol probe uses an empty profile and blocked HTTP proxy. A regression test
 ensures subscription 503 and revoked-scope failures never enter generic retries.
+The narrow HUD toolbar keeps all buttons visible; language switching is checked
+at 280, 300 and 440 px, including the longer ENG label.
 
 Integrate locally, verify hashes/tests, review, install only while stopped with
 a backup, then compare every payload file. Roll back using the same plan and
@@ -65,6 +69,7 @@ non-Git 工作副本同时使用上游的 `shutil.Error` 处理和我们的受�
 不可访问文件不影响其他文件，受保护目录必须在复制前排除。
 Codex CLI 固定为已验证的 `0.164.0-alpha.11.1`，仍严格校验 SHA-256。
 离线协议探测使用空配置和阻断 HTTP 的代理；回归测试确保订阅 503 和权限撤销不会触发通用重试。
+修复窄窗口工具栏，在 280、300、440 px 下检查所有按钮及 ENG/CH/RU 切换。
 
 流程：本地集成、哈希与测试、审查、关闭应用后备份安装、逐文件核对。
 回滚使用同一计划和备份。AI20 仍是独立的后续适配器，须先验证 Manager→Router→Node

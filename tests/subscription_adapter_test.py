@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 import threading
 import types
 import unittest
@@ -145,8 +146,11 @@ class AdapterTests(unittest.TestCase):
         self.assertFalse(adapter.ui_command("generate", {})["ok"])
 
     def test_codex_health_roundtrip_no_login_or_model(self):
-        result = ipc.invoke("health", policy=lambda: True, runtime=RUNTIME, transport="codex")
-        self.assertTrue(result["dependency_ready"])
+        # CI не обязан иметь desktop CLI: проверяем настоящий IPC и честный отказ.
+        # Установленный CLI проверяется отдельно probe_codex.py без входа/модели.
+        with tempfile.TemporaryDirectory() as empty, patch.dict(os.environ, {"LOCALAPPDATA": empty}):
+            result = ipc.invoke("health", policy=lambda: True, runtime=RUNTIME, transport="codex")
+        self.assertFalse(result["dependency_ready"])
         self.assertEqual(result["transport"], "codex")
         self.assertFalse(result["network_called"])
         self.assertFalse(result["live_verified"])

@@ -145,7 +145,7 @@
     {
       "path": "ui/hud.html",
       "before": "ab534e93c95ad7de02b8a606a61221a1d43ff8a3212fc674733a83e248bf5700",
-      "after": "7f90732334906c5a7d58479c06ae8630387bf35469c408ba1363bb333dba778a"
+      "after": "82db15f42ebc3cefec00ac57f61f187042b772d670cb2e6a2d3562359095ada1"
     },
     {
       "path": "ui/settings.html",
