@@ -90,14 +90,16 @@ for i in range(10):
     now = time.monotonic(); e.state = "idle"; e.utt_id += 1; e.wake_time = now - 1.0
     e._on_utterance(pcm(1.0), now - 1.0, now); e.stt_q.get_nowait()
     e.utt_id += 1; e._pause_check(now + 0.2)
-ok(e.s.d["audio"]["end_silence_extra"] == 900, f"не больше +900 мс: {e.s.d['audio']['end_silence_extra']}")
+ok(e.s.d["audio"]["end_silence_extra"] == 600, f"не больше +600 мс (№226): {e.s.d['audio']['end_silence_extra']}")
 saves0 = e.s.saves
 for i in range(20):
     now = time.monotonic(); e.state = "idle"; e.utt_id += 1; e.wake_time = now - 1.0
     e._on_utterance(pcm(1.0), now - 1.0, now); e.stt_q.get_nowait()
     e._pause_ok()
-ok(e.s.d["audio"]["end_silence_extra"] == 700 and e.s.saves - saves0 == 4, f"20 ответов без обрыва — −200 мс, в настройки 4 раза: {e.s.d['audio']['end_silence_extra']}, {e.s.saves - saves0}")
-ok(e._end_frames == max(8, int((650 + 700) / 1000 / FRAME_S)), "пауза применяется сразу")
+ok(e.s.d["audio"]["end_silence_extra"] == 240 and e.s.saves - saves0 == 6, f"20 ответов без обрыва — −360 мс (тает вдвое быстрее, №226), в настройки 6 раз: {e.s.d['audio']['end_silence_extra']}, {e.s.saves - saves0}")
+ok(e._end_frames == max(8, int((650 + 240) / 1000 / FRAME_S)), "пауза применяется сразу")
+e.s.d["audio"]["end_silence_extra"] = 900; e._pause_apply()
+ok(e._end_frames == max(8, int((650 + 600) / 1000 / FRAME_S)), "выученные раньше +900 — ждём не дольше +600")
 
 # 4. выключено
 e = make(auto=False)

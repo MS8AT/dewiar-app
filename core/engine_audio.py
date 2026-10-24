@@ -384,6 +384,14 @@ class AudioMixin:
                 if str(e) != last_err:              # подробно — один раз; повторы (нет микрофона) — строкой
                     if no_mic:
                         log.warning("Микрофон не найден (%s) — жду, пока его подключат", e)
+                    elif isinstance(e, ImportError) and "sounddevice" in str(e):
+                        # пакет 24.10: «No module named 'sounddevice'» на 2 компьютерах. На Linux это значит: нет ни libpulse,
+                        # ни parec/pacat (звук без PulseAudio/PipeWire-Pulse); на Windows — файлы звука убрал антивирус
+                        why = ("установите звуковую прослойку: sudo apt install pipewire-pulse (или pulseaudio-utils) и перезапустите Dewiar"
+                               if os.name != "nt" else
+                               "часть файлов Dewiar убрал антивирус — запустите установщик Dewiar ещё раз (он вернёт их)")
+                        log.warning("Нет доступа к звуку: %s — %s", e, why)
+                        self.note("Не слышу микрофон и не могу говорить: " + why + ". Писать мне можно и сейчас.")
                     else:
                         log.exception("Сбой аудиопотока")
                     last_err = str(e)
@@ -793,20 +801,22 @@ class AudioMixin:
         """Сколько кадров тишины — конец фразы: end_silence_ms плюс выученная добавка (если подстройка включена)."""
         ms = int(self.s.get("audio", "end_silence_ms") or 650)
         if self.s.get("audio", "end_silence_auto") is not False:
-            ms += int(self.s.get("audio", "end_silence_extra") or 0)
+            ms += min(PAUSE_EXTRA_MAX, int(self.s.get("audio", "end_silence_extra") or 0))   # выученное раньше +900 — тоже до потолка
         self._end_frames = max(8, int(ms / 1000 / FRAME_S))
         return ms
 
     def _pause_check(self, t0):
         """Началась речь. Если прошлую фразу сочли законченной меньше 0,8 с назад, а ответа ещё нет (модель думает), —
-        человек не договорил: ждать паузу дольше (+150 мс, до +900) и склеить обе части (_on_utterance)."""
+        человек не договорил: ждать паузу дольше (+150 мс, до +600) и склеить обе части (_on_utterance).
+        №226 (24.10): «после нескольких „перебил“ добавка дошла до 900 мс и сама не уменьшается — ассистент всё медленнее»:
+        потолок +600 (вся пауза ~1,25 с), а тает она вдвое быстрее (_pause_ok); в студии — «вернуть обычную»."""
         lf = getattr(self, "_last_final", None)
         if not lf or lf.get("cut") or self.state != "thinking" or t0 - lf["t"] > 0.8 or t0 < lf["t"] - 0.5:
             return
         lf["cut"] = self.utt_id
         if self.s.get("audio", "end_silence_auto") is False:
             return
-        extra = min(900, int(self.s.get("audio", "end_silence_extra") or 0) + 150)
+        extra = min(PAUSE_EXTRA_MAX, int(self.s.get("audio", "end_silence_extra") or 0) + 150)
         self.s.update({"audio": {"end_silence_extra": extra}})
         ms = self._pause_apply()
         self._pause_debt = 0
@@ -814,7 +824,7 @@ class AudioMixin:
         self.emit("pause_learned", ms=ms, extra=extra)
 
     def _pause_ok(self):
-        """Ответ на голосовой вопрос прошёл без обрыва — добавка понемногу тает: −10 мс за ответ (в настройки — по 50)."""
+        """Ответ на голосовой вопрос прошёл без обрыва — добавка понемногу тает: −20 мс за ответ (в настройки — по 50)."""
         lf = getattr(self, "_last_final", None)
         if not lf or lf.get("cut") or lf.get("ok") or time.monotonic() - lf["t"] > 180:
             return
@@ -822,7 +832,7 @@ class AudioMixin:
         extra = int(self.s.get("audio", "end_silence_extra") or 0)
         if extra <= 0 or self.s.get("audio", "end_silence_auto") is False:
             return
-        self._pause_debt = getattr(self, "_pause_debt", 0) + 10
+        self._pause_debt = getattr(self, "_pause_debt", 0) + 20
         if self._pause_debt >= min(50, extra):
             self.s.update({"audio": {"end_silence_extra": max(0, extra - self._pause_debt)}})
             self._pause_debt = 0
@@ -1290,6 +1300,8 @@ class AudioMixin:
                 self.go_sleep(last, media=False)       # «…Вроде я её не вызывал. Пауза.» — это «стоп», а не вопрос
                 return
             long_ = (dur is not None and dur > FOLLOW_MAX_S) or len(ws) > FOLLOW_MAX_WORDS
+            if self.s.get("audio", "follow_long"):      # №226: «рассказ секунд на 10 теряется» — человек сам выбрал: длинное тоже мне
+                long_ = False
             named = name_inside(text, self.aliases)
             # позвали по имени и ждём вопрос («Лира» → «Слушаю») — это вопрос мне, какой бы длинный ни был (пакет 22.10,
             # №182/№183: «пропадает, не дослушав вопрос»: 15-секундный вопрос после имени принимался за разговор рядом)

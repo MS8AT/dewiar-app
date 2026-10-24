@@ -93,7 +93,7 @@ function prefSet(k, v) { if (SANDBOX) { SANDBOX.prefs[k] = v; return; } D.setPre
 function prefGet(k) { return SANDBOX && k in SANDBOX.prefs ? SANDBOX.prefs[k] : D.pref(k); }
 function fileSave(n, t) { if (SANDBOX) { SANDBOX.files[n] = t; return true; } return D.saveFile(n, t); }
 function fileGet(n) { return SANDBOX && n in SANDBOX.files ? SANDBOX.files[n] : D.files(n); }
-function devTorch(on) { if (SANDBOX) { SANDBOX.dev.push({ name: "flashlight", on: !!on, t: Date.now() }); return true; } return D.torch(on); }
+function devTorch(on) { if (SANDBOX) { SANDBOX.dev.push({ name: "flashlight", on: !!on, argsObj: { on: !!on }, t: Date.now() }); return true; } return D.torch(on); }
 function devVolume(op, v) { if (SANDBOX) { SANDBOX.dev.push({ name: "set_volume", op, v, t: Date.now() }); return 40; } return D.volume(op, v); }
 
 if (!window.Dewiar) window.Dewiar = D;          // кнопки в разметке вызывают Dewiar.* и в браузере
@@ -333,9 +333,12 @@ const HOME_URL = /^https?:\/\/(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|127
 function netErr(e, url) {
   e = String(e || "");
   const home = HOME_URL.test(url || "");
+  // №229 (24.10): «Failed to connect to /127.0.0.1:1234» — 127.0.0.1 на телефоне — это сам телефон, а LM Studio — на компьютере
+  if (/^https?:\/\/(?:127\.|localhost\b)/i.test(url || "") && /refused|failed to connect|timeout|timed out/i.test(e))
+    return "адрес 127.0.0.1 — это сам телефон, а модель работает на компьютере. В «Мозге» впишите адрес компьютера в домашней сети (например, 192.168.1.5:1234 — он есть в LM Studio или Ollama)";
   if (/Unable to resolve|UnknownHost|No address/i.test(e)) return home ? "домашний сервер не найден (возможно, вы не дома)" : "нет интернета или слабая связь";
   if (/timeout|timed out|after \d+\s*ms/i.test(e)) return home ? "домашний сервер долго не отвечает (возможно, вы не дома)" : (/dewiar\.pro/i.test(url || "") ? "сервер Dewiar долго не отвечает — слабая связь или сейчас много людей сразу" : "сервер долго не отвечает — похоже, слабая связь");
-  if (/ECONNREFUSED|Connection refused|failed to connect|reset|closed|EOF/i.test(e)) return home ? "домашний сервер не отвечает (возможно, вы не в домашней сети)" : "связь с сервером оборвалась";
+  if (/ECONNREFUSED|Connection refused|failed to connect|reset|closed|EOF|connection abort/i.test(e)) return home ? "домашний сервер не отвечает (возможно, вы не в домашней сети)" : "связь с сервером оборвалась";
   return e;
 }
 
@@ -1239,6 +1242,12 @@ function cloudEars() {
    «Не получилось услышать: сервер распознавания ответил 402», и всё. Теперь, если у телефона есть своё распознавание,
    слушает оно — 30 минут или до перезапуска приложения, потом снова пробуем сервер (вдруг пополнили). */
 let sttSysUntil = 0;
+/* Распознавание телефона (Google) — через интернет: на слабой мобильной сети (24.10, владелец: «не получилось услышать:
+   нет сети для распознавания» через раз) оно обрывается, а сказанное пропадает. Теперь сбой сети — не ошибка на экране:
+   есть распознавание Dewiar — эту фразу слушает сервер (он ждёт дольше), два сбоя за 10 минут — сервер слушает 10 минут;
+   нет — один тихий повтор «скажите ещё раз». */
+let sttNetUntil = 0, sttNetFails = [], sttNetRetryAt = 0;
+const STT_NET = [1, 2];                             // SpeechRecognizer.ERROR_NETWORK_TIMEOUT, ERROR_NETWORK
 const STT_DENIED = /ответил (40[1-3]|429)\b/;
 function sttServerUrl(u) { return u.replace(/\/+$/, "") + (/(transcriptions)$/.test(u) ? "" : "/audio/transcriptions"); }
 async function listen() {
@@ -1248,6 +1257,7 @@ async function listen() {
   setState("listening"); sttActive = true; sttStarted = false; if (!dict) D.vibrate(18);
   let server = S.stt.engine === "server" && S.stt.url ? { url: S.stt.url, key: S.stt.key || "", model: S.stt.model || "" } : null;
   if (!server && (!D.recognizer() || sttOnce)) { const c = sttOnce || cloudEars(); sttOnce = null; if (c) server = { url: c.url, key: c.key, model: "gigaam" }; }
+  if (!server && Date.now() < sttNetUntil) { const c = cloudEars(); if (c) server = { url: c.url, key: c.key, model: "gigaam" }; }   // сеть Google сбоит — сервер
   if (server && Date.now() < sttSysUntil && D.recognizer()) server = null;     // сервер не пускает (талеры) — слушает телефон
   if (!server && !D.recognizer()) {
     sttActive = false; setState("idle");
@@ -1377,10 +1387,26 @@ N.on("stt_error", e => {
     showBot((why || "Сервер распознавания не пускает.") + " Своего распознавания у этого телефона нет — напишите текстом.", "err");
     return;
   }
+  if (sttVia === "system" && STT_NET.includes(e.code) && !heardPartial && !dict) {
+    const now = Date.now(); sttNetFails = sttNetFails.filter(t => now - t < 600e3).concat(now); vCount("stt_net");
+    const c = Date.now() < sttSysUntil ? null : cloudEars();
+    if (c) {
+      if (sttNetFails.length >= 2) { sttNetUntil = now + 600e3; plog("warn", "распознавание телефона: сеть сбоит — 10 минут слушает сервер Dewiar"); }
+      else sttOnce = c;
+      toast("Распознавание телефона потеряло сеть — слушает сервер Dewiar. Скажите ещё раз.", 4000);
+      setState("idle"); showYou(""); setTimeout(() => { if (state === "idle" && !busy) listen(); }, 500);
+      return;
+    }
+    if (now - sttNetRetryAt > 120e3) {
+      sttNetRetryAt = now; toast("Связь моргнула — скажите ещё раз.", 3500);
+      setState("idle"); showYou(""); setTimeout(() => { if (state === "idle" && !busy) listen(); }, 500);
+      return;
+    }
+  }
   if (heardPartial || dict) { if (dictMore(heardPartial, false)) return; askHeard(dictTake(heardPartial)); return; }
   setState("idle"); showYou("");
   // молча (коды SpeechRecognizer, Speech.java): 6 — речи не было, 7 — не расслышал, 5 — отменено, 11 — распознаватель отключился
-  if (![6, 7, 5, 11].includes(e.code)) showBot("Не получилось услышать: " + (e.msg || e.code), "err");
+  if (![6, 7, 5, 11].includes(e.code)) showBot("Не получилось услышать: " + (e.msg || e.code) + (STT_NET.includes(e.code) ? ". Связь слабая — скажите ещё раз или напишите." : ""), "err");
 });
 function stopListen() { sttGuard(0); sttGen++; dict = ""; if (sttActive) { sttActive = false; D.cancelListen(); } }
 
@@ -2405,6 +2431,23 @@ function parseWhen(t, now = new Date()) {
     // «в пятницу» в пятницу — сегодня, если час ещё впереди, иначе через неделю (как when.py на компьютере; 16.10)
     if (r.test(t)) { const d = (v - now.getDay() + 7) % 7; day = new Date(now); day.setDate(now.getDate() + d); hasDay = true; dowToday = d === 0; if (/кажд|по\s/.test(t.match(r)[0])) repeat = "weekly"; break; }
   }
+  // дата: «27 октября», «на 27.10», «27.10.2026», «2026-10-27», «27-го» (№231, 24.10: «попросил на 27.10 — создала на завтра»:
+  // дат телефон не понимал, «на 27» читал как час, а «в 10» без дня — как завтра). Дату из фразы убираем, чтобы её числа
+  // не приняли за время. Без года и уже прошла — в следующем году (месяце); без времени — 9:00, как у дня недели.
+  if (!hasDay) {
+    const set = (y, mo, d, src, roll) => { const x = new Date(now); x.setFullYear(y, mo, d); if (x.getMonth() !== mo || x.getDate() !== d) return false;
+      const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      if (roll && x < t0) { if (roll === "y") x.setFullYear(y + 1, mo, d); else x.setMonth(mo + 1, d); }
+      day = x; hasDay = true; t = t.replace(src, " "); return true; };
+    let d;
+    if ((d = t.match(/\s(?:на\s+)?(\d{4})-(\d{2})-(\d{2})(?:[t\s]+(\d{1,2}):(\d{2}))?/))) { if (set(+d[1], +d[2] - 1, +d[3], d[0]) && d[4]) t += ` в ${d[4]}:${d[5]} `; }
+    else if ((d = t.match(/\s(?:на\s+|к\s+)?(\d{1,2})(?:-?(?:го|е|ое))?\s+(январ|феврал|март|апрел|ма[яй]|июн|июл|август|сентябр|октябр|ноябр|декабр)[а-я]*/)))
+      set(now.getFullYear(), ["январ", "феврал", "март", "апрел", "ма", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр"].findIndex(k => d[2].startsWith(k)), +d[1], d[0], "y");
+    else if ((d = t.match(/(?<!\s[вк])\s(?:на\s+)?(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?(?=[\s,])/)) && +d[2] >= 1 && +d[2] <= 12 && +d[1] >= 1 && +d[1] <= 31)
+      set(d[3] ? (+d[3] < 100 ? 2000 + +d[3] : +d[3]) : now.getFullYear(), +d[2] - 1, +d[1], d[0], d[3] ? "" : "y");
+    else if ((d = t.match(/\s(?:на\s+|к\s+)?(\d{1,2})(?:-?(?:го|е|ое)(?=\s)|\s+числ[а-я]*)/)) && +d[1] >= 1 && +d[1] <= 31)
+      set(now.getFullYear(), now.getMonth(), +d[1], d[0], "m");
+  }
   m = t.match(/(?:\sв|\sна|\sк)\s+(\d{1,2})(?:[:.\s](\d{2}))?(?:\s*(утра|дня|вечера|ночи))?(?=\s)/) || t.match(/\s(\d{1,2}):(\d{2})\s/);
   let h = null, mi = 0;
   if (m) { h = +m[1]; mi = m[2] ? +m[2] : 0; if (m[3] && /дня|вечера/.test(m[3]) && h < 12) h += 12; if (m[3] === "ночи" && h === 12) h = 0; }
@@ -2639,8 +2682,11 @@ async function quick(text) {
     if (w) { const said = await worldTime(w[2], w[1]); if (said) return { say: said }; } }
   if (/^(какое (сегодня )?число|какой сегодня день)$/.test(t)) { const d = new Date(); return { say: `Сегодня ${WD[d.getDay()]}, ${d.getDate()} ${MON[d.getMonth()]}.` }; }
   let m;
-  if ((m = t.match(/^(?:(включи|зажги|выключи|погаси)\s+(?:мне\s+)?(?:фонарик|фонарь|вспышку)|(посвети)(?:\s+мне)?(?:\s+фонариком)?)(?:,?\s+пожалуйста)?$/))) {
-    const on = !/выключи|погаси/.test(m[1] || ""); return { say: devTorch(on) ? (on ? "Фонарик включён." : "Фонарик выключен.") : "Фонарик не нашёлся." };
+  // фонарик — сразу, без модели. №227 (24.10): «Лера выключи фонарик», «выключи фонарик на телефоне», «фонарик включён,
+  // выключи его» уходили модели, та отвечала «Фонарик выключен.», не выключив. Имя (и ослышка имени) в начале не мешает.
+  if ((m = t.match(/^(?:(?!не[\s,])[а-яё-]+[\s,]+)?(?:(?:а\s+)?(?:фонарик|фонарь)\s+(?:(?:всё\s+|все\s+|ещё\s+|еще\s+)?(?:включ[её]н|горит|не\s+выключ[а-яё]*|светит)[\s,]+))?(?:(включи|зажги|выключи|отключи|погаси|убери)\s+(?:мне\s+)?(фонарик|фонарь|вспышку|его)|(посвети)(?:\s+мне)?(?:\s+фонариком)?|(?:фонарик|фонарь)\s+(включи|выключи|отключи|погаси))(?:\s+на\s+телефоне)?(?:,?\s+пожалуйста)?$/))
+      && (m[2] !== "его" || /фонар/.test(t))) {
+    const on = !/выключи|отключи|погаси|убери/.test(m[1] || m[4] || ""); return { say: devTorch(on) ? (on ? "Фонарик включён." : "Фонарик выключен.") : "Фонарик не нашёлся." };
   }
   // «тише» — заметно (−20%), «чуть тише» — −10%, «намного тише» — −35%; и «сделай радио тише», «музыку потише»
   if ((m = t.match(/^(?:сделай\s+)?(?:радио\s+|музыку\s+|звук\s+)?(?:(еще|ещё)\s+)?(чуть|чуть-чуть|немного|немножко|слегка|намного|гораздо|сильно|значительно|совсем)?\s*(?:по)?(громче|тише)(?:\s+(?:радио|музыку|звук))?(?:\s+пожалуйста)?$|^(прибавь|увеличь|убавь|уменьши)\s+(?:звук|громкость)$/))) {
@@ -2817,9 +2863,19 @@ async function closeCallFirst(who) {
   try { await clCall(p.pid, vid); lastClose = { pid: p.pid, video: vid, at: Date.now() }; return { ok: true, final: true, text: `${vid ? "Видеозвонок" : "Звоню"} через Dewiar: ${p.name}.` }; }
   catch (e) { return { ok: false, final: true, text: e.message }; }
 }
+/* «на обычный мобильный телефон», «по сотовому», «на номер» — звонок через телефон, а не через Dewiar; и это не часть
+   имени (24.10, владелец: «позвони на обычный мобильный телефон Исаевой Людмиле» — слова «телефон» и «на» совпали
+   с контактом «Телефон На Громова 46», и звонок ушёл туда). -> {who: без этих слов, phone: просили обычный звонок} */
+const PSTN_RX = /(?:^|\s)(?:(?:на|по|через)\s+)?(?:(?:обычн|простой|прост|мобильн|сотов|городск|домашн|рабоч)[а-яё]*\s+)*(?:телефон[а-яё]*|номер[а-яё]*|сотов[а-яё]*|мобильн[а-яё]*|связ[ьи])(?=\s|$)/gi;
+function callTarget(who) {
+  let w = String(who || ""), phone = false;
+  w = w.replace(PSTN_RX, () => { phone = true; return " "; }).replace(/(?:^|\s)не\s+через\s+(?:dewiar|девиар|дэвиар)(?=\s|$)/gi, () => { phone = true; return " "; });
+  return { who: w.replace(/\s+/g, " ").trim(), phone };
+}
 async function doCall(who) {
   who = who.replace(/^(мне|пожалуйста)\s+/, "").replace(/\s+пожалуйста$/, "").trim();
-  { const c = await closeCallFirst(who); if (c) return c; }
+  const tg = callTarget(who); if (tg.who) who = tg.who;
+  if (!tg.phone) { const c = await closeCallFirst(who); if (c) return c; }
   const rel = relOf(who);
   if (rel) {
     const known = (S.relations || {})[rel];
@@ -2867,6 +2923,9 @@ const CLAIMS = [
   { rx: /(?:^|[.!—–-]\s*|,\s*)(?:хорошо,?\s*|секунду,?\s*|сейчас\s+)?(?:звоню|набираю|перезваниваю|позвоню|вызываю)(?:\s|[.!:,]|$)/i, tool: "call", what: "звонишь" },
   { rx: /(?:^|[.!]\s*)(?:хорошо,?\s*)?(?:включаю|ставлю|переключаю(?:сь)?(?:\s+на)?|запускаю)\s+(?:радио|станци|«|"|волну|[А-ЯЁA-Z])/, tool: "play_radio (или radio_control с action next, если просят другую станцию)", what: "включаешь радио" },
   { rx: /(?:^|[.!]\s*)(?:сейчас\s+)?(?:фотографирую|делаю (?:снимок|фото)|смотрю через камеру|открываю камеру)/i, tool: "take_photo", what: "фотографируешь" },
+  // №227 (24.10): «выключи фонарик» — «Фонарик выключен.», а flashlight не вызван: фонарь горит, человек просит снова
+  { rx: /фонар(?:ик|ь)[^.!?]{0,20}(?:выключ|включ|погас|зажж|гор(?:ит|ю))|(?:выключил[аи]?|включил[аи]?|погасил[аи]?|выключаю|включаю|гашу)\s+(?:тебе\s+|вам\s+)?(?:фонар|вспышк|св?ет)/i,
+    tool: "flashlight", what: "включил(а) или выключил(а) фонарик", user: /фонар|вспышк|посвети/i },
   // просили посмотреть или показать через камеру, а в ответ «Секунду, смотрю.», «Вот.», «Показываю» — без снимка ничего не произошло
   { rx: /^(?:хорошо,?\s*|секунду,?\s*|сейчас,?\s*|конечно,?\s*)*(?:смотрю|посмотрю|гляжу|взгляну|показываю|покажу|вот(?:\s+(?:он|оно|она|фото|снимок|изображение|так))?|держи)(?:[\s,.!…]|$)/i,
     tool: "take_photo (или show_photo, если снимок уже сделан и его просят показать снова)", what: "смотришь или показываешь", user: CAM_ASK_RX },
@@ -3115,7 +3174,7 @@ function calcEval(src) {
 function toolSpecs() {
   if (S.llm.trial) return [];                     // пробный разговор на сайте — без действий (сервер их и не пропустит)
   const t = [
-    { name: "set_reminder", description: "Поставить напоминание, будильник или таймер. when — когда, словами пользователя («через 20 минут», «завтра в 9», «в пятницу в 18:30») — время посчитает телефон по своим часам, сам не считай; at — дата и время ISO (ГГГГ-ММ-ДДTЧЧ:ММ, местное) — только если when не подходит. kind: reminder | alarm (будильник) | timer. repeat: '' | daily | weekdays | weekly.",
+    { name: "set_reminder", description: "Поставить напоминание, будильник или таймер. when — когда, словами пользователя («через 20 минут», «завтра в 9», «в пятницу в 18:30», «27 октября в 10») — время посчитает телефон по своим часам, сам не считай; at — дата и время ISO (ГГГГ-ММ-ДДTЧЧ:ММ, местное) — только если when не подходит. kind: reminder | alarm (будильник) | timer. repeat: '' | daily | weekdays | weekly.",
       parameters: O({ text: STR, when: STR, at: STR, in_minutes: NUM, kind: { type: "string", enum: ["reminder", "alarm", "timer"] }, repeat: { type: "string", enum: ["", "daily", "weekdays", "weekly"] } }, ["text"]) },
     { name: "list_reminders", description: "Какие напоминания и будильники стоят.", parameters: O({}) },
     { name: "calc", description: "Посчитать точно: любые вычисления (проценты, суммы, скидки, деление) и даты. Считай ВСЕГДА этим инструментом, не в уме. Выражение: 2350 * 17 / 100, (1200 - 15%) * 3; даты ГГГГ-ММ-ДД: days_until(\"2027-01-01\") — сколько дней до даты, days_between(\"2026-10-01\", \"2026-12-31\"), weekday(\"2026-10-14\").",

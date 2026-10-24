@@ -114,7 +114,10 @@ public final class Bridge {
     // настройки и состояние интерфейса: ключ → строка в SharedPreferences "dewiar" (в браузерной заглушке app.js — localStorage)
     @JavascriptInterface public String pref(String key) { return prefs.getString(key, ""); }
 
-    @JavascriptInterface public void setPref(String key, String value) { prefs.edit().putString(key, value).apply(); }
+    @JavascriptInterface public void setPref(String key, String value) {
+        prefs.edit().putString(key, value).apply();
+        if ("look_body".equals(key)) CaptureWidget.refresh(a);      // сменили тему — значок «Записать» на экране тоже
+    }
 
     @JavascriptInterface public void toast(final String t) {
         a.runOnUiThread(new Runnable() { @Override public void run() { Toast.makeText(a, t, Toast.LENGTH_SHORT).show(); } });

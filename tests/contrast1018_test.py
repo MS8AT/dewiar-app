@@ -66,6 +66,15 @@ try:
                 pg.evaluate("() => { " + js + " }"); pg.wait_for_timeout(450)
                 bad += [dict(x, sel=f"{name}: {x['sel']}") for x in audit(pg, "body", 3.0)]
             ok(not bad, f"виджет, «{sk}»: таймер и карточки читаются (контраст ≥ 3): {show(bad)}")
+            # №233 (24.10): «Ответ целиком» в «Небесном» — тёмные чернила на тёмном листе
+            pg.evaluate("""() => { TL.you = 'Как устроена твоя память?'; TL.steps = [{ title: 'Ищу в заметках', status: 'done', detail: 'find_notes: память' }];
+                TL.answer = '**Коротко.** Это блокнот с хорошим поиском: файл `Обо мне` и папка заметок.\\n\\n- первое\\n- второе'; openReader(); }""")
+            pg.wait_for_timeout(300)
+            bad = audit(pg, "#reader", 3.0)
+            ok(pg.is_visible("#reader") and not bad, f"виджет, «{sk}»: «Ответ целиком» читается: {show(bad)}")
+            if sk == "neusky":
+                pg.screenshot(path="/tmp/claude-0/reader_neusky.png")
+            pg.evaluate("() => $('reader').classList.remove('on')")
             pg.close()
         # ---------- студия: все разделы с настоящим ядром ----------
         for _ in range(150):

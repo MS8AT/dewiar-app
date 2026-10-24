@@ -314,10 +314,17 @@ class CodeWork:
         else:
             size = 0
             for rel in _walk(self.project, limit=200000):
-                size += (self.project / rel).stat().st_size
+                try:
+                    size += (self.project / rel).stat().st_size
+                except OSError:                    # №222 (24.10): сетевая папка, файл с ключами без доступа — пропускаем
+                    continue
                 if size > MAX_COPY:
                     raise CodeError("проект без git больше 400 МБ — инициализируйте git (git init), и я возьму его рабочей копией")
-            shutil.copytree(self.project, self.work, ignore=shutil.ignore_patterns(*IGNORE_DIRS), symlinks=True)
+            try:
+                shutil.copytree(self.project, self.work, ignore=shutil.ignore_patterns(*IGNORE_DIRS), symlinks=True)
+            except shutil.Error as e:              # часть файлов не прочиталась (нет доступа) — работаем с остальными
+                bad = e.args[0] if e.args and isinstance(e.args[0], list) else []
+                log.warning("Рабочая копия: не скопировано файлов без доступа — %d", len(bad))
             self.meta.write_text('{"mode": "copy"}', encoding="utf-8")
         log.info("Рабочая копия: %s → %s", self.project, self.work)
 

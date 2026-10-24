@@ -70,8 +70,6 @@ def ensure_vosk(data_dir: Path, models_dir: Path, on_status=None, mirror=None) -
         return model_dir
     zip_path = data_dir / f"{VOSK_NAME}.zip"
     if not zip_path.exists():
-        import hashlib
-        import httpx
         zip_path = models_dir / f"{VOSK_NAME}.zip"
         models_dir.mkdir(parents=True, exist_ok=True)
         last = None
@@ -80,17 +78,10 @@ def ensure_vosk(data_dir: Path, models_dir: Path, on_status=None, mirror=None) -
             try:
                 if on_status:
                     on_status("Скачиваю модель распознавания имён (45 МБ, один раз)…")
-                tmp = zip_path.with_suffix(".part")
-                h = hashlib.sha256()
-                with httpx.stream("GET", url, follow_redirects=True, timeout=httpx.Timeout(20, read=120)) as r:
-                    r.raise_for_status()
-                    with open(tmp, "wb") as f:
-                        for chunk in r.iter_bytes(1 << 16):
-                            f.write(chunk)
-                            h.update(chunk)
-                if h.hexdigest() != VOSK_SHA256:
-                    raise ValueError("файл повреждён (контрольная сумма не совпала)")
-                tmp.replace(zip_path)
+                # №218 (24.10): на медленной связи «The read operation timed out» — и каждый раз с нуля. Теперь как голоса:
+                # обрыв — докачиваем с того же места (updater.download, Range), до 6 попыток, сумма сверяется
+                from updater import download
+                download(url, zip_path, sha256=VOSK_SHA256, tries=6)
                 break
             except Exception as e:  # noqa: BLE001
                 last = e
