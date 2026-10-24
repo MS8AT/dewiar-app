@@ -4,6 +4,7 @@
 
 Upstream: `616e70afada2ca3ebe95d894cb7d836592366aed` (`v0.40.1`).
 Overlay: `overlay.json`; exact runtime hashes: `../../tools/local_codex_manifest.json`.
+[Validation / Проверки / 验证](../../docs/VALIDATION_2026-10-24.md).
 
 ## RU
 
